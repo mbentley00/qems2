@@ -30,7 +30,7 @@
     <form action="/type_questions/" method="post">
         {% csrf_token %}
         <div class="alert alert-info">
-            Type questions into the box below. Questions must be formatted properly or the parser will reject them.
+            Type questions into the box below. Questions must be <a href="https://github.com/grapesmoker/qems2">formatted properly</a> or the parser will reject them.
         </div>
         {{ form.as_p }}
         <input type="hidden" name="qset_id" value="{{ qset.id }}">
