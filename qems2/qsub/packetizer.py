@@ -141,9 +141,9 @@ def assign_pwce(pwce_list, packet_count, total_acf_tossup, total_acf_bonus, tota
 def get_fraction_array(pwce, value):
     fractions = []
     fraction = round(round(value - int(value), 4) * 1000, 0)
-    print "Fraction before rounding: " + str(fraction)
+    print("Fraction before rounding: " + str(fraction))
     fraction = int(fraction)
-    print "Fraction after rounding: " + str(fraction)
+    print("Fraction after rounding: " + str(fraction))
     for i in range(0, fraction):
         fractions.append(pwce)
     
@@ -326,7 +326,7 @@ def fill_unassigned_questions(qset, author):
 # TODO: Add tests
 def packetize(qset):
     if (not is_question_set_complete(qset)):
-        print "Not enough questions in the set"
+        print("Not enough questions in the set")
         return
     
     clear_questions(qset)
@@ -366,15 +366,15 @@ def randomize_acf_tossups_in_period(qset, period):
             index += 1
         if (curDistance > bestDistance):
             bestQuestionOrder = tossups
-            print "Best question distance: " + str(bestDistance)
-            print "Set best question order: " + str(tossups)
-    
+            print("Best question distance: " + str(bestDistance))
+            print("Set best question order: " + str(tossups))
+
     # Now that we have an order, set it
     index = 1
     for tossup in bestQuestionOrder:
         tossup.question_number = index
         tossup.save()
-        index += 1    
+        index += 1
 
 # TODO: Add tests
 def randomize_acf_bonuses_in_period(qset, period):
@@ -404,9 +404,9 @@ def randomize_bonuses_in_period(bonuses):
             index += 1
         if (curDistance > bestDistance):
             bestQuestionOrder = bonuses
-            print "Best question distance: " + str(bestDistance)
-            print "Set best question order: " + str(bonuses)
-    
+            print("Best question distance: " + str(bestDistance))
+            print("Set best question order: " + str(bonuses))
+
     # Now that we have an order, set it
     index = 1
     for bonus in bestQuestionOrder:
@@ -535,21 +535,21 @@ def get_parents_from_category_entry(category_entry):
         try:
             category = CategoryEntry.objects.get(category_name=category_entry.category_name, category_type=CATEGORY)
         except Exception as ex:
-            print "Could not find parent for: " + str(category_entry)
-        
+            print("Could not find parent for: " + str(category_entry))
+
         return category, category_entry, None
     else:
         category = None
         try:
             category = CategoryEntry.objects.get(category_name=category_entry.category_name, category_type=CATEGORY)
         except Exception as ex:
-            print "Could not find parent for: " + str(category_entry)
-        
+            print("Could not find parent for: " + str(category_entry))
+
         sub_category = None
         try:
             sub_category = CategoryEntry.objects.get(category_name=category_entry.category_name, sub_category_name=category_entry.sub_category_name, category_type=SUB_CATEGORY)
         except Exception as ex:
-            print "Could not find parent for: " + str(category_entry)
+            print("Could not find parent for: " + str(category_entry))
                 
 =======
 
@@ -783,10 +783,10 @@ def get_unassigned_vhsl_bonuses(qset):
 def get_assigned_acf_tossups_in_period(qset, period):
     acf_tossups = Tossup.objects.filter(question_set=qset, period=period)
     
-    print "Found Tossup Count: " + str(len(acf_tossups))
-    print "All tossups:"
+    print("Found Tossup Count: " + str(len(acf_tossups)))
+    print("All tossups:")
     for tossup in Tossup.objects.filter(question_set=qset):
-        print "Tossup: " + str(tossup)
+        print("Tossup: " + str(tossup))
     
     return acf_tossups
     
@@ -810,11 +810,11 @@ def get_assigned_vhsl_bonuses_in_period(qset, period):
 
 # Clear packet information from each question
 def clear_questions(qset):
-    print "Start clear_questions"
+    print("Start clear_questions")
     
     tossups = Tossup.objects.filter(question_set=qset)
     for tossup in tossups:
-        print "Clearing tossup: " + str(tossup)
+        print("Clearing tossup: " + str(tossup))
         tossup.packet = None
         tossup.period = None
         tossup.question_number = None
@@ -822,7 +822,7 @@ def clear_questions(qset):
     
     bonuses = Bonus.objects.filter(question_set=qset)
     for bonus in bonuses:
-        print "Clearing bonus: " + str(bonus)
+        print("Clearing bonus: " + str(bonus))
         bonus.packet = None
         bonus.period = None
         bonus.question_number = None
@@ -831,7 +831,7 @@ def clear_questions(qset):
 def reset_category_counts(qset, reset_totals=False):
     period_wide_entries = PeriodWideEntry.objects.filter(question_set=qset)
     for pwe in period_wide_entries:
-        print "Reset pwe: " + str(pwe)
+        print("Reset pwe: " + str(pwe))
         pwe.reset_current_values()
         if (reset_totals):
             pwe.reset_total_values()
@@ -839,13 +839,13 @@ def reset_category_counts(qset, reset_totals=False):
         
         periods = Period.objects.filter(period_wide_entry=pwe)
         for period in periods:
-            print "Reset period: " + str(period)
+            print("Reset period: " + str(period))
             period.reset_current_values()
             period.save()
         
         period_wide_category_entries = PeriodWideCategoryEntry.objects.filter(period_wide_entry=pwe)        
         for pwce in period_wide_category_entries:
-            print "Reset pwce: " + str(pwce)
+            print("Reset pwce: " + str(pwce))
             pwce.reset_current_values()
             if (reset_totals):
                 pwce.reset_total_values()
@@ -853,7 +853,7 @@ def reset_category_counts(qset, reset_totals=False):
             
             one_period_category_entries = OnePeriodCategoryEntry.objects.filter(period_wide_category_entry=pwce)
             for opce in one_period_category_entries:
-                print "Reset opce: " + str(opce)
+                print("Reset opce: " + str(opce))
                 opce.reset_current_values()
 <<<<<<< HEAD
 =======

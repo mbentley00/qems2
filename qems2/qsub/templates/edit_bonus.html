@@ -39,6 +39,15 @@
 
     {% if not read_only %}
         {% if question_type == "ACF-style bonus" %}
+            <a href="#" id="toggle-unified-editor" class="button small secondary">Switch to Unified Editor</a>
+            <a href="#" id="copy-for-discord-bonus" class="button small secondary">Copy for Discord</a>
+            <a href="#" id="copy-for-discord-plain-bonus" class="button small secondary">Copy for Discord (no spoilers)</a>
+            <div id="unified-editor-container" style="display:none;">
+                <textarea id="unified-bonus-text" rows="16" class="unified-editor-textarea expanding" style="width:100%;"></textarea>
+            </div>
+        {% endif %}
+        <div id="individual-fields-container">
+        {% if question_type == "ACF-style bonus" %}
             <label>
                 Leadin
                 {{ form.leadin }}
@@ -55,6 +64,10 @@
             {{ form.part1_answer }}
             {% if form.part1_answer.errors %}{{ form.part1_answer.errors }}{% endif %}
         </label>
+        <label>
+            Part 1 Difficulty
+            {{ form.part1_difficulty }}
+        </label>
 
         {% if question_type == "ACF-style bonus" %}
             <label>
@@ -68,6 +81,10 @@
                 {% if form.part2_answer.errors %}{{ form.part2_answer.errors }}{% endif %}
             </label>
             <label>
+                Part 2 Difficulty
+                {{ form.part2_difficulty }}
+            </label>
+            <label>
                 Part 3 Text
                 {{ form.part3_text }}
                 {% if form.part3_text.errors %}{{ form.part3_text.errors }}{% endif %}
@@ -76,8 +93,13 @@
                 Part 3 Answer
                 {{ form.part3_answer }}
                 {% if form.part3_answer.errors %}{{ form.part3_answer.errors }}{% endif %}
-            </label> 
+            </label>
+            <label>
+                Part 3 Difficulty
+                {{ form.part3_difficulty }}
+            </label>
         {% endif %}
+        </div>
         <div class="row">
         {% for field in form %}
             {% if field.html_name == "category" or field.html_name == "author" %}
@@ -143,9 +165,54 @@
             {{ form.question_type }}
         </div>
 
+        <div id="difficulty-warning" class="alert-box warning" style="display:none;"></div>
         <input type="submit" id="submit-bonus" value="Save" class="button primary right" />
     {% endif %}
 </form>
+{% if question_type == "ACF-style bonus" and not read_only %}
+<script>
+$(function () {
+    $('form').on('submit', function (e) {
+        var d1 = $('#id_part1_difficulty').val();
+        var d2 = $('#id_part2_difficulty').val();
+        var d3 = $('#id_part3_difficulty').val();
+        var diffs = [d1, d2, d3].filter(function (v) { return v !== ''; });
+        var sorted = diffs.slice().sort().join('');
+        var $warn = $('#difficulty-warning');
+
+        if (sorted !== 'ehm') {
+            var problems = [];
+            if (diffs.length < 3) {
+                problems.push('not all parts have a difficulty set');
+            } else {
+                var counts = {};
+                diffs.forEach(function (v) { counts[v] = (counts[v] || 0) + 1; });
+                if (!counts['e']) problems.push('missing an easy part');
+                if (!counts['m']) problems.push('missing a medium part');
+                if (!counts['h']) problems.push('missing a hard part');
+                for (var k in counts) {
+                    if (counts[k] > 1) {
+                        var name = {e:'easy',m:'medium',h:'hard'}[k];
+                        problems.push(name + ' is used ' + counts[k] + ' times');
+                    }
+                }
+            }
+
+            if (!$warn.data('confirmed')) {
+                e.preventDefault();
+                $warn.html('Warning: ' + problems.join(', ') + '. Click Save again to save anyway.').show();
+                $warn.data('confirmed', true);
+                return false;
+            }
+        }
+    });
+
+    $('#id_part1_difficulty, #id_part2_difficulty, #id_part3_difficulty').on('change', function () {
+        $('#difficulty-warning').hide().data('confirmed', false);
+    });
+});
+</script>
+{% endif %}
 {% if bonus %}
     <ul class="button-group even">
         <li><a href="/move_bonus/{{ qset.id }}/{{ bonus.id }}" class="button primary">Move set</a></li>
@@ -167,18 +234,39 @@
 <div class="row">
     <div class="small-6 columns end comments">
         {% autoescape off %}
-            {% get_comment_list for bonus as comment_list %}            
-            {% for comment in comment_list %}
-                {% if not comment.is_removed %}
-                    <strong>{{comment.user}}:</strong> {{ comment.comment|safe|comment_html|linebreaks }} ({{ comment.submit_date }})<br><br>
-                    {% if role == "editor" %}
-                        <a href="/delete_comment/{{ comment.id }}" class="delete_comment" value="{{ comment.id }}" qset="{{ qset.id }}">Delete Comment</a><br><br>
-                    {% endif %}
-                {% endif %}
+            {% get_threaded_comments bonus as thread_data %}
+            {% for comment in thread_data.top_level %}
+                <div class="comment-item" data-comment-id="{{ comment.id }}">
+                    <strong>{{ comment.user }}:</strong> {{ comment.comment|safe|comment_html|linebreaks }} ({{ comment.submit_date }})
+                    <div class="comment-actions">
+                        {% if role == "editor" %}
+                            <a href="/delete_comment/{{ comment.id }}" class="delete_comment" value="{{ comment.id }}" qset="{{ qset.id }}">Delete</a>
+                        {% endif %}
+                        <a href="#" class="reply-toggle" data-comment-id="{{ comment.id }}">Reply</a>
+                    </div>
+                    <div class="reply-form" id="reply-form-{{ comment.id }}" style="display:none;">
+                        <textarea rows="3" class="reply-text" placeholder="Write a reply..."></textarea>
+                        <button class="button small primary post-reply" data-parent-id="{{ comment.id }}" data-qset-id="{{ qset.id }}">Post Reply</button>
+                        <button class="button small secondary cancel-reply">Cancel</button>
+                    </div>
+                    <div class="comment-replies">
+                        {% for reply in thread_data.replies|get_replies:comment.id %}
+                            <div class="comment-item" data-comment-id="{{ reply.id }}">
+                                <strong>{{ reply.user }}:</strong> {{ reply.comment|safe|comment_html|linebreaks }} ({{ reply.submit_date }})
+                                <div class="comment-actions">
+                                    {% if role == "editor" %}
+                                        <a href="/delete_comment/{{ reply.id }}" class="delete_comment" value="{{ reply.id }}" qset="{{ qset.id }}">Delete</a>
+                                    {% endif %}
+                                    <a href="#" class="reply-toggle" data-comment-id="{{ comment.id }}">Reply</a>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
             {% endfor %}
             {% if role == "editor" %}
                 <a href="/delete_all_comments/{{ bonus.id }}" class="delete_all_comments" value="{{ bonus.id }}" qset="{{ qset.id }}" question-type="bonus">Delete All Comments</a><br /><br />
-            {% endif %}            
+            {% endif %}
         {% endautoescape %}
 
         {% get_comment_form for bonus as cform %}

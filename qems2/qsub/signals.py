@@ -15,7 +15,7 @@ def email_on_comments(sender, instance, created, raw, using, update_fields, **kw
     try:
         if (type(instance) is Comment):        
             # Figure out if this is a tossup or bonus we've added a comment for
-            print "New comment has been saved"        
+            print("New comment has been saved")
             mail_set = Set()
             target = instance.content_object
             if (type(target) is Tossup or type(target) is Bonus):
@@ -65,9 +65,9 @@ def email_on_comments(sender, instance, created, raw, using, update_fields, **kw
                         url)
 
                     send_mail(subject, body, settings.EMAIL_HOST_USER, mail_set, fail_silently=False)
-                    print "Sent new comment mail to: " + str(mail_set)   
+                    print("Sent new comment mail to: " + str(mail_set))
     except:
-        print "Error sending mail for comments:", sys.exc_info()[0], sys.exc_info()[1], sys.exc_info()[2]
+        print("Error sending mail for comments:", sys.exc_info()[0], sys.exc_info()[1], sys.exc_info()[2])
 
 @receiver(post_save)
 def email_on_new_questions(sender, instance, created, raw, using, update_fields, **kwargs):
@@ -75,7 +75,7 @@ def email_on_new_questions(sender, instance, created, raw, using, update_fields,
         # Only care about new questions
         if (created):
             if (type(instance) is Tossup or type(instance) is Bonus):        
-                print "New tossup or bonus.  Checking for who to send e-mails to."
+                print("New tossup or bonus.  Checking for who to send e-mails to.")
                 
                 # Go through each person in this set and see their options
                 all_writers = Writer.objects.filter(Q(question_set_writer=instance.question_set) | Q(question_set_editor=instance.question_set)).distinct().order_by('user__last_name', 'user__first_name', 'user__username')
@@ -85,15 +85,15 @@ def email_on_new_questions(sender, instance, created, raw, using, update_fields,
                         if (writer != instance.author):
                             set_settings = WriterQuestionSetSettings.objects.get(writer=writer, question_set=instance.question_set)
                             if (set_settings.email_on_all_new_questions):
-                                print "Matched all"
+                                print("Matched all")
                                 email_list.append(writer.user.email)
                             else:
                                 category_settings = PerCategoryWriterSettings.objects.get(writer_question_set_settings=set_settings, distribution_entry=instance.category)
                                 if (category_settings.email_on_new_questions):
-                                    print "Matched on category: " + str(category_settings.distribution_entry)
+                                    print("Matched on category: " + str(category_settings.distribution_entry))
                                     email_list.append(writer.user.email)
                     except:
-                        print "Error getting settings for writer: " + str(writer)
+                        print("Error getting settings for writer: " + str(writer))
                 
                 if (len(email_list) > 0):
                     qset = str(instance.question_set)
@@ -111,6 +111,6 @@ def email_on_new_questions(sender, instance, created, raw, using, update_fields,
                         url)
                     
                     send_mail(subject, body, settings.EMAIL_HOST_USER, email_list, fail_silently=False)
-                    print "Sent new question mail to: " + str(email_list)       
+                    print("Sent new question mail to: " + str(email_list))
     except:
-        print "Error sending mail for new question", sys.exc_info()[0], sys.exc_info()[1], sys.exc_info()[2]
+        print("Error sending mail for new question", sys.exc_info()[0], sys.exc_info()[1], sys.exc_info()[2])

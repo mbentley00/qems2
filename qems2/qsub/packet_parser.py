@@ -9,11 +9,12 @@ from qems2.qsub.utils import *
 from qems2.qsub.model_utils import sanitize_html
 from django.utils.html import escape
 
-ansregex = '(?i)a..?wers?:\s*'
-bpart_regex = '^\[\d+\]'
-vhsl_bpart_regex = '^\[V\d+\]'
-category_regex = '\{(.+)}'
-bonus_value_regex = '\[|\]|\(|\)'
+ansregex = r'(?i)a..?wers?:\s*'
+bpart_regex = r'^\[\d+[emh]?\]'
+vhsl_bpart_regex = r'^\[V\d+\]'
+category_regex = r'\{(.+)}'
+bonus_value_regex = r'\[|\]|\(|\)'
+difficulty_regex = r'\[(\d+)([emh]?)\]'
 
 def is_answer(line):
 
@@ -47,9 +48,19 @@ def remove_answer_label(line):
     return re.sub(ansregex, '', line)
 
 def get_bonus_part_value(line):
-    
+
+    match = re.search(difficulty_regex, line)
+    if match:
+        return match.group(1)
     match = re.search(bpart_regex, line)
-    return re.sub(bonus_value_regex, '', match.group(0))     
+    return re.sub(bonus_value_regex, '', match.group(0))
+
+def get_bonus_part_difficulty(line):
+
+    match = re.search(difficulty_regex, line)
+    if match:
+        return match.group(2)
+    return ''     
 
 def parse_packet_data(data, question_set):
 
@@ -129,6 +140,7 @@ def parse_packet_data(data, question_set):
             parts = []
             values = []
             answers = []
+            difficulties = []
             leadin = ''
             category = ''
             while question_stack != []:
@@ -137,9 +149,11 @@ def parse_packet_data(data, question_set):
                 if is_bpart(bonus_line):
                     # print "Is BPart"
                     val = get_bonus_part_value(bonus_line)
-                    question = string.strip(re.sub(bpart_regex, '', bonus_line))
+                    diff = get_bonus_part_difficulty(bonus_line)
+                    question = re.sub(bpart_regex, '', bonus_line).strip()
                     values.append(val)
                     parts.append(question)
+                    difficulties.append(diff)
                 elif is_answer(bonus_line):
                     # print "Is Answer"
                     answer = bonus_line
@@ -157,17 +171,18 @@ def parse_packet_data(data, question_set):
             parts.reverse()
             values.reverse()
             answers.reverse()
-            
+            difficulties.reverse()
+
             # print leadin
             # print parts
             # print answers
-            
+
             if (i < len(data) - 1):
                 question_stack.append(next_question_line)
-            
+
             bonus = None
             try:
-                bonus = create_bonus(leadin, parts, answers, values, question_type_text=ACF_STYLE_BONUS, category_text=category, question_set=question_set)
+                bonus = create_bonus(leadin, parts, answers, values, question_type_text=ACF_STYLE_BONUS, category_text=category, question_set=question_set, difficulties=difficulties)
                 validate_bonus_category(bonus, category)                
                 bonus.is_valid()
                 bonuses.append(bonus)
@@ -182,8 +197,8 @@ def parse_packet_data(data, question_set):
         elif vhsl_bonus_flag and (is_answer(this_line) or i == len(data) - 1):
             answer = question_stack.pop()
             question = question_stack.pop()
-            question = string.strip(re.sub(vhsl_bpart_regex, '', question))
-            answer = string.strip(re.sub(ansregex, '', answer))
+            question = re.sub(vhsl_bpart_regex, '', question).strip()
+            answer = re.sub(ansregex, '', answer).strip()
             category = get_category(answer)
             answer = remove_category(answer)
             
@@ -233,21 +248,24 @@ def create_tossup(question='', answer='', category_text='', question_type_text='
     tossup = Tossup(tossup_text=question, tossup_answer=answer, category=setCategory, question_type=setQuestionType)
     return tossup
 
-def create_bonus(leadin='', parts=[], answers=[], values=[], question_type_text=ACF_STYLE_BONUS, category_text='', question_set=''):
-    
+def create_bonus(leadin='', parts=[], answers=[], values=[], question_type_text=ACF_STYLE_BONUS, category_text='', question_set='', difficulties=[]):
+
     leadin = escape(leadin)
     sanitizedParts = []
     for part in parts:
         sanitizedParts.append(escape(part))
     parts = sanitizedParts
-    
+
     # For VHSL bonuses, make sure that we have enough data to pass into the bonus form
     while (len(parts) < 3):
         parts.append('')
-    
+
     while (len(answers) < 3):
         answers.append('')
-    
+
+    while (len(difficulties) < 3):
+        difficulties.append('')
+
     questionTypes = QuestionType.objects.all()
     setQuestionType = None
     for questionType in questionTypes:
@@ -263,14 +281,15 @@ def create_bonus(leadin='', parts=[], answers=[], values=[], question_type_text=
         if (formattedCategory == category_text):
             setCategory = category
             break
-    
+
     modifiedAnswers = []
     for answer in answers:
         formattedAnswer = escape(remove_answer_label(answer))
         modifiedAnswers.append(formattedAnswer)
     answers = modifiedAnswers
-    
+
     bonus = Bonus(leadin=leadin, part1_text=parts[0], part1_answer=answers[0],
         part2_text=parts[1], part2_answer=answers[1], part3_text=parts[2],
-        part3_answer=answers[2], category=setCategory, question_type=setQuestionType)
+        part3_answer=answers[2], category=setCategory, question_type=setQuestionType,
+        part1_difficulty=difficulties[0], part2_difficulty=difficulties[1], part3_difficulty=difficulties[2])
     return bonus

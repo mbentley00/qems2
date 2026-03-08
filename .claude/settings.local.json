@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm:*)",
+      "Bash(pip --version:*)",
+      "Bash(python:*)",
+      "Bash(pip install:*)",
+      "Bash(where:*)",
+      "Bash(wc:*)",
+      "Bash(head:*)",
+      "Bash(python3:*)",
+      "Bash(curl:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(grep:*)",
+      "Bash(taskkill:*)",
+      "Bash(node -c:*)",
+      "Bash(del test_export.docx)",
+      "Bash(ping:*)",
+      "Bash(ls:*)"
+    ]
+  }
+}

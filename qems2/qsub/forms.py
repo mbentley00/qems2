@@ -1,8 +1,8 @@
-from models import *
-from utils import *
+from .models import *
+from .utils import *
 from django import forms
 from django.forms import ValidationError
-from django.utils.translation import ugettext, ugettext_lazy as _
+from django.utils.translation import gettext, gettext_lazy as _
 from django.db.models import Q
 
 class RegistrationFormWithName(forms.Form):
@@ -94,15 +94,15 @@ class TossupForm(forms.ModelForm):
     tossup_answer = forms.CharField(widget=forms.Textarea(attrs={'rows': 1, 'class': 'expanding'}))
     search_question_content = forms.CharField(widget=forms.HiddenInput, required=False)
     search_question_answers = forms.CharField(widget=forms.HiddenInput, required=False)
-    question_history = forms.ModelChoiceField([], widget=forms.HiddenInput, required=False)
-    editor = forms.ModelChoiceField([], widget=forms.HiddenInput, required=False)
+    question_history = forms.ModelChoiceField(queryset=QuestionHistory.objects.none(), widget=forms.HiddenInput, required=False)
+    editor = forms.ModelChoiceField(queryset=Writer.objects.none(), widget=forms.HiddenInput, required=False)
     edited_date = forms.DateTimeField(widget=forms.HiddenInput, required=False)
-    proofreader = forms.ModelChoiceField([], widget=forms.HiddenInput, required=False)
-    proofread_date = forms.DateTimeField(widget=forms.HiddenInput, required=False)    
+    proofreader = forms.ModelChoiceField(queryset=Writer.objects.none(), widget=forms.HiddenInput, required=False)
+    proofread_date = forms.DateTimeField(widget=forms.HiddenInput, required=False)
     last_changed_date = forms.DateTimeField(widget=forms.HiddenInput, required=False)
     created_date = forms.DateTimeField(widget=forms.HiddenInput, required=False)
 
-    category = forms.ModelChoiceField([])
+    category = forms.ModelChoiceField(queryset=DistributionEntry.objects.none())
 
     class Meta:
         model = Tossup
@@ -125,7 +125,13 @@ class TossupForm(forms.ModelForm):
         if qset_id:
             try:
                 qset = QuestionSet.objects.get(id=qset_id)
-                all_writers = Writer.objects.filter(Q(question_set_writer=qset) | Q(question_set_editor=qset)).distinct().order_by('user__last_name', 'user__first_name', 'user__username')
+                writer_filter = Q(question_set_writer=qset) | Q(question_set_editor=qset)
+                # Include the current author even if they're not in this set
+                # (e.g. question was moved from another set)
+                if self.instance and self.instance.pk and self.instance.author_id:
+                    writer_filter = writer_filter | Q(pk=self.instance.author_id)
+                all_writers = Writer.objects.filter(writer_filter).distinct()
+                all_writers = all_writers.order_by('user__last_name', 'user__first_name', 'user__username')
                 if writer:
                     user = User.objects.get(username=writer)
                     my_writer = all_writers.get(user=user)
@@ -134,7 +140,7 @@ class TossupForm(forms.ModelForm):
                     self.fields['author'] = forms.ModelChoiceField(queryset=all_writers, required=True, empty_label=None)
 
                 dist = qset.distribution
-                dist_entries = dist.distributionentry_set.all()
+                dist_entries = dist.distributionentry_set.all().order_by('category', 'subcategory')
                 # categories = [(d.id, '{0!s} - {1!s}'.format(d.category, d.subcategory)) for d in dist_entries]
                 if packet_id is not None:
                     pack_label = None
@@ -142,19 +148,20 @@ class TossupForm(forms.ModelForm):
                 else:
                     pack_label = 'None'
                     packets = qset.packet_set.all()
-                                
-                periods = Period.objects.filter(period_wide_entry__question_set=qset)                
+
+                periods = Period.objects.filter(period_wide_entry__question_set=qset)
                 if period_id is not None:
-                    period_label = None                    
+                    period_label = None
                 else:
                     period_label = 'None'
-                    
+
                 self.fields['category'] = forms.ModelChoiceField(queryset=dist_entries, empty_label=None)
                 self.fields['packet'] = forms.ModelChoiceField(queryset=packets, required=False, empty_label=pack_label)
                 self.fields['period'] = forms.ModelChoiceField(queryset=periods, required=False, empty_label=period_label)
+
             except QuestionSet.DoesNotExist:
-                print 'Non-existent question set!'
-                self.fields['category'] = forms.ModelChoiceField([], empty_label=None)
+                print('Non-existent question set!')
+                self.fields['category'] = forms.ModelChoiceField(queryset=DistributionEntry.objects.none(), empty_label=None)
 
         if role and role == 'writer':
             # if this tossup is being submitted by a writer we don't need to show them the edited/locked checkboxes
@@ -176,11 +183,11 @@ class BonusForm(forms.ModelForm):
     part3_answer = forms.CharField(widget=forms.Textarea(attrs={'class': 'expanding', 'rows': 1}), required=False)
     search_question_content = forms.CharField(widget=forms.HiddenInput, required=False)
     search_question_answers = forms.CharField(widget=forms.HiddenInput, required=False)
-    question_history = forms.ModelChoiceField([], widget=forms.HiddenInput, required=False)
-    editor = forms.ModelChoiceField([], widget=forms.HiddenInput, required=False)
+    question_history = forms.ModelChoiceField(queryset=QuestionHistory.objects.none(), widget=forms.HiddenInput, required=False)
+    editor = forms.ModelChoiceField(queryset=Writer.objects.none(), widget=forms.HiddenInput, required=False)
     edited_date = forms.DateTimeField(widget=forms.HiddenInput, required=False)
-    proofreader = forms.ModelChoiceField([], widget=forms.HiddenInput, required=False)
-    proofread_date = forms.DateTimeField(widget=forms.HiddenInput, required=False)     
+    proofreader = forms.ModelChoiceField(queryset=Writer.objects.none(), widget=forms.HiddenInput, required=False)
+    proofread_date = forms.DateTimeField(widget=forms.HiddenInput, required=False)
     last_changed_date = forms.DateTimeField(widget=forms.HiddenInput, required=False)
     created_date = forms.DateTimeField(widget=forms.HiddenInput, required=False)
 
@@ -204,7 +211,13 @@ class BonusForm(forms.ModelForm):
         if qset_id:
             try:
                 qset = QuestionSet.objects.get(id=qset_id)
-                all_writers = Writer.objects.filter(Q(question_set_writer=qset) | Q(question_set_editor=qset)).distinct().order_by('user__last_name', 'user__first_name', 'user__username')
+                writer_filter = Q(question_set_writer=qset) | Q(question_set_editor=qset)
+                # Include the current author even if they're not in this set
+                # (e.g. question was moved from another set)
+                if self.instance and self.instance.pk and self.instance.author_id:
+                    writer_filter = writer_filter | Q(pk=self.instance.author_id)
+                all_writers = Writer.objects.filter(writer_filter).distinct()
+                all_writers = all_writers.order_by('user__last_name', 'user__first_name', 'user__username')
                 if writer:
                     user = User.objects.get(username=writer)
                     my_writer = all_writers.get(user=user)
@@ -213,28 +226,27 @@ class BonusForm(forms.ModelForm):
                     self.fields['author'] = forms.ModelChoiceField(queryset=all_writers, required=True, empty_label=None)
 
                 dist = qset.distribution
-                dist_entries = dist.distributionentry_set.all()
-                # categories = [(d.id, '{0!s} - {1!s}'.format(d.category, d.subcategory)) for d in dist_entries]
+                dist_entries = dist.distributionentry_set.all().order_by('category', 'subcategory')
                 if packet_id is not None:
                     pack_label = None
                     packets = qset.packet_set.filter(id=packet_id)
                 else:
                     pack_label = 'None'
                     packets = qset.packet_set.all()
-                    
-                periods = Period.objects.filter(period_wide_entry__question_set=qset)                
+
+                periods = Period.objects.filter(period_wide_entry__question_set=qset)
                 if period_id is not None:
-                    period_label = None                    
+                    period_label = None
                 else:
                     period_label = 'None'
-                    
+
                 self.fields['category'] = forms.ModelChoiceField(queryset=dist_entries, empty_label=None)
                 self.fields['packet'] = forms.ModelChoiceField(queryset=packets, required=False, empty_label=pack_label)
                 self.fields['period'] = forms.ModelChoiceField(queryset=periods, required=False, empty_label=period_label)
 
             except QuestionSet.DoesNotExist:
-                print 'Non-existent question set!'
-                self.fields['category'] = forms.ModelChoiceField([], empty_label=None)
+                print('Non-existent question set!')
+                self.fields['category'] = forms.ModelChoiceField(queryset=DistributionEntry.objects.none(), empty_label=None)
 
         if question_type and question_type == VHSL_BONUS:
             self.fields['leadin'].widget.attrs['style'] = 'display:none'

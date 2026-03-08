@@ -4,7 +4,7 @@ import os
 DEBUG = True
 TEMPLATE_DEBUG = DEBUG
 
-ALLOWED_HOSTS = ['.grapesmoker.net']
+ALLOWED_HOSTS = ['*']
 
 ADMINS = (
     # ('Your Name', 'your_email@example.com'),
@@ -19,14 +19,14 @@ CACHES = {
     }
 }
 
+PROJECT_ROOT = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), ".."),
+)
+
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.mysql', # Add 'postgresql_psycopg2', 'mysql', 'sqlite3' or 'oracle'.
-        'NAME': 'qems92',                      # Or path to database file if using sqlite3.
-        'USER': 'django',                      # Not used with sqlite3.
-        'PASSWORD': 'django',                  # Not used with sqlite3.
-        'HOST': '',                      # Set to empty string for localhost. Not used with sqlite3.
-        'PORT': '',                      # Set to empty string for default. Not used with sqlite3.
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': os.path.join(PROJECT_ROOT, 'db.sqlite3'),
     }
 }
 
@@ -65,10 +65,6 @@ MEDIA_ROOT = ''
 # Examples: "http://media.lawrence.com/media/", "http://example.com/media/"
 MEDIA_URL = ''
 
-PROJECT_ROOT = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), ".."),
-)
-
 # Absolute path to the directory static files should be collected to.
 # Don't put anything in this directory yourself; store your static files
 # in apps' "static/" subdirectories and in STATICFILES_DIRS.
@@ -97,6 +93,7 @@ STATICFILES_FINDERS = (
 )
 
 BOWER_COMPONENTS_ROOT = os.path.join(PROJECT_ROOT, 'components')
+BOWER_PATH = os.path.normpath(r'C:\Program Files (x86)\Nodist\bin\bower.cmd')
 
 # Make this unique, and don't share it with anybody.
 # Read secret from disk
@@ -106,12 +103,7 @@ f.close()
 
 #SECRET_KEY = '%&amp;5&amp;wmrx-g8zpk8=m*kttzkxfy^38ziedy$1kf-4uwme8bksba'
 
-# List of callables that know how to import templates from various sources.
-TEMPLATE_LOADERS = (
-    'django.template.loaders.filesystem.Loader',
-    'django.template.loaders.app_directories.Loader',
-#     'django.template.loaders.eggs.Loader',
-)
+# TEMPLATE_LOADERS removed (handled by TEMPLATES setting below)
 
 TEMPLATES = [
     {
@@ -120,11 +112,9 @@ TEMPLATES = [
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
-                # Already defined Django-related contexts here
-
-                # `allauth` needs this from django
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
+                'django.contrib.messages.context_processors.messages',
             ],
         },
     },
@@ -138,31 +128,25 @@ AUTHENTICATION_BACKENDS = (
     'allauth.account.auth_backends.AuthenticationBackend'
 )
 
-MIDDLEWARE_CLASSES = (
-#    'debug_toolbar.middleware.DebugToolbarMiddleware',
+MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
-    # Uncomment the next line for simple clickjacking protection:
-    # 'django.middleware.clickjacking.XFrameOptionsMiddleware',
-)
+    'allauth.account.middleware.AccountMiddleware',
+]
 
 ROOT_URLCONF = 'qems2.urls'
 
-AUTH_PROFILE_MODULE = 'qsub.Player'
+# AUTH_PROFILE_MODULE removed (deprecated in modern Django)
 
 INTERNAL_IPS = ('127.0.0.1')
 
 # Python dotted path to the WSGI application used by Django's runserver.
 WSGI_APPLICATION = 'qems2.wsgi.application'
 
-TEMPLATE_DIRS = (
-    # Put strings here, like "/home/html/django_templates" or "C:/www/django/templates".
-    # Always use forward slashes, even on Windows.
-    # Don't forget to use absolute paths, not relative paths.
-)
+# TEMPLATE_DIRS removed (handled by TEMPLATES setting)
 
 INSTALLED_APPS = (
     'django.contrib.auth',
@@ -187,13 +171,13 @@ INSTALLED_APPS = (
 )
 
 # Account and registration settings
-ACCOUNT_EMAIL_REQUIRED = True
-ACCOUNT_EMAIL_VERIFICATION='mandatory'
+ACCOUNT_EMAIL_VERIFICATION='none'
+ACCOUNT_SIGNUP_FIELDS = ['email*', 'username*', 'password1*', 'password2*']
 ACCOUNT_SIGNUP_FORM_CLASS = 'qems2.qsub.forms.RegistrationFormWithName'
 
 LOGIN_REDIRECT_URL = "/"
 
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
 EMAIL_USE_TLS = True
 DEFAULT_FROM_EMAIL = 'qems2@outlook.com'
 SERVER_EMAIL = 'smtp-mail.outlook.com'
@@ -260,5 +244,7 @@ HAYSTACK_CONNECTIONS = {
 HAYSTACK_SIGNAL_PROCESSOR = 'haystack.signals.RealtimeSignalProcessor'
 
 TEST_RUNNER = 'django.test.runner.DiscoverRunner'
+
+DEFAULT_AUTO_FIELD = 'django.db.models.AutoField'
 #COMMENTS_APP = "django_comments_xtd"
 #COMMENTS_XTD_MAX_THREAD_LEVEL = 1

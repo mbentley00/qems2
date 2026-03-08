@@ -26,6 +26,10 @@
                 <a href="/edit_distribution/{{ dist.id }}/">
                 {{ dist.name }}
                 </a>
+                <form method="post" action="/clone_distribution/{{ dist.id }}/" style="display:inline; margin-left:10px;">
+                    {% csrf_token %}
+                    <button type="submit" class="button tiny secondary">Clone</button>
+                </form>
             </td>
         </tr>
         {% endfor %}

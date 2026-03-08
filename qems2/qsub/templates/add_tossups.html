@@ -24,6 +24,9 @@
     {% csrf_token %}
     {{ form.non_field_errors }}
     {% if not read_only %}
+        <a href="#" id="paste-full-tossup" class="button small secondary">Paste Full Tossup</a>
+        <a href="#" id="copy-for-discord-tossup" class="button small secondary">Copy for Discord</a>
+        <a href="#" id="copy-for-discord-plain-tossup" class="button small secondary">Copy for Discord (no spoilers)</a>
         <label>
             Tossup Text
             {{ form.tossup_text }}

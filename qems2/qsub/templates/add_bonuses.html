@@ -33,6 +33,15 @@
     {{ form.non_field_errors }}
     {% if not read_only %}
         {% if question_type == "ACF-style bonus" %}
+            <a href="#" id="toggle-unified-editor" class="button small secondary">Switch to Unified Editor</a>
+            <a href="#" id="copy-for-discord-bonus" class="button small secondary">Copy for Discord</a>
+            <a href="#" id="copy-for-discord-plain-bonus" class="button small secondary">Copy for Discord (no spoilers)</a>
+            <div id="unified-editor-container" style="display:none;">
+                <textarea id="unified-bonus-text" rows="16" class="unified-editor-textarea expanding" style="width:100%;"></textarea>
+            </div>
+        {% endif %}
+        <div id="individual-fields-container">
+        {% if question_type == "ACF-style bonus" %}
             <label>
                 Leadin
                 {{ form.leadin }}
@@ -55,6 +64,10 @@
                 {{ form.part1_answer.errors }}
             {% endif %}
         </label>
+        <label>
+            Part 1 Difficulty
+            {{ form.part1_difficulty }}
+        </label>
 
         {% if question_type == "ACF-style bonus" %}
             <label>
@@ -72,6 +85,10 @@
                 {% endif %}
             </label>
             <label>
+                Part 2 Difficulty
+                {{ form.part2_difficulty }}
+            </label>
+            <label>
                 Part 3 Text
                 {{ form.part3_text }}
                 {% if form.part3_text.errors %}
@@ -85,7 +102,12 @@
                     {{ form.part3_answer.errors }}
                 {% endif %}
             </label>
+            <label>
+                Part 3 Difficulty
+                {{ form.part3_difficulty }}
+            </label>
         {% endif %}
+        </div>
         <div class="row">
             <div class="small-6 columns">
                 <div class="row collapse">

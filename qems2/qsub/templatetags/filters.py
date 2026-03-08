@@ -139,7 +139,7 @@ def overall_percent(entry):
 @register.filter(name='check_mark_if_100_pct')
 def check_mark_if_100_pct(x, y):
     percentage = fpercent(x, y)
-    if percentage >= 100 or percentage == None:
+    if percentage is None or percentage >= 100:
         return mark_safe('<i class="fa fa-check"></i>')
     else:
         return mark_safe('<i class="fa fa-times"></i>')
@@ -151,17 +151,17 @@ def class_name(obj):
 @register.filter(name='sort')
 def listsort(value):
     if isinstance(value, dict):
-        print "Sorted dict called"
+        print("Sorted dict called")
         new_dict = OrderedDict()
         key_list = sorted(value.keys())
         for key in key_list:
             new_dict[key] = value[key]
         return new_dict
     elif isinstance(value, list):
-        print "List called"
+        print("List called")
         return sorted(value)
     else:
-        print "Other called"
+        print("Other called")
         return value
     listsort.is_safe = True
 
@@ -238,6 +238,46 @@ def question_set_id(question):
 @register.filter(name='question_length')
 def question_length(question):
     return question.character_count()
+
+
+@register.filter(name='get_replies')
+def get_replies(replies_dict, comment_id):
+    """Get replies for a comment from the replies dictionary."""
+    if isinstance(replies_dict, dict):
+        return replies_dict.get(comment_id, [])
+    return []
+
+
+@register.simple_tag
+def get_threaded_comments(obj):
+    """
+    Returns a dict with 'top_level' (list of comments) and 'replies' (dict of parent_id -> [comments]).
+    Usage: {% get_threaded_comments obj as thread_data %}
+    """
+    content_type = ContentType.objects.get_for_model(obj)
+    all_comments = Comment.objects.filter(
+        content_type=content_type,
+        object_pk=str(obj.pk),
+        is_removed=False,
+    ).order_by('submit_date')
+
+    # Get all reply mappings
+    reply_comment_ids = set()
+    parent_map = {}  # comment_id -> parent_id
+    for cr in CommentReply.objects.filter(comment__in=all_comments):
+        reply_comment_ids.add(cr.comment_id)
+        parent_map[cr.comment_id] = cr.parent_id
+
+    top_level = []
+    replies = {}  # parent_id -> [comments]
+    for comment in all_comments:
+        if comment.id in reply_comment_ids:
+            parent_id = parent_map[comment.id]
+            replies.setdefault(parent_id, []).append(comment)
+        else:
+            top_level.append(comment)
+
+    return {'top_level': top_level, 'replies': replies}
 
 
 #@register.filter(name='compare_categories'):

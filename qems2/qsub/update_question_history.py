@@ -1,9 +1,9 @@
 # This script updates existing tossups and bonuses with a value for question history
 
 from qems2.qsub.models import *
-from utils import *
+from .utils import *
 
-print "Starting script"
+print("Starting script")
 
 for tossup in Tossup.objects.all():
     if (tossup.question_history is None):
@@ -19,4 +19,4 @@ for bonus in Bonus.objects.all():
         bonus.question_history = qh
         bonus.save()
 
-print "Finished"
+print("Finished")

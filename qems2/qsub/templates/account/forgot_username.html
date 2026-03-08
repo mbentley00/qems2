@@ -1,0 +1,22 @@
+{% extends "base-login.html" %}
+
+{% block title %}Forgot Username - QEMS2{% endblock %}
+
+{% block content %}
+<h4>Forgot Username</h4>
+{% if sent %}
+    <div class="alert-box success">
+        If an account exists with that email address, we have sent an email with the username.
+    </div>
+{% else %}
+    <p>Enter your email address below and we'll send you your username.</p>
+    <form method="post" action="{% url 'forgot_username' %}">
+        {% csrf_token %}
+        <label for="id_email">Email
+            <input type="email" name="email" id="id_email" placeholder="Email address" required autofocus>
+        </label>
+        <input type="submit" value="Send Username" class="button primary expand">
+    </form>
+{% endif %}
+<p class="small-below"><a href="{% url 'account_login' %}">Back to sign in</a></p>
+{% endblock %}

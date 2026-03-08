@@ -39,6 +39,9 @@
     {{ form.non_field_errors }}
 
     {% if not read_only %}
+        <a href="#" id="paste-full-tossup" class="button small secondary">Paste Full Tossup</a>
+        <a href="#" id="copy-for-discord-tossup" class="button small secondary">Copy for Discord</a>
+        <a href="#" id="copy-for-discord-plain-tossup" class="button small secondary">Copy for Discord (no spoilers)</a>
         <label>
             Tossup Text
             {{ form.tossup_text }}
@@ -135,14 +138,35 @@
 <div class="row">
     <div class="small-6 columns end comments">
         {% autoescape off %}
-            {% get_comment_list for tossup as comment_list %}
-            {% for comment in comment_list %}
-                {% if not comment.is_removed %}
-                    <strong>{{comment.user}}:</strong> {{ comment.comment|safe|comment_html|linebreaks }} ({{ comment.submit_date }})<br><br>
-                    {% if role == "editor" %}
-                        <a href="/delete_comment/{{ comment.id }}" class="delete_comment" value="{{ comment.id }}" qset="{{ qset.id }}">Delete Comment</a><br /><br />
-                    {% endif %}
-                {% endif %}
+            {% get_threaded_comments tossup as thread_data %}
+            {% for comment in thread_data.top_level %}
+                <div class="comment-item" data-comment-id="{{ comment.id }}">
+                    <strong>{{ comment.user }}:</strong> {{ comment.comment|safe|comment_html|linebreaks }} ({{ comment.submit_date }})
+                    <div class="comment-actions">
+                        {% if role == "editor" %}
+                            <a href="/delete_comment/{{ comment.id }}" class="delete_comment" value="{{ comment.id }}" qset="{{ qset.id }}">Delete</a>
+                        {% endif %}
+                        <a href="#" class="reply-toggle" data-comment-id="{{ comment.id }}">Reply</a>
+                    </div>
+                    <div class="reply-form" id="reply-form-{{ comment.id }}" style="display:none;">
+                        <textarea rows="3" class="reply-text" placeholder="Write a reply..."></textarea>
+                        <button class="button small primary post-reply" data-parent-id="{{ comment.id }}" data-qset-id="{{ qset.id }}">Post Reply</button>
+                        <button class="button small secondary cancel-reply">Cancel</button>
+                    </div>
+                    <div class="comment-replies">
+                        {% for reply in thread_data.replies|get_replies:comment.id %}
+                            <div class="comment-item" data-comment-id="{{ reply.id }}">
+                                <strong>{{ reply.user }}:</strong> {{ reply.comment|safe|comment_html|linebreaks }} ({{ reply.submit_date }})
+                                <div class="comment-actions">
+                                    {% if role == "editor" %}
+                                        <a href="/delete_comment/{{ reply.id }}" class="delete_comment" value="{{ reply.id }}" qset="{{ qset.id }}">Delete</a>
+                                    {% endif %}
+                                    <a href="#" class="reply-toggle" data-comment-id="{{ comment.id }}">Reply</a>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
             {% endfor %}
             {% if role == "editor" %}
                 <a href="/delete_all_comments/{{ tossup.id }}" class="delete_all_comments" value="{{ tossup.id }}" qset="{{ qset.id }}" question-type="tossup">Delete All Comments</a><br /><br />

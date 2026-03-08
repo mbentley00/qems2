@@ -1,0 +1,28 @@
+{% extends "base-login.html" %}
+
+{% block title %}Sign In - QEMS2{% endblock %}
+
+{% block content %}
+<h4>Sign In</h4>
+<p>If you have not created an account yet, please <a href="{% url 'account_signup' %}">sign up</a> first.</p>
+
+<form method="post" action="{% url 'account_login' %}">
+    {% csrf_token %}
+    {% if form.errors %}
+        <div class="alert-box alert">Your login credentials were incorrect. Please try again.</div>
+    {% endif %}
+    <label for="id_login">Username or Email
+        <input type="text" name="login" id="id_login" placeholder="Username or email" required autofocus>
+    </label>
+    <label for="id_password">Password
+        <input type="password" name="password" id="id_password" placeholder="Password" required>
+    </label>
+    <label>
+        <input type="checkbox" name="remember"> Remember me
+    </label>
+    {{ redirect_field }}
+    <input type="submit" value="Sign In" class="button primary expand">
+</form>
+<p class="small-below"><a href="{% url 'account_reset_password' %}">Forgot your password?</a></p>
+<p class="small-below"><a href="{% url 'forgot_username' %}">Forgot your username?</a></p>
+{% endblock %}

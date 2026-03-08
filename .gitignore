@@ -7,3 +7,4 @@ whoosh_index/
 # but keep qsub/static
 *.py[cdo]
 secret
+nul

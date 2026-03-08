@@ -1,110 +1,92 @@
-from django.conf.urls import patterns, include, url
-from django.contrib.auth.views import logout, login, password_change, password_change_done
+from django.urls import re_path, include
 from django.views.generic import ListView
-from qsub.views import *
-from qsub.models import *
+from qems2.qsub.views import *
+from qems2.qsub.models import *
 
 import django
 
 # Uncomment the next two lines to enable the admin:
 from django.contrib import admin
-admin.autodiscover()
 
-urlpatterns = patterns('',
-    # Examples:
-    # url(r'^$', 'QuEST.views.home', name='home'),
-    # url(r'^QuEST/', include('QuEST.foo.urls')),
+urlpatterns = [
+    re_path(r'^admin/', admin.site.urls),
 
-    # Uncomment the admin/doc line below to enable admin documentation:
-    # url(r'^admin/doc/', include('django.contrib.admindocs.urls')),
-
-    url(r'^admin/', include(admin.site.urls)),
-    
     # accounts
-    url(r'^accounts/', include('allauth.urls')),
-    
-    (r'^main/$', main),
-    (r'^$', main),
-    (r'^profile/$', profile),    
-    
-    (r'^question_sets/$', question_sets),
-    (r'^create_question_set/$', create_question_set),
-    (r'^edit_question_set/(?P<qset_id>[0-9]+)/$', edit_question_set),
-    (r'^distributions/$', distributions),
-    (r'^add_editor/(?P<qset_id>[0-9]+)/$', add_editor),
-    (r'^add_writer/(?P<qset_id>[0-9]+)/$', add_writer),
-    (r'^edit_distribution/(?P<dist_id>[0-9]+)/$', edit_distribution),
-    (r'^edit_distribution/$', edit_distribution),
-    (r'^edit_tiebreak/(?P<dist_id>[0-9]+)/$', edit_tiebreak),
-    (r'^edit_tiebreak/$', edit_tiebreak),
-    (r'^edit_set_distribution/(?P<qset_id>[0-9]+)/$', edit_set_distribution),
-    (r'^edit_set_tiebreak/(?P<qset_id>[0-9]+)/$', edit_set_tiebreak),
-    (r'^add_tossups/(?P<qset_id>[0-9]+)/$', add_tossups),
-    (r'^add_tossups/(?P<qset_id>[0-9]+)/(?P<packet_id>[0-9]+)/$', add_tossups),
-    (r'^edit_tossup/(?P<tossup_id>[0-9]+)/$', edit_tossup),
-    (r'^delete_tossup/$', delete_tossup),
-    (r'^add_bonuses/(?P<qset_id>[0-9]+)/(?P<bonus_type>.+)/$', add_bonuses),
-    (r'^add_bonuses/(?P<qset_id>[0-9]+)/(?P<bonus_type>.+)/(?P<packet_id>[0-9]+)/$', add_bonuses),
-    (r'^edit_bonus/(?P<bonus_id>[0-9]+)/$', edit_bonus),
-    (r'^delete_bonus/$', delete_bonus),
-    (r'^add_packets/(?P<qset_id>[0-9]+)/$', add_packets),
-    (r'^edit_packet/(?P<packet_id>[0-9]+)/$', edit_packet),
-    (r'^type_questions/$', type_questions),
-    (r'^type_questions/(?P<qset_id>[0-9]+)/$', type_questions),
-    (r'^type_questions_edit/(?P<question_type>.+)/(?P<question_id>[0-9]+)/$', type_questions_edit),    
-    #(r'^edit_packet/(?P<packet_id>[0-9]+)/change_tossup_position/(?P<old_index>[0-9]+)/(?P<new_index>[0-9]+)$', change_tossup_order),
-    #(r'^edit_packet/(?P<packet_id>[0-9]+)/change_bonus_position/(?P<old_index>[0-9]+)/(?P<new_index>[0-9]+)$', change_bonus_order),
-    (r'^delete_packet/$', delete_packet),
-    (r'^settings/$', settings),
-    (r'^logout/$', logout_view),   
-    (r'^categories/(?P<qset_id>[0-9]+)/(?P<category_id>[0-9]+)/$', categories),
-    (r'^export_question_set/(?P<qset_id>[0-9]+)/(?P<output_format>.+)/$', export_question_set),
-    (r'^delete_writer/$', delete_writer),
-    (r'^delete_editor/$', delete_editor),
-    (r'^delete_set/$', delete_set),    
-    (r'^delete_comment/$', delete_comment),
-    (r'^delete_all_comments/$', delete_all_comments),
-    (r'^restore_tossup/$', restore_tossup),
-    (r'^restore_bonus/$', restore_bonus),
-    (r'^tossup_history/(?P<tossup_id>[0-9]+)/$', tossup_history),
-    (r'^bonus_history/(?P<bonus_id>[0-9]+)/$', bonus_history),
-    (r'^questions_remaining/(?P<qset_id>[0-9]+)/$', questions_remaining),
-    (r'^bulk_change_set/(?P<qset_id>[0-9]+)/$', bulk_change_set),
-    (r'^writer_question_set_settings/(?P<qset_id>[0-9]+)/$', writer_question_set_settings),    
-    (r'^contributor/(?P<qset_id>[0-9]+)/(?P<writer_id>[0-9]+)/$', contributor),
-              
-    (r'^upload_questions/(?P<qset_id>[0-9]+)/$', upload_questions),
-    (r'^complete_upload/$', complete_upload),
-    (r'^move_tossup/(?P<q_set_id>[0-9]+)/(?P<tossup_id>[0-9]+)/$', move_tossup),
-    (r'^move_bonus/(?P<q_set_id>[0-9]+)/(?P<bonus_id>[0-9]+)/$', move_bonus),
-    (r'^convert_tossup/$', convert_tossup),
-    (r'^convert_bonus/$',convert_bonus),
-    (r'^view_all_questions/(?P<qset_id>[0-9]+)/$',view_all_questions),    
-    (r'^view_all_comments/(?P<qset_id>[0-9]+)/$',view_all_comments),    
-    (r'^question_set_distribution/(?P<qset_id>[0-9]+)/$',question_set_distribution),    
-    
+    re_path(r'^accounts/forgot-username/$', forgot_username, name='forgot_username'),
+    re_path(r'^accounts/', include('allauth.urls')),
+
+    re_path(r'^main/$', main),
+    re_path(r'^$', main),
+    re_path(r'^profile/$', profile),
+
+    re_path(r'^question_sets/$', question_sets),
+    re_path(r'^create_question_set/$', create_question_set),
+    re_path(r'^edit_question_set/(?P<qset_id>[0-9]+)/$', edit_question_set),
+    re_path(r'^distributions/$', distributions),
+    re_path(r'^add_editor/(?P<qset_id>[0-9]+)/$', add_editor),
+    re_path(r'^add_writer/(?P<qset_id>[0-9]+)/$', add_writer),
+    re_path(r'^clone_distribution/(?P<dist_id>[0-9]+)/$', clone_distribution),
+    re_path(r'^edit_distribution/(?P<dist_id>[0-9]+)/$', edit_distribution),
+    re_path(r'^edit_distribution/$', edit_distribution),
+    re_path(r'^edit_tiebreak/(?P<dist_id>[0-9]+)/$', edit_tiebreak),
+    re_path(r'^edit_tiebreak/$', edit_tiebreak),
+    re_path(r'^edit_set_distribution/(?P<qset_id>[0-9]+)/$', edit_set_distribution),
+    re_path(r'^edit_set_tiebreak/(?P<qset_id>[0-9]+)/$', edit_set_tiebreak),
+    re_path(r'^add_tossups/(?P<qset_id>[0-9]+)/$', add_tossups),
+    re_path(r'^add_tossups/(?P<qset_id>[0-9]+)/(?P<packet_id>[0-9]+)/$', add_tossups),
+    re_path(r'^edit_tossup/(?P<tossup_id>[0-9]+)/$', edit_tossup),
+    re_path(r'^delete_tossup/$', delete_tossup),
+    re_path(r'^add_bonuses/(?P<qset_id>[0-9]+)/(?P<bonus_type>.+)/$', add_bonuses),
+    re_path(r'^add_bonuses/(?P<qset_id>[0-9]+)/(?P<bonus_type>.+)/(?P<packet_id>[0-9]+)/$', add_bonuses),
+    re_path(r'^edit_bonus/(?P<bonus_id>[0-9]+)/$', edit_bonus),
+    re_path(r'^delete_bonus/$', delete_bonus),
+    re_path(r'^add_packets/(?P<qset_id>[0-9]+)/$', add_packets),
+    re_path(r'^edit_packet/(?P<packet_id>[0-9]+)/$', edit_packet),
+    re_path(r'^type_questions/$', type_questions),
+    re_path(r'^type_questions/(?P<qset_id>[0-9]+)/$', type_questions),
+    re_path(r'^type_questions_edit/(?P<question_type>.+)/(?P<question_id>[0-9]+)/$', type_questions_edit),
+    re_path(r'^delete_packet/$', delete_packet),
+    re_path(r'^settings/$', settings),
+    re_path(r'^logout/$', logout_view),
+    re_path(r'^categories/(?P<qset_id>[0-9]+)/(?P<category_id>[0-9]+)/$', categories),
+    re_path(r'^export_question_set/(?P<qset_id>[0-9]+)/(?P<output_format>.+)/$', export_question_set),
+    re_path(r'^delete_writer/$', delete_writer),
+    re_path(r'^delete_editor/$', delete_editor),
+    re_path(r'^delete_set/$', delete_set),
+    re_path(r'^delete_comment/$', delete_comment),
+    re_path(r'^reply_to_comment/$', reply_to_comment),
+    re_path(r'^delete_all_comments/$', delete_all_comments),
+    re_path(r'^restore_tossup/$', restore_tossup),
+    re_path(r'^restore_bonus/$', restore_bonus),
+    re_path(r'^tossup_history/(?P<tossup_id>[0-9]+)/$', tossup_history),
+    re_path(r'^bonus_history/(?P<bonus_id>[0-9]+)/$', bonus_history),
+    re_path(r'^questions_remaining/(?P<qset_id>[0-9]+)/$', questions_remaining),
+    re_path(r'^bulk_change_set/(?P<qset_id>[0-9]+)/$', bulk_change_set),
+    re_path(r'^writer_question_set_settings/(?P<qset_id>[0-9]+)/$', writer_question_set_settings),
+    re_path(r'^contributor/(?P<qset_id>[0-9]+)/(?P<writer_id>[0-9]+)/$', contributor),
+
+    re_path(r'^upload_questions/(?P<qset_id>[0-9]+)/$', upload_questions),
+    re_path(r'^complete_upload/$', complete_upload),
+    re_path(r'^move_tossup/(?P<q_set_id>[0-9]+)/(?P<tossup_id>[0-9]+)/$', move_tossup),
+    re_path(r'^move_bonus/(?P<q_set_id>[0-9]+)/(?P<bonus_id>[0-9]+)/$', move_bonus),
+    re_path(r'^convert_tossup/$', convert_tossup),
+    re_path(r'^convert_bonus/$', convert_bonus),
+    re_path(r'^view_all_questions/(?P<qset_id>[0-9]+)/$', view_all_questions),
+    re_path(r'^duplicate_check/(?P<qset_id>[0-9]+)/$', duplicate_check),
+    re_path(r'^view_all_comments/(?P<qset_id>[0-9]+)/$', view_all_comments),
+    re_path(r'^question_set_distribution/(?P<qset_id>[0-9]+)/$', question_set_distribution),
+
     # json calls
-    (r'^get_unassigned_tossups/$', get_unassigned_tossups),
-    (r'^get_unassigned_bonuses/$', get_unassigned_bonuses),
-    (r'^assign_tossups_to_packet/$', assign_tossups_to_packet),
-    (r'^assign_bonuses_to_packet/$', assign_bonuses_to_packet),
-    (r'^change_question_order/$', change_question_order),
-    #(r'^change_tossup_position/$', change_tossup_order),
-    #(r'^change_bonus_position/$', change_bonus_order),
+    re_path(r'^get_unassigned_tossups/$', get_unassigned_tossups),
+    re_path(r'^get_unassigned_bonuses/$', get_unassigned_bonuses),
+    re_path(r'^assign_tossups_to_packet/$', assign_tossups_to_packet),
+    re_path(r'^assign_bonuses_to_packet/$', assign_bonuses_to_packet),
+    re_path(r'^change_question_order/$', change_question_order),
 
     # commenting framework
-    (r'^comments/', include('django_comments.urls')),
+    re_path(r'^comments/', include('django_comments.urls')),
 
     # search
-    # (r'^search/', include('haystack.urls')),
-    (r'^search/$', search),
-    (r'^search/(?P<passed_qset_id>[0-9]+)/$', search),
-    
-    #auth
-    #url(r'^accounts/', include('allauth.urls')),
-)
-
-#import debug_toolbar
-#urlpatterns += patterns('',
-#    url(r'^__debug__/', include(debug_toolbar.urls)),
-#)
+    re_path(r'^search/$', search),
+    re_path(r'^search/(?P<passed_qset_id>[0-9]+)/$', search),
+]

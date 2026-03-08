@@ -2,7 +2,7 @@
 from qems2.qsub.models import *
 from qems2.qsub.utils import *
 
-print "Starting script"
+print("Starting script")
 
 for bonus in Bonus.objects.all():
     if (bonus.leadin is not None and bonus.leadin != ''):
@@ -12,4 +12,4 @@ for bonus in Bonus.objects.all():
     
     bonus.save()
 
-print "Finished"
+print("Finished")

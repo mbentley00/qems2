@@ -5,4 +5,4 @@ class QSubConfig(AppConfig):
     verbose_name = 'QEMS2'
     
     def ready(self):
-        print "Set up ready method"
+        print("Set up ready method")

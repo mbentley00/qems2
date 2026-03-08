@@ -1,8 +1,8 @@
 #from __future__ import unicode_literals
 
 from bs4 import BeautifulSoup
-from models import *
-from forms import *
+from .models import *
+from .forms import *
 from django.forms.formsets import formset_factory
 from django.forms.models import modelformset_factory
 from django.contrib.contenttypes.models import ContentType, ContentTypeManager
@@ -119,7 +119,7 @@ def export_packet(packet_id):
 
     tex_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "tex"),)
 
-    print tex_path
+    print(tex_path)
 
     latex_preamble = r'''
 \documentclass[10pt]{article}
@@ -174,9 +174,9 @@ def export_packet(packet_id):
 
     packet_latex = latex_preamble + tossup_latex + bonus_latex + latex_end
 
-    print output_file
+    print(output_file)
 
-    print packet_latex
+    print(packet_latex)
 
     f = open(output_file, 'w')
     f.write(packet_latex.encode('utf-8'))
@@ -273,10 +273,10 @@ def tossup_to_tossup(tossup, output_question_type):
     pass # No-op for now since there's just one type of tossup
 
 def bonus_to_bonus(bonus, output_question_type):
-    print "bonus to bonus"
+    print("bonus to bonus")
     if (output_question_type == ACF_STYLE_BONUS):
         if (bonus.get_bonus_type() == VHSL_BONUS):
-            print "Convert to ACF"
+            print("Convert to ACF")
             bonus.question_type = QuestionType.objects.get(question_type=ACF_STYLE_BONUS)
             bonus.leadin = ""
             bonus.part2_text = ""
@@ -286,7 +286,7 @@ def bonus_to_bonus(bonus, output_question_type):
             bonus.save_question(QUESTION_CREATE, tossup.author)
     elif (output_question_type == VHSL_BONUS):
         if (bonus.get_bonus_type() == ACF_STYLE_BONUS):
-            print "Convert to VHSL"
+            print("Convert to VHSL")
             bonus.question_type = QuestionType.objects.get(question_type=VHSL_BONUS)
             bonus.part1_text = bonus.leadin + " " + bonus.part1_text + " " + bonus.part1_answer + " " + bonus.part2_text + " " + bonus.part2_answer + " " + bonus.part3_text + " " + bonus.part3_answer
             bonus.leadin = ""
@@ -411,8 +411,8 @@ def get_comment_tab_list(tossup_dict, bonus_dict, comment_limit=60):
     for comment in Comment.objects.filter(Q(content_type_id=tossup_content_type_id) | Q(content_type_id=bonus_content_type_id)).order_by('-submit_date'):
         if (not comment.is_removed):
             if (comment.content_type_id == tossup_content_type_id):
-                if (long(comment.object_pk) in tossup_dict):
-                    tossup = tossup_dict[long(comment.object_pk)]            
+                if (int(comment.object_pk) in tossup_dict):
+                    tossup = tossup_dict[int(comment.object_pk)]            
                     new_comment = { 'comment': comment,
                                         'question_text': get_formatted_question_html(tossup.tossup_answer[0:80], True, True, False, False),
                                         'question_id': tossup.id,
@@ -422,8 +422,8 @@ def get_comment_tab_list(tossup_dict, bonus_dict, comment_limit=60):
                     if (comment_count >= comment_limit):
                         break
             else:
-                if (long(comment.object_pk) in bonus_dict):
-                    bonus = bonus_dict[long(comment.object_pk)]            
+                if (int(comment.object_pk) in bonus_dict):
+                    bonus = bonus_dict[int(comment.object_pk)]            
                     new_comment = { 'comment': comment,
                                         'question_text': get_formatted_question_html_for_bonus_answers(bonus),
                                         'question_id': bonus.id,
@@ -443,7 +443,7 @@ def get_questions_remaining(qset):
     set_status = {}    
     
     entries = qset.setwidedistributionentry_set.all().order_by('dist_entry__category', 'dist_entry__subcategory')
-    for entry in sorted(entries):
+    for entry in entries:
         tu_required = entry.num_tossups
         bs_required = entry.num_bonuses
         # TODO: really fix extra questions increasing set completion; this is temporary

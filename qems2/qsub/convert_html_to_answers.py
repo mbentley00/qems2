@@ -17,14 +17,14 @@ def convert_html(line):
 
 #@transaction.commit_manually
 def update_tossups_and_bonuses():
-    print "Starting script to update PACE NSC formatting"
+    print("Starting script to update PACE NSC formatting")
 
     qset = QuestionSet.objects.get(id=2)
     for tossup in Tossup.objects.filter(question_set=qset):        
         tossup.tossup_text, changed1 = convert_html(tossup.tossup_text)
         tossup.tossup_answer, changed2 = convert_html(tossup.tossup_answer)
         if (changed1 or changed2):
-            print "saving tossup", tossup.id
+            print("saving tossup", tossup.id)
             tossup.save()
 
     for bonus in Bonus.objects.filter(question_set=qset):
@@ -37,12 +37,12 @@ def update_tossups_and_bonuses():
         bonus.part3_answer, changed7 = convert_html(bonus.part3_answer)
         
         if (changed1 or changed2 or changed3 or changed4 or changed5 or changed6 or changed7):
-            print "saving bonus", bonus.id
+            print("saving bonus", bonus.id)
             bonus.save()
 
-    print "Committing"
+    print("Committing")
     transaction.commit()
 
-    print "Finished"
+    print("Finished")
 
 update_tossups_and_bonuses()

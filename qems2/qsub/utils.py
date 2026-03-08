@@ -1,7 +1,7 @@
 from __future__ import unicode_literals
 
 from bs4 import BeautifulSoup
-from django.utils.encoding import smart_unicode
+from django.utils.encoding import smart_str
 from django.utils.safestring import mark_safe
 import unicodedata
 
@@ -336,7 +336,7 @@ def does_answerline_have_underlines(line):
         return True
 
 def convert_smart_quotes(line):
-    return smart_unicode(line).translate(DOUBLE_QUOTE_MAP).translate(SINGLE_QUOTE_MAP)
+    return smart_str(line).translate(DOUBLE_QUOTE_MAP).translate(SINGLE_QUOTE_MAP)
 
 def strip_special_chars(line):
     return line.replace('_', '').replace('~', '')

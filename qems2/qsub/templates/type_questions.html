@@ -25,6 +25,16 @@
         <form action="/type_questions/" method="post" id="type-questions">
             {% csrf_token %}
             {{ form }}
+            {% if dist_entries %}
+            <div class="category-tag-panel">
+                <label>Insert category tag:</label>
+                <div class="category-tag-list">
+                {% for dist_entry in dist_entries %}
+                    <button type="button" class="category-tag-btn" data-tag="{{'{'}}{{ dist_entry }}{{'}'}}">{{ dist_entry }}</button>
+                {% endfor %}
+                </div>
+            </div>
+            {% endif %}
             <input type="hidden" name="qset_id" value="{{ qset.id }}">
             <input type="submit" class="button primary right" value="Submit">
         </form>
@@ -46,4 +56,53 @@
     </div>
 </div>
 
+<script>
+$(function () {
+    $(document).on('click', '.category-tag-btn', function (e) {
+        e.preventDefault();
+        var tag = $(this).attr('data-tag');
+        var textarea = document.getElementById('id_questions');
+        if (!textarea) return;
+
+        var text = textarea.value;
+        var cursorPos = textarea.selectionStart || 0;
+        var lines = text.split('\n');
+
+        // Find which line the cursor is on
+        var charCount = 0;
+        var cursorLine = 0;
+        for (var i = 0; i < lines.length; i++) {
+            charCount += lines[i].length + 1;
+            if (charCount > cursorPos) {
+                cursorLine = i;
+                break;
+            }
+        }
+
+        // Walk backward from cursor line to find nearest ANSWER: line
+        var answerLineIdx = -1;
+        var ansRegex = /^answer/i;
+        for (var i = cursorLine; i >= 0; i--) {
+            if (ansRegex.test(lines[i].trim())) {
+                answerLineIdx = i;
+                break;
+            }
+        }
+
+        if (answerLineIdx >= 0) {
+            var tagRegex = /\{.+\}\s*$/;
+            if (tagRegex.test(lines[answerLineIdx])) {
+                lines[answerLineIdx] = lines[answerLineIdx].replace(tagRegex, tag);
+            } else {
+                lines[answerLineIdx] = lines[answerLineIdx].trimEnd() + ' ' + tag;
+            }
+            textarea.value = lines.join('\n');
+        } else {
+            textarea.value = text.slice(0, cursorPos) + tag + text.slice(cursorPos);
+        }
+
+        textarea.focus();
+    });
+});
+</script>
 {% endblock %}

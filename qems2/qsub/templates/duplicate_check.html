@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% block title %}Duplicate Check - {{ qset.name }} - QEMS2{% endblock %}
+
+{% block content %}
+
+<h3 class="page-header">Duplicate Question Check: {{ qset.name }}</h3>
+
+<div class="row">
+    <div class="small-12 columns">
+        <a href="/edit_question_set/{{ qset.id }}/" class="button secondary small">&laquo; Back to Question Set</a>
+    </div>
+</div>
+
+<div class="row">
+    <div class="small-12 columns">
+        <div class="panel">
+            <h5>Summary</h5>
+            <ul class="no-bullet">
+                <li><span class="label alert">{{ critical_count }} Critical</span> &mdash; Same answer with high clue overlap. Likely needs one deleted or rewritten.</li>
+                <li><span class="label warning">{{ warning_count }} Warning</span> &mdash; Same answer, same category, distinct clues. Review for variety.</li>
+                <li><span class="label">{{ info_count }} Info</span> &mdash; Same answer, different categories. Generally fine but good to know.</li>
+            </ul>
+            <p><strong>{{ total_groups }} duplicate answer group{{ total_groups|pluralize }}</strong> found across {{ total_questions }} question entries.</p>
+            {% if internal_issues %}
+            <hr style="margin: 0.5rem 0;">
+            <h5>Within-Question Issues</h5>
+            <ul class="no-bullet">
+                <li><span class="label alert">{{ bonus_repeat_count }} Bonus Repeat Answer{{ bonus_repeat_count|pluralize }}</span> &mdash; A single bonus has the same answer for multiple parts.</li>
+                <li><span class="label warning">{{ clue_reuse_count }} Tossup Clue Reuse</span> &mdash; A tossup repeats similar clues across different sentences.</li>
+            </ul>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+{% if not groups %}
+    <div class="row">
+        <div class="small-12 columns">
+            <div class="panel callout">
+                <p>No duplicate answers detected in this question set.</p>
+            </div>
+        </div>
+    </div>
+{% endif %}
+
+{% for group in groups %}
+    <div class="row">
+        <div class="small-12 columns">
+            <div class="panel" style="border-left: 4px solid {% if group.severity == 'critical' %}#f04124{% elif group.severity == 'warning' %}#e99002{% else %}#008cba{% endif %}; margin-bottom: 1rem;">
+                <div class="row">
+                    <div class="small-12 columns">
+                        <h5 style="margin-bottom: 0.5rem;">
+                            {% if group.severity == 'critical' %}
+                                <span class="label alert">Critical</span>
+                            {% elif group.severity == 'warning' %}
+                                <span class="label warning">Warning</span>
+                            {% else %}
+                                <span class="label">Info</span>
+                            {% endif %}
+                            &ldquo;{{ group.answer }}&rdquo;
+                            <small>({{ group.entries|length }} questions)</small>
+                        </h5>
+                    </div>
+                </div>
+                <table class="table-striped" style="width: 100%; margin-top: 0.5rem;">
+                    <thead>
+                        <tr>
+                            <th>Type</th>
+                            <th>Answer</th>
+                            <th>Category</th>
+                            <th>Author</th>
+                            <th style="width: 40%;">Text Preview</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% autoescape off %}
+                        {% for entry in group.entries %}
+                            <tr>
+                                <td>
+                                    {% if entry.type == 'tossup' %}
+                                        <a href="/edit_tossup/{{ entry.id }}/">Tossup</a>
+                                    {% else %}
+                                        <a href="/edit_bonus/{{ entry.id }}/">Bonus {{ entry.part_label }}</a>
+                                    {% endif %}
+                                </td>
+                                <td>{{ entry.answer_raw|truncatechars:80 }}</td>
+                                <td>{{ entry.category_str }}</td>
+                                <td>{{ entry.author }}</td>
+                                <td><small>{{ entry.text_preview }}</small></td>
+                            </tr>
+                        {% endfor %}
+                        {% endautoescape %}
+                    </tbody>
+                </table>
+                {% if group.severity == 'critical' %}
+                    <p style="margin-top: 0.5rem; margin-bottom: 0;"><small>
+                        {% for pair in group.pairs %}
+                            {% if pair.severity == 'critical' %}
+                                Clue overlap between #{{ pair.entry_a|add:"1" }} and #{{ pair.entry_b|add:"1" }}: {{ pair.similarity_pct }}%{% if not forloop.last %};{% endif %}
+                            {% endif %}
+                        {% endfor %}
+                    </small></p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+{% endfor %}
+
+{% if internal_issues %}
+    <h4 class="page-header" style="margin-top: 2rem;">Within-Question Issues</h4>
+
+    {% for issue in internal_issues %}
+        <div class="row">
+            <div class="small-12 columns">
+                <div class="panel" style="border-left: 4px solid {% if issue.severity == 'critical' %}#f04124{% else %}#e99002{% endif %}; margin-bottom: 1rem;">
+                    <div class="row">
+                        <div class="small-12 columns">
+                            <h5 style="margin-bottom: 0.5rem;">
+                                {% if issue.severity == 'critical' %}
+                                    <span class="label alert">Critical</span>
+                                {% else %}
+                                    <span class="label warning">Warning</span>
+                                {% endif %}
+                                {% if issue.question_type == 'bonus' %}
+                                    <a href="/edit_bonus/{{ issue.question_id }}/">Bonus #{{ issue.question_id }}</a>
+                                {% else %}
+                                    <a href="/edit_tossup/{{ issue.question_id }}/">Tossup #{{ issue.question_id }}</a>
+                                {% endif %}
+                                <small>{{ issue.category_str }} &mdash; {{ issue.author }}</small>
+                            </h5>
+                            <p style="margin-bottom: 0;">{{ issue.description }}</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    {% endfor %}
+{% endif %}
+
+{% endblock %}

@@ -1,14 +1,7 @@
-<<<<<<< HEAD
-from django.test import SimpleTestCase
+from django.test import TestCase
 from django.contrib.auth.models import AnonymousUser, User
 from datetime import datetime
 from django.utils import timezone
-=======
-from django.contrib.auth.models import User
-import django
-from django.test import TestCase
-from datetime import datetime
->>>>>>> dc5f333216071c2f7e80ec9a556251516d74364a
 
 from qems2.qsub.packet_parser import is_answer, is_bpart, is_vhsl_bpart, is_category
 from qems2.qsub.packet_parser import parse_packet_data, get_bonus_part_value, remove_category
@@ -145,7 +138,7 @@ class PacketParserTests(TestCase):
     def test_parse_packet_data(self):
         dist = Distribution.objects.create(name="Test Distribution", acf_tossup_per_period_count=20, acf_bonus_per_period_count=20, vhsl_bonus_per_period_count=20)
         dist.save()
-        print "dist.id: " + str(dist.id)
+        print("dist.id: " + str(dist.id))
 
         euroHistory = DistributionEntry(category="History", subcategory="European", distribution=dist)
         euroHistory.save()
@@ -1413,7 +1406,7 @@ class PacketParserTests(TestCase):
         unassigned_tossup.period = None
         unassigned_tossup.save()
 
-        print "\nassigned_tossup period: " + str(assigned_tossup.period)
+        print("\nassigned_tossup period: " + str(assigned_tossup.period))
         self.reload_standard_objects()
                         
         assigned_tossups = get_assigned_acf_tossups_in_period(self.qset, self.period)
@@ -1479,8 +1472,8 @@ class PacketParserTests(TestCase):
 
         self.reload_standard_objects()
 
-        print "self.period: " + str(self.period)
-        print "assigned_bonus.period: " + str(assigned_bonus.period)
+        print("self.period: " + str(self.period))
+        print("assigned_bonus.period: " + str(assigned_bonus.period))
 
         assigned_bonuses = get_assigned_vhsl_bonuses_in_period(self.qset, self.period)
         self.assertEqual(len(assigned_bonuses), 1)

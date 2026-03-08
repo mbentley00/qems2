@@ -19,7 +19,7 @@ bonus_value_regex = '\[|\]|\(|\)'
 
 def parse_uploaded_packet(uploaded_file):
 
-    print uploaded_file.name
+    print(uploaded_file.name)
     file_data = uploaded_file.read().split('\n')
 
     tossups, bonuses, tossup_errors, bonus_errors = parse_packet_data(file_data)
@@ -29,7 +29,7 @@ def parse_uploaded_packet(uploaded_file):
 
 def handle_uploaded_packet(uploaded_file):
 
-    print uploaded_file.name
+    print(uploaded_file.name)
 
     file_data = uploaded_file.read().split('\n')
 
@@ -48,7 +48,7 @@ def handle_uploaded_packet(uploaded_file):
         last_bonus = None
         first_bonus = None
 
-    print first_tossup, last_tossup
+    print(first_tossup, last_tossup)
 
     if first_tossup is not None and last_tossup is not None:
         tossups = file_data[first_tossup:last_tossup]
@@ -136,8 +136,8 @@ def tossups_structured(tossups, mode='json'):
             tossup.is_valid()
             tossup_objects.append(tossup)
         except InvalidTossup as ex:
-            print ex
-            print tossup
+            print(ex)
+            print(tossup)
             errors += 1
 
     if mode == 'json':
@@ -156,7 +156,7 @@ def bonuses_structured(bonuses, mode='json'):
     bonus_objects = []
     #bonuses = map(lambda text: re.sub('\'', '\\\'', text), bonuses)
     leadin_markers = [i for i in range(len(bonuses)) if not re.search('^\[\w*\]|^\(\w*\)|(?i)^(answer|asnwer|answers|anwer):', bonuses[i])]
-    print leadin_markers
+    print(leadin_markers)
     for i in range(len(leadin_markers)):
         leadin = bonuses[leadin_markers[i]]
         parts = []
@@ -197,8 +197,8 @@ def bonuses_structured(bonuses, mode='json'):
             bonus.is_valid()
             bonus_objects.append(bonus)
         except InvalidBonus as ex:
-            print ex
-            print bonus
+            print(ex)
+            print(bonus)
             errors += 1
 
     if mode == 'json':
