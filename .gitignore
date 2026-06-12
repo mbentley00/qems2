@@ -8,3 +8,6 @@ whoosh_index/
 *.py[cdo]
 secret
 nul
+db.sqlite3
+cookies.txt
+cookies_test.txt
