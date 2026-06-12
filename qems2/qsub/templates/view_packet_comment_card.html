@@ -1,0 +1,11 @@
+{% if q.comments %}
+<div class="doc-comment-card" data-for="q-{{ q.qtype }}-{{ q.id }}">
+    <div class="doc-comment-target">{% if q.qtype == 'tossup' %}Tossup{% else %}Bonus{% endif %} {{ q.number }}</div>
+    {% for c in q.comments %}
+    <div class="doc-comment">
+        <div class="doc-comment-author">{{ c.user }} <span class="doc-comment-date">{{ c.date|date:"m/d/y H:i" }}</span></div>
+        {% autoescape off %}<div class="doc-comment-text">{{ c.text|safe|comment_html|linebreaks }}</div>{% endautoescape %}
+    </div>
+    {% endfor %}
+</div>
+{% endif %}

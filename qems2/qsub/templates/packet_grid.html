@@ -1,0 +1,302 @@
+{% extends "base.html" %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% load static %}
+{% load filters %}
+
+{% block title %}Packet Grid - QEMS2{% endblock %}
+
+{% block content %}
+
+<h3 class="page-header">Packet Grid</h3>
+<ul class="breadcrumbs">
+    <li><a href="/edit_question_set/{{ qset.id }}/">{{ qset.name }}</a></li>
+    <li class="current"><a href="/packet_grid/{{ qset.id }}/">Packet Grid</a></li>
+</ul>
+
+{% if not read_only %}
+<div class="panel radius">
+    Drag a question onto another cell to swap the two questions (or onto an empty cell to move it).
+    Rows beyond the regular per-packet count are tiebreakers.
+    <a href="/packetize_set/{{ qset.id }}/" class="button small secondary right">Re-packetize</a>
+</div>
+{% endif %}
+
+{% if unassigned_tu or unassigned_bs %}
+<div class="alert-box warning">
+    {{ unassigned_tu }} tossup(s) and {{ unassigned_bs }} bonus(es) are not assigned to any packet.
+</div>
+{% endif %}
+
+{% if not packets %}
+<div class="alert-box info">This set has no packets yet. <a href="/packetize_set/{{ qset.id }}/">Packetize the set</a> to create them.</div>
+{% else %}
+
+<h4>Tossups</h4>
+<div class="grid-scroll">
+    <table class="packet-grid" data-qtype="tossup">
+        <thead>
+            <tr>
+                <th class="num-col">#</th>
+                {% for packet in packets %}
+                <th><a href="/edit_packet/{{ packet.id }}">{{ packet.packet_name }}</a> <a href="/view_packet/{{ packet.id }}/" title="Document view"><i class="fa fa-file-lines"></i></a></th>
+                {% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in tossup_rows %}
+            <tr{% if row.num > tossups_per_packet %} class="tiebreaker-row"{% endif %}>
+                <td class="num-col">{{ row.num }}{% if row.num > tossups_per_packet %} (TB){% endif %}</td>
+                {% for cell in row.cells %}
+                <td class="grid-cell" data-qtype="tossup" data-num="{{ row.num }}">
+                    {% if cell %}
+                        <a href="{{ cell.edit_url }}" class="cell-answer" data-qid="{{ cell.id }}">{{ cell.answer }}</a>
+                        <div class="cell-category">{{ cell.category }}</div>
+                        {% if not read_only %}<a href="#" class="swap-btn" title="Swap with a question from another packet">&#8644;</a>{% endif %}
+                    {% endif %}
+                </td>
+                {% endfor %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<h4>Bonuses</h4>
+<div class="grid-scroll">
+    <table class="packet-grid" data-qtype="bonus">
+        <thead>
+            <tr>
+                <th class="num-col">#</th>
+                {% for packet in packets %}
+                <th><a href="/edit_packet/{{ packet.id }}">{{ packet.packet_name }}</a> <a href="/view_packet/{{ packet.id }}/" title="Document view"><i class="fa fa-file-lines"></i></a></th>
+                {% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in bonus_rows %}
+            <tr{% if row.num > bonuses_per_packet %} class="tiebreaker-row"{% endif %}>
+                <td class="num-col">{{ row.num }}{% if row.num > bonuses_per_packet %} (TB){% endif %}</td>
+                {% for cell in row.cells %}
+                <td class="grid-cell" data-qtype="bonus" data-num="{{ row.num }}">
+                    {% if cell %}
+                        <a href="{{ cell.edit_url }}" class="cell-answer" data-qid="{{ cell.id }}">{{ cell.answer }}</a>
+                        <div class="cell-category">{{ cell.category }}</div>
+                        {% if not read_only %}<a href="#" class="swap-btn" title="Swap with a question from another packet">&#8644;</a>{% endif %}
+                    {% endif %}
+                </td>
+                {% endfor %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% endif %}
+
+<div id="swap-dialog" title="Swap with another packet" style="display:none;">
+    <p id="swap-source" style="margin-bottom: 8px;"></p>
+    <div style="margin-bottom: 10px;">
+        <label style="display:inline; margin-right: 12px;"><input type="radio" name="swap-scope" value="leaf" checked> Same sub-subcategory</label>
+        <label style="display:inline; margin-right: 12px;"><input type="radio" name="swap-scope" value="sub"> Same subcategory</label>
+        <label style="display:inline;"><input type="radio" name="swap-scope" value="top"> Same category</label>
+    </div>
+    <div id="swap-candidates"></div>
+</div>
+
+<style>
+.grid-scroll { overflow-x: auto; margin-bottom: 30px; }
+.swap-btn {
+    position: absolute;
+    top: 0;
+    right: 4px;
+    color: #bbb;
+    font-size: 1.2em;
+    font-weight: bold;
+    line-height: 1.2;
+}
+.grid-cell { position: relative; }
+.grid-cell:hover .swap-btn { color: #555; }
+.swap-btn:hover { color: #008CBA !important; }
+#swap-candidates { max-height: 320px; overflow-y: auto; }
+.swap-candidate {
+    padding: 6px 8px;
+    border-bottom: 1px solid #eee;
+    cursor: pointer;
+    font-size: 0.85em;
+}
+.swap-candidate:hover { background-color: #d9edf7; }
+.swap-candidate .swap-cand-packet { font-weight: bold; }
+.swap-candidate .swap-cand-category { color: #777; font-size: 0.9em; }
+.packet-grid { border-collapse: collapse; }
+.packet-grid th, .packet-grid td {
+    border: 1px solid #ddd;
+    padding: 4px 8px;
+    min-width: 170px;
+    max-width: 220px;
+    vertical-align: top;
+    font-size: 0.8em;
+}
+.packet-grid th.num-col, .packet-grid td.num-col {
+    min-width: 45px;
+    max-width: 60px;
+    text-align: center;
+    font-weight: bold;
+    background-color: #f0f0f0;
+    position: sticky;
+    left: 0;
+    z-index: 1;
+}
+.packet-grid tbody tr:nth-child(even) { background-color: #f9f9f9; }
+.packet-grid .tiebreaker-row { background-color: #fff8dc !important; }
+.cell-answer { display: block; font-weight: bold; }
+.cell-category { color: #777; font-size: 0.9em; }
+.grid-cell.drag-over { background-color: #d9edf7 !important; outline: 2px dashed #008CBA; }
+.grid-cell.ui-draggable-dragging-source { opacity: 0.4; }
+.grid-helper {
+    background: #fff;
+    border: 1px solid #008CBA;
+    padding: 4px 8px;
+    font-size: 0.8em;
+    z-index: 100;
+    max-width: 220px;
+}
+</style>
+
+<script>
+$(function() {
+    var readOnly = {% if read_only %}true{% else %}false{% endif %};
+    if (readOnly) return;
+
+    // Column index -> packet id
+    var packetIds = [{% for packet in packets %}{{ packet.id }}{% if not forloop.last %},{% endif %}{% endfor %}];
+
+    function packetIdForCell($cell) {
+        var idx = $cell.index() - 1;  // first column is the number column
+        return packetIds[idx];
+    }
+
+    $('.grid-cell').has('.cell-answer').draggable({
+        cancel: '.swap-btn',
+        helper: function() {
+            return $('<div class="grid-helper">').text($(this).find('.cell-answer').text());
+        },
+        cursorAt: { top: 10, left: 10 },
+        start: function() { $(this).addClass('ui-draggable-dragging-source'); },
+        stop: function() { $(this).removeClass('ui-draggable-dragging-source'); },
+        revert: 'invalid',
+        appendTo: 'body',
+        scroll: true
+    });
+
+    $('.grid-cell').droppable({
+        accept: function(draggable) {
+            return $(draggable).data('qtype') === $(this).data('qtype') && draggable[0] !== this;
+        },
+        over: function() { $(this).addClass('drag-over'); },
+        out: function() { $(this).removeClass('drag-over'); },
+        drop: function(event, ui) {
+            $(this).removeClass('drag-over');
+            var $source = ui.draggable;
+            var $target = $(this);
+            $.post('/move_packet_question/', {
+                question_type: $source.data('qtype'),
+                question_id: $source.find('.cell-answer').data('qid'),
+                target_packet_id: packetIdForCell($target),
+                target_number: $target.data('num')
+            }, function(response) {
+                var json = $.parseJSON(response);
+                if (json.success) {
+                    location.reload();
+                } else {
+                    alert(json.message);
+                }
+            });
+        }
+    });
+
+    // Clicking a link mid-drag shouldn't navigate
+    $('.grid-cell').on('click', '.cell-answer', function(e) {
+        if ($(this).closest('.grid-cell').hasClass('ui-draggable-dragging-source')) {
+            e.preventDefault();
+        }
+    });
+
+    // ---- Swap with another packet ----
+    var swapSource = null;
+
+    var $swapDialog = $('#swap-dialog').dialog({
+        autoOpen: false,
+        modal: true,
+        width: 600
+    });
+
+    function loadCandidates() {
+        var scope = $('input[name="swap-scope"]:checked').val();
+        var $list = $('#swap-candidates');
+        $list.html('<em>Loading...</em>');
+        $.get('/swap_candidates/', {
+            question_type: swapSource.qtype,
+            question_id: swapSource.qid,
+            scope: scope
+        }, function(response) {
+            var json = $.parseJSON(response);
+            if (json.error) {
+                $list.html('<div class="alert-box warning">' + json.error + '</div>');
+                return;
+            }
+            $('#swap-source').html('Swapping: <strong>' + swapSource.answer + '</strong> <span class="swap-cand-category">(' + json.source_category + ')</span>');
+            if (json.candidates.length === 0) {
+                $list.html('<em>No matching questions in other packets.</em>');
+                return;
+            }
+            $list.empty();
+            $.each(json.candidates, function(_, cand) {
+                var $row = $('<div class="swap-candidate">')
+                    .append($('<span class="swap-cand-packet">').text(cand.packet_name + ' #' + cand.number + (cand.is_tiebreaker ? ' (TB)' : '') + ': '))
+                    .append($('<span>').text(cand.answer + ' '))
+                    .append($('<div class="swap-cand-category">').text(cand.category));
+                $row.on('click', function() {
+                    $.post('/move_packet_question/', {
+                        question_type: swapSource.qtype,
+                        question_id: swapSource.qid,
+                        target_packet_id: cand.packet_id,
+                        target_number: cand.number
+                    }, function(response) {
+                        var json = $.parseJSON(response);
+                        if (json.success) {
+                            location.reload();
+                        } else {
+                            alert(json.message);
+                        }
+                    });
+                });
+                $list.append($row);
+            });
+        });
+    }
+
+    $('.grid-cell').on('click', '.swap-btn', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var $cell = $(this).closest('.grid-cell');
+        swapSource = {
+            qtype: $cell.data('qtype'),
+            qid: $cell.find('.cell-answer').data('qid'),
+            answer: $cell.find('.cell-answer').text()
+        };
+        $('input[name="swap-scope"][value="leaf"]').prop('checked', true);
+        $swapDialog.dialog('open');
+        loadCandidates();
+    });
+
+    $('input[name="swap-scope"]').on('change', function() {
+        if (swapSource) loadCandidates();
+    });
+});
+</script>
+
+{% endblock %}

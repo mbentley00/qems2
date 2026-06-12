@@ -16,6 +16,14 @@
     {% block content %}
 
     <h3 class="page-header">{{ category }}</h3>
+    {% if category %}
+    <ul class="breadcrumbs">
+        <li><a href="/edit_question_set/{{ qset.id }}/">{{ qset.name }}</a></li>
+        <li><a href="/category_overview/{{ qset.id }}/">Category Overview</a></li>
+        <li><a href="/top_category/{{ qset.id }}/{{ category.category }}/">{{ category.category }}</a></li>
+        <li class="current">{{ category.subcategory }}</li>
+    </ul>
+    {% endif %}
     <p>Overall Percent: {{ category_status|overall_percent}}<br />
     Tossups Remaining: {{ category_status|tossups_remaining }}, Tossup Completion: {{ category_status.tu_in_cat|percent:category_status.tu_req }}<br />
     Bonuses Remaining: {{ category_status|bonuses_remaining }}, Bonus Completion: {{ category_status.bs_in_cat|percent:category_status.bs_req }}</p>

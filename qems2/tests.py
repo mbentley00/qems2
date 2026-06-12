@@ -10,6 +10,8 @@ from qems2.qsub.utils import get_character_count, get_formatted_question_html, a
 from qems2.qsub.models import *
 from qems2.qsub.model_utils import *
 from qems2.qsub.packetizer import *
+from qems2.qsub.packetizer import _ensure_packets
+from decimal import Decimal
 
 class PacketParserTests(TestCase):
 
@@ -61,326 +63,10 @@ class PacketParserTests(TestCase):
     #########################################################################
     
     def setUp(self):
-<<<<<<< HEAD
         acfTossup = QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
         acfBonus = QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
         vhslBonus = QuestionType.objects.get_or_create(question_type=VHSL_BONUS)
-    
-    # If the object exists, re-query it from the DB to get updated properties
-    def reload_standard_objects(self):         
-        if (self.user is not None):
-            self.user = User.objects.get(id=self.user.id)
-=======
-        self.user = User.objects.create_user(username="testuser", password="top_secret", email="qems2test@gmail.com")
-        self.user.save()
-                        
-        self.writer = Writer.objects.get(user=self.user.id)
-        self.writer.save()
 
-        acfTossup = QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
-        acfBonus = QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
-        vhslBonus = QuestionType.objects.get_or_create(question_type=VHSL_BONUS)
-            
-    def test_is_answer(self):
-        answers = ["answer:", "Answer:", "ANSWER:", "ANSWER: _underlined_", "ANSWER: no underline", "ANSWER: <u>underline2</u>"]
-        for answer in answers:
-            self.assertTrue(is_answer(answer), msg=answer)
-        non_answers = ["question:", "answer", "ansER"]
-        for non_answer in non_answers:
-            self.assertFalse(is_answer(non_answer), msg=non_answer)
-
-    def test_remove_answer_label(self):
-        answers = ["ANSWER: <u><b>my answer</b></u>", "answer:      <u><b>my answer</b></u>", "Answer:\t<u><b>my answer</b></u>"]
-        for answer in answers:
-            self.assertEqual(remove_answer_label(answer), '<u><b>my answer</b></u>')
-
-    def test_are_special_characters_balanced(self):
-        balancedLines = ["", "No special chars", "_Underscores_", "~Italics~", "(Parens)", "_~Several_~ (items) in (one) _question_."]
-        unbalancedLines = ["_", "~", "_test__", "~~test~", "(test", "test)", "((test)", "(", ")", ")test(", "(test))"]
-        for balancedLine in balancedLines:
-            self.assertTrue(are_special_characters_balanced(balancedLine))
-        for unbalancedLine in unbalancedLines:
-            self.assertFalse(are_special_characters_balanced(unbalancedLine))
-
-    def test_is_bpart(self):
-        bonusParts = ['[10]', '[15]']
-        for bonusPart in bonusParts:
-            self.assertTrue(is_bpart(bonusPart), msg=bonusPart)
-        notBonusParts = ['(10)', '10', '[10', '10]', '(10]', '[10)', '[or foo]', '(not a number)', '[10.5]', '[<i>10</i>]']
-        for notBonus in notBonusParts:
-            self.assertFalse(is_bpart(notBonus), msg=notBonus)
-
-    def test_is_vhsl_bpart(self):
-        bonusParts = ['[V10]', '[V15]']
-        for bonusPart in bonusParts:
-            self.assertTrue(is_vhsl_bpart(bonusPart), msg=bonusPart)
-        notBonusParts = ['(V10)', '[10]', '(10)', 'V10', '[10', '10]', '(10]', '[V10)', '[or foo]', '(not a number)']
-        for notBonus in notBonusParts:
-            self.assertFalse(is_vhsl_bpart(notBonus), msg=notBonus)
-
-    def test_is_category(self):
-        categories = ["{History - European}, 'ANSWER: _foo_ {Literature - American}"]
-        for category in categories:
-            self.assertTrue(is_category(category), msg=category)
-        notCategories = ["answer: _foo_", '{History - World', 'History - Other}']
-        for notCategory in notCategories:
-            self.assertFalse(is_category(notCategory), msg=notCategory)
-
-    def test_remove_category(self):
-        self.assertEqual(remove_category('ANSWER: _foo_ {History - European}'), 'ANSWER: _foo_ ')
-        self.assertEqual(remove_category('ANSWER: _foo_ {History - European'), 'ANSWER: _foo_ {History - European')
-
-    def test_get_bonus_part_value(self):
-        bonusParts = ['[10]']
-        for bonusPart in bonusParts:
-            self.assertEqual(get_bonus_part_value(bonusPart), '10')
-
-    def test_parse_packet_data(self):
-        dist = Distribution.objects.create(name="Test Distribution", acf_tossup_per_period_count=20, acf_bonus_per_period_count=20, vhsl_bonus_per_period_count=20)
-        dist.save()
-        print("dist.id: " + str(dist.id))
-
-        euroHistory = DistributionEntry(category="History", subcategory="European", distribution=dist)
-        euroHistory.save()
-
-        americanHistory = DistributionEntry(category="History", subcategory="American", distribution=dist)
-        americanHistory.save()
-
-        qset = QuestionSet.objects.create(name="new_set", date=timezone.now(), host="test host", owner=self.writer, num_packets=10, distribution=dist)
-
-        validTossup = 'This is a valid test tossup.\nANSWER: _My Answer_'
-        tossups, bonuses, tossup_errors, bonus_errors = parse_packet_data(validTossup.splitlines(), qset)
-        self.assertEqual(len(tossups), 1)
-        self.assertEqual(tossups[0].tossup_text, 'This is a valid test tossup.');
-        self.assertEqual(tossups[0].tossup_answer, '_My Answer_');
-        self.assertEqual(tossups[0].category, None);
-
-        validTossupWithCategory = 'This should be a ~European History~ tossup.\nANSWER: _Charles I_ {History - European}'
-        tossups, bonuses, tossup_errors, bonus_errors = parse_packet_data(validTossupWithCategory.splitlines(), qset)
-        self.assertEqual(len(tossups), 1)
-        self.assertEqual(tossups[0].tossup_text, 'This should be a ~European History~ tossup.');
-        self.assertEqual(tossups[0].tossup_answer, '_Charles I_ ');
-        self.assertEqual(str(tossups[0].category), 'History - European');
-
-        validBonus = 'This is a valid bonus.  For 10 points each:\n[10] Prompt 1.\nANSWER: _Answer 1_\n[10] Prompt 2.\nANSWER: _Answer 2_\n[10] Prompt 3.\nANSWER: _Answer 3_'
-        tossups, bonuses, tossup_errors, bonus_errors = parse_packet_data(validBonus.splitlines(), qset)
-        self.assertEqual(len(bonuses), 1)
-        self.assertEqual(str(bonuses[0].question_type), 'ACF-style bonus')
-        self.assertEqual(bonuses[0].leadin, 'This is a valid bonus.  For 10 points each:')
-        self.assertEqual(bonuses[0].part1_text, 'Prompt 1.')
-        self.assertEqual(bonuses[0].part1_answer, '_Answer 1_')
-        self.assertEqual(bonuses[0].part2_text, 'Prompt 2.')
-        self.assertEqual(bonuses[0].part2_answer, '_Answer 2_')
-        self.assertEqual(bonuses[0].part3_text, 'Prompt 3.')
-        self.assertEqual(bonuses[0].part3_answer, '_Answer 3_')
-
-        validBonusWithCategory = validBonus + " {History - American}"
-        tossups, bonuses, tossup_errors, bonus_errors = parse_packet_data(validBonusWithCategory.splitlines(), qset)
-        self.assertEqual(len(bonuses), 1)
-        self.assertEqual(str(bonuses[0].category), "History - American");
-
-        validVHSLBonus = '[V10] This is a valid VHSL bonus.\nANSWER: _VHSL Answer_'
-        tossups, bonuses, tossup_errors, bonus_errors = parse_packet_data(validVHSLBonus.splitlines(), qset)
-        self.assertEqual(len(bonuses), 1)
-        self.assertEqual(str(bonuses[0].question_type), 'VHSL bonus')
-        self.assertEqual(bonuses[0].leadin, '')
-        self.assertEqual(bonuses[0].part1_text, 'This is a valid VHSL bonus.')
-        self.assertEqual(bonuses[0].part1_answer, '_VHSL Answer_')
-
-        multipleQuestions = 'This is tossup 1.\nANSWER: _Tossup 1 Answer_\n[V10] This is a VHSL bonus.\nANSWER: _VHSL Answer_\nThis is another tossup.\nANSWER: _Tossup 2 Answer_'
-        multipleQuestions += '\n' + validBonus
-        tossups, bonuses, tossup_errors, bonus_errors = parse_packet_data(multipleQuestions.splitlines(), qset)
-        self.assertEqual(len(bonuses), 2)
-        self.assertEqual(len(tossups), 2)
-        self.assertEqual(tossups[0].tossup_text, 'This is tossup 1.')
-        self.assertEqual(tossups[0].tossup_answer, '_Tossup 1 Answer_')
-        self.assertEqual(tossups[1].tossup_text, 'This is another tossup.')
-        self.assertEqual(tossups[1].tossup_answer, '_Tossup 2 Answer_')
-        self.assertEqual(bonuses[0].part1_text, 'This is a VHSL bonus.')
-        self.assertEqual(bonuses[0].part1_answer, '_VHSL Answer_')
-        self.assertEqual(str(bonuses[0].question_type), 'VHSL bonus')
-        self.assertEqual(str(bonuses[1].question_type), 'ACF-style bonus')
-        self.assertEqual(bonuses[1].leadin, 'This is a valid bonus.  For 10 points each:')
-        self.assertEqual(bonuses[1].part1_text, 'Prompt 1.')
-        self.assertEqual(bonuses[1].part1_answer, '_Answer 1_')
-        self.assertEqual(bonuses[1].part2_text, 'Prompt 2.')
-        self.assertEqual(bonuses[1].part2_answer, '_Answer 2_')
-        self.assertEqual(bonuses[1].part3_text, 'Prompt 3.')
-        self.assertEqual(bonuses[1].part3_answer, '_Answer 3_')
-
-        multipleQuestionsBlankLines = 'This is tossup 1.\nANSWER: _Tossup 1 Answer_\n\n\nThis is tossup 2.\nANSWER: _Tossup 2 Answer_'
-        tossups, bonuses, tossup_errors, bonus_errors = parse_packet_data(multipleQuestionsBlankLines.splitlines(), qset)
-        self.assertEqual(len(bonuses), 0)
-        self.assertEqual(len(tossups), 2)
-        self.assertEqual(tossups[0].tossup_text, 'This is tossup 1.')
-        self.assertEqual(tossups[0].tossup_answer, '_Tossup 1 Answer_')
-        self.assertEqual(tossups[1].tossup_text, 'This is tossup 2.')
-        self.assertEqual(tossups[1].tossup_answer, '_Tossup 2 Answer_')
-
-        tossupWithoutAnswer = 'This is not a valid tossup.  It does not have an answer.'
-        tossups, bonuses, tossup_errors, bonus_errors = parse_packet_data(tossupWithoutAnswer.splitlines(), qset)
-        self.assertEqual(len(tossups), 0)
-        self.assertEqual(len(bonuses), 0)
-
-        tossupWithLineBreaks = 'This is not a valid tossup.\nIt has a line break before its answer.\nANSWER: _foo_'
-        tossups, bonuses, tossup_errors, bonus_errors = parse_packet_data(tossupWithLineBreaks.splitlines(), qset)
-        self.assertEqual(len(tossups), 1)
-        self.assertEqual(tossups[0].tossup_text, 'It has a line break before its answer.');
-        self.assertEqual(tossups[0].tossup_answer, '_foo_');
-        self.assertEqual(len(bonuses), 0)
-
-        tossupWithoutQuestion = 'ANSWER: This is an answer line without a question'
-        tossups, bonuses, tossup_errors, bonus_errors = parse_packet_data(tossupWithoutQuestion.splitlines(), qset)
-        self.assertEqual(len(tossups), 0)
-        self.assertEqual(len(bonuses), 0)
-        self.assertEqual(len(tossup_errors), 1)
-
-        tossupWithSingleQuotes = "This is a tossup with 'single quotes' in it.\nANSWER: '_Single Quoted Answer_'"
-        tossups, bonuses, tossup_errors, bonus_errors = parse_packet_data(tossupWithSingleQuotes.splitlines(), qset)
-        self.assertEqual(len(tossups), 1)
-        self.assertEqual(tossups[0].tossup_text, "This is a tossup with &#39;single quotes&#39; in it.");
-        self.assertEqual(tossups[0].tossup_answer, "&#39;_Single Quoted Answer_&#39;");
-
-        tossupWithDoubleQuotes = 'This is a tossup with "double quotes" in it.\nANSWER: "_Double Quoted Answer_"'
-        tossups, bonuses, tossup_errors, bonus_errors = parse_packet_data(tossupWithDoubleQuotes.splitlines(), qset)
-        self.assertEqual(len(tossups), 1)
-        self.assertEqual(tossups[0].tossup_text, 'This is a tossup with &quot;double quotes&quot; in it.');
-        self.assertEqual(tossups[0].tossup_answer, '&quot;_Double Quoted Answer_&quot;');
-
-        tossupWithDoubleQuotes = 'This is a tossup with an <i>italic tag</i> in it.\nANSWER: <i>_Italic Answer_</i>'
-        tossups, bonuses, tossup_errors, bonus_errors = parse_packet_data(tossupWithDoubleQuotes.splitlines(), qset)
-        self.assertEqual(len(tossups), 1)
-        self.assertEqual(tossups[0].tossup_text, 'This is a tossup with an &lt;i&gt;italic tag&lt;/i&gt; in it.');
-        self.assertEqual(tossups[0].tossup_answer, '&lt;i&gt;_Italic Answer_&lt;/i&gt;');
-
-        bonusWithNonIntegerValues = 'This is a bonus with non-integer values.  For 10 points each:\n[A] Prompt 1.\nANSWER: _Answer 1_\n[10.5] Prompt 2.\nANSWER: _Answer 2_\n[10C] Prompt 3.\nANSWER: _Answer 3_'
-        tossups, bonuses, tossup_errors, bonus_errors = parse_packet_data(bonusWithNonIntegerValues.splitlines(), qset)
-        self.assertEqual(len(bonuses), 0)
-
-        bonusWithHtmlValues = 'This is a bonus with html values.  For 10 points each:\n[<i>10</i>] Prompt 1.\nANSWER: _Answer 1_\n[10] Prompt 2.\nANSWER: _Answer 2_\n[<i>10</i>] Prompt 3.\nANSWER: _Answer 3_'
-        tossups, bonuses, tossup_errors, bonus_errors = parse_packet_data(bonusWithHtmlValues.splitlines(), qset)
-        self.assertEqual(len(bonuses), 0)
-
-        bonusWithQuotesAndHtml = 'This is a <i>valid</i> "bonus".  For 10 points each:\n[10] <i>Prompt 1</i>.\nANSWER: "_Answer 1_"\n[10] "Prompt 2."\nANSWER: <i>_Answer 2_</i>\n[10] <i>Prompt 3.</i>\nANSWER: <i>_Answer 3_</i>'
-        tossups, bonuses, tossup_errors, bonus_errors = parse_packet_data(bonusWithQuotesAndHtml.splitlines(), qset)
-        self.assertEqual(len(bonuses), 1)
-        self.assertEqual(str(bonuses[0].question_type), 'ACF-style bonus')
-        self.assertEqual(bonuses[0].leadin, 'This is a &lt;i&gt;valid&lt;/i&gt; &quot;bonus&quot;.  For 10 points each:')
-        self.assertEqual(bonuses[0].part1_text, '&lt;i&gt;Prompt 1&lt;/i&gt;.')
-        self.assertEqual(bonuses[0].part1_answer, '&quot;_Answer 1_&quot;')
-        self.assertEqual(bonuses[0].part2_text, '&quot;Prompt 2.&quot;')
-        self.assertEqual(bonuses[0].part2_answer, '&lt;i&gt;_Answer 2_&lt;/i&gt;')
-        self.assertEqual(bonuses[0].part3_text, '&lt;i&gt;Prompt 3.&lt;/i&gt;')
-        self.assertEqual(bonuses[0].part3_answer, '&lt;i&gt;_Answer 3_&lt;/i&gt;')
-
-        tossupWithUnbalancedSpecialCharsInQuestion = 'This is a tossup question with ~an unclosed tilde.\nANSWER: _foo_'
-        tossups, bonuses, tossup_errors, bonus_errors = parse_packet_data(tossupWithUnbalancedSpecialCharsInQuestion.splitlines(), qset)
-        self.assertEqual(len(tossup_errors), 1)
-
-        tossupWithUnbalancedSpecialCharsInAnswer = 'This is a tossup question.\nANSWER: _unclosed answer'
-        tossups, bonuses, tossup_errors, bonus_errors = parse_packet_data(tossupWithUnbalancedSpecialCharsInAnswer.splitlines(), qset)
-        self.assertEqual(len(tossup_errors), 1)
-
-        bonusWithUnbalancedSpecialCharsInLeadin = 'This is a bonus with (unbalanced leadin characters.  For 10 points each:\n[10] <i>Prompt 1</i>.\nANSWER: "_Answer 1_"\n[10] "Prompt 2."\nANSWER: <i>_Answer 2_</i>\n[10] <i>Prompt 3.</i>\nANSWER: <i>_Answer 3_</i>'
-        tossups, bonuses, tossup_errors, bonus_errors = parse_packet_data(bonusWithUnbalancedSpecialCharsInLeadin.splitlines(), qset)
-        self.assertEqual(len(bonus_errors), 1)
-
-        bonusWithUnbalancedSpecialCharsInPrompts = 'This is a bonus with unbalanced prompt characters.  For 10 points each:\n[10] ~Prompt 1.\nANSWER: "_Answer 1_"\n[10] "Prompt 2."\nANSWER: <i>_Answer 2_</i>\n[10] <i>Prompt 3.</i>\nANSWER: <i>_Answer 3_</i>'
-        tossups, bonuses, tossup_errors, bonus_errors = parse_packet_data(bonusWithUnbalancedSpecialCharsInPrompts.splitlines(), qset)
-        self.assertEqual(len(bonus_errors), 1)
-
-        bonusWithUnbalancedSpecialCharsInAnswers = 'This is a bonus with unbalanced answer characters.  For 10 points each:\n[10] Prompt 1.\nANSWER: "_Answer 1_"\n[10] "Prompt 2."\nANSWER: _Answer 2\n[10] <i>Prompt 3.</i>\nANSWER: <i>_Answer 3_</i>'
-        tossups, bonuses, tossup_errors, bonus_errors = parse_packet_data(bonusWithUnbalancedSpecialCharsInAnswers.splitlines(), qset)
-        self.assertEqual(len(bonus_errors), 1)
-
-    def test_get_character_count(self):
-        emptyTossup = ""
-        self.assertEqual(get_character_count(emptyTossup, True), 0)
-
-        noSpecialCharacters = "123456789"
-        self.assertEqual(get_character_count(noSpecialCharacters, True), 9)
-
-        onlySpecialCharacters = "~~()"
-        self.assertEqual(get_character_count(onlySpecialCharacters, True), 0)
-
-        mixed = "(~1234~) ~67~"
-        self.assertEqual(get_character_count(mixed, True), 3)
-        self.assertEqual(get_character_count(mixed, False), len(mixed))
-
-    def test_get_formatted_question_html(self):
-        emptyLine = ""
-        self.assertEqual(get_formatted_question_html(emptyLine, False, True, False, False), "")
-        self.assertEqual(get_formatted_question_html(emptyLine, True, True, False, False), "")
-
-        noSpecialChars = "No special chars"
-        self.assertEqual(get_formatted_question_html(noSpecialChars, False, True, False, False), noSpecialChars)
-        self.assertEqual(get_formatted_question_html(noSpecialChars, True, True, False, False), noSpecialChars)
-
-        specialChars = "_Underlines_, ~italics~ and (parens).  And again _Underlines_, ~italics~ and (parens). \\(escaped\\)"
-        self.assertEqual(get_formatted_question_html(specialChars, False, True, False, False), "_Underlines_, <i>italics</i> and <strong>(parens)</strong>.  And again _Underlines_, <i>italics</i> and <strong>(parens)</strong>. (escaped)")
-        self.assertEqual(get_formatted_question_html(specialChars, True, True, False, False), "<u><b>Underlines</b></u>, <i>italics</i> and <strong>(parens)</strong>.  And again <u><b>Underlines</b></u>, <i>italics</i> and <strong>(parens)</strong>. (escaped)")
-
-        newLinesNoParens = "(No parens).&lt;br&gt;New line."
-        self.assertEqual(get_formatted_question_html(newLinesNoParens, False, False, False, False), "(No parens).&lt;br&gt;New line.")
-        self.assertEqual(get_formatted_question_html(newLinesNoParens, False, False, True, False), "(No parens).<br />New line.")
-        
-        powerMark = "A ~question~ with a (guide) and a (*) power mark (in it) like so."
-        self.assertEqual(get_formatted_question_html(powerMark, False, True, True, True), "<strong>A <i>question</i> with a <strong>(guide)</strong><strong> and a (*)</strong> power mark <strong>(in it)</strong> like so.")
-        self.assertEqual(get_formatted_question_html(powerMark, False, True, True, False), "A <i>question</i> with a <strong>(guide)</strong> and a <strong>(*)</strong> power mark <strong>(in it)</strong> like so.")
-
-        prompt = "A question with a __prompt__ and a regular _answer_ and another __prompt__"
-        self.assertEqual(get_formatted_question_html(prompt, True, True, True, False), "A question with a <u>prompt</u> and a regular <u><b>answer</b></u> and another <u>prompt</u>")
-        self.assertEqual(get_formatted_question_html(prompt, False, True, True, False), "A question with a __prompt__ and a regular _answer_ and another __prompt__")
-
-        subAndSuper = "A question with a \sSubscript\s and a \SSuperscript\S like this"
-        self.assertEqual(get_formatted_question_html(subAndSuper, True, True, True, False), "A question with a <sub>Subscript</sub> and a <sup>Superscript</sup> like this")
-
-    def test_does_answerline_have_underlines(self):
-        self.assertFalse(does_answerline_have_underlines("ANSWER: Foo"))
-        self.assertTrue(does_answerline_have_underlines("ANSWER: _Foo_"))
-        self.assertTrue(does_answerline_have_underlines(""))
-
-    def test_tossup_to_html(self):
-        dist = Distribution.objects.create(name="test_tossup_to_html distribution", acf_tossup_per_period_count=20, acf_bonus_per_period_count=20, vhsl_bonus_per_period_count=20)
-        dist.save()
->>>>>>> dc5f333216071c2f7e80ec9a556251516d74364a
-
-        if (self.writer is not None):
-            self.writer = Writer.objects.get(id=self.writer.id)
-
-        if (self.qset is not None):
-            self.qset = QuestionSet.objects.get(id=self.qset.id)
-
-        if (self.pwe is not None):
-            self.pwe = PeriodWideEntry.objects.get(id=self.pwe.id)
-
-        if (self.packet is not None):
-            self.packet = Packet.objects.get(id=self.packet.id)
-
-        if (self.period is not None):
-            self.period = Period.objects.get(id=self.period.id)
-
-        if (self.ce is not None):
-            self.ce = CategoryEntry.objects.get(id=self.ce.id)
-
-        if (self.cefd is not None):
-            self.cefd = CategoryEntryForDistribution.objects.get(id=self.cefd.id)
-
-        if (self.pwce is not None):
-            self.pwce = PeriodWideCategoryEntry.objects.get(id=self.pwce.id)
-
-        if (self.opce is not None):
-            self.opce = OnePeriodCategoryEntry.objects.get(id=self.opce.id)
-
-        if (self.acf_tossup is not None):
-            self.acf_tossup = Tossup.objects.get(id=self.acf_tossup.id)
-
-        if (self.acf_bonus is not None):
-            self.acf_bonus = Bonus.objects.get(id=self.acf_bonus.id)
-
-        if (self.vhsl_bonus is not None):
-            self.vhsl_bonus = Bonus.objects.get(id=self.vhsl_bonus.id)
-                
     def create_user(self):
         self.user, created = User.objects.get_or_create(username="testuser")
         if (created):
@@ -389,188 +75,7 @@ class PacketParserTests(TestCase):
             self.user.save()
             
         self.writer = Writer.objects.get(user=self.user.id)
-        
-    # Creates an entire question set worth of questions using the standard ACF distribution
-    def create_full_acf_question_set(self, packetize=True, create_questions=True):
-        self.acf_reg_dist = Distribution.objects.create(name="ACF Regular Period Distribution", acf_tossup_per_period_count=20, acf_bonus_per_period_count=20, vhsl_bonus_per_period_count=0)
-        self.acf_reg_dist.save()
 
-        self.acf_tb_dist = Distribution.objects.create(name="ACF Tiebreaker Distribution", acf_tossup_per_period_count=3, acf_bonus_per_period_count=0, vhsl_bonus_per_period_count=0)
-        self.acf_tb_dist.save()
-        
-        self.create_user()
-        self.acf_qset = QuestionSet.objects.create(
-            name="ACF Set",
-            date=timezone.now(),
-            host="test host",
-            owner=self.writer,
-            num_packets=5,
-            distribution=self.acf_reg_dist) # TODO: Delete this line eventually, it's obsolete
-        self.acf_qset.save()
-        
-        self.acf_reg_pwe = PeriodWideEntry.objects.create(period_type=ACF_REGULAR_PERIOD, question_set=self.acf_qset, distribution=self.acf_reg_dist)
-        self.acf_reg_pwe.acf_tossup_cur=0
-        self.acf_reg_pwe.acf_bonus_cur=0 
-        self.acf_reg_pwe.vhsl_bonus_cur=0
-        self.acf_reg_pwe.acf_tossup_total=20
-        self.acf_reg_pwe.acf_bonus_total=20
-        self.acf_reg_pwe.vhsl_bonus_total=0
-        self.acf_reg_pwe.save()
-
-        self.acf_tb_pwe = PeriodWideEntry.objects.create(period_type=ACF_TIEBREAKER_PERIOD, question_set=self.acf_qset, distribution=self.acf_tb_dist)
-        self.acf_tb_pwe.acf_tossup_cur=0
-        self.acf_tb_pwe.acf_bonus_cur=0 
-        self.acf_tb_pwe.vhsl_bonus_cur=0
-        self.acf_tb_pwe.acf_tossup_total=3
-        self.acf_tb_pwe.acf_bonus_total=0
-        self.acf_tb_pwe.vhsl_bonus_total=0
-        self.acf_tb_pwe.save()
-        
-        # Create all categories in the regular period distribution
-        category_tuple = []
-        
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_reg_dist, category_type=CATEGORY, cefd_fraction=4, cefd_min=8, cefd_max=8, category_name="Literature"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_reg_dist, category_type=SUB_CATEGORY, cefd_fraction=1.5, cefd_min=3, cefd_max=3, category_name="Literature", sub_category_name="American"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_reg_dist, category_type=SUB_CATEGORY, cefd_fraction=1, cefd_min=2, cefd_max=2, category_name="Literature", sub_category_name="British"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_reg_dist, category_type=SUB_CATEGORY, cefd_fraction=1, cefd_min=2, cefd_max=2, category_name="Literature", sub_category_name="European"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_reg_dist, category_type=SUB_CATEGORY, cefd_fraction=0.5, cefd_min=1, cefd_max=1, category_name="Literature", sub_category_name="World"))
-                              
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_reg_dist, category_type=CATEGORY, cefd_fraction=4, cefd_min=8, cefd_max=8, category_name="History"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_reg_dist, category_type=SUB_CATEGORY, cefd_fraction=1, cefd_min=2, cefd_max=2, category_name="History", sub_category_name="American"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_reg_dist, category_type=SUB_CATEGORY, cefd_fraction=2, cefd_min=4, cefd_max=4, category_name="History", sub_category_name="European"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_reg_dist, category_type=SUB_CATEGORY, cefd_fraction=1, cefd_min=2, cefd_max=2, category_name="History", sub_category_name="World"))
-                              
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_reg_dist, category_type=CATEGORY, cefd_fraction=4, cefd_min=8, cefd_max=8, category_name="Science"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_reg_dist, category_type=SUB_CATEGORY, cefd_fraction=1.5, cefd_min=3, cefd_max=3, category_name="Science", sub_category_name="Biology"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_reg_dist, category_type=SUB_CATEGORY, cefd_fraction=0.5, cefd_min=1, cefd_max=1, category_name="Science", sub_category_name="Chemistry"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_reg_dist, category_type=SUB_CATEGORY, cefd_fraction=1, cefd_min=2, cefd_max=2, category_name="Science", sub_category_name="Physics"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_reg_dist, category_type=SUB_CATEGORY, cefd_fraction=1, cefd_min=1, cefd_max=1, category_name="Science", sub_category_name="Other Science"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_reg_dist, category_type=SUB_SUB_CATEGORY, cefd_fraction=0.2, cefd_min=0, cefd_max=1, category_name="Science", sub_category_name="Other Science", sub_sub_category_name="Computer Science"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_reg_dist, category_type=SUB_SUB_CATEGORY, cefd_fraction=0.4, cefd_min=0, cefd_max=1, category_name="Science", sub_category_name="Other Science", sub_sub_category_name="Math"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_reg_dist, category_type=SUB_SUB_CATEGORY, cefd_fraction=0.2, cefd_min=0, cefd_max=1, category_name="Science", sub_category_name="Other Science", sub_sub_category_name="Earth Science"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_reg_dist, category_type=SUB_SUB_CATEGORY, cefd_fraction=0.2, cefd_min=0, cefd_max=1, category_name="Science", sub_category_name="Other Science", sub_sub_category_name="Astronomy"))
-
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_reg_dist, category_type=CATEGORY, cefd_fraction=3, cefd_min=6, cefd_max=6, category_name="RMP"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_reg_dist, category_type=SUB_CATEGORY, cefd_fraction=0.7, cefd_min=1, cefd_max=2, category_name="RMP", sub_category_name="Religion"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_reg_dist, category_type=SUB_CATEGORY, cefd_fraction=1.3, cefd_min=2, cefd_max=3, category_name="RMP", sub_category_name="Mythology"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_reg_dist, category_type=SUB_CATEGORY, cefd_fraction=1, cefd_min=2, cefd_max=2, category_name="RMP", sub_category_name="Philosophy"))
-
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_reg_dist, category_type=CATEGORY, cefd_fraction=3, cefd_min=6, cefd_max=6, category_name="Arts"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_reg_dist, category_type=SUB_CATEGORY, cefd_fraction=1, cefd_min=2, cefd_max=2, category_name="Arts", sub_category_name="Painting"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_reg_dist, category_type=SUB_CATEGORY, cefd_fraction=1, cefd_min=2, cefd_max=2, category_name="Arts", sub_category_name="Music"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_reg_dist, category_type=SUB_CATEGORY, cefd_fraction=0.5, cefd_min=1, cefd_max=1, category_name="Arts", sub_category_name="Other Visual Arts"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_reg_dist, category_type=SUB_CATEGORY, cefd_fraction=0.5, cefd_min=1, cefd_max=1, category_name="Arts", sub_category_name="Other Audio Arts"))
-
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_reg_dist, category_type=CATEGORY, cefd_fraction=1, cefd_min=2, cefd_max=2, category_name="Social Science"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_reg_dist, category_type=SUB_CATEGORY, cefd_fraction=0.25, cefd_min=0, cefd_max=1, category_name="Social Science", sub_category_name="Economics"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_reg_dist, category_type=SUB_CATEGORY, cefd_fraction=0.5, cefd_min=0, cefd_max=1, category_name="Social Science", sub_category_name="Anthropology"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_reg_dist, category_type=SUB_CATEGORY, cefd_fraction=0.05, cefd_min=0, cefd_max=1, category_name="Social Science", sub_category_name="Social Criticism"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_reg_dist, category_type=SUB_CATEGORY, cefd_fraction=0.2, cefd_min=0, cefd_max=1, category_name="Social Science", sub_category_name="Psychology"))
-
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_reg_dist, category_type=CATEGORY, cefd_fraction=0.5, cefd_min=1, cefd_max=1, category_name="Geography"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_reg_dist, category_type=SUB_CATEGORY, cefd_fraction=0.25, cefd_min=0, cefd_max=1, category_name="Geography", sub_category_name="US"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_reg_dist, category_type=SUB_CATEGORY, cefd_fraction=0.5, cefd_min=0, cefd_max=1, category_name="Geography", sub_category_name="World"))
-
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_reg_dist, category_type=CATEGORY, cefd_fraction=0.5, cefd_min=1, cefd_max=1, category_name="Trash"))
-
-        for ct in category_tuple:
-            self.acf_ces.append(ct[0])
-            self.acf_reg_cefds.append(ct[1])
-        
-        # Create categories for tiebreaker
-                
-        category_tuple = []
-        
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_tb_dist, category_type=CATEGORY, cefd_fraction=1, cefd_min=1, cefd_max=1, category_name="Literature"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_tb_dist, category_type=SUB_CATEGORY, cefd_fraction=0.3, cefd_min=0, cefd_max=1, category_name="Literature", sub_category_name="American"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_tb_dist, category_type=SUB_CATEGORY, cefd_fraction=0.25, cefd_min=0, cefd_max=1, category_name="Literature", sub_category_name="British"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_tb_dist, category_type=SUB_CATEGORY, cefd_fraction=0.25, cefd_min=0, cefd_max=1, category_name="Literature", sub_category_name="European"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_tb_dist, category_type=SUB_CATEGORY, cefd_fraction=0.2, cefd_min=0, cefd_max=1, category_name="Literature", sub_category_name="World"))
-                              
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_tb_dist, category_type=CATEGORY, cefd_fraction=1, cefd_min=1, cefd_max=1, category_name="History"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_tb_dist, category_type=SUB_CATEGORY, cefd_fraction=0.25, cefd_min=0, cefd_max=1, category_name="History", sub_category_name="American"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_tb_dist, category_type=SUB_CATEGORY, cefd_fraction=0.5, cefd_min=0, cefd_max=1, category_name="History", sub_category_name="European"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_tb_dist, category_type=SUB_CATEGORY, cefd_fraction=0.25, cefd_min=0, cefd_max=1, category_name="History", sub_category_name="World"))
-                              
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_tb_dist, category_type=CATEGORY, cefd_fraction=1, cefd_min=1, cefd_max=1, category_name="Science"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_tb_dist, category_type=SUB_CATEGORY, cefd_fraction=0.35, cefd_min=0, cefd_max=1, category_name="Science", sub_category_name="Biology"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_tb_dist, category_type=SUB_CATEGORY, cefd_fraction=0.15, cefd_min=0, cefd_max=1, category_name="Science", sub_category_name="Chemistry"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_tb_dist, category_type=SUB_CATEGORY, cefd_fraction=0.25, cefd_min=0, cefd_max=1, category_name="Science", sub_category_name="Physics"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_tb_dist, category_type=SUB_CATEGORY, cefd_fraction=0.25, cefd_min=0, cefd_max=1, category_name="Science", sub_category_name="Other Science"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_tb_dist, category_type=SUB_SUB_CATEGORY, cefd_fraction=0.05, cefd_min=0, cefd_max=1, category_name="Science", sub_category_name="Other Science", sub_sub_category_name="Computer Science"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_tb_dist, category_type=SUB_SUB_CATEGORY, cefd_fraction=0.08, cefd_min=0, cefd_max=1, category_name="Science", sub_category_name="Other Science", sub_sub_category_name="Math"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_tb_dist, category_type=SUB_SUB_CATEGORY, cefd_fraction=0.05, cefd_min=0, cefd_max=1, category_name="Science", sub_category_name="Other Science", sub_sub_category_name="Earth Science"))
-        category_tuple.append(self.create_just_ce_and_cefd(dist=self.acf_tb_dist, category_type=SUB_SUB_CATEGORY, cefd_fraction=0.07, cefd_min=0, cefd_max=1, category_name="Science", sub_category_name="Other Science", sub_sub_category_name="Astronomy"))
-
-        for ct in category_tuple:
-            self.acf_tb_cefds.append(ct[1])
-                        
-        for i in range(1, self.acf_qset.num_packets):
-            packet = Packet.objects.create(packet_name="ACF Packet " + str(i), question_set=self.acf_qset, created_by=self.writer)
-            packet.save()
-            self.acf_packets.append(packet)
-                
-            period = Period.objects.create(
-                name="ACF Regular Period " + str(i), 
-                packet=packet, 
-                period_wide_entry=self.acf_reg_pwe, 
-                acf_tossup_cur=0, 
-                acf_bonus_cur=0, 
-                vhsl_bonus_cur=0)
-            period.save()
-            self.acf_reg_periods.append(period)
-            
-            period = Period.objects.create(
-                name="ACF Tiebreaker Period " + str(i), 
-                packet=packet, 
-                period_wide_entry=self.acf_tb_pwe, 
-                acf_tossup_cur=0, 
-                acf_bonus_cur=0, 
-                vhsl_bonus_cur=0)
-            period.save()
-            self.acf_tb_periods.append(period)
-        
-        # With all of the categories, packets and periods created, set the packet requirements
-        if (packetize):
-            set_packet_requirements(self.acf_qset)
-            if (create_questions):
-                # So we've set the requirements
-                # Go through period wide category entries and just make that many questions
-                for pwe in self.acf_reg_pwe:
-                    for cefd in self.acf_reg_cefds:
-                        pwce = PeriodWideCategoryEntry.objects.get(period_wide_entry=pwe, category_entry_for_distribution=cefd)
-                        
-                        for i in range(1, pwce.acf_tossup_total_across_periods):
-                            tossup = Tossup.objects.create(
-                                author=self.writer, 
-                                question_set=self.acf_qset, 
-                                packet=None, 
-                                question_number=999, 
-                                tossup_text=str(cefd) + " Tossup #" + str(i), 
-                                tossup_answer="_" + str(cefd) + " Tossup #" + str(i) + "_",
-                                created_date=timezone.now(),
-                                last_changed_date=timezone.now(),
-                                question_type=get_question_type_from_string(ACF_STYLE_TOSSUP))
-                            tossup.save_question(QUESTION_CREATE, self.writer)
-                        
-                        for i in range(1, pwce.acf_bonus_total_across_periods):
-                            acf_bonus = Bonus.objects.create(
-                                author=self.writer,
-                                question_set=self.acf_qset,
-                                packet=None,
-                                question_number=999,
-                                leadin=str(cefd) + " Bonus #" + str(i),
-                                part1_text=str(cefd) + " Bonus #" + str(i),
-                                part1_answer="_" + str(cefd) + " Tossup #" + str(i) + "_",
-                                part2_text=str(cefd) + " Bonus #" + str(i),
-                                part2_answer="_" + str(cefd) + " Tossup #" + str(i) + "_",
-                                part3_text=str(cefd) + " Bonus #" + str(i),
-                                part3_answer="_" + str(cefd) + " Tossup #" + str(i) + "_",
-                                created_date=timezone.now(),
-                                last_changed_date=timezone.now(),
-                                question_type=get_question_type_from_string(ACF_STYLE_BONUS))
-                            acf_bonus.save_question(QUESTION_CREATE, self.writer)                            
-              
     def create_generic_distribution(self, per_period_totals=20):
         self.dist = Distribution.objects.create(name="Test Distribution", acf_tossup_per_period_count=per_period_totals, acf_bonus_per_period_count=per_period_totals, vhsl_bonus_per_period_count=per_period_totals)
         self.dist.save()
@@ -636,72 +141,7 @@ class PacketParserTests(TestCase):
             acf_bonus_cur_in_period=opce_cur_value,
             vhsl_bonus_cur_in_period=opce_cur_value)
         self.opce.save()
-        
-    def create_generic_questions(self):
-        self.create_generic_period()
-        
-        self.acf_tossup = self.get_acf_tossup()        
-        self.acf_bonus = self.get_acf_bonus()        
-        self.vhsl_bonus = self.get_vhsl_bonus()
-    
-    def get_acf_tossup(self, tossup_text="foo"):
-        tossup = Tossup.objects.create(
-            author=self.writer, 
-            question_set=self.qset, 
-            packet=self.packet, 
-            question_number=1, 
-            tossup_text=tossup_text, 
-            tossup_answer="_bar_",
-            created_date=timezone.now(),
-            last_changed_date=timezone.now(),
-            question_type=get_question_type_from_string(ACF_STYLE_TOSSUP),
-            category_entry=self.ce,
-            period=self.period)
-        tossup.save_question(QUESTION_CREATE, self.writer)
-        return tossup
-        
-    def get_acf_bonus(self, leadin="Leadin"):
-        acf_bonus = Bonus.objects.create(
-            author=self.writer,
-            question_set=self.qset,
-            packet=self.packet,
-            question_number=2,
-            leadin=leadin,
-            part1_text="Part 1 text.",
-            part1_answer="_part 1 answer_",
-            part2_text="Part 2 text.",
-            part2_answer="_part 2 answer_",
-            part3_text="Part 3 text.",
-            part3_answer="_part 3 answer_",
-            created_date=timezone.now(),
-            last_changed_date=timezone.now(),
-            question_type=get_question_type_from_string(ACF_STYLE_BONUS),
-            category_entry=self.ce,
-            period=self.period)
-        acf_bonus.save_question(QUESTION_CREATE, self.writer)
-        return acf_bonus
-    
-    def get_vhsl_bonus(self, part1_text="Foobar"):
-        vhsl_bonus = Bonus.objects.create(
-            author=self.writer, 
-            question_set=self.qset, 
-            packet=self.packet, 
-            question_number=3, 
-            leadin="",
-            part1_text=part1_text, 
-            part1_answer="_vhsl_", 
-            part2_text="",
-            part2_answer="",
-            part3_text="",
-            part3_answer="",
-            created_date=timezone.now(),
-            last_changed_date=timezone.now(),
-            question_type=get_question_type_from_string(VHSL_BONUS),
-            category_entry=self.ce,
-            period=self.period)
-        vhsl_bonus.save_question(QUESTION_CREATE, self.writer)
-        return vhsl_bonus
-        
+
     # Returns 3 tuple of tuples.  The first layer of tuples is just the list of 
     # each category entry, the second is a CategoryEntry, a CategoryEntryForDistribution, 
     # a PeriodWideCategoryEntry and a OnePeriodCategoryEntry that all relate back to the CategoryEntry
@@ -947,8 +387,8 @@ class PacketParserTests(TestCase):
 #        self.assertEqual(get_formatted_question_html(noSpecialChars, True, True, False), noSpecialChars)
 #
 #        specialChars = "_Underlines_, ~italics~ and (parens).  And again _Underlines_, ~italics~ and (parens)."
-#        self.assertEqual(get_formatted_question_html(specialChars, False, True, False), "_Underlines_, <i>italics</i> and <strong>(parens)</strong>.  And again _Underlines_, <i>italics</i> and <strong>(parens)</strong>.")
-#        self.assertEqual(get_formatted_question_html(specialChars, True, True, False), "<u><b>Underlines</b></u>, <i>italics</i> and <strong>(parens)</strong>.  And again <u><b>Underlines</b></u>, <i>italics</i> and <strong>(parens)</strong>.")
+#        self.assertEqual(get_formatted_question_html(specialChars, False, True, False), "_Underlines_, <i>italics</i> and <strong class="pronunciation-guide">(parens)</strong>.  And again _Underlines_, <i>italics</i> and <strong class="pronunciation-guide">(parens)</strong>.")
+#        self.assertEqual(get_formatted_question_html(specialChars, True, True, False), "<u><b>Underlines</b></u>, <i>italics</i> and <strong class="pronunciation-guide">(parens)</strong>.  And again <u><b>Underlines</b></u>, <i>italics</i> and <strong class="pronunciation-guide">(parens)</strong>.")
 #
 #        newLinesNoParens = "(No parens).&lt;br&gt;New line."
 #        self.assertEqual(get_formatted_question_html(newLinesNoParens, False, False, False), "(No parens).&lt;br&gt;New line.")
@@ -1158,8 +598,8 @@ class PacketParserTests(TestCase):
 #        part3_text = "Part 3."
 #        part3_answer = "_answer 3_"
 #        acf_bonus_no_category = Bonus(leadin=leadin, part1_text=part1_text, part1_answer=part1_answer, part2_text=part2_text, part2_answer=part2_answer, part3_text=part3_text, part3_answer=part3_answer)
-#        expectedOutput = "<p>Leadin with <i>italics</i> and <strong>(parens)</strong> and _underlines_.<br />"
-#        expectedOutput += "[10] Part 1 with <i>italics</i> and <strong>(parens)</strong> and _underlines_.<br />"
+#        expectedOutput = "<p>Leadin with <i>italics</i> and <strong class="pronunciation-guide">(parens)</strong> and _underlines_.<br />"
+#        expectedOutput += "[10] Part 1 with <i>italics</i> and <strong class="pronunciation-guide">(parens)</strong> and _underlines_.<br />"
 #        expectedOutput += "ANSWER: <u><b><i>Answer 1</i></b></u> [or foo <strong>(bar)</strong>]<br />"
 #        expectedOutput += "[10] Part 2.<br />"
 #        expectedOutput += "ANSWER: <u><b>answer 2</b></u><br />"
@@ -1177,14 +617,38 @@ class PacketParserTests(TestCase):
 #        self.assertEqual(acf_bonus_no_category.to_html(include_category=True), expectedOutputWithCategory)
 #
 #        vhsl_bonus_no_category = Bonus(part1_text=part1_text, part1_answer=part1_answer, question_type=vhslBonus)
-#        expectedVhslOutput = "<p>Part 1 with <i>italics</i> and <strong>(parens)</strong> and _underlines_.<br />"
+#        expectedVhslOutput = "<p>Part 1 with <i>italics</i> and <strong class="pronunciation-guide">(parens)</strong> and _underlines_.<br />"
 #        expectedVhslOutput += "ANSWER: <u><b><i>Answer 1</i></b></u> [or foo <strong>(bar)</strong>]</p>"
 #        self.assertEqual(vhsl_bonus_no_category.to_html(), expectedVhslOutput)
 #        vhsl_bonus_no_category.category = americanHistory
 #        self.assertEqual(vhsl_bonus_no_category.to_html(), expectedVhslOutput)
-#        expectedVhslOutput = "<p>Part 1 with <i>italics</i> and <strong>(parens)</strong> and _underlines_.<br />"
+#        expectedVhslOutput = "<p>Part 1 with <i>italics</i> and <strong class="pronunciation-guide">(parens)</strong> and _underlines_.<br />"
 #        expectedVhslOutput += "ANSWER: <u><b><i>Answer 1</i></b></u> [or foo <strong>(bar)</strong>]</p><p><strong>Category:</strong> History - American</p>"
 #        self.assertEqual(vhsl_bonus_no_category.to_html(include_category=True), expectedVhslOutput)
+
+    def test_character_count_ignores_moderator_instructions(self):
+        base = "This is a question about a thing that does stuff."
+        base_count = get_character_count(base, True)
+
+        # Leading directive sentences are excluded
+        for directive in ("Description acceptable. ",
+                          "A description is acceptable. ",
+                          "Note to moderator: read the answerline carefully. ",
+                          "Note to players: Description acceptable. ",
+                          "Two answers required. "):
+            self.assertEqual(get_character_count(directive + base, True), base_count, msg=directive)
+            self.assertEqual(get_character_count(directive + base, False), len(base), msg=directive)
+
+        # Trailing directives and inline markers are excluded
+        self.assertEqual(get_character_count(base + " You have ten seconds.", True), base_count)
+        self.assertEqual(get_character_count(base.replace("about", "[emphasize] about"), True), base_count)
+
+        # Mid-sentence content mentions still count
+        content = "Critics found the description acceptable in most reviews."
+        self.assertEqual(get_character_count(content, True), len(content))
+
+        # Markup-wrapped directives are also excluded
+        self.assertEqual(get_character_count("~Description acceptable.~ " + base, True), base_count)
 
     def test_category_entry_get_requirements_methods(self):
         self.create_generic_period(cefd_fraction=2.2)
@@ -1315,256 +779,6 @@ class PacketParserTests(TestCase):
     #############################################################
     # Packetizer Tests
     #############################################################
-    
-    def test_clear_questions(self):
-<<<<<<< HEAD
-        self.create_generic_questions()
-                
-        clear_questions(self.qset)
-        self.reload_standard_objects()
-                        
-        self.assertEqual(self.acf_tossup.packet, None)
-        self.assertEqual(self.acf_tossup.period, None)
-        self.assertEqual(self.acf_tossup.question_number, None)
-
-        self.assertEqual(self.acf_bonus.packet, None)
-        self.assertEqual(self.acf_bonus.period, None)
-        self.assertEqual(self.acf_bonus.question_number, None)
-
-        self.assertEqual(self.vhsl_bonus.packet, None)
-        self.assertEqual(self.vhsl_bonus.period, None)
-        self.assertEqual(self.vhsl_bonus.question_number, None)
-        
-    def test_get_unassigned_acf_tossups(self):
-        self.create_generic_period()
-        assigned_tossup = self.get_acf_tossup(tossup_text="Assigned")
-        unassigned_tossup = self.get_acf_tossup(tossup_text="Unassigned")
-        unassigned_tossup.packet = None
-        unassigned_tossup.period = None
-        unassigned_tossup.save()
-        
-        acf_tossups = get_unassigned_acf_tossups(self.qset)
-=======
-        dist, qset, pwe, packet, period = self.create_period()
-        tossup = self._create_tossup(self.writer, qset, packet, None, 1, "Foo", "_bar_", get_question_type_from_string(ACF_STYLE_TOSSUP))
-        bonus = self._create_bonus(self.writer, qset, packet, None, 2, get_question_type_from_string(VHSL_BONUS), None, "Foobar", "_vhsl_")
-        tossup_pk = tossup.pk
-        bonus_pk = bonus.pk
-
-        clear_questions(qset)
-        # Django caches values for existing references, so we have to fetch the object again
-        tossup = Tossup.objects.filter(pk=tossup_pk)[0]
-        self.assertEqual(tossup.packet, None)
-        self.assertEqual(tossup.period, None)
-        self.assertEqual(tossup.question_number, None)
-        bonus = Bonus.objects.filter(pk=bonus_pk)[0]
-        self.assertEqual(bonus.packet, None)
-        self.assertEqual(bonus.period, None)
-        self.assertEqual(bonus.question_number, None)
-        
-    def test_get_unassigned_acf_tossups(self):
-        dist, qset, pwe, packet, period = self.create_period()
-        assigned_tossup = self._create_tossup(self.writer, qset, packet, period, 1, "Assigned Tossup", "_bar_", None)
-        unassigned_tossup = self._create_tossup(self.writer, qset, None, None, None, "Unassigned Tossup", "_bar_", None)
-        acf_tossups = get_unassigned_acf_tossups(qset)
->>>>>>> dc5f333216071c2f7e80ec9a556251516d74364a
-        self.assertEqual(len(acf_tossups), 1)
-        self.assertEqual(acf_tossups[0].tossup_text, "Unassigned")
-                
-    def test_get_unassigned_acf_bonuses(self):
-<<<<<<< HEAD
-        self.create_generic_period()
-        assigned_bonus = self.get_acf_bonus(leadin="Assigned")
-        unassigned_bonus = self.get_acf_bonus(leadin="Unassigned")
-        unassigned_bonus.packet = None
-        unassigned_bonus.period = None
-        unassigned_bonus.save()
-        
-        acf_bonuses = get_unassigned_acf_bonuses(self.qset)
-        self.assertEqual(len(acf_bonuses), 1)
-        self.assertEqual(acf_bonuses[0].leadin, "Unassigned")
-        
-    def test_get_unassigned_vhsl_bonuses(self):
-        self.create_generic_period()
-        assigned_bonus = self.get_vhsl_bonus(part1_text="Assigned")
-        unassigned_bonus = self.get_vhsl_bonus(part1_text="Unassigned")
-        unassigned_bonus.packet = None
-        unassigned_bonus.period = None
-        unassigned_bonus.save()
-        
-        vhsl_bonuses = get_unassigned_vhsl_bonuses(self.qset)
-        self.assertEqual(len(vhsl_bonuses), 1)
-        self.assertEqual(vhsl_bonuses[0].part1_text, "Unassigned")
-
-    def test_get_assigned_acf_tossups_in_period(self):
-        self.create_generic_period()
-        assigned_tossup = self.get_acf_tossup(tossup_text="Assigned")
-        acf_bonus = self.get_acf_bonus()
-        vhsl_bonus = self.get_vhsl_bonus()
-        unassigned_tossup = self.get_acf_tossup(tossup_text="Unassigned")
-        unassigned_tossup.packet = None
-        unassigned_tossup.period = None
-        unassigned_tossup.save()
-
-        print("\nassigned_tossup period: " + str(assigned_tossup.period))
-        self.reload_standard_objects()
-                        
-        assigned_tossups = get_assigned_acf_tossups_in_period(self.qset, self.period)
-=======
-        dist, qset, pwe, packet, period = self.create_period()
-        self._setup_assigned_bonus_tests_bonuses(qset, packet, period)
-
-        acf_bonuses = get_unassigned_acf_bonuses(qset)
-        self.assertEqual(len(acf_bonuses), 1)
-        self.assertEqual(acf_bonuses[0].leadin, "Unassigned ACF bonus.")
-        
-    def test_get_unassigned_vhsl_bonuses(self):
-        dist, qset, pwe, packet, period = self.create_period()
-        self._setup_assigned_bonus_tests_bonuses(qset, packet, period)
-
-        vhsl_bonuses = get_unassigned_vhsl_bonuses(qset)
-        self.assertEqual(len(vhsl_bonuses), 1)
-        self.assertEqual(vhsl_bonuses[0].leadin, "Unassigned VHSL bonus.")
-
-    def test_get_assigned_acf_tossups_in_period(self):
-        dist, qset, pwe, packet, period = self.create_period()
-        tossup1 = self._create_tossup(self.writer, qset, packet, period, 1, "Assigned Tossup", "_bar_", None)
-        tossup2 = self._create_tossup(self.writer, qset, packet, None, 1, "Unassigned Tossup", "_foo_", None)
-        
-        assigned_tossups = get_assigned_acf_tossups_in_period(qset, period)
->>>>>>> dc5f333216071c2f7e80ec9a556251516d74364a
-        self.assertEqual(len(assigned_tossups), 1)
-        self.assertEqual(assigned_tossups[0].tossup_text, "Assigned")
-
-    def test_get_assigned_acf_bonuses_in_period(self):
-<<<<<<< HEAD
-        self.create_generic_period()
-        assigned_bonus = self.get_acf_bonus(leadin="Assigned")
-        unassigned_bonus = self.get_acf_bonus(leadin="Unassigned")
-        unassigned_bonus.packet = None
-        unassigned_bonus.period = None
-        unassigned_bonus.save()
-        acf_tossup = self.get_acf_tossup()
-        vhsl_bonus = self.get_vhsl_bonus()
-
-        self.reload_standard_objects()        
-
-        assigned_bonuses = get_assigned_acf_bonuses_in_period(self.qset, self.period)
-=======
-        dist, qset, pwe, packet, period = self.create_period()
-        self._setup_assigned_bonus_tests_bonuses(qset, packet, period)
-
-        assigned_bonuses = get_assigned_acf_bonuses_in_period(qset, period)
->>>>>>> dc5f333216071c2f7e80ec9a556251516d74364a
-        self.assertEqual(len(assigned_bonuses), 1)
-        self.assertEqual(assigned_bonuses[0].leadin, "Assigned")
-
-    def test_get_assigned_vhsl_bonuses_in_period(self):
-<<<<<<< HEAD
-        self.create_generic_period()
-        assigned_bonus = self.get_vhsl_bonus(part1_text="Assigned")
-        unassigned_bonus = self.get_vhsl_bonus(part1_text="Unassigned")
-        unassigned_bonus.packet = None
-        unassigned_bonus.period = None
-        unassigned_bonus.save()        
-        acf_bonus = self.get_acf_bonus()
-        acf_tossup = self.get_acf_tossup()
-
-        self.reload_standard_objects()
-
-        print("self.period: " + str(self.period))
-        print("assigned_bonus.period: " + str(assigned_bonus.period))
-
-        assigned_bonuses = get_assigned_vhsl_bonuses_in_period(self.qset, self.period)
-        self.assertEqual(len(assigned_bonuses), 1)
-        self.assertEqual(assigned_bonuses[0].part1_text, "Assigned")
-
-    def test_reset_category_counts(self):
-        self.create_generic_period()
-                
-        reset_category_counts(self.qset, False)
-        
-        self.reload_standard_objects()
-        
-        self.pwe = PeriodWideEntry.objects.get(id=self.pwe.id)
-        
-        self.assertEqual(self.pwe.acf_tossup_cur, 0)
-        self.assertEqual(self.pwe.acf_tossup_total, 10)
-        self.assertEqual(self.period.acf_tossup_cur, 0)
-        self.assertEqual(self.pwce.acf_tossup_cur_across_periods, 0)
-        self.assertEqual(self.pwce.acf_tossup_total_across_periods, 10)
-        self.assertEqual(self.opce.acf_tossup_cur_in_period, 0)
-        
-        reset_category_counts(self.qset, True)
-
-        self.reload_standard_objects()        
-        
-        self.assertEqual(self.pwe.acf_tossup_cur, 0)
-        self.assertEqual(self.pwe.acf_tossup_total, 10)
-        self.assertEqual(self.period.acf_tossup_cur, 0)
-        self.assertEqual(self.pwce.acf_tossup_cur_across_periods, 0)
-        self.assertEqual(self.pwce.acf_tossup_total_across_periods, 0)
-        self.assertEqual(self.opce.acf_tossup_cur_in_period, 0)
-        self.assertEqual(self.opce.acf_tossup_total_in_period, 0)
-=======
-        dist, qset, pwe, packet, period = self.create_period()
-        self._setup_assigned_bonus_tests_bonuses(qset, packet, period)
-
-        assigned_bonuses = get_assigned_vhsl_bonuses_in_period(qset, period)
-        self.assertEqual(len(assigned_bonuses), 1)
-        self.assertEqual(assigned_bonuses[0].leadin, "My assigned VHSL bonus.")
-
-    def test_reset_category_counts(self):
-        dist, qset, pwe, packet, period = self.create_period()
-        pwe.acf_tossup_cur = 10
-        pwe.acf_tossup_total = 10
-        period.acf_tossup_cur = 10
-        pwe.save()
-        period.save()
-        pwe_pk = pwe.pk
-        period_pk = period.pk
-
-        ce = CategoryEntry(distribution=dist, category_name="History", category_type=CATEGORY)
-        ce.save()
-        
-        pwce = PeriodWideCategoryEntry(period_wide_entry=pwe, category_entry=ce)
-        pwce.acf_tossup_cur_across_periods = 10
-        pwce.acf_tossup_total_across_periods = 10
-        pwce.save()
-        pwce_pk = pwce.pk
-        
-        opce = OnePeriodCategoryEntry(period=period, period_wide_category_entry=pwce)
-        opce.acf_tossup_cur_in_period = 10
-        opce.acf_tossup_total_in_period = 10
-        opce.save()
-        opce_pk = opce.pk
-        
-        reset_category_counts(qset, False)
-        pwe = PeriodWideEntry.objects.filter(pk=pwe_pk)[0]
-        period = Period.objects.filter(pk=period_pk)[0]
-        pwce = PeriodWideCategoryEntry.objects.filter(pk=pwce_pk)[0]
-        opce = OnePeriodCategoryEntry.objects.filter(pk=opce_pk)[0]
-        self.assertEqual(pwe.acf_tossup_cur, 0)
-        self.assertEqual(pwe.acf_tossup_total, 10)
-        self.assertEqual(period.acf_tossup_cur, 0)
-        self.assertEqual(pwce.acf_tossup_cur_across_periods, 0)
-        self.assertEqual(pwce.acf_tossup_total_across_periods, 10)
-        self.assertEqual(opce.acf_tossup_cur_in_period, 0)
-        self.assertEqual(opce.acf_tossup_total_in_period, 10)
-        
-        reset_category_counts(qset, True)
-        pwe = PeriodWideEntry.objects.filter(pk=pwe_pk)[0]
-        period = Period.objects.filter(pk=period_pk)[0]
-        pwce = PeriodWideCategoryEntry.objects.filter(pk=pwce_pk)[0]
-        opce = OnePeriodCategoryEntry.objects.filter(pk=opce_pk)[0]
-        self.assertEqual(pwe.acf_tossup_cur, 0)
-        self.assertEqual(pwe.acf_tossup_total, 0)
-        self.assertEqual(period.acf_tossup_cur, 0)
-        self.assertEqual(pwce.acf_tossup_cur_across_periods, 0)
-        self.assertEqual(pwce.acf_tossup_total_across_periods, 0)
-        self.assertEqual(opce.acf_tossup_cur_in_period, 0)
-        self.assertEqual(opce.acf_tossup_total_in_period, 0)
->>>>>>> dc5f333216071c2f7e80ec9a556251516d74364a
 
     def test_get_parents_from_category_entry(self):
         # Just category entry
@@ -1605,11 +819,7 @@ class PacketParserTests(TestCase):
         
         subsubcat1, created = CategoryEntry.objects.get_or_create(category_name="AHistory", sub_category_name="European", sub_sub_category_name="British", category_type=SUB_SUB_CATEGORY)
         subsubcat1.save()
-<<<<<<< HEAD
         c, sc, ssc = get_parents_from_category_entry(subsubcat1)                
-=======
-        c, sc, ssc = get_parents_from_category_entry(subsubcat1)
->>>>>>> dc5f333216071c2f7e80ec9a556251516d74364a
         self.assertEqual(c, ce)
         self.assertEqual(sc, subcat1)
         self.assertEqual(ssc, subsubcat1)
@@ -1618,47 +828,10 @@ class PacketParserTests(TestCase):
         
         subsubcat2, created = CategoryEntry.objects.get_or_create(category_name="AGeography", sub_category_name="World", sub_sub_category_name="French", category_type=SUB_SUB_CATEGORY)
         subsubcat2.save()
-<<<<<<< HEAD
         c, sc, ssc = get_parents_from_category_entry(subsubcat2)                        
-=======
-        c, sc, ssc = get_parents_from_category_entry(subsubcat2)
->>>>>>> dc5f333216071c2f7e80ec9a556251516d74364a
         self.assertEqual(c, None)
         self.assertEqual(sc, None)
         self.assertEqual(ssc, subsubcat2)
-        
-    def test_get_children_from_category_entry(self):
-        # Just category entry        
-        ce, created = CategoryEntry.objects.get_or_create(category_name="AHistory", category_type=CATEGORY)
-        ce.save()
-        
-        children = get_children_from_category_entry(ce)
-        self.assertEqual(len(children), 1)
-        
-        # One with multiple sub cats
-        subcat1, created = CategoryEntry.objects.get_or_create(category_name="AHistory", sub_category_name="European", category_type=SUB_CATEGORY)
-        subcat1.save()
-        subcat2, created = CategoryEntry.objects.get_or_create(category_name="AHistory", sub_category_name="American", category_type=SUB_CATEGORY)
-        subcat2.save()
-        subcat3, created = CategoryEntry.objects.get_or_create(category_name="ALiterature", sub_category_name="European", category_type=SUB_CATEGORY)
-        subcat3.save()
-        
-        children = get_children_from_category_entry(ce)
-        self.assertEqual(len(children), 3)
-                
-        # One with multiple sub sub cats
-        subsubcat1, created = CategoryEntry.objects.get_or_create(category_name="AHistory", sub_category_name="European", sub_sub_category_name="British", category_type=SUB_SUB_CATEGORY)
-        subsubcat1.save()
-        subsubcat2, created = CategoryEntry.objects.get_or_create(category_name="AHistory", sub_category_name="European", sub_sub_category_name="French", category_type=SUB_SUB_CATEGORY)
-        subsubcat2.save()
-        subsubcat3, created = CategoryEntry.objects.get_or_create(category_name="AHistory", sub_category_name="American", sub_sub_category_name="Political", category_type=SUB_SUB_CATEGORY)
-        subsubcat3.save()
-        subsubcat4, created = CategoryEntry.objects.get_or_create(category_name="ALiterature", sub_category_name="European", sub_sub_category_name="British", category_type=SUB_SUB_CATEGORY)
-        subsubcat4.save()
-        
-        # Should return the 1 category, 2 subcats, and 3 subsubcats
-        children = get_children_from_category_entry(ce)
-        self.assertEqual(len(children), 6)
 
     def test_get_period_entries_from_category_entry(self):
         # Create a category entry and a period
@@ -1670,62 +843,6 @@ class PacketParserTests(TestCase):
         pwce, opce = get_period_entries_from_category_entry(self.ce, self.period)
         self.assertEqual(pwce, self.pwce)
         self.assertEqual(opce, self.opce)
-        
-    def test_get_period_entries_from_category_entry_with_parents(self):
-        self.create_generic_period()
-        
-        # This is a tuple of tuples
-        # The second tuple is (ce, cefd, pwce, opce)
-        cats, sub_cats, sub_sub_cats = self.create_generic_ce_hierarchy()
-        
-        # Try from the cat level
-        c_pwce, c_opce, sc_pwce, sc_opce, ssc_pwce, ssc_opce = get_period_entries_from_category_entry_with_parents(cats[0][0], self.period)
-        self.assertEqual(c_pwce, cats[0][2])
-        self.assertEqual(c_opce, cats[0][3])
-        self.assertEqual(sc_pwce, None)
-        self.assertEqual(sc_opce, None)
-        self.assertEqual(ssc_pwce, None)
-        self.assertEqual(ssc_opce, None)
-                
-        # Try from the subcat level
-        c_pwce, c_opce, sc_pwce, sc_opce, ssc_pwce, ssc_opce = get_period_entries_from_category_entry_with_parents(sub_cats[0][0], self.period)
-        self.assertEqual(c_pwce, cats[0][2])
-        self.assertEqual(c_opce, cats[0][3])
-        self.assertEqual(sc_pwce, sub_cats[0][2])
-        self.assertEqual(sc_opce, sub_cats[0][3])
-        self.assertEqual(ssc_pwce, None)
-        self.assertEqual(ssc_opce, None)
-                
-        # Try from the subsubcat level with the "Literature - American - Novels" option
-        c_pwce, c_opce, sc_pwce, sc_opce, ssc_pwce, ssc_opce = get_period_entries_from_category_entry_with_parents(sub_sub_cats[0][0], self.period)
-        self.assertEqual(c_pwce, cats[0][2])
-        self.assertEqual(c_opce, cats[0][3])
-        self.assertEqual(sc_pwce, sub_cats[0][2])
-        self.assertEqual(sc_opce, sub_cats[0][3])
-        self.assertEqual(ssc_pwce, sub_sub_cats[0][2])
-        self.assertEqual(ssc_opce, sub_sub_cats[0][3])
-                
-        # Try from the subsubcat level with the "Literature - European - Poetry" option
-        c_pwce, c_opce, sc_pwce, sc_opce, ssc_pwce, ssc_opce = get_period_entries_from_category_entry_with_parents(sub_sub_cats[2][0], self.period)
-        self.assertEqual(c_pwce, cats[0][2])
-        self.assertEqual(c_opce, cats[0][3])
-        
-        # The sub category and sub sub category should have changed from the above tests
-        self.assertEqual(sc_pwce, sub_cats[1][2])
-        self.assertEqual(sc_opce, sub_cats[1][3])
-        self.assertEqual(ssc_pwce, sub_sub_cats[2][2])
-        self.assertEqual(ssc_opce, sub_sub_cats[2][3])
-
-    def test_get_question_count_for_category_in_period(self):
-        self.create_generic_questions() # This creates 3 questions
-        self.acf_tossup.category_entry = self.ce
-        self.acf_tossup.save()
-        self.acf_bonus.category_entry = self.ce
-        self.acf_bonus.save()
-        self.vhsl_bonus.category_entry = self.ce
-        self.vhsl_bonus.save()        
-        
-        self.assertEqual(get_question_count_for_category_in_period(qset=self.qset, period=self.period, category=self.ce), 3)
 
     def test_get_parents_from_period_wide_category_entry(self):
         self.create_generic_period()
@@ -1756,26 +873,7 @@ class PacketParserTests(TestCase):
         self.assertEqual(cat, cats[0][2])
         self.assertEqual(subcat, sub_cats[1][2])
         self.assertEqual(subsubcat, sub_sub_cats[2][2])
-        
-    def test_get_children_from_period_wide_category_entry(self):
-        self.create_generic_period()
-        
-        # (ce, cefd, pwce, opce)
-        cats, sub_cats, sub_sub_cats = self.create_generic_ce_hierarchy()
-        
-        # Try for category
-        children = get_children_from_period_wide_category_entry(cats[0][2])
-        self.assertEqual(len(children), 6) # cat, subcat1-2, subsubcat1-3
-        
-        # Try for subcat
-        children = get_children_from_period_wide_category_entry(sub_cats[0][2])
-        self.assertEqual(len(children), 2) # subcat1, subsubcat1
-        
-        # Try for subsubcat
-        children = get_children_from_period_wide_category_entry(sub_sub_cats[0][2])
-        self.assertEqual(len(children), 1) # subsubcat1
-        self.assertEqual(children[0], sub_sub_cats[0][2])
-                
+
     def test_get_parents_from_category_entry_for_distribution(self):
         self.create_generic_period()
         
@@ -1805,65 +903,7 @@ class PacketParserTests(TestCase):
         self.assertEqual(cat, cats[0][1])
         self.assertEqual(subcat, sub_cats[1][1])
         self.assertEqual(subsubcat, sub_sub_cats[2][1])        
-                
-    def test_get_children_from_category_entry_for_distribution(self):
-        self.create_generic_period()
-        
-        # (ce, cefd, pwce, opce)
-        cats, sub_cats, sub_sub_cats = self.create_generic_ce_hierarchy()
-        
-        # Try for category
-        children = get_children_from_category_entry_for_distribution(cats[0][1])
-        self.assertEqual(len(children), 6) # cat, subcat1-2, subsubcat1-3        
-        
-        # Try for subcat
-        children = get_children_from_category_entry_for_distribution(sub_cats[0][1])
-        self.assertEqual(len(children), 2) # subcat1, subsubcat1
-                
-        # Try for subsubcat
-        children = get_children_from_category_entry_for_distribution(sub_sub_cats[0][1])
-        self.assertEqual(len(children), 1) # subsubcat1
-        self.assertEqual(children[0], sub_sub_cats[0][1])
-        
-    def test_randomize_acf_tossups_in_period(self):
-        # TODO: Need to test get assigned acf tossups in period first
-        
-        pass
-        
-    def test_randomize_bonuses_in_period(self):        
-        self.create_full_acf_question_set()
-        bonuses = self.acf_qset.bonus_set # This is actually more than we'd put into one packet but that's okay
-        randomize_bonuses_in_period(bonuses)
-        bonus_index_set = set()
-        
-        # Make sure two bonuses don't share the same number
-        for bonus in bonuses:
-            self.assertFalse(bonus.question_number in bonus_index_set)
-            bonus_index_set.add(bonus.question_number)
-            
-        # There shouldn't be any numbers missing
-        for i in range(1, len(bonuses)):
-            self.assertTrue(i in bonus_index_set)
-                
-    def test_fill_unassigned_questions(self):
-        self.create_generic_period()
-        
-        # Shouldn't have any questions to begin with
-        
-        fill_unassigned_questions(self.qset, self.writer)
 
-        # Now there should be some questions...
-        tossups = Tossup.objects.filter(question_set=self.qset)
-        self.assertEqual(len(tossups), 5) # TODO: This number probably isn't right
-        
-
-        #    def create_generic_period(self, pwe_cur_value=5, pwe_total_value=10, cefd_fraction=5, cefd_min=15, cefd_max=15, period_cur_value=10, pwce_cur_value=10, pwce_total_value=10, opce_cur_value=10):
-        
-        
-        # Make sure that the correct number of questions get created
-        
-        # After doing this, is_question_set_complete should return true
-                
     def test_get_fraction_array(self):
         self.create_generic_period()
                 
@@ -1872,69 +912,6 @@ class PacketParserTests(TestCase):
 
         fractions = get_fraction_array(self.pwce, 1.101)
         self.assertEqual(len(fractions), 101)        
-                
-    def test_is_acf_tossup_valid_in_period(self):
-        
-        # TODO: It would probably be helpful to return a message as to why it's not valid
-        # We can probably start with something that is valid
-        
-        # Without adding any existing tossups, it should be valid
-        self.create_generic_period(pwe_cur_value=0, period_cur_value=0, pwce_cur_value=0, opce_cur_value=0)
-        tossup = self.get_acf_tossup()        
-        self.assertTrue(is_acf_tossup_valid_in_period(self.qset, self.period, tossup))
-        
-        # Now set the opce cur value too high for tossups
-        self.opce.acf_tossup_cur_in_period = 100
-        self.assertFalse(is_acf_tossup_valid_in_period(self.qset, self.period, tossup))
-        self.opce.acf_tossup_cur_in_period = 0
-        
-        # Now set the opce cur value too high for another question type
-        self.opce.acf_bonus_cur_in_period = 100
-        self.assertFalse(is_acf_tossup_valid_in_period(self.qset, self.period, tossup))
-        self.opce.acf_bonus_cur_in_period = 0
-        
-        # TODO: Set the pwe values too high?
-        
-        # Try again for a tossup at the sub category level
-        # First with a valid category
-        # Then with an invalid category
-        
-        # Try again for a tossup at the subsubcategory level
-        # First with valid parents
-        # Then invalid subcat
-        # Then invalid cat
-        
-        cats, sub_cats, sub_sub_cats = self.create_generic_ce_hierarchy()
-        # ce_tuple = (ce, cefd, pwce, opce)
-
-        c_ce = cats[0][0]
-        c_cefd = cats[0][1]
-        c_pwce = cats[0][2]
-        c_opce = cats[0][3]
-        
-        sc_ce = sub_cats[0][0]
-        sc_cefd = sub_cats[0][1]
-        sc_pwce = sub_cats[0][2]
-        sc_opce = sub_cats[0][3]
-                
-        tossup2 = self.get_acf_tossup()
-        tossup2.category_entry = sub_cats[0]
-        tossup2.save()
-        
-        c_cefd.min_total_questions_in_period = 0
-        c_cefd.max_total_questions_in_period = 10
-        c_pwce.reset_current_values()
-        c_opce.reset_current_values()
-        
-        
-        self.assertEqual(tossup2.period, self.period)
-        self.assertTrue(is_acf_tossup_valid_in_period(self.qset, self.period, tossup2))
-        
-        # Now set the opce cur value too high for tossups
-        
-        
-        
-        #    def create_generic_period(self, pwe_cur_value=5, pwe_total_value=10, cefd_fraction=5, cefd_min=15, cefd_max=15, period_cur_value=10, pwce_cur_value=10, pwce_total_value=10, opce_cur_value=10):
 
 #        if (c_pwce is not None and c_pwce.acf_tossup_cur_across_periods >= c_pwce.acf_tossup_total_across_periods):
 #            return False
@@ -1966,106 +943,204 @@ class PacketParserTests(TestCase):
         
         pass
 
-    def test_get_questions_written_across_periods_for_category(self):        
-        self.create_generic_period(pwe_cur_value=0, period_cur_value=0, pwce_cur_value=0, opce_cur_value=0)
-        
-        # ce_tuple = (ce, cefd, pwce, opce)
-        cats, sub_cats, sub_sub_cats = self.create_generic_ce_hierarchy()
-        
-        # Try with no questions
-        req = get_questions_written_across_periods_for_category(self.qset, cats[0][2])
-        self.assertEqual(req.acf_tossups_written, 0)
-        self.assertEqual(req.acf_bonuses_written, 0)
-        self.assertEqual(req.vhsl_bonuses_written, 0)
-        self.assertEqual(req.category_entry, cats[0][0])
-        
-        
-        # Try with one tossup in the category    
-        tossup = self.get_acf_tossup()
-        tossup.category_entry = cats[0][0]
-        tossup.save()
 
-<<<<<<< HEAD
-        acf_bonus = self.get_acf_bonus()
-        acf_bonus.category_entry = cats[0][0]
-        acf_bonus.save()
+class AutoPacketizeTests(TestCase):
+    """Tests for packetizer.auto_packetize."""
 
-        vhsl_bonus = self.get_vhsl_bonus()
-        vhsl_bonus.category_entry = cats[0][0]
-        vhsl_bonus.save()
-        
-        req = get_questions_written_across_periods_for_category(self.qset, cats[0][2])
-        self.assertEqual(req.acf_tossups_written, 1)
-        self.assertEqual(req.acf_bonuses_written, 1)
-        self.assertEqual(req.vhsl_bonuses_written, 1)
-        self.assertEqual(req.category_entry, tossup.category_entry)
-        
-        # Two tossups in the category
-        tossup2 = self.get_acf_tossup()
-        tossup2.category_entry = sub_cats[0][0]
-        tossup2.save()
+    def setUp(self):
+        self.user = User.objects.create_user(username="packetizeuser", password="top_secret", email="qems2test@gmail.com")
+        self.writer = Writer.objects.get(user=self.user.id)
 
-        acf_bonus2 = self.get_acf_bonus()
-        acf_bonus2.category_entry = sub_cats[0][0]
-        acf_bonus2.save()
+        self.dist = Distribution.objects.create(name="Packetize Test Distribution")
+        self.qset = QuestionSet.objects.create(
+            name="Packetize Test Set", date=timezone.now(), host="host", address="",
+            owner=self.writer, num_packets=4, distribution=self.dist,
+            tossups_per_packet=6, bonuses_per_packet=6)
 
-        vhsl_bonus2 = self.get_vhsl_bonus()
-        vhsl_bonus2.category_entry = sub_cats[0][0]
-        vhsl_bonus2.save()
-        
-        req = get_questions_written_across_periods_for_category(self.qset, cats[0][2])
-        self.assertEqual(req.acf_tossups_written, 2)
-        self.assertEqual(req.acf_bonuses_written, 2)
-        self.assertEqual(req.vhsl_bonuses_written, 2)
-        self.assertEqual(req.category_entry, tossup.category_entry)
-        
-        # A tossup not in the category
-        tossup3 = self.get_acf_tossup()
-        req = get_questions_written_across_periods_for_category(self.qset, cats[0][2])
-        self.assertEqual(req.acf_tossups_written, 2)
-        self.assertEqual(req.acf_bonuses_written, 2)
-        self.assertEqual(req.vhsl_bonuses_written, 2)
+        self.entries = {}
+        for category, subcategory in [
+                ('History', 'European'), ('History', 'American'),
+                ('Literature', 'American'), ('Literature', 'European'),
+                ('Science', 'Biology'),
+                ('Fine Arts', 'Visual'), ('Fine Arts', 'Music')]:
+            entry = DistributionEntry.objects.create(
+                distribution=self.dist, category=category, subcategory=subcategory)
+            self.entries[(category, subcategory)] = entry
 
-    def test_get_per_category_requirements_for_set(self):
-        # We get back a category name to DistributionRequirement mapping
-        # With DR being defined in packetizer
-        
-        self.create_generic_period(pwe_cur_value=0, period_cur_value=0, pwce_cur_value=0, opce_cur_value=0)
-        
-        # ce_tuple = (ce, cefd, pwce, opce)
-        cats, sub_cats, sub_sub_cats = self.create_generic_ce_hierarchy()
-        
-        
-        
-        
-        # create one category
-        
-        pass
-                
-                
-    # TODO: Write this
-    def create_full_vhsl_question_set(self):
-        pass
-=======
-    def _setup_assigned_bonus_tests_bonuses(self, qset, packet, period):
-        part1_text = u"Part 1 with ~italics~ and (parens) and _underlines_."
-        part1_answer = u"_~Answer 1~_ [or foo (bar)]"
-        part2_text = u"Part 2."
-        part2_answer = u"_answer 2_"
-        part3_text = u"Part 3."
-        part3_answer = u"_answer 3_"
-        acf_question_type = get_question_type_from_string(ACF_STYLE_BONUS)
-        vhsl_question_type = get_question_type_from_string(VHSL_BONUS)
-        self._create_bonus(self.writer, qset, packet, period, 1, acf_question_type, "My ACF assigned bonus.", part1_text, part1_answer, part2_text, part2_answer, part3_text, part3_answer)
-        self._create_bonus(self.writer, qset, None, None, None, acf_question_type, "Unassigned ACF bonus.", part1_text, part1_answer, part2_text, part2_answer, part3_text, part3_answer)
-        self._create_bonus(self.writer, qset, packet, period, 1, vhsl_question_type, "My assigned VHSL bonus.", part1_text, part1_answer, part2_text, part2_answer, part3_text, part3_answer)
-        self._create_bonus(self.writer, qset, None, None, None, vhsl_question_type, "Unassigned VHSL bonus.", part1_text, part1_answer, part2_text, part2_answer, part3_text, part3_answer)
+    def _add_tossup(self, entry, text):
+        return Tossup.objects.create(
+            author=self.writer, question_set=self.qset, tossup_text=text,
+            tossup_answer='_answer_', category=entry,
+            created_date=datetime.now(), last_changed_date=datetime.now())
 
-    def _create_tossup(self, writer, qset, packet, period, number, text, answer, question_type):
-        return Tossup.objects.create(author=writer, question_set=qset, packet=packet, question_number=number, tossup_text=text, \
-            period=period, tossup_answer=answer, question_type=question_type, created_date=datetime.now(), last_changed_date=datetime.now())
+    def _add_bonus(self, entry, text):
+        return Bonus.objects.create(
+            author=self.writer, question_set=self.qset, leadin=text,
+            part1_text='p1', part1_answer='_a1_', part2_text='p2', part2_answer='_a2_',
+            part3_text='p3', part3_answer='_a3_', category=entry,
+            created_date=datetime.now(), last_changed_date=datetime.now())
 
-    def _create_bonus(self, writer, qset, packet, period, number, question_type, leadin, part1_text, part1_answer, part2_text=None, part2_answer=None, part3_text=None, part3_answer=None):
-        return Bonus.objects.create(author=writer, question_set=qset, packet=packet, question_number=number, period=period, leadin=leadin, \
-            part1_text=part1_text, part1_answer=part1_answer, question_type=question_type, created_date=datetime.now(), last_changed_date=datetime.now())
->>>>>>> dc5f333216071c2f7e80ec9a556251516d74364a
+    def _create_questions(self):
+        # Regular load for 4 packets of 6/6:
+        # History 2/2 per packet, Literature 1.5/1.5, Science 1/1, Fine Arts 1.5/1.5
+        for i in range(4):
+            self._add_tossup(self.entries[('History', 'European')], 'HE tu {0}'.format(i))
+            self._add_tossup(self.entries[('History', 'American')], 'HA tu {0}'.format(i))
+            self._add_bonus(self.entries[('History', 'European')], 'HE bs {0}'.format(i))
+            self._add_bonus(self.entries[('History', 'American')], 'HA bs {0}'.format(i))
+            self._add_tossup(self.entries[('Science', 'Biology')], 'SB tu {0}'.format(i))
+            self._add_bonus(self.entries[('Science', 'Biology')], 'SB bs {0}'.format(i))
+        for i in range(3):
+            self._add_tossup(self.entries[('Literature', 'American')], 'LA tu {0}'.format(i))
+            self._add_tossup(self.entries[('Literature', 'European')], 'LE tu {0}'.format(i))
+            self._add_bonus(self.entries[('Literature', 'American')], 'LA bs {0}'.format(i))
+            self._add_bonus(self.entries[('Literature', 'European')], 'LE bs {0}'.format(i))
+            self._add_tossup(self.entries[('Fine Arts', 'Visual')], 'FV tu {0}'.format(i))
+            self._add_tossup(self.entries[('Fine Arts', 'Music')], 'FM tu {0}'.format(i))
+            self._add_bonus(self.entries[('Fine Arts', 'Visual')], 'FV bs {0}'.format(i))
+            self._add_bonus(self.entries[('Fine Arts', 'Music')], 'FM bs {0}'.format(i))
+        # Two extra history tossups that exceed every cap -> tiebreakers
+        self._add_tossup(self.entries[('History', 'European')], 'HE extra 1')
+        self._add_tossup(self.entries[('History', 'American')], 'HA extra 2')
+
+    def _quotas(self):
+        PacketizationEntry.objects.create(
+            question_set=self.qset, path='History', depth=0,
+            min_tossups=2, max_tossups=2, min_bonuses=2, max_bonuses=2)
+        PacketizationEntry.objects.create(
+            question_set=self.qset, path='Literature', depth=0,
+            min_tossups=Decimal('1.5'), max_tossups=Decimal('1.5'),
+            min_bonuses=Decimal('1.5'), max_bonuses=Decimal('1.5'))
+        PacketizationEntry.objects.create(
+            question_set=self.qset, path='Science', depth=0,
+            min_tossups=1, max_tossups=1, min_bonuses=1, max_bonuses=1)
+        PacketizationEntry.objects.create(
+            question_set=self.qset, path='Fine Arts', depth=0,
+            min_tossups=Decimal('1.5'), max_tossups=Decimal('1.5'),
+            min_bonuses=Decimal('1.5'), max_bonuses=Decimal('1.5'))
+        return build_quota_dict(self.qset)
+
+    def _packetize(self, seed=42):
+        report = auto_packetize(self.qset, 4, 6, 6, self._quotas(), created_by=self.writer, seed=seed)
+        packets = list(Packet.objects.filter(question_set=self.qset).order_by('packet_name'))
+        return report, packets
+
+    def test_auto_packetize_basic_structure(self):
+        self._create_questions()
+        report, packets = self._packetize()
+
+        self.assertEqual(len(packets), 4)
+        for packet in packets:
+            regular_tossups = Tossup.objects.filter(packet=packet, question_number__lte=6)
+            regular_bonuses = Bonus.objects.filter(packet=packet, question_number__lte=6)
+            self.assertEqual(regular_tossups.count(), 6)
+            self.assertEqual(regular_bonuses.count(), 6)
+            # Sequential numbering from 1
+            tu_numbers = sorted(t.question_number for t in Tossup.objects.filter(packet=packet))
+            self.assertEqual(tu_numbers[:6], [1, 2, 3, 4, 5, 6])
+
+        # Nothing left unassigned
+        self.assertEqual(Tossup.objects.filter(question_set=self.qset, packet=None).count(), 0)
+        self.assertEqual(Bonus.objects.filter(question_set=self.qset, packet=None).count(), 0)
+
+    def test_auto_packetize_category_quotas(self):
+        self._create_questions()
+        report, packets = self._packetize()
+
+        for packet in packets:
+            regular_tossups = Tossup.objects.filter(packet=packet, question_number__lte=6)
+            regular_bonuses = Bonus.objects.filter(packet=packet, question_number__lte=6)
+            tu_by_cat = {}
+            bs_by_cat = {}
+            for t in regular_tossups:
+                tu_by_cat[t.category.category] = tu_by_cat.get(t.category.category, 0) + 1
+            for b in regular_bonuses:
+                bs_by_cat[b.category.category] = bs_by_cat.get(b.category.category, 0) + 1
+
+            self.assertEqual(tu_by_cat.get('History', 0), 2, msg=str(tu_by_cat))
+            self.assertEqual(bs_by_cat.get('History', 0), 2)
+            self.assertEqual(tu_by_cat.get('Science', 0), 1)
+            self.assertEqual(bs_by_cat.get('Science', 0), 1)
+            # Fractional 1.5/1.5: combined total is exactly 3, each type 1 or 2
+            for cat in ('Literature', 'Fine Arts'):
+                tu = tu_by_cat.get(cat, 0)
+                bs = bs_by_cat.get(cat, 0)
+                self.assertEqual(tu + bs, 3, msg='{0}: {1}+{2}'.format(cat, tu, bs))
+                self.assertIn(tu, (1, 2))
+                self.assertIn(bs, (1, 2))
+
+    def test_auto_packetize_subcategory_spread(self):
+        self._create_questions()
+        report, packets = self._packetize()
+
+        # 4 History-European tossups over 4 packets with 2 History per packet
+        # should spread to exactly one per packet
+        for packet in packets:
+            he = Tossup.objects.filter(packet=packet, question_number__lte=6,
+                                       category=self.entries[('History', 'European')])
+            self.assertEqual(he.count(), 1)
+
+    def test_auto_packetize_tiebreakers(self):
+        self._create_questions()
+        report, packets = self._packetize()
+
+        tiebreakers = Tossup.objects.filter(question_set=self.qset, question_number__gt=6)
+        self.assertEqual(tiebreakers.count(), 2)
+        for tb in tiebreakers:
+            self.assertEqual(tb.question_number, 7)
+            # Tiebreakers are exempt from caps: this packet now has 3 History tossups
+            self.assertEqual(tb.category.category, 'History')
+        # Spread across different packets
+        self.assertEqual(len(set(tb.packet_id for tb in tiebreakers)), 2)
+
+    def test_auto_packetize_ordering(self):
+        self._create_questions()
+        report, packets = self._packetize()
+
+        for packet in packets:
+            tossups = list(Tossup.objects.filter(packet=packet, question_number__lte=6).order_by('question_number'))
+            cats = [t.category.category for t in tossups]
+            adjacencies = sum(1 for i in range(len(cats) - 1) if cats[i] == cats[i + 1])
+            self.assertEqual(adjacencies, 0, msg='Packet {0}: {1}'.format(packet.packet_name, cats))
+            # History has 2 per packet: quarter balance means they can't both
+            # be in the first three slots and can't both be in the last three
+            history_positions = [i for i, c in enumerate(cats) if c == 'History']
+            self.assertFalse(all(p < 3 for p in history_positions), msg=str(cats))
+            self.assertFalse(all(p >= 3 for p in history_positions), msg=str(cats))
+
+    def test_auto_packetize_overwrites_existing_assignments(self):
+        self._create_questions()
+        report, packets = self._packetize()
+
+        # Cram everything into the first packet with bogus numbers, then re-run
+        first = packets[0]
+        Tossup.objects.filter(question_set=self.qset).update(packet=first, question_number=999)
+        Bonus.objects.filter(question_set=self.qset).update(packet=first, question_number=999)
+
+        report, packets = self._packetize(seed=7)
+        for packet in packets:
+            self.assertEqual(Tossup.objects.filter(packet=packet, question_number__lte=6).count(), 6)
+        self.assertEqual(Tossup.objects.filter(question_number=999).count(), 0)
+
+    def test_auto_packetize_lower_level_max(self):
+        self._create_questions()
+        # Six more Literature-American tossups (9 total) try to cluster;
+        # a subcategory max of 1 per packet must hold for regular slots
+        for i in range(3):
+            self._add_tossup(self.entries[('Literature', 'American')], 'LA extra {0}'.format(i))
+        PacketizationEntry.objects.create(
+            question_set=self.qset, path='Literature - American', depth=1,
+            max_tossups=1)
+        report, packets = self._packetize()
+
+        for packet in packets:
+            la = Tossup.objects.filter(packet=packet, question_number__lte=6,
+                                       category=self.entries[('Literature', 'American')])
+            self.assertLessEqual(la.count(), 1)
+
+    def test_ensure_packets_continues_naming(self):
+        Packet.objects.create(question_set=self.qset, packet_name='Round 01', created_by=self.writer)
+        Packet.objects.create(question_set=self.qset, packet_name='Round 02', created_by=self.writer)
+        packets = _ensure_packets(self.qset, 4, self.writer)
+        self.assertEqual([p.packet_name for p in packets],
+                         ['Round 01', 'Round 02', 'Round 03', 'Round 04'])

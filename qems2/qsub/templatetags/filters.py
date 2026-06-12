@@ -89,6 +89,21 @@ def fpercent(x, y):
     except Exception as ex:
         return None
 
+@register.filter(name='packet_completion')
+def packet_completion(packet):
+    """Completion of a packet against the set's regular per-packet counts,
+    e.g. '100% (20/20 TU, 20/20 B)'."""
+    qset = packet.question_set
+    tu = packet.tossup_set.count()
+    bs = packet.bonus_set.count()
+    tu_needed = qset.tossups_per_packet
+    bs_needed = qset.bonuses_per_packet
+    total_needed = tu_needed + bs_needed
+    if total_needed == 0:
+        return ''
+    pct = 100.0 * (min(tu, tu_needed) + min(bs, bs_needed)) / total_needed
+    return '{0:0.0f}% ({1}/{2} TU, {3}/{4} B)'.format(pct, tu, tu_needed, bs, bs_needed)
+
 @register.filter(name='tossups_remaining')
 def tossups_remaining(entry):
     val = entry['tu_req'] - entry['tu_in_cat']

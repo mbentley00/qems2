@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% load static %}
+{% load filters %}
+
+{% block title %}Category Tags - QEMS2{% endblock %}
+
+{% block content %}
+
+<h3 class="page-header">Category Tags: {{ qset.name }}</h3>
+<ul class="breadcrumbs">
+    <li><a href="/edit_question_set/{{ qset.id }}/">{{ qset.name }}</a></li>
+    <li class="current"><a href="/category_tags/{{ qset.id }}/">Category Tags</a></li>
+</ul>
+
+{% if message %}
+    <div class="{{ message_class }}">{{ message }}</div>
+{% endif %}
+
+<div class="panel radius">
+    Tags are editor-defined requirements within a category &mdash; for instance &ldquo;Asian Literature&rdquo;
+    under Literature - World with 6 tossups and 6 bonuses needed. Writers fulfill a tag by checking it
+    on the question's edit page. Tags with a required count of 0 are informational labels.
+</div>
+
+{% if can_edit %}
+<form action="" method="post" class="panel radius">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="add">
+    <div class="row">
+        <div class="small-4 columns">
+            <label>Category
+                <select name="category_path">
+                    {% for path in path_choices %}
+                    <option value="{{ path }}">{{ path }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+        </div>
+        <div class="small-3 columns">
+            <label>Tag Name
+                <input type="text" name="name" placeholder="e.g. Asian Literature">
+            </label>
+        </div>
+        <div class="small-2 columns">
+            <label>Tossups Needed
+                <input type="number" name="num_tossups" min="0" value="0">
+            </label>
+        </div>
+        <div class="small-2 columns">
+            <label>Bonuses Needed
+                <input type="number" name="num_bonuses" min="0" value="0">
+            </label>
+        </div>
+        <div class="small-1 columns">
+            <label>&nbsp;</label>
+            <input type="submit" value="Add" class="button small primary">
+        </div>
+    </div>
+</form>
+{% endif %}
+
+{% if not groups %}
+<div class="panel callout"><p>No tags defined yet.</p></div>
+{% endif %}
+
+{% for group in groups %}
+<h4 class="tag-group-header">{{ group.path }}</h4>
+<table class="table-striped table-hover tag-table">
+    <thead>
+        <tr>
+            <th style="width: 16%;">Tag</th>
+            <th style="width: 7%;">Tossups</th>
+            <th style="width: 31%;">TU Answer Lines</th>
+            <th style="width: 7%;">Bonuses</th>
+            <th style="width: 31%;">Bonus Answer Lines</th>
+            {% if can_edit %}<th style="width: 8%;"></th>{% endif %}
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in group.rows %}
+        <tr>
+            <td><strong>{{ row.tag.name }}</strong></td>
+            <td class="{% if row.tu_complete %}tag-complete{% else %}tag-incomplete{% endif %}">
+                {{ row.tu_done }}{% if row.tag.num_tossups %}/{{ row.tag.num_tossups }}{% endif %}
+            </td>
+            <td>
+                {% for q in row.tossups %}
+                    <a href="/edit_tossup/{{ q.id }}/" title="{{ q.location }}">{{ q.answer }}</a>{% if not forloop.last %}<br>{% endif %}
+                {% endfor %}
+            </td>
+            <td class="{% if row.bs_complete %}tag-complete{% else %}tag-incomplete{% endif %}">
+                {{ row.bs_done }}{% if row.tag.num_bonuses %}/{{ row.tag.num_bonuses }}{% endif %}
+            </td>
+            <td>
+                {% for q in row.bonuses %}
+                    <a href="/edit_bonus/{{ q.id }}/" title="{{ q.location }}">{{ q.answer }}</a>{% if not forloop.last %}<br>{% endif %}
+                {% endfor %}
+            </td>
+            {% if can_edit %}
+            <td>
+                <form action="" method="post" style="margin: 0;"
+                      onsubmit="return confirm('Delete the tag \'{{ row.tag.name }}\'? Question assignments to it will be removed.');">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="delete">
+                    <input type="hidden" name="tag_id" value="{{ row.tag.id }}">
+                    <input type="submit" value="Delete" class="button tiny alert" style="margin: 0;">
+                </form>
+            </td>
+            {% endif %}
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endfor %}
+
+<style>
+.tag-group-header { border-bottom: 2px solid #333; padding-bottom: 4px; margin-top: 25px; }
+.tag-table td { vertical-align: top; font-size: 0.85em; }
+.tag-complete { background-color: #dff0d8; color: #3c763d; font-weight: bold; }
+.tag-incomplete { background-color: #fcf8e3; color: #8a6d3b; font-weight: bold; }
+</style>
+
+{% endblock %}

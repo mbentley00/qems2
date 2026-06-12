@@ -90,12 +90,12 @@ def get_role(user, qset):
     qset_editors = qset.editor.all()
     qset_writers = qset.writer.all()
 
-    if user in qset_editors and user != qset.owner:
+    if qset.is_owner(user):
+        role = 'owner'
+    elif user in qset_editors:
         role = 'editor'
     elif user in qset_writers:
         role = 'writer'
-    elif user == qset.owner:
-        role = 'owner'
 
     return role
 
@@ -252,50 +252,53 @@ def tossup_to_bonus(tossup, output_question_type):
             bonus.part3_text = ""
             bonus.part3_answer = ""
             bonus.save_question(QUESTION_CREATE, tossup.author)
-            move_comments_to_bonus(tossup, bonus)                        
+            move_comments_to_bonus(tossup, bonus)
             tossup.delete()
+            return bonus
     elif (output_question_type == VHSL_BONUS):
         if (tossup.get_tossup_type() == ACF_STYLE_TOSSUP):
             bonus = copy_to_bonus(tossup)
             bonus.part1_text = tossup.tossup_text
             bonus.part1_answer = tossup.tossup_answer
-            bonus.question_type = QuestionType.objects.get(question_type=VHSL_STYLE_BONUS)            
+            bonus.question_type = QuestionType.objects.get(question_type=VHSL_BONUS)
             bonus.leadin = ""
             bonus.part2_text = ""
             bonus.part2_answer = ""
             bonus.part3_text = ""
             bonus.part3_answer = ""
             bonus.save_question(QUESTION_CREATE, tossup.author)
-            move_comments_to_bonus(tossup, bonus)            
-            tossup.delete()                  
+            move_comments_to_bonus(tossup, bonus)
+            tossup.delete()
+            return bonus
+    return None
         
 def tossup_to_tossup(tossup, output_question_type):
     pass # No-op for now since there's just one type of tossup
 
 def bonus_to_bonus(bonus, output_question_type):
-    print("bonus to bonus")
     if (output_question_type == ACF_STYLE_BONUS):
         if (bonus.get_bonus_type() == VHSL_BONUS):
-            print("Convert to ACF")
             bonus.question_type = QuestionType.objects.get(question_type=ACF_STYLE_BONUS)
             bonus.leadin = ""
             bonus.part2_text = ""
             bonus.part2_answer = ""
             bonus.part3_text = ""
             bonus.part3_answer = ""
-            bonus.save_question(QUESTION_CREATE, tossup.author)
+            bonus.save_question(QUESTION_CREATE, bonus.author)
+            return bonus
     elif (output_question_type == VHSL_BONUS):
         if (bonus.get_bonus_type() == ACF_STYLE_BONUS):
-            print("Convert to VHSL")
             bonus.question_type = QuestionType.objects.get(question_type=VHSL_BONUS)
             bonus.part1_text = bonus.leadin + " " + bonus.part1_text + " " + bonus.part1_answer + " " + bonus.part2_text + " " + bonus.part2_answer + " " + bonus.part3_text + " " + bonus.part3_answer
             bonus.leadin = ""
             bonus.part2_text = ""
             bonus.part2_answer = ""
             bonus.part3_text = ""
-            bonus.part3_answer = ""            
-            bonus.save_question(QUESTION_CREATE, tossup.author)            
-        
+            bonus.part3_answer = ""
+            bonus.save_question(QUESTION_CREATE, bonus.author)
+            return bonus
+    return None
+
 def bonus_to_tossup(bonus, output_question_type):
     if (output_question_type == ACF_STYLE_TOSSUP):
         if (bonus.get_bonus_type() == VHSL_BONUS):
@@ -305,15 +308,18 @@ def bonus_to_tossup(bonus, output_question_type):
             tossup.tossup_answer = bonus.part1_answer
             tossup.save_question(QUESTION_CREATE, bonus.author)
             move_comments_to_tossup(bonus, tossup)
-            bonus.delete()            
+            bonus.delete()
+            return tossup
         elif (bonus.get_bonus_type() == ACF_STYLE_BONUS):
             tossup = copy_to_tossup(bonus)
             tossup.question_type = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
             tossup.tossup_text = bonus.leadin + " " + bonus.part1_text + " " + bonus.part1_answer + " " + bonus.part2_text + " " + bonus.part2_answer + " " + bonus.part3_text + " " + bonus.part3_answer
             tossup.tossup_answer = bonus.part1_answer
             tossup.save_question(QUESTION_CREATE, bonus.author)
-            move_comments_to_tossup(bonus, tossup)            
-            bonus.delete()                        
+            move_comments_to_tossup(bonus, tossup)
+            bonus.delete()
+            return tossup
+    return None                        
         
 def copy_to_tossup(bonus):
     tossup = Tossup()
@@ -331,11 +337,11 @@ def copy_to_tossup(bonus):
 
 def move_comments_to_tossup(bonus, tossup):
     # Change all of the comments to be associated with this new object
-    tossup_content_type_id = ContentType.objects.get(name="tossup")
-    bonus_content_type_id = ContentType.objects.get(name="bonus")
-    for comment in Comment.objects.filter(object_pk=bonus.id).filter(content_type_id=bonus_content_type_id):
+    tossup_content_type = ContentType.objects.get(app_label='qsub', model='tossup')
+    bonus_content_type = ContentType.objects.get(app_label='qsub', model='bonus')
+    for comment in Comment.objects.filter(object_pk=bonus.id).filter(content_type_id=bonus_content_type.id):
         comment.object_pk = tossup.id
-        comment.content_type_id = tossup_content_type_id
+        comment.content_type_id = tossup_content_type.id
         comment.save()
 
 def copy_to_bonus(tossup):
@@ -354,11 +360,11 @@ def copy_to_bonus(tossup):
 
 def move_comments_to_bonus(tossup, bonus):
     # Change all of the comments to be associated with this new object
-    tossup_content_type_id = ContentType.objects.get(name="tossup")
-    bonus_content_type_id = ContentType.objects.get(name="bonus")
-    for comment in Comment.objects.filter(object_pk=tossup.id).filter(content_type_id=tossup_content_type_id):
+    tossup_content_type = ContentType.objects.get(app_label='qsub', model='tossup')
+    bonus_content_type = ContentType.objects.get(app_label='qsub', model='bonus')
+    for comment in Comment.objects.filter(object_pk=tossup.id).filter(content_type_id=tossup_content_type.id):
         comment.object_pk = bonus.id
-        comment.content_type_id = bonus_content_type_id
+        comment.content_type_id = bonus_content_type.id
         comment.save()
 
 def get_question_type_from_string(question_type):
@@ -434,6 +440,84 @@ def get_comment_tab_list(tossup_dict, bonus_dict, comment_limit=60):
                         break
     
     return comment_tab_list
+
+def get_category_overview(qset):
+    entries = qset.setwidedistributionentry_set.all().order_by('dist_entry__category', 'dist_entry__subcategory')
+
+    # Build a tree of category stats
+    # tree[path_tuple] = {'tu_req': ..., 'tu_in_cat': ..., 'bs_req': ..., 'bs_in_cat': ..., 'category_id': ..., 'is_leaf': bool}
+    tree = {}
+
+    for entry in entries:
+        tu_required = entry.num_tossups
+        bs_required = entry.num_bonuses
+        tu_written = qset.tossup_set.filter(category=entry.dist_entry).count()
+        bs_written = qset.bonus_set.filter(category=entry.dist_entry).count()
+
+        # Build path from category + subcategory parts
+        parts = [entry.dist_entry.category]
+        if entry.dist_entry.subcategory:
+            for sub in entry.dist_entry.subcategory.split(' - '):
+                sub = sub.strip()
+                if sub:
+                    parts.append(sub)
+
+        leaf_key = tuple(parts)
+
+        # Mark the leaf
+        tree[leaf_key] = {
+            'tu_req': tu_required,
+            'tu_in_cat': tu_written,
+            'bs_req': bs_required,
+            'bs_in_cat': bs_written,
+            'category_id': entry.dist_entry.id,
+            'is_leaf': True,
+        }
+
+        # Accumulate into all ancestor prefixes
+        for i in range(1, len(parts)):
+            prefix = tuple(parts[:i])
+            if prefix not in tree:
+                tree[prefix] = {
+                    'tu_req': 0, 'tu_in_cat': 0,
+                    'bs_req': 0, 'bs_in_cat': 0,
+                    'category_id': None, 'is_leaf': False,
+                }
+            tree[prefix]['tu_req'] += tu_required
+            tree[prefix]['tu_in_cat'] += tu_written
+            tree[prefix]['bs_req'] += bs_required
+            tree[prefix]['bs_in_cat'] += bs_written
+
+    # Remove group nodes that only have one child (they'd just duplicate the leaf)
+    keys = sorted(tree.keys())
+    groups_to_remove = set()
+    for key in keys:
+        if not tree[key]['is_leaf']:
+            # Count direct children
+            children = [k for k in keys if len(k) == len(key) + 1 and k[:len(key)] == key]
+            if len(children) == 1:
+                groups_to_remove.add(key)
+    for key in groups_to_remove:
+        del tree[key]
+
+    # Build sorted rows
+    rows = []
+    for key in sorted(tree.keys()):
+        node = tree[key]
+        rows.append({
+            'name': ' - '.join(key),
+            'short_name': key[-1],
+            'depth': len(key) - 1,
+            'tu_req': node['tu_req'],
+            'tu_in_cat': node['tu_in_cat'],
+            'bs_req': node['bs_req'],
+            'bs_in_cat': node['bs_in_cat'],
+            'is_group': not node['is_leaf'],
+            'category_id': node['category_id'],
+            'padding': (len(key) - 1) * 30,
+        })
+
+    return rows
 
 def get_questions_remaining(qset):
     total_tu_req = 0

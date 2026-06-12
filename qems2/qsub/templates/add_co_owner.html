@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% block title %}Add Co-owner - QEMS2{% endblock %}
+
+{% block content %}
+{% load static %}
+
+<h3 class="page-header">Add Co-owners to {{ qset.name }}</h3>
+{% if message %}
+    <div class="alert-box info">{{ message }}</div>
+{% endif %}
+<p>Co-owners share full owner privileges over this set, including editing every question, managing packets, and assigning editors and writers.</p>
+<form action="" method="post">
+    {% csrf_token %}
+    <div class="row">
+        <div class="small-8 small-centered columns">
+            <table class="tablesorter table-striped table-hover">
+                <thead>
+                <tr>
+                    <th>Available Co-owners</th>
+                    <th>Add to Set?</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for co_owner in available_co_owners %}
+                <tr>
+                    <td>{{ co_owner|verbose_username }}</td>
+                    <td><input type="checkbox" value="{{ co_owner.id }}" name="co_owners_to_add"></td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <input type="submit" value="Add Co-owners" class="button primary right" />
+</form>
+
+{% endblock %}

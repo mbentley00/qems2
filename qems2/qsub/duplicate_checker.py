@@ -280,3 +280,246 @@ def find_internal_issues(qset):
 
     issues.sort(key=lambda i: (SEVERITY_ORDER[i['severity']], i['question_type']))
     return issues
+
+
+#########################################################################
+# Topic repeat checker
+#
+# Beyond exact duplicate answers (find_duplicates), flag questions that
+# repeat very specific topics:
+#   - containment: one answer is wholly contained in another
+#     ("Jericho" vs "Battle of Jericho")
+#   - shared rare term: two different answers share a distinctive token
+#     ("Jose Saramago" vs "Blindness [by Saramago]")
+#   - mention: an answer appears verbatim in another question's text
+#########################################################################
+
+def _plain_words(text):
+    """Lowercased, punctuation-free rendering of question text."""
+    if not text:
+        return ''
+    plain = strip_markup(text).lower().translate(PUNCTUATION_TABLE)
+    return ' '.join(plain.split())
+
+
+def _distinctive_tokens(norm, min_length=4):
+    return [t for t in norm.split()
+            if len(t) >= min_length and t not in STOPWORDS and not t.isdigit()]
+
+
+def _collect_repeat_entries(qset):
+    """Answer-line entries with location info for the repeat checker."""
+    from .models import Tossup, Bonus
+
+    entries = []
+
+    def location(question):
+        if question.packet is None:
+            return 'Unassigned'
+        return '{0} #{1}'.format(question.packet.packet_name, question.question_number or '?')
+
+    for tu in Tossup.objects.filter(question_set=qset).select_related('category', 'author', 'packet'):
+        norm = normalize_answer(tu.tossup_answer)
+        if not norm:
+            continue
+        entries.append({
+            'type': 'tossup', 'id': tu.id, 'part_label': None,
+            'answer_raw': tu.tossup_answer, 'answer_normalized': norm,
+            'tokens': frozenset(_distinctive_tokens(norm)),
+            'all_tokens': frozenset(w for w in norm.split() if w not in STOPWORDS),
+            'text': tu.tossup_text, 'category_str': _get_category_str(tu),
+            'author': str(tu.author), 'location': location(tu),
+        })
+
+    for bonus in Bonus.objects.filter(question_set=qset).select_related('category', 'author', 'packet'):
+        for part_label, answer, text in [('Part 1', bonus.part1_answer, bonus.part1_text),
+                                         ('Part 2', bonus.part2_answer, bonus.part2_text),
+                                         ('Part 3', bonus.part3_answer, bonus.part3_text)]:
+            norm = normalize_answer(answer) if answer else ''
+            if not norm:
+                continue
+            entries.append({
+                'type': 'bonus', 'id': bonus.id, 'part_label': part_label,
+                'answer_raw': answer, 'answer_normalized': norm,
+                'tokens': frozenset(_distinctive_tokens(norm)),
+                'all_tokens': frozenset(w for w in norm.split() if w not in STOPWORDS),
+                'text': text or '', 'category_str': _get_category_str(bonus),
+                'author': str(bonus.author), 'location': location(bonus),
+            })
+
+    for entry in entries:
+        preview = strip_markup(entry['text'])
+        entry['text_preview'] = preview[:120] + '...' if len(preview) > 120 else preview
+
+    return entries
+
+
+def _pair_severity(entry_a, entry_b, base, promoted):
+    same_cat = (entry_a['category_str'] != '' and
+                entry_a['category_str'] == entry_b['category_str'])
+    return promoted if same_cat else base
+
+
+def find_topic_repeats(qset):
+    """Find repeated specific topics across different answer lines.
+
+    Returns a list of group dicts: {'kind', 'label', 'severity', 'entries',
+    'note'}, sorted by severity.  Pairs whose normalized answers are equal
+    are excluded -- find_duplicates already reports those.
+    """
+    from .models import Tossup, Bonus
+
+    entries = _collect_repeat_entries(qset)
+
+    # Token index for candidate generation, plus per-token document frequency
+    # so generic words ("minor", "symphony") don't count as specific topics
+    token_index = {}
+    for i, entry in enumerate(entries):
+        for token in entry['tokens']:
+            token_index.setdefault(token, []).append(i)
+    token_df = {token: len(set(idxs)) for token, idxs in token_index.items()}
+
+    def same_question(a, b):
+        return a['type'] == b['type'] and a['id'] == b['id']
+
+    groups = []
+    covered_pairs = set()
+
+    # --- 1. Containment: one answer's tokens are a subset of another's ---
+    containment_groups = {}
+    checked = set()
+    for token, idxs in token_index.items():
+        if len(idxs) < 2 or len(idxs) > 50:
+            continue
+        for x in range(len(idxs)):
+            for y in range(x + 1, len(idxs)):
+                i, j = idxs[x], idxs[y]
+                key = (min(i, j), max(i, j))
+                if key in checked:
+                    continue
+                checked.add(key)
+                a, b = entries[i], entries[j]
+                if same_question(a, b) or a['answer_normalized'] == b['answer_normalized']:
+                    continue
+                inner, outer = (a, b) if len(a['all_tokens']) <= len(b['all_tokens']) else (b, a)
+                if not inner['all_tokens'] or not inner['all_tokens'] <= outer['all_tokens']:
+                    continue
+                # The contained answer must carry at least one distinctive
+                # (set-rare) token, so "G minor" doesn't match every "minor"
+                if not any(token_df.get(t, 0) <= 5 for t in inner['tokens']):
+                    continue
+                covered_pairs.add(key)
+                label = inner['answer_normalized']
+                group = containment_groups.setdefault(label, {
+                    'kind': 'containment', 'label': label,
+                    'severity': INFO, 'members': {}, })
+                group['members'][i] = entries[i]
+                group['members'][j] = entries[j]
+                sev = _pair_severity(a, b, WARNING, CRITICAL)
+                if SEVERITY_ORDER[sev] < SEVERITY_ORDER[group['severity']]:
+                    group['severity'] = sev
+
+    for label, group in containment_groups.items():
+        groups.append({
+            'kind': 'Answer contained in another answer',
+            'label': label,
+            'severity': group['severity'],
+            'entries': list(group['members'].values()),
+            'note': 'One of these answer lines is wholly contained in the other; '
+                    'they may be the same topic.',
+        })
+
+    # --- 2. Shared rare term across different answers ---
+    for token, idxs in sorted(token_index.items()):
+        if len(token) < 5 or len(idxs) < 2 or len(idxs) > 4:
+            continue
+        distinct = {entries[i]['answer_normalized'] for i in idxs}
+        if len(distinct) < 2:
+            continue
+        member_idx = sorted(set(idxs))
+        # Skip if every cross-answer pair is already covered (exact or containment)
+        new_pair_severity = None
+        for x in range(len(member_idx)):
+            for y in range(x + 1, len(member_idx)):
+                i, j = member_idx[x], member_idx[y]
+                a, b = entries[i], entries[j]
+                if same_question(a, b) or a['answer_normalized'] == b['answer_normalized']:
+                    continue
+                if (min(i, j), max(i, j)) in covered_pairs:
+                    continue
+                sev = _pair_severity(a, b, INFO, WARNING)
+                if new_pair_severity is None or SEVERITY_ORDER[sev] < SEVERITY_ORDER[new_pair_severity]:
+                    new_pair_severity = sev
+        if new_pair_severity is None:
+            continue
+        for x in range(len(member_idx)):
+            for y in range(x + 1, len(member_idx)):
+                covered_pairs.add((member_idx[x], member_idx[y]))
+        groups.append({
+            'kind': 'Shared specific term',
+            'label': token,
+            'severity': new_pair_severity,
+            'entries': [entries[i] for i in member_idx],
+            'note': 'These answer lines share the distinctive term "{0}".'.format(token),
+        })
+
+    # --- 3. Answer mentioned in another question's text ---
+    question_texts = []
+    for tu in Tossup.objects.filter(question_set=qset).select_related('category', 'author', 'packet'):
+        question_texts.append({
+            'type': 'tossup', 'id': tu.id, 'part_label': None,
+            'plain': ' {0} '.format(_plain_words(tu.tossup_text)),
+            'answer_raw': tu.tossup_answer,
+            'category_str': _get_category_str(tu), 'author': str(tu.author),
+            'location': '{0} #{1}'.format(tu.packet.packet_name, tu.question_number) if tu.packet else 'Unassigned',
+            'text_preview': '', 'text': tu.tossup_text,
+        })
+    for bonus in Bonus.objects.filter(question_set=qset).select_related('category', 'author', 'packet'):
+        text = ' '.join(filter(None, [bonus.leadin, bonus.part1_text, bonus.part2_text, bonus.part3_text]))
+        question_texts.append({
+            'type': 'bonus', 'id': bonus.id, 'part_label': '',
+            'plain': ' {0} '.format(_plain_words(text)),
+            'answer_raw': bonus.part1_answer,
+            'category_str': _get_category_str(bonus), 'author': str(bonus.author),
+            'location': '{0} #{1}'.format(bonus.packet.packet_name, bonus.question_number) if bonus.packet else 'Unassigned',
+            'text_preview': '', 'text': text,
+        })
+
+    seen_mention_labels = set()
+    for entry in entries:
+        norm = entry['answer_normalized']
+        if len(norm) < 6 or not any(len(t) >= 5 for t in entry['tokens']):
+            continue
+        # Only specific answers: at least one set-rare token, so routine
+        # clue vocabulary ("hydrogen", "symphony") doesn't flood the report
+        if not any(token_df.get(t, 0) <= 3 and len(t) >= 5 for t in entry['tokens']):
+            continue
+        if norm in seen_mention_labels:
+            continue
+        needle = ' {0} '.format(norm)
+        entry_top = entry['category_str'].split(' - ')[0] if entry['category_str'] else ''
+        mentions = [qt for qt in question_texts
+                    if needle in qt['plain']
+                    and not (qt['type'] == entry['type'] and qt['id'] == entry['id'])
+                    and entry_top and qt['category_str'].split(' - ')[0] == entry_top]
+        if not mentions:
+            continue
+        seen_mention_labels.add(norm)
+        severity = WARNING
+        mention_entries = []
+        for qt in mentions:
+            qt2 = dict(qt)
+            preview = strip_markup(qt2['text'])
+            qt2['text_preview'] = preview[:120] + '...' if len(preview) > 120 else preview
+            qt2['part_label'] = qt2['part_label'] or None
+            mention_entries.append(qt2)
+        groups.append({
+            'kind': 'Answer mentioned in another question',
+            'label': norm,
+            'severity': severity,
+            'entries': [entry] + mention_entries,
+            'note': 'The answer "{0}" also appears in the text of the other question(s) below.'.format(norm),
+        })
+
+    groups.sort(key=lambda g: (SEVERITY_ORDER[g['severity']], g['kind'], g['label']))
+    return groups

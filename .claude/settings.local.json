@@ -17,7 +17,9 @@
       "Bash(node -c:*)",
       "Bash(del test_export.docx)",
       "Bash(ping:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(pip freeze *)",
+      "Skill(run)"
     ]
   }
 }

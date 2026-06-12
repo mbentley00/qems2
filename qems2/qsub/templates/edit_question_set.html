@@ -92,6 +92,7 @@
                 </div>
             </div>
             <strong>Set Completion Status: {{ set_pct_complete}} &ndash; <a href="/questions_remaining/{{ qset.id }}">{{ tu_needed }} tossups needed, {{ bs_needed }} bonuses needed</a></strong>
+            <br><a href="/category_overview/{{ qset.id }}">Category Overview</a> &middot; <a href="/category_tags/{{ qset.id }}">Category Tags</a>
         </div>
 
         <table class="tablesorter table-striped table-hover" id="set-status-table">
@@ -211,7 +212,7 @@
                 <strong><a href="/bulk_change_set/{{ qset.id }}">Make Bulk Changes to this Set</a></strong>
             </div>
             <div class="panel header radius text-center">
-                <strong><a href="/duplicate_check/{{ qset.id }}/">Check for Duplicate Questions</a></strong>
+                <strong><a href="/duplicate_check/{{ qset.id }}/">Check for Duplicates and Topic Repeats</a></strong>
             </div>
         {% endif %}
         {% if role == "editor" %}
@@ -257,6 +258,7 @@
     <div class="content" id="editors">
         {% if role == "editor" %}
             <ul class="button-group even">
+                <li><a href="/add_co_owner/{{ qset.id }}" class="button primary" id="btn-add-co-owner"><i class="fa fa-plus-circle"></i> Add a Co-owner</a></li>
                 <li><a href="/add_editor/{{ qset.id }}" class="button primary" id="btn-add-editor"><i class="fa fa-plus-circle"></i> Add an Editor</a></li>
                 <li><a href="/add_writer/{{ qset.id }}" class="button primary"><i class="fa fa-plus-circle"></i> Add a Writer</a></li>
             </ul>
@@ -280,6 +282,8 @@
                 <tr>
                     {% if writer.writer.user.username == qset.owner.user.username %}
                     <td>Owner</td>
+                    {% elif writer.writer in qset.co_owners.all %}
+                    <td>Co-owner</td>
                     {% elif writer.writer in editors %}
                     <td>Editor</td>
                     {% elif writer.writer in writers %}
@@ -293,7 +297,9 @@
                     <td>{{ writer.question_percent|floatformat }}%</td>
                     <td>
                         {% if writer.writer.user.username != qset.owner.user.username %}
-                            {% if writer.writer in editors %}
+                            {% if writer.writer in qset.co_owners.all %}
+                                 <a href="/delete_co_owner/{{ writer.writer.id }}" class="delete_co_owner" value="{{ writer.writer.id }}"  qset-id="{{ qset.id }}">Remove</a>
+                            {% elif writer.writer in editors %}
                                  <a href="/delete_editor/{{ writer.writer.id }}" class="delete_editor" value="{{ writer.writer.id }}"  qset-id="{{ qset.id }}">Remove</a>
                             {% else %}
                                 <a href="/delete_writer/{{ writer.writer.id }}" class="delete_writer" value="{{ writer.writer.id }}"  qset-id="{{ qset.id }}">Remove</a>
@@ -437,6 +443,13 @@
     <div class="content" id="packets">
         <ul class="button-group even">
             <li><a href="/add_packets/{{ qset.id }}" class="button primary"><i class="fa fa-plus-circle"></i> Add Packets</a></li>
+            <li><a href="/packetize_set/{{ qset.id }}" class="button primary"><i class="fa fa-magic"></i> Auto-Packetize</a></li>
+            <li><a href="/packet_grid/{{ qset.id }}" class="button primary"><i class="fa fa-table"></i> Packet Grid</a></li>
+            {% with packets|dictsort:"packet_name"|first as first_packet %}
+            {% if first_packet %}
+            <li><a href="/view_packet/{{ first_packet.id }}/" class="button primary"><i class="fa fa-file-lines"></i> Document View</a></li>
+            {% endif %}
+            {% endwith %}
         </ul>
         <table class="tablesorter table-striped table-hover" id="packets-table">
             <thead>
@@ -452,12 +465,11 @@
                     <td>
                         {% if role == "editor" %}
                         <a href="/edit_packet/{{ packet.id }}">{{ packet.packet_name }}</a>
-                        {% else %}
-                        {{ packet.packet_name }}
                         {% endif %}
+                        <a href="/view_packet/{{ packet.id }}/" title="Document view">{% if role != "editor" %}{{ packet.packet_name }}{% else %}<i class="fa fa-file-lines"></i>{% endif %}</a>
                     </td>
                     <td>
-                        N/A
+                        {{ packet|packet_completion }}
                     </td>
                     <td>
                         <span data-tooltip aria-haspopup="true" class="has-tip tip-right" title="Delete">

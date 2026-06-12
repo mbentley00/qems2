@@ -26,6 +26,16 @@
                 <li><span class="label">{{ info_count }} Info</span> &mdash; Same answer, different categories. Generally fine but good to know.</li>
             </ul>
             <p><strong>{{ total_groups }} duplicate answer group{{ total_groups|pluralize }}</strong> found across {{ total_questions }} question entries.</p>
+            <hr style="margin: 0.5rem 0;">
+            <h5>Topic Repeats</h5>
+            <ul class="no-bullet">
+                <li><span class="label alert">{{ topic_critical }} Critical</span>
+                    <span class="label warning">{{ topic_warning }} Warning</span>
+                    <span class="label">{{ topic_info }} Info</span>
+                    &mdash; Different answer lines covering the same specific topic: one answer contained in another,
+                    a shared distinctive term, or an answer appearing in another question's text.
+                    <a href="#topic-repeats">Jump to list</a></li>
+            </ul>
             {% if internal_issues %}
             <hr style="margin: 0.5rem 0;">
             <h5>Within-Question Issues</h5>
@@ -106,6 +116,69 @@
                         {% endfor %}
                     </small></p>
                 {% endif %}
+            </div>
+        </div>
+    </div>
+{% endfor %}
+
+<h4 class="page-header" style="margin-top: 2rem;" id="topic-repeats">Topic Repeats</h4>
+
+{% if not topic_groups %}
+    <div class="row">
+        <div class="small-12 columns">
+            <div class="panel callout"><p>No repeated topics detected across different answer lines.</p></div>
+        </div>
+    </div>
+{% endif %}
+
+{% for group in topic_groups %}
+    <div class="row">
+        <div class="small-12 columns">
+            <div class="panel" style="border-left: 4px solid {% if group.severity == 'critical' %}#f04124{% elif group.severity == 'warning' %}#e99002{% else %}#008cba{% endif %}; margin-bottom: 1rem;">
+                <h5 style="margin-bottom: 0.25rem;">
+                    {% if group.severity == 'critical' %}
+                        <span class="label alert">Critical</span>
+                    {% elif group.severity == 'warning' %}
+                        <span class="label warning">Warning</span>
+                    {% else %}
+                        <span class="label">Info</span>
+                    {% endif %}
+                    <span class="label secondary">{{ group.kind }}</span>
+                    &ldquo;{{ group.label }}&rdquo;
+                </h5>
+                <p style="margin-bottom: 0.5rem;"><small>{{ group.note }}</small></p>
+                <table class="table-striped" style="width: 100%; margin-top: 0.5rem;">
+                    <thead>
+                        <tr>
+                            <th>Question</th>
+                            <th>Location</th>
+                            <th>Answer</th>
+                            <th>Category</th>
+                            <th>Author</th>
+                            <th style="width: 35%;">Text Preview</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% autoescape off %}
+                        {% for entry in group.entries %}
+                            <tr>
+                                <td>
+                                    {% if entry.type == 'tossup' %}
+                                        <a href="/edit_tossup/{{ entry.id }}/">Tossup</a>
+                                    {% else %}
+                                        <a href="/edit_bonus/{{ entry.id }}/">Bonus{% if entry.part_label %} {{ entry.part_label }}{% endif %}</a>
+                                    {% endif %}
+                                </td>
+                                <td>{{ entry.location }}</td>
+                                <td>{{ entry.answer_raw|truncatechars:70 }}</td>
+                                <td>{{ entry.category_str }}</td>
+                                <td>{{ entry.author }}</td>
+                                <td><small>{{ entry.text_preview }}</small></td>
+                            </tr>
+                        {% endfor %}
+                        {% endautoescape %}
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>

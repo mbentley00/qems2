@@ -75,7 +75,13 @@ $(function () {
             if (tag === 'br') {
                 inner = '\n';
             } else {
-                inner = inner + '\n';
+                // Skip empty paragraphs (Word uses <p>&nbsp;</p> for blank lines)
+                var trimmed = inner.replace(/[\u00a0\s]/g, '');
+                if (!trimmed) {
+                    inner = '\n';
+                } else {
+                    inner = inner + '\n';
+                }
             }
         }
 
@@ -111,7 +117,16 @@ $(function () {
 
             // Prevent default paste and insert converted text
             e.preventDefault();
-            var converted = htmlToQemsMarkup(html).trim();
+            var converted = htmlToQemsMarkup(html)
+                .replace(/\u00a0/g, ' ')        // non-breaking spaces → normal spaces
+                .replace(/\n{3,}/g, '\n\n')     // 3+ newlines → max 2
+                .trim();
+
+            // Question field textareas (class "expanding") should be single
+            // paragraphs — collapse all line breaks to spaces.
+            if ($(textarea).hasClass('expanding')) {
+                converted = converted.replace(/\n+/g, ' ').replace(/ {2,}/g, ' ');
+            }
 
             // Insert at cursor position
             var start = textarea.selectionStart;
@@ -323,6 +338,10 @@ $(function () {
             }
         }
 
+        // Tossup fields are single-paragraph — collapse line breaks to spaces
+        questionText = questionText.replace(/\n+/g, ' ').replace(/ {2,}/g, ' ');
+        answerText = answerText.replace(/\n+/g, ' ').replace(/ {2,}/g, ' ');
+
         $('#id_tossup_text').val(questionText).trigger('input').trigger('change');
         $('#id_tossup_answer').val(answerText).trigger('input').trigger('change');
     }
@@ -414,10 +433,10 @@ $(function () {
      * - Text before (*) is bold-wrapped with **...**
      * - Answer is spoiler-tagged
      */
-    function formatTossupForDiscord() {
-        var text = ($('#id_tossup_text').val() || '').trim();
-        var answer = ($('#id_tossup_answer').val() || '').trim();
-        var info = getAuthorAndCategory();
+    function formatTossupForDiscord(text, answer, author, category) {
+        text = (text || '').trim();
+        answer = (answer || '').trim();
+        var info = { author: author || '', category: category || '' };
 
         var discordAnswer = qemsToDiscordMarkup(answer);
         var powerIdx = text.indexOf('(*)');
@@ -464,16 +483,16 @@ $(function () {
      * - All answers are spoilered
      * - Difficulty placeholder appended
      */
-    function formatBonusForDiscord() {
-        var leadin = ($('#id_leadin').val() || '').trim();
-        var info = getAuthorAndCategory();
-        var result = qemsToDiscordMarkup(leadin) + '\n';
+    function formatBonusForDiscord(leadin, parts, author, category) {
+        var info = { author: author || '', category: category || '' };
+        var result = qemsToDiscordMarkup((leadin || '').trim()) + '\n';
 
         var difficulties = [];
         for (var i = 1; i <= 3; i++) {
-            var partText = qemsToDiscordMarkup(($('#id_part' + i + '_text').val() || '').trim());
-            var partAnswer = qemsToDiscordMarkup(($('#id_part' + i + '_answer').val() || '').trim());
-            var diff = ($('#id_part' + i + '_difficulty').val() || '');
+            var part = parts[i - 1] || {};
+            var partText = qemsToDiscordMarkup((part.text || '').trim());
+            var partAnswer = qemsToDiscordMarkup((part.answer || '').trim());
+            var diff = (part.diff || '');
 
             var label = '[10' + diff + ']';
             if (i === 1) {
@@ -522,12 +541,39 @@ $(function () {
         setTimeout(function () { $button.text(originalText); }, 2000);
     }
 
+    function domTossupArgs() {
+        var info = getAuthorAndCategory();
+        return [($('#id_tossup_text').val() || ''), ($('#id_tossup_answer').val() || ''), info.author, info.category];
+    }
+
+    function domBonusArgs() {
+        var info = getAuthorAndCategory();
+        var parts = [];
+        for (var i = 1; i <= 3; i++) {
+            parts.push({
+                text: ($('#id_part' + i + '_text').val() || ''),
+                answer: ($('#id_part' + i + '_answer').val() || ''),
+                diff: ($('#id_part' + i + '_difficulty').val() || '')
+            });
+        }
+        return [($('#id_leadin').val() || ''), parts, info.author, info.category];
+    }
+
+    // Expose the formatters for other pages (e.g. the packet document view)
+    window.QemsDiscord = {
+        tossup: formatTossupForDiscord,
+        tossupPlain: formatTossupForDiscordPlain,
+        bonus: formatBonusForDiscord,
+        bonusPlain: formatBonusForDiscordPlain,
+        copy: copyToClipboard
+    };
+
     // Wire up "Copy for Discord" buttons
     var $copyTossupBtn = $('#copy-for-discord-tossup');
     if ($copyTossupBtn.length) {
         $copyTossupBtn.on('click', function (e) {
             e.preventDefault();
-            var formatted = formatTossupForDiscord();
+            var formatted = formatTossupForDiscord.apply(null, domTossupArgs());
             copyToClipboard(formatted, $copyTossupBtn);
         });
     }
@@ -536,7 +582,7 @@ $(function () {
     if ($copyBonusBtn.length) {
         $copyBonusBtn.on('click', function (e) {
             e.preventDefault();
-            var formatted = formatBonusForDiscord();
+            var formatted = formatBonusForDiscord.apply(null, domBonusArgs());
             copyToClipboard(formatted, $copyBonusBtn);
         });
     }
@@ -549,12 +595,11 @@ $(function () {
      * Format a tossup for Discord without spoiler tags.
      * Clean Discord markdown with category + author for sharing finished questions.
      */
-    function formatTossupForDiscordPlain() {
-        var text = ($('#id_tossup_text').val() || '').trim();
-        var answer = ($('#id_tossup_answer').val() || '').trim();
-        var info = getAuthorAndCategory();
+    function formatTossupForDiscordPlain(text, answer, author, category) {
+        var info = { author: author || '', category: category || '' };
 
-        var result = qemsToDiscordMarkup(text);
+        var result = qemsToDiscordMarkup((text || '').trim());
+        answer = (answer || '').trim();
         result += '\nANSWER: ' + qemsToDiscordMarkup(answer);
         if (info.author || info.category) {
             result += '\n<' + info.author + ', ' + info.category + '>';
@@ -565,15 +610,15 @@ $(function () {
     /**
      * Format a bonus for Discord without spoiler tags.
      */
-    function formatBonusForDiscordPlain() {
-        var leadin = ($('#id_leadin').val() || '').trim();
-        var info = getAuthorAndCategory();
-        var result = qemsToDiscordMarkup(leadin) + ' For 10 points each:\n';
+    function formatBonusForDiscordPlain(leadin, parts, author, category) {
+        var info = { author: author || '', category: category || '' };
+        var result = qemsToDiscordMarkup((leadin || '').trim()) + ' For 10 points each:\n';
 
         for (var i = 1; i <= 3; i++) {
-            var partText = qemsToDiscordMarkup(($('#id_part' + i + '_text').val() || '').trim());
-            var partAnswer = qemsToDiscordMarkup(($('#id_part' + i + '_answer').val() || '').trim());
-            var diff = ($('#id_part' + i + '_difficulty').val() || '');
+            var part = parts[i - 1] || {};
+            var partText = qemsToDiscordMarkup((part.text || '').trim());
+            var partAnswer = qemsToDiscordMarkup((part.answer || '').trim());
+            var diff = (part.diff || '');
             result += '[10' + diff + '] ' + partText + '\n';
             result += 'ANSWER: ' + partAnswer + '\n';
         }
@@ -589,7 +634,7 @@ $(function () {
     if ($copyPlainTossupBtn.length) {
         $copyPlainTossupBtn.on('click', function (e) {
             e.preventDefault();
-            var formatted = formatTossupForDiscordPlain();
+            var formatted = formatTossupForDiscordPlain.apply(null, domTossupArgs());
             copyToClipboard(formatted, $copyPlainTossupBtn);
         });
     }
@@ -598,7 +643,7 @@ $(function () {
     if ($copyPlainBonusBtn.length) {
         $copyPlainBonusBtn.on('click', function (e) {
             e.preventDefault();
-            var formatted = formatBonusForDiscordPlain();
+            var formatted = formatBonusForDiscordPlain.apply(null, domBonusArgs());
             copyToClipboard(formatted, $copyPlainBonusBtn);
         });
     }

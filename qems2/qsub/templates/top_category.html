@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% load static %}
+{% load filters %}
+
+{% block title %}{{ category_name }} - QEMS2{% endblock %}
+
+{% block content %}
+
+<h3 class="page-header">{{ category_name }}</h3>
+
+<ul class="breadcrumbs">
+    <li><a href="/edit_question_set/{{ qset.id }}/">{{ qset.name }}</a></li>
+    <li><a href="/category_overview/{{ qset.id }}/">Category Overview</a></li>
+    <li class="current">{{ category_name }}</li>
+</ul>
+
+<ul class="button-group even">
+    <li><a href="/add_tossups/{{ qset.id }}" class="button primary"><i class="fa fa-plus-circle"></i> Add Tossup</a></li>
+    <li><a href="/add_bonuses/{{ qset.id }}/ACF-style bonus" class="button primary"><i class="fa fa-plus-circle"></i> Add ACF Bonus</a></li>
+    <li><a href="/add_bonuses/{{ qset.id }}/VHSL bonus" class="button primary"><i class="fa fa-plus-circle"></i> Add VHSL Bonus</a></li>
+</ul>
+
+<table class="tablesorter table-striped table-hover">
+    <thead>
+        <tr>
+            <th>Sub-Category</th>
+            <th>Tossups Written</th>
+            <th>Tossups Required</th>
+            <th>Tossup %</th>
+            <th>Bonuses Written</th>
+            <th>Bonuses Required</th>
+            <th>Bonus %</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in sub_categories %}
+        <tr>
+            <td><a href="/categories/{{ qset.id }}/{{ row.entry.id }}/">{{ row.entry.subcategory }}</a></td>
+            <td>{{ row.tu_written }}</td>
+            <td>{{ row.tu_req }}</td>
+            <td>{{ row.tu_written|percent:row.tu_req }}</td>
+            <td>{{ row.bs_written }}</td>
+            <td>{{ row.bs_req }}</td>
+            <td>{{ row.bs_written|percent:row.bs_req }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+{% endblock %}

@@ -232,8 +232,30 @@ $(function () {
         }
     });
 
+    $('.delete_co_owner').click(function(e) {
+        e.preventDefault();
+        var result = confirm("You are about to remove this co-owner from the set! Are you sure you want to do that?");
+        if (result == true) {
+            var qset_id = $(this).attr('qset-id');
+            $.post('/delete_co_owner/', {co_owner_id: $(this).attr('value'), qset_id: $(this).attr('qset-id')}, function (response) {
+                var json_response = $.parseJSON(response);
+                var dialog = $('#info-dialog').dialog({
+                    modal: true,
+                    buttons: {
+                        Ok: function() {
+                            $(this).dialog('close');
+                            window.location.replace('/edit_question_set/' + qset_id);
+                        }
+                    }
+                })
+                dialog.append('<div class="' + json_response['message_class'] + '">' + json_response['message'] + '</div>');
+                dialog.dialog('open');
+            });
+        }
+    });
+
     $('.delete_comment').click(function(e) {
-        e.preventDefault();        
+        e.preventDefault();
         var result = confirm("Are you sure you want to delete this comment?  It can only be restored by a QEMS2 admin.");
         if (result == true) {
             $.post('/delete_comment/', {comment_id: $(this).attr('value'), qset_id: $(this).attr('qset')}, function (response) {
@@ -321,20 +343,11 @@ $(function () {
         e.preventDefault();
         var result = confirm("Are you sure that you want to change this tossup's type?");
         if (result == true) {
-            var qset_id = $(this).attr('qset-id');            
+            var qset_id = $(this).attr('qset-id');
             $.post('/convert_tossup/', { tossup_id: $(this).attr('value'), qset_id: $(this).attr('qset-id'), target_type: $(this).attr('target-type')}, function (response) {
                 var json_response = $.parseJSON(response);
-                var dialog = $('#info-dialog').dialog({
-                    modal: true,
-                    buttons: {
-                        Ok: function() {
-                            $(this).dialog('close');
-                            window.location.replace('/edit_question_set/' + qset_id);
-                        }
-                    }
-                })
-                dialog.append('<div class="' + json_response['message_class'] + '">' + json_response['message'] + '</div>');
-                dialog.dialog('open');
+                var redirect_url = json_response['redirect_url'] || ('/edit_question_set/' + qset_id);
+                window.location.replace(redirect_url);
             });
         }
     });
@@ -343,20 +356,11 @@ $(function () {
         e.preventDefault();
         var result = confirm("Are you sure that you want to change this bonus' type?");
         if (result == true) {
-            var qset_id = $(this).attr('qset-id');                        
+            var qset_id = $(this).attr('qset-id');
             $.post('/convert_bonus/', {bonus_id: $(this).attr('value'), qset_id: $(this).attr('qset-id'), target_type: $(this).attr('target-type')}, function (response) {
                 var json_response = $.parseJSON(response);
-                var dialog = $('#info-dialog').dialog({
-                    modal: true,
-                    buttons: {
-                        Ok: function() {
-                            $(this).dialog('close');
-                            window.location.replace('/edit_question_set/' + qset_id);
-                        }
-                    }
-                })
-                dialog.append('<div class="' + json_response['message_class'] + '">' + json_response['message'] + '</div>');
-                dialog.dialog('open');
+                var redirect_url = json_response['redirect_url'] || ('/edit_question_set/' + qset_id);
+                window.location.replace(redirect_url);
             });
         }
     });

@@ -1,5 +1,7 @@
 from __future__ import unicode_literals
 
+import re
+
 from bs4 import BeautifulSoup
 from django.utils.encoding import smart_str
 from django.utils.safestring import mark_safe
@@ -187,7 +189,7 @@ def get_formatted_question_html(line, allowUnderlines, allowParens, allowNewLine
                 output += u"</i>"
             
             if (not powerFlag):
-                output += u"<strong>("
+                output += u"<strong class=\"pronunciation-guide\">("
                 parensFlag = True
             else:
                 output += u"("
@@ -271,7 +273,34 @@ def get_formatted_question_html(line, allowUnderlines, allowParens, allowNewLine
 
     return output
 
+# Moderator instructions that don't count toward question length:
+# sentences like "Description acceptable." or "Note to moderator: read the
+# answerline carefully." plus inline markers like [emphasize].  Sentences are
+# only matched at the start of the text or after sentence-ending punctuation,
+# so content like "critics found the description acceptable" still counts.
+_DIRECTIVE_CORE = (
+    r'note to (?:the )?(?:moderators?|players?|readers?)[:,]?[^.!?]*'
+    r'|(?:a )?descriptions? (?:is |are )?acceptable[^.!?]*'
+    r'|(?:two|both|all) answers? (?:are |is |will be )?required[^.!?]*'
+    r'|you have (?:\d+|ten|fifteen|twenty|thirty) seconds[^.!?]*'
+    r'|read (?:the )?answer ?line carefully[^.!?]*'
+)
+MODERATOR_INSTRUCTION_RE = re.compile(
+    r'(?:^|(?<=[.!?\]~]))[\s~]*(?:' + _DIRECTIVE_CORE + r')[.!?]?[~\s]*',
+    re.IGNORECASE)
+INLINE_DIRECTIVE_RE = re.compile(r'\[(?:emphasi[sz]e|pause|read slowly)\]\s*', re.IGNORECASE)
+
+def strip_moderator_instructions(line):
+    """Remove moderator/player instruction sentences and inline directive
+    markers so they don't count toward question length."""
+    if not line:
+        return line
+    line = MODERATOR_INSTRUCTION_RE.sub('', line)
+    line = INLINE_DIRECTIVE_RE.sub('', line)
+    return line
+
 def get_character_count(line, ignore_pronunciation):
+    line = strip_moderator_instructions(line)
     if not ignore_pronunciation:
         return len(line)
 

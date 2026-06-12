@@ -1,0 +1,18 @@
+{% if available_tags %}
+<div class="row">
+    <div class="small-12 columns">
+        <div class="panel" style="padding: 8px 12px; margin-bottom: 12px;">
+            <strong>Category Tags</strong>
+            <small>(check the requirements this question fulfills &mdash; <a href="/category_tags/{{ qset.id }}/">tag status</a>)</small><br>
+            {% for item in available_tags %}
+                <label style="display: inline-block; margin-right: 16px; font-weight: normal;">
+                    <input type="checkbox" name="category_tags" value="{{ item.tag.id }}"
+                           {% if item.checked %}checked{% endif %}>
+                    {{ item.tag.name }}
+                    <small style="color: #888;">({{ item.tag.category_path }}{% if item.tag.num_tossups or item.tag.num_bonuses %}, {{ item.tag.num_tossups }}/{{ item.tag.num_bonuses }} needed{% endif %})</small>
+                </label>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endif %}

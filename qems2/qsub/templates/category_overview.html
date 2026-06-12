@@ -1,0 +1,243 @@
+{% extends "base.html" %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% load static %}
+{% load filters %}
+
+{% block title %}Category Overview - QEMS2{% endblock %}
+
+{% block content %}
+
+<h3 class="page-header">Category Overview</h3>
+<div class="panel header radius text-center">
+    <div class="small-7 small-centered columns">
+        <div class="progress success round edit-qset">
+            <span class="meter text-center" style="width:{{ set_pct_progress_bar }}"></span>
+        </div>
+    </div>
+    <strong>Set Completion Status: {{ set_pct_complete}} &ndash; {{ tu_needed }} tossups needed, {{ bs_needed }} bonuses needed</strong>
+</div>
+
+<table class="tablesorter table-striped table-hover" id="set-status-table">
+    <thead>
+        <tr>
+            <th>Category</th>
+            <th>Overall Completion</th>
+            <th>Tossups Remaining</th>
+            <th>Tossup Completion</th>
+            <th>Bonuses Remaining</th>
+            <th>Bonus Completion</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in overview_rows %}
+        <tr{% if row.is_group %} style="font-weight: bold; background-color: #f0f0f0;"{% endif %}
+           {% if row.depth == 0 %} data-toplevel="{{ row.short_name }}" data-tu-req="{{ row.tu_req }}" data-tu-written="{{ row.tu_in_cat }}" data-bs-req="{{ row.bs_req }}" data-bs-written="{{ row.bs_in_cat }}"{% endif %}>
+            <td style="padding-left: {{ row.padding }}px;">
+                {% if row.is_group %}
+                    {{ row.short_name }}
+                {% else %}
+                    <a href="/categories/{{ qset.id }}/{{ row.category_id }}">{{ row.short_name }}</a>
+                {% endif %}
+            </td>
+            <td>
+                {{ row|overall_percent }}
+            </td>
+            <td>
+                {{ row|tossups_remaining }}
+            </td>
+            <td>
+                {{ row.tu_in_cat|check_mark_if_100_pct:row.tu_req }} {{ row.tu_in_cat|percent:row.tu_req }}
+            </td>
+            <td>
+                {{ row|bonuses_remaining }}
+            </td>
+            <td>
+                {{ row.bs_in_cat|check_mark_if_100_pct:row.bs_req }} {{ row.bs_in_cat|percent:row.bs_req }}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<div class="panel" id="supergroup-panel" style="margin-top: 20px;">
+    <h5>Create Super-Group</h5>
+    <div class="row">
+        <div class="small-4 columns">
+            <label>Group Name
+                <input type="text" id="supergroup-name" placeholder="e.g. STEM">
+            </label>
+        </div>
+        <div class="small-6 columns">
+            <label>Categories</label>
+            <div id="supergroup-checkboxes" style="max-height: 200px; overflow-y: auto;"></div>
+        </div>
+        <div class="small-2 columns">
+            <label>&nbsp;</label>
+            <button class="button small" id="add-supergroup-btn">Add Group</button>
+        </div>
+    </div>
+</div>
+
+<div id="supergroup-results" style="display: none; margin-top: 20px;">
+    <h5>Super-Groups</h5>
+    <table class="tablesorter table-striped table-hover" id="supergroup-table">
+        <thead>
+            <tr>
+                <th>Group</th>
+                <th>Overall Completion</th>
+                <th>Tossups Remaining</th>
+                <th>Tossup Completion</th>
+                <th>Bonuses Remaining</th>
+                <th>Bonus Completion</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+</div>
+
+<script>
+(function() {
+    // Extract top-level category data from the table
+    var topLevelCategories = [];
+    $('#set-status-table tbody tr[data-toplevel]').each(function() {
+        var $row = $(this);
+        topLevelCategories.push({
+            name: $row.data('toplevel'),
+            tu_req: parseInt($row.data('tu-req'), 10) || 0,
+            tu_written: parseInt($row.data('tu-written'), 10) || 0,
+            bs_req: parseInt($row.data('bs-req'), 10) || 0,
+            bs_written: parseInt($row.data('bs-written'), 10) || 0
+        });
+    });
+
+    // Build checkboxes
+    var $checkboxes = $('#supergroup-checkboxes');
+    $.each(topLevelCategories, function(i, cat) {
+        $checkboxes.append(
+            '<label style="display: block; margin-bottom: 4px;">' +
+            '<input type="checkbox" class="sg-cat-check" value="' + i + '"> ' +
+            cat.name +
+            '</label>'
+        );
+    });
+
+    var superGroups = [];
+
+    function formatPercent(x, y) {
+        if (y === 0) return null;
+        var val = 100 * x / y;
+        if (val > 100) val = 100;
+        return val;
+    }
+
+    function percentStr(x, y) {
+        var pct = formatPercent(x, y);
+        if (pct === null) return '';
+        return pct.toFixed(1) + '%';
+    }
+
+    function checkIcon(x, y) {
+        var pct = formatPercent(x, y);
+        if (pct === null || pct >= 100) {
+            return '<i class="fa fa-check"></i>';
+        }
+        return '<i class="fa fa-times"></i>';
+    }
+
+    function overallPercentStr(tu_in, tu_req, bs_in, bs_req) {
+        var tu = Math.min(tu_in, tu_req);
+        var bs = Math.min(bs_in, bs_req);
+        var total = tu_req + bs_req;
+        if (total === 0) return '<i class="fa fa-check"></i> null';
+        var pct = 100 * (tu + bs) / total;
+        var icon = pct >= 100 ? '<i class="fa fa-check"></i>' : '<i class="fa fa-times"></i>';
+        return icon + ' ' + pct.toFixed(2) + '%';
+    }
+
+    function remainingStr(written, req) {
+        var val = req - written;
+        if (val < 0) {
+            return '0 (' + (-val) + ' extra)';
+        }
+        return '' + val;
+    }
+
+    function renderGroups() {
+        var $tbody = $('#supergroup-table tbody');
+        $tbody.empty();
+        $.each(superGroups, function(idx, group) {
+            var row = '<tr style="background-color: #d9edf7;">' +
+                '<td><strong>' + $('<span>').text(group.name).html() + '</strong></td>' +
+                '<td>' + overallPercentStr(group.tu_written, group.tu_req, group.bs_written, group.bs_req) + '</td>' +
+                '<td>' + remainingStr(group.tu_written, group.tu_req) + '</td>' +
+                '<td>' + checkIcon(group.tu_written, group.tu_req) + ' ' + percentStr(group.tu_written, group.tu_req) + '</td>' +
+                '<td>' + remainingStr(group.bs_written, group.bs_req) + '</td>' +
+                '<td>' + checkIcon(group.bs_written, group.bs_req) + ' ' + percentStr(group.bs_written, group.bs_req) + '</td>' +
+                '<td><a href="#" class="remove-sg" data-idx="' + idx + '" title="Remove group">&times;</a></td>' +
+                '</tr>';
+            $tbody.append(row);
+        });
+
+        if (superGroups.length > 0) {
+            $('#supergroup-results').show();
+        } else {
+            $('#supergroup-results').hide();
+        }
+    }
+
+    $('#add-supergroup-btn').on('click', function() {
+        var name = $.trim($('#supergroup-name').val());
+        if (!name) {
+            alert('Please enter a group name.');
+            return;
+        }
+
+        var selected = [];
+        $('.sg-cat-check:checked').each(function() {
+            selected.push(parseInt($(this).val(), 10));
+        });
+
+        if (selected.length === 0) {
+            alert('Please select at least one category.');
+            return;
+        }
+
+        var tu_req = 0, tu_written = 0, bs_req = 0, bs_written = 0;
+        $.each(selected, function(_, i) {
+            var cat = topLevelCategories[i];
+            tu_req += cat.tu_req;
+            tu_written += cat.tu_written;
+            bs_req += cat.bs_req;
+            bs_written += cat.bs_written;
+        });
+
+        superGroups.push({
+            name: name,
+            tu_req: tu_req,
+            tu_written: tu_written,
+            bs_req: bs_req,
+            bs_written: bs_written
+        });
+
+        // Reset form
+        $('#supergroup-name').val('');
+        $('.sg-cat-check').prop('checked', false);
+
+        renderGroups();
+    });
+
+    $(document).on('click', '.remove-sg', function(e) {
+        e.preventDefault();
+        var idx = parseInt($(this).data('idx'), 10);
+        superGroups.splice(idx, 1);
+        renderGroups();
+    });
+})();
+</script>
+
+{% endblock %}

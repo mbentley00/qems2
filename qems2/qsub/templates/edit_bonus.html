@@ -13,6 +13,15 @@
 {% block content %}
 
 <h3 class="page-header">Edit Bonus</h3>
+{% if bonus and bonus.category %}
+<ul class="breadcrumbs">
+    <li><a href="/edit_question_set/{{ qset.id }}/">{{ qset.name }}</a></li>
+    <li><a href="/category_overview/{{ qset.id }}/">Category Overview</a></li>
+    <li><a href="/top_category/{{ qset.id }}/{{ bonus.category.category }}/">{{ bonus.category.category }}</a></li>
+    <li><a href="/categories/{{ qset.id }}/{{ bonus.category.id }}/">{{ bonus.category.subcategory }}</a></li>
+    <li class="current"><a href="/edit_bonus/{{ bonus.id }}/">Bonus</a></li>
+</ul>
+{% endif %}
 {% autoescape off %}
     {% if message %}
         <div class="{{ message_class }}">{{ message }}</div>
@@ -159,6 +168,8 @@
                 {% if form.read_carefully.errors %}{{ form.read_carefully.errors }}{% endif %}
             </div>            
         </div>
+
+        {% include "question_tags.html" %}
 
         <div class="fieldWrapper">
             {{ form.question_type.errors }}

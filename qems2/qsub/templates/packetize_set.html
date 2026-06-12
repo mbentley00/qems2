@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% load static %}
+{% load filters %}
+
+{% block title %}Packetize Set - QEMS2{% endblock %}
+
+{% block content %}
+
+<h3 class="page-header">Packetize {{ qset.name }}</h3>
+<ul class="breadcrumbs">
+    <li><a href="/edit_question_set/{{ qset.id }}/">{{ qset.name }}</a></li>
+    <li class="current"><a href="/packetize_set/{{ qset.id }}/">Packetize</a></li>
+</ul>
+
+{% if message %}
+    <div class="{{ message_class }}">{{ message }}</div>
+{% endif %}
+
+{% if report %}
+<div class="panel radius">
+    <h5>Packetization Results <a href="/packet_grid/{{ qset.id }}/" class="button small primary right">View Packet Grid</a></h5>
+    {% if report.warnings %}
+        <div class="alert-box warning">
+            {% for warning in report.warnings %}
+                {{ warning }}<br />
+            {% endfor %}
+        </div>
+    {% endif %}
+    <table class="table-striped table-hover">
+        <thead>
+            <tr>
+                <th>Packet</th>
+                <th>Tossups</th>
+                <th>Bonuses</th>
+                <th>Tiebreakers</th>
+                <th>Categories (TU/B)</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for prow in report.packets %}
+            <tr>
+                <td><a href="/edit_packet/{{ prow.packet.id }}">{{ prow.packet.packet_name }}</a></td>
+                <td>{{ prow.tossups }}</td>
+                <td>{{ prow.bonuses }}</td>
+                <td>{% if prow.tiebreaker_tossups or prow.tiebreaker_bonuses %}{{ prow.tiebreaker_tossups }}/{{ prow.tiebreaker_bonuses }}{% else %}&ndash;{% endif %}</td>
+                <td>
+                    {% for cat, counts in prow.category_counts.items %}
+                        <span style="white-space: nowrap; margin-right: 8px;"><strong>{{ cat }}</strong> {{ counts }}</span>
+                    {% endfor %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<div class="panel radius">
+    <p>Auto-packetization assigns <strong>every</strong> tossup and bonus in the set to a packet,
+    <strong>overwriting any existing packet assignments</strong>.  Each packet follows the per-packet
+    quotas below; questions beyond the regular per-packet counts become tiebreakers, which are exempt
+    from the maximums.  Fractional values are allowed: a minimum/maximum of 1.5 tossups and 1.5 bonuses
+    means each packet gets 3 questions total from that category &mdash; sometimes 2 tossups and 1 bonus,
+    sometimes the reverse.</p>
+</div>
+
+<form action="" method="post" id="packetize-form">
+    {% csrf_token %}
+    <input type="hidden" name="row_count" value="{{ row_count }}">
+
+    <div class="row">
+        <div class="small-4 columns">
+            <label>Number of Packets
+                <input type="number" name="num_packets" min="1" value="{{ qset.num_packets }}">
+            </label>
+        </div>
+        <div class="small-4 columns">
+            <label>Tossups per Packet (regular)
+                <input type="number" name="tossups_per_packet" min="1" value="{{ qset.tossups_per_packet }}">
+            </label>
+        </div>
+        <div class="small-4 columns">
+            <label>Bonuses per Packet (regular)
+                <input type="number" name="bonuses_per_packet" min="1" value="{{ qset.bonuses_per_packet }}">
+            </label>
+        </div>
+    </div>
+
+    <table class="table-striped table-hover" id="packetize-table">
+        <thead>
+            <tr>
+                <th>Category</th>
+                <th>Written (TU/B)</th>
+                <th>Recommended per Packet (TU/B)</th>
+                <th>Min Tossups</th>
+                <th>Max Tossups</th>
+                <th>Min Bonuses</th>
+                <th>Max Bonuses</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in rows %}
+            <tr{% if row.is_top %} style="font-weight: bold; background-color: #f0f0f0;"{% endif %}>
+                <td style="padding-left: {{ row.padding }}px;">
+                    {{ row.short_name }}
+                    <input type="hidden" name="row_{{ forloop.counter0 }}_path" value="{{ row.path }}">
+                </td>
+                <td>{{ row.tu_written }}/{{ row.bs_written }}</td>
+                <td>{{ row.rec_tu }}/{{ row.rec_bs }}</td>
+                {% if row.is_top %}
+                <td><input type="number" step="0.1" min="0" class="quota-input top-min-tu" name="row_{{ forloop.counter0 }}_min_tu" value="{{ row.min_tu|default_if_none:'' }}"></td>
+                <td><input type="number" step="0.1" min="0" class="quota-input" name="row_{{ forloop.counter0 }}_max_tu" value="{{ row.max_tu|default_if_none:'' }}"></td>
+                <td><input type="number" step="0.1" min="0" class="quota-input top-min-bs" name="row_{{ forloop.counter0 }}_min_bs" value="{{ row.min_bs|default_if_none:'' }}"></td>
+                <td><input type="number" step="0.1" min="0" class="quota-input" name="row_{{ forloop.counter0 }}_max_bs" value="{{ row.max_bs|default_if_none:'' }}"></td>
+                {% else %}
+                <td></td>
+                <td><input type="number" step="0.1" min="0" class="quota-input" name="row_{{ forloop.counter0 }}_max_tu" value="{{ row.max_tu|default_if_none:'' }}" placeholder="optional"></td>
+                <td></td>
+                <td><input type="number" step="0.1" min="0" class="quota-input" name="row_{{ forloop.counter0 }}_max_bs" value="{{ row.max_bs|default_if_none:'' }}" placeholder="optional"></td>
+                {% endif %}
+            </tr>
+            {% endfor %}
+        </tbody>
+        <tfoot>
+            <tr style="font-weight: bold;">
+                <td>Total of top-level minimums</td>
+                <td></td>
+                <td></td>
+                <td id="total-min-tu">{{ top_min_tu }}</td>
+                <td></td>
+                <td id="total-min-bs">{{ top_min_bs }}</td>
+                <td></td>
+            </tr>
+        </tfoot>
+    </table>
+
+    <input type="submit" value="Packetize" class="button primary right"
+           onclick="return confirm('This will overwrite all existing packet assignments for this set. Continue?');" />
+</form>
+
+<style>
+#packetize-table .quota-input { width: 70px; margin-bottom: 0; }
+</style>
+
+<script>
+$(function() {
+    function updateTotals() {
+        var tu = 0, bs = 0;
+        $('.top-min-tu').each(function() { tu += parseFloat($(this).val()) || 0; });
+        $('.top-min-bs').each(function() { bs += parseFloat($(this).val()) || 0; });
+        $('#total-min-tu').text(Math.round(tu * 10) / 10);
+        $('#total-min-bs').text(Math.round(bs * 10) / 10);
+        var tuTarget = parseFloat($('input[name="tossups_per_packet"]').val()) || 0;
+        var bsTarget = parseFloat($('input[name="bonuses_per_packet"]').val()) || 0;
+        $('#total-min-tu').css('color', Math.abs(tu - tuTarget) > 0.01 ? '#c60f13' : '#43AC6A');
+        $('#total-min-bs').css('color', Math.abs(bs - bsTarget) > 0.01 ? '#c60f13' : '#43AC6A');
+    }
+    $(document).on('input', '.top-min-tu, .top-min-bs, input[name="tossups_per_packet"], input[name="bonuses_per_packet"]', updateTotals);
+    updateTotals();
+});
+</script>
+
+{% endblock %}

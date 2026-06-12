@@ -1,0 +1,312 @@
+{% extends "base.html" %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% load static %}
+{% load filters %}
+
+{% block title %}{{ packet.packet_name }} - QEMS2{% endblock %}
+
+{% block content %}
+
+<ul class="breadcrumbs">
+    <li><a href="/edit_question_set/{{ qset.id }}/">{{ qset.name }}</a></li>
+    <li><a href="/edit_packet/{{ packet.id }}">{{ packet.packet_name }}</a></li>
+    <li class="current"><a href="/view_packet/{{ packet.id }}/">Document View</a></li>
+</ul>
+
+<div class="row">
+    <div class="small-8 columns">
+        <ul class="button-group">
+            <li><a href="?order=separate" class="button small {% if order == 'separate' %}primary{% else %}secondary{% endif %}">Tossups then Bonuses</a></li>
+            <li><a href="?order=interleaved" class="button small {% if order == 'interleaved' %}primary{% else %}secondary{% endif %}">Interleaved</a></li>
+            {% if comment_count %}
+            <li><a href="#" id="toggle-comments" class="button small secondary"><i class="fa fa-comment"></i> Comments ({{ comment_count }})</a></li>
+            {% endif %}
+        </ul>
+    </div>
+    <div class="small-4 columns text-right">
+        {% if prev_packet %}<a href="/view_packet/{{ prev_packet.id }}/?order={{ order }}" class="button small secondary" title="{{ prev_packet.packet_name }}">&laquo; Prev</a>{% endif %}
+        <span style="margin: 0 6px;">{{ packet_index }} of {{ packet_count }}</span>
+        {% if next_packet %}<a href="/view_packet/{{ next_packet.id }}/?order={{ order }}" class="button small secondary" title="{{ next_packet.packet_name }}">Next &raquo;</a>{% endif %}
+        <a href="/packet_grid/{{ qset.id }}/" class="button small secondary">Packet Grid</a>
+    </div>
+</div>
+
+{% if not read_only %}
+<div class="panel radius doc-hint">
+    Click a question to edit it. Drag a question to change its position; numbering updates automatically.
+</div>
+{% endif %}
+
+<div class="doc-flex">
+<div class="doc-page">
+    <div class="doc-header">
+        <div class="doc-set-name">{{ qset.name }}</div>
+        <div class="doc-packet-name">{{ packet.packet_name }}</div>
+    </div>
+
+    {% if order == 'interleaved' %}
+        <div class="doc-list" id="doc-list-interleaved">
+            {% for q in interleaved %}
+            <div class="doc-question" id="q-{{ q.qtype }}-{{ q.id }}" data-qtype="{{ q.qtype }}" data-qid="{{ q.id }}" data-edit-url="{{ q.edit_url }}">
+                <span class="doc-qlabel">{% if q.qtype == 'tossup' %}Tossup{% else %}Bonus{% endif %} {{ q.number }}.{% if q.is_tiebreaker %} <span class="doc-tb">(Tiebreaker)</span>{% endif %}</span>
+                {% autoescape off %}{{ q.html }}{% endautoescape %}
+                {% include "view_packet_meta.html" %}
+            </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <h4 class="doc-section">Tossups</h4>
+        <div class="doc-list" id="doc-list-tossups">
+            {% for q in tossups %}
+            <div class="doc-question" id="q-tossup-{{ q.id }}" data-qtype="tossup" data-qid="{{ q.id }}" data-edit-url="{{ q.edit_url }}">
+                <span class="doc-qlabel">{{ q.number }}.{% if q.is_tiebreaker %} <span class="doc-tb">(Tiebreaker)</span>{% endif %}</span>
+                {% autoescape off %}{{ q.html }}{% endautoescape %}
+                {% include "view_packet_meta.html" %}
+            </div>
+            {% endfor %}
+        </div>
+
+        <h4 class="doc-section">Bonuses</h4>
+        <div class="doc-list" id="doc-list-bonuses">
+            {% for q in bonuses %}
+            <div class="doc-question" id="q-bonus-{{ q.id }}" data-qtype="bonus" data-qid="{{ q.id }}" data-edit-url="{{ q.edit_url }}">
+                <span class="doc-qlabel">{{ q.number }}.{% if q.is_tiebreaker %} <span class="doc-tb">(Tiebreaker)</span>{% endif %}</span>
+                {% autoescape off %}{{ q.html }}{% endautoescape %}
+                {% include "view_packet_meta.html" %}
+            </div>
+            {% endfor %}
+        </div>
+    {% endif %}
+</div>
+
+<div class="doc-gutter" id="doc-gutter">
+    {% for q in tossups %}{% include "view_packet_comment_card.html" %}{% endfor %}
+    {% for q in bonuses %}{% include "view_packet_comment_card.html" %}{% endfor %}
+</div>
+</div>
+
+<style>
+.doc-page {
+    background: #fff;
+    max-width: 850px;
+    margin: 0 auto 40px auto;
+    padding: 50px 60px;
+    box-shadow: 0 0 12px rgba(0,0,0,0.25);
+    border: 1px solid #ccc;
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: 15px;
+    line-height: 1.45;
+    color: #111;
+}
+.doc-header { text-align: center; margin-bottom: 30px; }
+.doc-set-name { font-size: 1.5em; font-weight: bold; }
+.doc-packet-name { font-size: 1.2em; margin-top: 4px; }
+.doc-section {
+    font-family: Georgia, 'Times New Roman', serif;
+    font-weight: bold;
+    border-bottom: 2px solid #333;
+    margin: 30px 0 15px 0;
+    padding-bottom: 4px;
+}
+.doc-question {
+    padding: 10px 12px;
+    margin-bottom: 6px;
+    border-radius: 3px;
+    border: 1px solid transparent;
+}
+.doc-question:hover { background-color: #f5f9ff; border-color: #cfe0f5; cursor: pointer; }
+.doc-qlabel { display: inline; font-weight: bold; margin-right: 4px; }
+.doc-category-line { color: #777; font-size: 0.85em; font-style: italic; margin-top: 4px; }
+.doc-tb { color: #b8860b; font-size: 0.9em; }
+.doc-question p { display: inline; margin-bottom: 0; font-size: inherit; }
+.doc-question .pronunciation-guide { color: #888; font-weight: normal; }
+.doc-meta { display: block; margin-top: 6px; }
+.doc-tag {
+    display: inline-block;
+    background: #eee;
+    color: #555;
+    border-radius: 3px;
+    padding: 1px 8px;
+    margin-right: 6px;
+    font-size: 0.72em;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+.doc-tag-edited { background: #dff0d8; color: #3c763d; }
+.doc-tag-unedited { background: #fcf8e3; color: #8a6d3b; }
+.doc-tag-overlength { background: #f2dede; color: #a94442; font-weight: bold; }
+.doc-question.ui-sortable-helper {
+    box-shadow: 0 3px 10px rgba(0,0,0,0.3);
+    background: #fff;
+    border-color: #008CBA;
+}
+.doc-placeholder {
+    border: 2px dashed #008CBA;
+    background: #eef7fb;
+    margin-bottom: 6px;
+    visibility: visible !important;
+    border-radius: 3px;
+}
+.doc-flex { display: flex; justify-content: center; align-items: flex-start; }
+.doc-flex .doc-page { flex: 0 1 850px; margin: 0 0 40px 0; min-width: 0; }
+.doc-gutter {
+    width: 300px;
+    flex-shrink: 0;
+    position: relative;
+    margin-left: 14px;
+    display: none;
+}
+.doc-gutter.open { display: block; }
+.doc-comment-card {
+    position: absolute;
+    left: 0;
+    width: 290px;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.15);
+    padding: 8px 10px;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-size: 12px;
+    cursor: pointer;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+.doc-comment-card.active, .doc-comment-card:hover {
+    border-color: #f4b400;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+}
+.doc-comment-target { font-weight: bold; color: #999; font-size: 11px; margin-bottom: 4px; text-transform: uppercase; }
+.doc-comment { border-top: 1px solid #f0f0f0; padding: 5px 0; }
+.doc-comment:first-of-type { border-top: none; }
+.doc-comment-author { font-weight: bold; color: #333; }
+.doc-comment-date { font-weight: normal; color: #999; font-size: 11px; margin-left: 4px; }
+a.doc-tag { cursor: pointer; }
+a.doc-tag:hover { background: #008CBA; color: #fff; }
+.doc-comment-text { color: #444; }
+.doc-comment-text p { display: block; margin: 0 0 4px 0; }
+.doc-question.doc-commented-highlight { background-color: #fef7e0; border-color: #f4b400; }
+</style>
+
+{{ discord_payload|json_script:"discord-payload" }}
+
+<script>
+$(function() {
+    var readOnly = {% if read_only %}true{% else %}false{% endif %};
+    var packetId = {{ packet.id }};
+    var suppressClick = false;
+
+    $('.doc-question').on('click', function(e) {
+        if (suppressClick) return;
+        window.location = $(this).data('edit-url');
+    });
+
+    // ---- Copy for Discord ----
+    var discordData = JSON.parse(document.getElementById('discord-payload').textContent);
+    $('.doc-copy-discord').on('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var q = discordData[$(this).data('key')];
+        if (!q || !window.QemsDiscord) return;
+        var plain = $(this).data('mode') === 'plain';
+        var text;
+        if (q.qtype === 'tossup') {
+            text = plain ? QemsDiscord.tossupPlain(q.text, q.answer, q.author, q.category)
+                         : QemsDiscord.tossup(q.text, q.answer, q.author, q.category);
+        } else {
+            text = plain ? QemsDiscord.bonusPlain(q.leadin, q.parts, q.author, q.category)
+                         : QemsDiscord.bonus(q.leadin, q.parts, q.author, q.category);
+        }
+        QemsDiscord.copy(text, $(this));
+    });
+
+    // ---- Google-Docs-style comment margin ----
+    function layoutComments() {
+        var $gutter = $('#doc-gutter');
+        if (!$gutter.hasClass('open')) return;
+        var gutterTop = $gutter.offset().top;
+        var cards = $('.doc-comment-card').map(function() {
+            var $target = $('#' + $(this).data('for'));
+            if (!$target.length) return null;
+            return { el: this, top: $target.offset().top - gutterTop };
+        }).get().sort(function(a, b) { return a.top - b.top; });
+        var lastBottom = 0;
+        $.each(cards, function(_, card) {
+            var top = Math.max(card.top, lastBottom);
+            $(card.el).css('top', top + 'px');
+            lastBottom = top + $(card.el).outerHeight() + 10;
+        });
+        $gutter.css('min-height', lastBottom + 'px');
+    }
+
+    $('#toggle-comments').on('click', function(e) {
+        e.preventDefault();
+        $('#doc-gutter').toggleClass('open');
+        $(this).toggleClass('secondary primary');
+        layoutComments();
+    });
+
+    // Open by default when the packet has comments
+    if ($('.doc-comment-card').length) {
+        $('#doc-gutter').addClass('open');
+        $('#toggle-comments').removeClass('secondary').addClass('primary');
+        layoutComments();
+        $(window).on('load', layoutComments);
+        setTimeout(layoutComments, 400);
+    }
+
+    $('.doc-comment-card').on('mouseenter', function() {
+        $('#' + $(this).data('for')).addClass('doc-commented-highlight');
+    }).on('mouseleave', function() {
+        $('#' + $(this).data('for')).removeClass('doc-commented-highlight');
+    }).on('click', function() {
+        window.location = $('#' + $(this).data('for')).data('edit-url');
+    });
+
+    $('.doc-question').on('mouseenter', function() {
+        $('.doc-comment-card[data-for="' + this.id + '"]').addClass('active');
+    }).on('mouseleave', function() {
+        $('.doc-comment-card[data-for="' + this.id + '"]').removeClass('active');
+    });
+
+    if (readOnly) return;
+
+    function saveOrder() {
+        var data = { packet_id: packetId };
+        var tossupIds = [], bonusIds = [];
+        $('.doc-question').each(function() {
+            if ($(this).data('qtype') === 'tossup') {
+                tossupIds.push($(this).data('qid'));
+            } else {
+                bonusIds.push($(this).data('qid'));
+            }
+        });
+        $.post('/reorder_packet_questions/', {
+            packet_id: packetId,
+            'tossup_ids[]': tossupIds,
+            'bonus_ids[]': bonusIds
+        }, function(response) {
+            var json = $.parseJSON(response);
+            if (json.success) {
+                location.reload();
+            } else {
+                alert(json.message);
+            }
+        });
+    }
+
+    $('.doc-list').sortable({
+        items: '.doc-question',
+        distance: 10,
+        placeholder: 'doc-placeholder',
+        forcePlaceholderSize: true,
+        start: function() { suppressClick = true; },
+        stop: function() { setTimeout(function() { suppressClick = false; }, 200); },
+        update: function() { saveOrder(); }
+    });
+});
+</script>
+
+{% endblock %}

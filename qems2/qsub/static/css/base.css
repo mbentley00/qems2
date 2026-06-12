@@ -13,6 +13,14 @@
     margin-bottom: 0.75em;
 }
 
+/* jQuery UI dialog above Foundation dropdowns */
+.ui-widget-overlay {
+    z-index: 10000 !important;
+}
+.ui-dialog {
+    z-index: 10001 !important;
+}
+
 /* Paste tossup dialog */
 #paste-tossup-dialog textarea {
     font-family: 'Courier New', Courier, monospace;

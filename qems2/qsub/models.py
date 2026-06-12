@@ -137,6 +137,7 @@ class QuestionSet (models.Model):
     host = models.CharField(max_length=200)
     address = models.TextField(max_length=200)
     owner = models.ForeignKey('Writer', on_delete=models.CASCADE, related_name='owner')
+    co_owners = models.ManyToManyField('Writer', related_name='co_owned_sets', blank=True)
     #public = models.BooleanField()
     num_packets = models.PositiveIntegerField()
     distribution = models.ForeignKey('Distribution', on_delete=models.CASCADE) # TODO: This needs to be deleted eventually
@@ -147,7 +148,21 @@ class QuestionSet (models.Model):
     max_vhsl_bonus_length = models.PositiveIntegerField(default=100)
     char_count_ignores_pronunciation_guides = models.BooleanField(default=True)
 
+    # Regular (non-tiebreaker) questions per packet, used by auto-packetization
+    tossups_per_packet = models.PositiveIntegerField(default=20)
+    bonuses_per_packet = models.PositiveIntegerField(default=20)
+
     class Admin: pass
+
+    def is_owner(self, writer):
+        """True if the writer is the primary owner or a co-owner of this set."""
+        if writer is None:
+            return False
+        return writer == self.owner or self.co_owners.filter(id=writer.id).exists()
+
+    def all_owners(self):
+        """The primary owner followed by any co-owners."""
+        return [self.owner] + list(self.co_owners.all())
 
     def __str__(self):
         return '{0!s}'.format(self.name)
@@ -449,6 +464,39 @@ class SetWideDistributionEntry(models.Model):
 
     def __str__(self):
         return '{0!s} - {1!s}'.format(self.dist_entry.category, self.dist_entry.subcategory)
+
+# Per-packet quota for a category path (e.g. "History" or "History - American")
+# used by auto-packetization.  Values are per-packet and may be fractional:
+# min/max of 1.5 tossups and 1.5 bonuses means each packet gets 3 questions
+# from the category, sometimes 2 tossups + 1 bonus, sometimes the reverse.
+class PacketizationEntry(models.Model):
+
+    question_set = models.ForeignKey(QuestionSet, on_delete=models.CASCADE)
+    path = models.CharField(max_length=500)
+    depth = models.PositiveIntegerField(default=0)
+    min_tossups = models.DecimalField(max_digits=5, decimal_places=1, null=True, blank=True)
+    max_tossups = models.DecimalField(max_digits=5, decimal_places=1, null=True, blank=True)
+    min_bonuses = models.DecimalField(max_digits=5, decimal_places=1, null=True, blank=True)
+    max_bonuses = models.DecimalField(max_digits=5, decimal_places=1, null=True, blank=True)
+
+    def __str__(self):
+        return '{0!s}: {1!s}'.format(self.question_set, self.path)
+
+# An editor-defined tag under a category path of a set, e.g. "Asian
+# Literature" under "Literature - World", with optional required tossup and
+# bonus counts that writers fulfill by tagging their questions.
+class CategoryTag(models.Model):
+
+    question_set = models.ForeignKey(QuestionSet, on_delete=models.CASCADE)
+    category_path = models.CharField(max_length=500)
+    name = models.CharField(max_length=200)
+    num_tossups = models.PositiveIntegerField(default=0)
+    num_bonuses = models.PositiveIntegerField(default=0)
+    tossups = models.ManyToManyField('Tossup', blank=True, related_name='category_tags')
+    bonuses = models.ManyToManyField('Bonus', blank=True, related_name='category_tags')
+
+    def __str__(self):
+        return '{0!s}: {1!s} ({2!s})'.format(self.question_set, self.name, self.category_path)
 
 class QuestionType(models.Model):
 
