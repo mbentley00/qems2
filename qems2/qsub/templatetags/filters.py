@@ -226,6 +226,11 @@ def bonus_history_html(bonus):
 
 @register.filter(name='tossup_last_comment_date')
 def tossup_last_comment_date(tossup):
+    # Views that batch-load comments (model_utils.attach_question_comments)
+    # leave them on the object; fall back to a query otherwise
+    cached = getattr(tossup, 'cached_comments', None)
+    if cached is not None:
+        return cached[-1].submit_date if cached else None
     tossup_content_type_id = ContentType.objects.get_for_model(Tossup).id
     comments = Comment.objects.filter(object_pk=tossup.id).filter(content_type_id=tossup_content_type_id).order_by('-id')
     if (len(comments) > 0):
@@ -235,6 +240,9 @@ def tossup_last_comment_date(tossup):
 
 @register.filter(name='bonus_last_comment_date')
 def bonus_last_comment_date(bonus):
+    cached = getattr(bonus, 'cached_comments', None)
+    if cached is not None:
+        return cached[-1].submit_date if cached else None
     bonus_content_type_id = ContentType.objects.get_for_model(Bonus).id
     comments = Comment.objects.filter(object_pk=bonus.id).filter(content_type_id=bonus_content_type_id).order_by('-id')
     if (len(comments) > 0):
@@ -261,6 +269,14 @@ def get_replies(replies_dict, comment_id):
     if isinstance(replies_dict, dict):
         return replies_dict.get(comment_id, [])
     return []
+
+
+@register.filter(name='get_anchor')
+def get_anchor(anchors_dict, comment_id):
+    """Get the CommentAnchor for a comment from the anchors dictionary."""
+    if isinstance(anchors_dict, dict):
+        return anchors_dict.get(comment_id)
+    return None
 
 
 @register.simple_tag
@@ -292,7 +308,9 @@ def get_threaded_comments(obj):
         else:
             top_level.append(comment)
 
-    return {'top_level': top_level, 'replies': replies}
+    anchors = {ca.comment_id: ca for ca in CommentAnchor.objects.filter(comment__in=all_comments)}
+
+    return {'top_level': top_level, 'replies': replies, 'anchors': anchors}
 
 
 #@register.filter(name='compare_categories'):

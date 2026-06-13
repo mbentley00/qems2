@@ -1,0 +1,32 @@
+# QEMS2 production image — Django 6 / Python 3.14 under Gunicorn.
+# Pinned to 3.14 because the app targets it and App Service's built-in
+# runtimes may not offer it; a container makes the runtime explicit.
+FROM python:3.14-slim-bookworm
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PORT=8000
+
+# psycopg2 needs libpq at runtime; build-essential + libpq-dev to compile the
+# wheel if a prebuilt one isn't available for 3.14.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --upgrade pip && pip install -r requirements.txt
+
+COPY . .
+
+# Static files are baked into the image (WhiteNoise serves them). Uses a
+# throwaway SECRET_KEY so collectstatic can run without real config.
+RUN SECRET_KEY=build-time-only DJANGO_SETTINGS_MODULE=qems2.settings \
+    python manage.py collectstatic --noinput
+
+EXPOSE 8000
+
+# Apply migrations at startup, then serve. App Service injects $PORT.
+CMD ["sh", "-c", "python manage.py migrate --noinput && gunicorn qems2.wsgi:application --bind 0.0.0.0:${PORT} --workers 3 --timeout 120"]

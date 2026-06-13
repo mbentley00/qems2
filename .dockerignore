@@ -1,0 +1,27 @@
+# Keep the build context small and free of local-only / secret files
+.git
+.gitignore
+.vscode
+.idea
+.claude
+
+# Local database and search index — production uses Postgres + a real index
+db.sqlite3
+whoosh_index/
+
+# Secrets — provided via environment variables in production
+secret
+cookies.txt
+cookies_test.txt
+
+# Python caches and virtualenvs
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# OS noise
+.DS_Store
+nul

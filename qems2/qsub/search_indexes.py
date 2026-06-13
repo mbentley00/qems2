@@ -1,6 +1,5 @@
 __author__ = 'jerry'
 
-import datetime
 from haystack import indexes
 from qems2.qsub.models import Tossup, Bonus
 
@@ -17,7 +16,7 @@ class TossupIndex(indexes.SearchIndex, indexes.Indexable):
         return Tossup
 
     def index_queryset(self, using=None):
-        return self.get_model().objects.filter(pub_date__lte=datetime.datetime.now())
+        return self.get_model().objects.all()
 
 
 class BonusIndex(indexes.SearchIndex, indexes.Indexable):
@@ -32,4 +31,4 @@ class BonusIndex(indexes.SearchIndex, indexes.Indexable):
         return Bonus
 
     def index_queryset(self, using=None):
-        return self.get_model().objects.filter(pub_date__lte=datetime.datetime.now())
+        return self.get_model().objects.all()

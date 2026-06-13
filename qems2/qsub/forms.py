@@ -159,6 +159,12 @@ class TossupForm(forms.ModelForm):
                 self.fields['packet'] = forms.ModelChoiceField(queryset=packets, required=False, empty_label=pack_label)
                 self.fields['period'] = forms.ModelChoiceField(queryset=periods, required=False, empty_label=period_label)
 
+                # New questions in a packetized set default to the Extras packet
+                if packet_id is None and not (self.instance and self.instance.pk):
+                    extras = packets.filter(packet_name=EXTRAS_PACKET_NAME).first()
+                    if extras:
+                        self.fields['packet'].initial = extras.pk
+
             except QuestionSet.DoesNotExist:
                 print('Non-existent question set!')
                 self.fields['category'] = forms.ModelChoiceField(queryset=DistributionEntry.objects.none(), empty_label=None)
@@ -243,6 +249,12 @@ class BonusForm(forms.ModelForm):
                 self.fields['category'] = forms.ModelChoiceField(queryset=dist_entries, empty_label=None)
                 self.fields['packet'] = forms.ModelChoiceField(queryset=packets, required=False, empty_label=pack_label)
                 self.fields['period'] = forms.ModelChoiceField(queryset=periods, required=False, empty_label=period_label)
+
+                # New questions in a packetized set default to the Extras packet
+                if packet_id is None and not (self.instance and self.instance.pk):
+                    extras = packets.filter(packet_name=EXTRAS_PACKET_NAME).first()
+                    if extras:
+                        self.fields['packet'].initial = extras.pk
 
             except QuestionSet.DoesNotExist:
                 print('Non-existent question set!')
@@ -336,6 +348,11 @@ class PacketForm(forms.Form):
 class QuestionUploadForm(forms.Form):
 
     questions_file = forms.FileField()
+
+class ImportSetForm(forms.Form):
+
+    set_name = forms.CharField(max_length=200, label='New set name')
+    set_file = forms.FileField(label='TSV or CSV file (in export format)')
 
 class NewPacketsForm(forms.Form):
 

@@ -20,6 +20,7 @@ urlpatterns = [
     re_path(r'^profile/$', profile),
 
     re_path(r'^question_sets/$', question_sets),
+    re_path(r'^import_set/$', import_set),
     re_path(r'^create_question_set/$', create_question_set),
     re_path(r'^edit_question_set/(?P<qset_id>[0-9]+)/$', edit_question_set),
     re_path(r'^packetize_set/(?P<qset_id>[0-9]+)/$', packetize_set),
@@ -65,6 +66,7 @@ urlpatterns = [
     re_path(r'^delete_set/$', delete_set),
     re_path(r'^delete_comment/$', delete_comment),
     re_path(r'^reply_to_comment/$', reply_to_comment),
+    re_path(r'^add_anchored_comment/$', add_anchored_comment),
     re_path(r'^delete_all_comments/$', delete_all_comments),
     re_path(r'^restore_tossup/$', restore_tossup),
     re_path(r'^restore_bonus/$', restore_bonus),

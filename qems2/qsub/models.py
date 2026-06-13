@@ -1130,3 +1130,17 @@ class CommentReply(models.Model):
         related_name='replies'
     )
 
+
+class CommentAnchor(models.Model):
+    """Anchors a comment to a selected span of the rendered question text,
+    like a Google Docs comment. Prefix/suffix store surrounding context so
+    the span can be re-located (or detected as stale) after edits."""
+    comment = models.OneToOneField(
+        'django_comments.Comment',
+        on_delete=models.CASCADE,
+        related_name='anchor_info'
+    )
+    selected_text = models.TextField()
+    prefix = models.CharField(max_length=100, blank=True, default='')
+    suffix = models.CharField(max_length=100, blank=True, default='')
+

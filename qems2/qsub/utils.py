@@ -38,6 +38,10 @@ ACF_STYLE_TOSSUP = 'ACF-style tossup'
 ACF_STYLE_BONUS = 'ACF-style bonus'
 VHSL_BONUS = 'VHSL bonus'
 
+# Overflow packet: holds questions that don't fit the regular packets during
+# packetization, and is the default packet for new questions in a packetized set
+EXTRAS_PACKET_NAME = 'Extras'
+
 # Constants for edit types
 QUESTION_CREATE = 'Question Create'
 QUESTION_CHANGE = 'Question Change'

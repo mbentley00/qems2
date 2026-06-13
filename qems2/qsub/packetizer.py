@@ -412,16 +412,6 @@ def _deal_questions(questions, qtype, targets, per_packet_limit, quotas, rnd):
             candidates[0].take(question, parts, qtype)
     return leftovers
 
-def _deal_tiebreakers(leftovers, qtype, targets, rnd):
-    """Tiebreakers are exempt from quota caps; spread them evenly."""
-    rnd.shuffle(leftovers)
-    for question, parts in leftovers:
-        order = sorted(targets,
-                       key=lambda t: (len(t.tb_tossups if qtype == 'tu' else t.tb_bonuses),
-                                      len(t.regular(qtype)), rnd.random()))
-        target = order[0]
-        (target.tb_tossups if qtype == 'tu' else target.tb_bonuses).append((question, parts))
-
 def _top_of(item):
     parts = item[1]
     return parts[0] if parts else ''
@@ -516,10 +506,19 @@ def build_quota_dict(qset):
         }
     return quotas
 
+# EXTRAS_PACKET_NAME comes from utils
+def get_or_create_extras_packet(qset, created_by):
+    packet = Packet.objects.filter(question_set=qset, packet_name=EXTRAS_PACKET_NAME).first()
+    if packet is None:
+        packet = Packet.objects.create(question_set=qset, packet_name=EXTRAS_PACKET_NAME,
+                                       created_by=created_by)
+    return packet
+
 def _ensure_packets(qset, num_packets, created_by):
     """Use the set's existing packets (sorted by name) and create more if
     needed to reach num_packets."""
-    packets = list(Packet.objects.filter(question_set=qset).order_by('packet_name'))
+    packets = list(Packet.objects.filter(question_set=qset)
+                   .exclude(packet_name=EXTRAS_PACKET_NAME).order_by('packet_name'))
     if len(packets) >= num_packets:
         return packets[:num_packets]
 
@@ -580,13 +579,28 @@ def auto_packetize(qset, num_packets, tossups_per_packet, bonuses_per_packet,
         else:
             still_bs.append((question, parts))
 
-    _deal_tiebreakers(still_tu, 'tu', targets, rnd)
-    _deal_tiebreakers(still_bs, 'bs', targets, rnd)
+    # Questions that don't fit anywhere go to the Extras packet, which is
+    # also where new questions land by default once a set is packetized.
+    # Always created so the default exists even when nothing overflows.
+    extras_packet = get_or_create_extras_packet(qset, created_by)
+    extras_target = PacketTarget(extras_packet, len(targets))
+    for question, parts in still_tu:
+        extras_target.take(question, parts, 'tu')
+    for question, parts in still_bs:
+        extras_target.take(question, parts, 'bs')
+    targets.append(extras_target)
+    if still_tu or still_bs:
+        report_overflow = '{0} tossup(s) and {1} bonus(es) did not fit and were placed in the {2} packet'.format(
+            len(still_tu), len(still_bs), EXTRAS_PACKET_NAME)
+    else:
+        report_overflow = None
 
     # Order each packet and persist.  bulk_update skips per-question save
     # signals (search indexes don't cover packet/number), which matters when
     # rewriting several hundred questions.
     report = {'packets': [], 'warnings': []}
+    if report_overflow:
+        report['warnings'].append(report_overflow)
     changed_tossups = []
     changed_bonuses = []
     for target in targets:

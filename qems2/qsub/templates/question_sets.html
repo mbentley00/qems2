@@ -13,6 +13,9 @@
 <ul class="button-group even">
     <li><a href="/create_question_set/" class="button">Create Question Set</a></li>
     <li><a href="/distributions/" class="button">Distribution Entry</a></li>
+    {% if request.user.is_superuser %}
+    <li><a href="/import_set/" class="button">Import Set from TSV</a></li>
+    {% endif %}
 </ul>
 
 <ul class="accordion" data-accordion>

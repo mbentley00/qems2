@@ -30,7 +30,9 @@
 {% if tossup %}
     {% autoescape off %}
         <div class="panel question radius">
+            <div class="anchor-region" data-question-type="tossup" data-question-id="{{ tossup.id }}">
             {{ tossup|tossup_html_verbose }}
+            </div>
             <p><strong>Written by:</strong> {{ tossup.author }} on {{ tossup.created_date }}</p>
             {% if tossup.edited %}
                 <p><strong>Edited by:</strong> {{ tossup.editor }} on {{ tossup.edited_date }}</p>
@@ -151,7 +153,9 @@
         {% autoescape off %}
             {% get_threaded_comments tossup as thread_data %}
             {% for comment in thread_data.top_level %}
-                <div class="comment-item" data-comment-id="{{ comment.id }}">
+                {% with anchor=thread_data.anchors|get_anchor:comment.id %}
+                <div class="comment-item" data-comment-id="{{ comment.id }}"{% if anchor %} data-anchor-text="{{ anchor.selected_text|force_escape }}" data-anchor-prefix="{{ anchor.prefix|force_escape }}" data-anchor-suffix="{{ anchor.suffix|force_escape }}"{% endif %}>
+                    {% if anchor %}<div class="comment-quote" title="Click to locate in question">{{ anchor.selected_text|force_escape }}</div>{% endif %}
                     <strong>{{ comment.user }}:</strong> {{ comment.comment|safe|comment_html|linebreaks }} ({{ comment.submit_date }})
                     <div class="comment-actions">
                         {% if role == "editor" %}
@@ -178,6 +182,7 @@
                         {% endfor %}
                     </div>
                 </div>
+                {% endwith %}
             {% endfor %}
             {% if role == "editor" %}
                 <a href="/delete_all_comments/{{ tossup.id }}" class="delete_all_comments" value="{{ tossup.id }}" qset="{{ qset.id }}" question-type="tossup">Delete All Comments</a><br /><br />
@@ -205,5 +210,7 @@
 <p>Do not include the word ANSWER: in answer lines.</p>
 
 {% include "dialog.html" %}
+
+<script src="{% static 'js/anchored_comments.js' %}?v=2"></script>
 
 {% endblock %}

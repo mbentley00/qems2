@@ -20,12 +20,60 @@ $(function () {
      */
     function htmlToQemsMarkup(html) {
         var doc = new DOMParser().parseFromString(html, 'text/html');
-        return walkNode(doc.body);
+        mergeNestedFormatting(doc.body);
+        // Inter-paragraph whitespace in the source HTML otherwise leaves
+        // stray spaces at line edges
+        return walkNode(doc.body)
+            .replace(/[ \t]+\n/g, '\n')
+            .replace(/\n[ \t]+/g, '\n');
+    }
+
+    /**
+     * Collapse <b><u>text</u></b> / <u><b>text</b></u> pairs into a single
+     * element carrying both styles, so walkNode sees bold+underline together
+     * and emits _text_ rather than underline-only __text__. (Google Docs puts
+     * both styles on one span, but Word and execCommand nest the tags.)
+     */
+    function mergeNestedFormatting(root) {
+        var pairs = root.querySelectorAll('b > u, strong > u, u > b, u > strong');
+        Array.prototype.forEach.call(pairs, function (inner) {
+            var outer = inner.parentNode;
+            // Only merge when the inner tag is the outer tag's sole content
+            for (var n = outer.firstChild; n; n = n.nextSibling) {
+                if (n === inner) continue;
+                if (n.nodeType === Node.TEXT_NODE && !n.textContent.trim()) continue;
+                return;
+            }
+            var span = outer.ownerDocument.createElement('span');
+            span.setAttribute('style', 'font-weight:bold;text-decoration:underline');
+            while (inner.firstChild) {
+                span.appendChild(inner.firstChild);
+            }
+            outer.parentNode.replaceChild(span, outer);
+        });
+    }
+
+    /**
+     * Wrap text in a QEMS markup marker. Markup is line-scoped, so when the
+     * content spans line breaks (Word's clipboard HTML can nest paragraph
+     * breaks inside formatting tags) each line is wrapped separately —
+     * otherwise the pair splits across lines and parses as stray markers.
+     * Leading/trailing whitespace stays outside the markers.
+     */
+    function wrapInlineMarkup(text, marker) {
+        return text.split('\n').map(function (segment) {
+            var m = segment.match(/^(\s*)([\s\S]*?)(\s*)$/);
+            if (!m[2]) { return segment; }
+            return m[1] + marker + m[2] + marker + m[3];
+        }).join('\n');
     }
 
     function walkNode(node) {
         if (node.nodeType === Node.TEXT_NODE) {
-            return node.textContent;
+            // Newlines/tabs inside text nodes are source formatting (Word
+            // pretty-prints its clipboard HTML with hard wraps mid-paragraph);
+            // real line breaks only come from block elements and <br>
+            return node.textContent.replace(/[\r\n\t]+/g, ' ');
         }
         if (node.nodeType !== Node.ELEMENT_NODE) {
             return '';
@@ -39,6 +87,13 @@ $(function () {
 
         // Determine formatting from tag name and inline styles
         var tag = node.tagName.toLowerCase();
+
+        // Empty formatting stubs (left behind by contenteditable edits)
+        // would otherwise emit stray markup like '____'
+        if (!inner && !/^(p|div|br|li|tr|h[1-6])$/.test(tag)) {
+            return '';
+        }
+
         var style = (node.getAttribute('style') || '').toLowerCase();
         var isBold = (tag === 'b' || tag === 'strong' ||
                       style.indexOf('font-weight') !== -1 &&
@@ -54,20 +109,20 @@ $(function () {
 
         // Apply QEMS markup wrappers
         if (isBold && isUnderline) {
-            inner = '_' + inner + '_';
+            inner = wrapInlineMarkup(inner, '_');
         } else if (isUnderline) {
-            inner = '__' + inner + '__';
+            inner = wrapInlineMarkup(inner, '__');
         } else if (isBold) {
             // Bold alone has no QEMS markup — pass through
         }
         if (isItalic) {
-            inner = '~' + inner + '~';
+            inner = wrapInlineMarkup(inner, '~');
         }
         if (isSup) {
-            inner = '\\S' + inner + '\\S';
+            inner = wrapInlineMarkup(inner, '\\S');
         }
         if (isSub) {
-            inner = '\\s' + inner + '\\s';
+            inner = wrapInlineMarkup(inner, '\\s');
         }
 
         // Block-level elements get a newline after them
@@ -82,11 +137,27 @@ $(function () {
                 } else {
                     inner = inner + '\n';
                 }
+                // A block directly after inline content also breaks the line
+                // before it (contenteditable leaves the first line bare:
+                // "first<div>second</div>")
+                var prev = node.previousSibling;
+                var prevIsBreak = prev && prev.nodeType === Node.ELEMENT_NODE &&
+                    /^(p|div|br|li|tr|h[1-6])$/i.test(prev.tagName);
+                var prevHasContent = prev && (prev.nodeType !== Node.TEXT_NODE || prev.textContent.trim());
+                if (prev && !prevIsBreak && prevHasContent) {
+                    inner = '\n' + inner;
+                }
             }
         }
 
         return inner;
     }
+
+    // Expose the converter for other scripts (e.g. rich_editor.js)
+    window.QemsMarkup = {
+        htmlToQems: htmlToQemsMarkup,
+        isRichHtml: function (html) { return isRichHtml(html); }
+    };
 
     /**
      * Detect whether clipboard HTML looks like it came from a rich-text

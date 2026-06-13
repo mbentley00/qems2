@@ -6,6 +6,26 @@ TEMPLATE_DEBUG = DEBUG
 
 ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', '*').split(',')
 
+# Origins trusted for unsafe (POST) requests over HTTPS. Required by Django
+# when the site is served from a real domain behind a TLS-terminating proxy
+# (e.g. Azure App Service). Comma-separated, each must include the scheme:
+# CSRF_TRUSTED_ORIGINS="https://qems2.example.com,https://qems2.azurewebsites.net"
+CSRF_TRUSTED_ORIGINS = [o for o in os.environ.get('CSRF_TRUSTED_ORIGINS', '').split(',') if o]
+
+# App Service (and most PaaS proxies) terminate TLS and forward the original
+# scheme in this header, so Django can tell the request was really HTTPS.
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+# Production hardening: on by default whenever DEBUG is off, individually
+# overridable. Safe locally because DEBUG defaults True (so all default off)
+# and runserver never sends the forwarded-proto header.
+def _env_bool(name, default):
+    return os.environ.get(name, str(default)).lower() in ('1', 'true', 'yes', 'on')
+
+SECURE_SSL_REDIRECT = _env_bool('SECURE_SSL_REDIRECT', not DEBUG)
+SESSION_COOKIE_SECURE = _env_bool('SESSION_COOKIE_SECURE', not DEBUG)
+CSRF_COOKIE_SECURE = _env_bool('CSRF_COOKIE_SECURE', not DEBUG)
+
 ADMINS = (
     # ('Your Name', 'your_email@example.com'),
 )
@@ -106,7 +126,10 @@ STATICFILES_FINDERS = (
 )
 
 BOWER_COMPONENTS_ROOT = os.path.join(PROJECT_ROOT, 'components')
-BOWER_PATH = os.path.normpath(r'C:\Program Files (x86)\Nodist\bin\bower.cmd')
+# Only used by the (Django-6-incompatible) bower management command; static
+# collection reads BOWER_COMPONENTS_ROOT directly. Overridable so the default
+# isn't a Windows-only path in a Linux container.
+BOWER_PATH = os.environ.get('BOWER_PATH', os.path.normpath(r'C:\Program Files (x86)\Nodist\bin\bower.cmd'))
 
 SECRET_KEY = os.environ.get('SECRET_KEY')
 if not SECRET_KEY:
@@ -190,16 +213,17 @@ ACCOUNT_SIGNUP_FORM_CLASS = 'qems2.qsub.forms.RegistrationFormWithName'
 
 LOGIN_REDIRECT_URL = "/"
 
-EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
-EMAIL_USE_TLS = True
-DEFAULT_FROM_EMAIL = 'qems2@outlook.com'
-SERVER_EMAIL = 'smtp-mail.outlook.com'
-EMAIL_HOST = 'smtp-mail.outlook.com'
-EMAIL_PORT = 587
-EMAIL_HOST_USER = 'qems2@outlook.com'
-EMAIL_HOST_PASSWORD = ''
-# You'll need to allow access for less secure apps to test.
-# https://www.google.com/settings/security/lesssecureapps
+# Email: defaults to the console backend (local dev prints mail to stdout).
+# In production set EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
+# and supply the host/credentials via environment variables.
+EMAIL_BACKEND = os.environ.get('EMAIL_BACKEND', 'django.core.mail.backends.console.EmailBackend')
+EMAIL_USE_TLS = _env_bool('EMAIL_USE_TLS', True)
+DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'qems2@outlook.com')
+SERVER_EMAIL = os.environ.get('SERVER_EMAIL', 'smtp-mail.outlook.com')
+EMAIL_HOST = os.environ.get('EMAIL_HOST', 'smtp-mail.outlook.com')
+EMAIL_PORT = int(os.environ.get('EMAIL_PORT', '587'))
+EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', 'qems2@outlook.com')
+EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
 
 # A sample logging configuration. The only tangible logging
 # performed by this configuration is to send an email to
@@ -250,7 +274,9 @@ BOWER_INSTALLED_APPS = (
 HAYSTACK_CONNECTIONS = {
     'default': {
         'ENGINE': 'haystack.backends.whoosh_backend.WhooshEngine',
-        'PATH': os.path.join(os.path.dirname(__file__), 'whoosh_index')
+        # Override to a persistent-volume path in production (the Whoosh index
+        # is on-disk and single-writer; see hosting notes).
+        'PATH': os.environ.get('WHOOSH_INDEX_PATH', os.path.join(os.path.dirname(__file__), 'whoosh_index')),
     },
 }
 

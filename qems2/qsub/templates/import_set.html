@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% block title %}Import Set - QEMS2{% endblock %}
+
+{% block content %}
+
+<h3 class="page-header">Import a Question Set</h3>
+
+{% if message %}
+    <div class="{{ message_class }}">
+        {{ message }}
+        {% if summary.question_set %}
+            <a href="/edit_question_set/{{ summary.question_set.id }}/">Open the new set.</a>
+        {% endif %}
+    </div>
+{% endif %}
+
+<p>Upload a <strong>.tsv</strong> or <strong>.csv</strong> file in the format produced by
+a set's <em>Export</em> action. A new set is created with all tossups, bonuses, comments
+(including threaded replies), and the category distribution, and the questions are added to
+the search index. Unknown commenters become inactive placeholder accounts so attribution is
+preserved.</p>
+
+<form action="" method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+    <div class="row">
+        <div class="small-8 columns">
+            <label>New set name
+                {{ form.set_name }}
+            </label>
+            {% if form.set_name.errors %}{{ form.set_name.errors }}{% endif %}
+            <label>TSV or CSV file
+                {{ form.set_file }}
+            </label>
+            {% if form.set_file.errors %}{{ form.set_file.errors }}{% endif %}
+        </div>
+    </div>
+    <input type="submit" value="Import Set" class="button primary right" />
+</form>
+
+{% if summary and summary.errors %}
+    <div class="panel">
+        <strong>Rows skipped during import ({{ summary.errors|length }}):</strong>
+        <ul>
+        {% for err in summary.errors %}
+            <li>{{ err }}</li>
+        {% endfor %}
+        </ul>
+    </div>
+{% endif %}
+
+{% endblock %}

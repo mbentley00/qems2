@@ -1022,14 +1022,20 @@ class AutoPacketizeTests(TestCase):
 
     def _packetize(self, seed=42):
         report = auto_packetize(self.qset, 4, 6, 6, self._quotas(), created_by=self.writer, seed=seed)
-        packets = list(Packet.objects.filter(question_set=self.qset).order_by('packet_name'))
+        packets = list(Packet.objects.filter(question_set=self.qset)
+                       .exclude(packet_name=EXTRAS_PACKET_NAME).order_by('packet_name'))
         return report, packets
+
+    def _extras_packet(self):
+        return Packet.objects.get(question_set=self.qset, packet_name=EXTRAS_PACKET_NAME)
 
     def test_auto_packetize_basic_structure(self):
         self._create_questions()
         report, packets = self._packetize()
 
         self.assertEqual(len(packets), 4)
+        self.assertTrue(Packet.objects.filter(
+            question_set=self.qset, packet_name=EXTRAS_PACKET_NAME).exists())
         for packet in packets:
             regular_tossups = Tossup.objects.filter(packet=packet, question_number__lte=6)
             regular_bonuses = Bonus.objects.filter(packet=packet, question_number__lte=6)
@@ -1080,18 +1086,38 @@ class AutoPacketizeTests(TestCase):
                                        category=self.entries[('History', 'European')])
             self.assertEqual(he.count(), 1)
 
-    def test_auto_packetize_tiebreakers(self):
+    def test_auto_packetize_overflow_to_extras(self):
         self._create_questions()
         report, packets = self._packetize()
 
-        tiebreakers = Tossup.objects.filter(question_set=self.qset, question_number__gt=6)
-        self.assertEqual(tiebreakers.count(), 2)
-        for tb in tiebreakers:
-            self.assertEqual(tb.question_number, 7)
-            # Tiebreakers are exempt from caps: this packet now has 3 History tossups
-            self.assertEqual(tb.category.category, 'History')
-        # Spread across different packets
-        self.assertEqual(len(set(tb.packet_id for tb in tiebreakers)), 2)
+        # The two questions exceeding every cap land in the Extras packet
+        extras = self._extras_packet()
+        overflow = Tossup.objects.filter(packet=extras)
+        self.assertEqual(overflow.count(), 2)
+        self.assertEqual(sorted(t.question_number for t in overflow), [1, 2])
+        for tossup in overflow:
+            self.assertEqual(tossup.category.category, 'History')
+        # Regular packets hold exactly their per-packet limit, nothing extra
+        for packet in packets:
+            self.assertEqual(Tossup.objects.filter(packet=packet, question_number__gt=6).count(), 0)
+        # And the report calls it out
+        self.assertTrue(any(EXTRAS_PACKET_NAME in w for w in report['warnings']), report['warnings'])
+
+    def test_auto_packetize_extras_packet_always_exists(self):
+        # Even with no overflow, the Extras packet is created (it's the
+        # default packet for new questions) and stays out of the rotation
+        self._create_questions()
+        Tossup.objects.filter(tossup_text__contains='extra').delete()
+        report, packets = self._packetize()
+
+        extras = self._extras_packet()
+        self.assertEqual(Tossup.objects.filter(packet=extras).count(), 0)
+        self.assertEqual(len(packets), 4)
+        # Re-running doesn't duplicate it or pull it into the rotation
+        report, packets = self._packetize(seed=7)
+        self.assertEqual(Packet.objects.filter(
+            question_set=self.qset, packet_name=EXTRAS_PACKET_NAME).count(), 1)
+        self.assertEqual(len(packets), 4)
 
     def test_auto_packetize_ordering(self):
         self._create_questions()
@@ -1102,11 +1128,13 @@ class AutoPacketizeTests(TestCase):
             cats = [t.category.category for t in tossups]
             adjacencies = sum(1 for i in range(len(cats) - 1) if cats[i] == cats[i + 1])
             self.assertEqual(adjacencies, 0, msg='Packet {0}: {1}'.format(packet.packet_name, cats))
-            # History has 2 per packet: quarter balance means they can't both
-            # be in the first three slots and can't both be in the last three
+            # History has 2 per packet: no adjacency means at least one
+            # question apart.  (Half-balance is not guaranteed: the quarter
+            # deal places a 2-question category in consecutive quarters,
+            # which can be the same half.)
             history_positions = [i for i, c in enumerate(cats) if c == 'History']
-            self.assertFalse(all(p < 3 for p in history_positions), msg=str(cats))
-            self.assertFalse(all(p >= 3 for p in history_positions), msg=str(cats))
+            self.assertEqual(len(history_positions), 2, msg=str(cats))
+            self.assertGreaterEqual(history_positions[1] - history_positions[0], 2, msg=str(cats))
 
     def test_auto_packetize_overwrites_existing_assignments(self):
         self._create_questions()
@@ -1144,3 +1172,96 @@ class AutoPacketizeTests(TestCase):
         packets = _ensure_packets(self.qset, 4, self.writer)
         self.assertEqual([p.packet_name for p in packets],
                          ['Round 01', 'Round 02', 'Round 03', 'Round 04'])
+
+
+class CrossSetAuthorizationTests(TestCase):
+    """A member of one set must not be able to inject into, or manipulate the
+    questions of, a set they do not belong to."""
+
+    def setUp(self):
+        self.attacker_user = User.objects.create_user('attacker', password='pw', email='atk@test.com')
+        self.victim_user = User.objects.create_user('victim', password='pw', email='vic@test.com')
+        self.attacker = Writer.objects.get(user=self.attacker_user)
+        self.victim = Writer.objects.get(user=self.victim_user)
+
+        self.dist = Distribution.objects.create(name='authz dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='History', subcategory='European')
+
+        self.victim_set = self._make_set('Victim Set', self.victim)
+        self.attacker_set = self._make_set('Attacker Set', self.attacker)
+
+        self.v_tossup = self._add_tossup(self.victim, self.victim_set, 'secret victim tossup')
+        self.v_bonus = self._add_bonus(self.victim, self.victim_set)
+        self.atk_packet = Packet.objects.create(
+            question_set=self.attacker_set, packet_name='Atk P1', created_by=self.attacker)
+
+        self.client.login(username='attacker', password='pw')
+
+    def _make_set(self, name, owner):
+        return QuestionSet.objects.create(
+            name=name, date=timezone.now(), host='h', address='', owner=owner,
+            num_packets=1, distribution=self.dist, tossups_per_packet=1, bonuses_per_packet=1)
+
+    def _add_tossup(self, author, qset, text):
+        return Tossup.objects.create(
+            author=author, question_set=qset, tossup_text=text, tossup_answer='_secret_',
+            category=self.de, created_date=datetime.now(), last_changed_date=datetime.now(),
+            question_number=1)
+
+    def _add_bonus(self, author, qset):
+        return Bonus.objects.create(
+            author=author, question_set=qset, leadin='secret', part1_text='p1', part1_answer='_a1_',
+            part2_text='p2', part2_answer='_a2_', part3_text='p3', part3_answer='_a3_',
+            category=self.de, created_date=datetime.now(), last_changed_date=datetime.now(),
+            question_number=1)
+
+    def test_complete_upload_rejects_non_member(self):
+        before = Tossup.objects.filter(question_set=self.victim_set).count()
+        self.client.post('/complete_upload/', {
+            'qset-id': self.victim_set.id, 'num-tossups': 1, 'num-bonuses': 0,
+            'tossup-text-0': 'INJECTED', 'tossup-answer-0': '_x_',
+            'tossup-category-0': 'History - European', 'tossup-type-0': 'ACF-style tossup'})
+        self.assertEqual(Tossup.objects.filter(question_set=self.victim_set).count(), before)
+        self.assertFalse(Tossup.objects.filter(
+            question_set=self.victim_set, tossup_text__contains='INJECTED').exists())
+
+    def test_assign_tossups_ignores_foreign_question(self):
+        self.client.post('/assign_tossups_to_packet/', {
+            'packet_id': self.atk_packet.id, 'tossup_ids[]': [str(self.v_tossup.id)]})
+        self.v_tossup.refresh_from_db()
+        self.assertNotEqual(self.v_tossup.packet_id, self.atk_packet.id)
+
+    def test_assign_bonuses_ignores_foreign_question(self):
+        self.client.post('/assign_bonuses_to_packet/', {
+            'packet_id': self.atk_packet.id, 'bonus_ids[]': [str(self.v_bonus.id)]})
+        self.v_bonus.refresh_from_db()
+        self.assertNotEqual(self.v_bonus.packet_id, self.atk_packet.id)
+
+    def test_bulk_change_author_ignores_foreign_question(self):
+        self.client.post('/bulk_change_set/{0}/'.format(self.attacker_set.id), {
+            'confirm': '1', 'change-type': 'author-step2', 'new-author': self.attacker.id,
+            'num-tossups': 1, 'num-bonuses': 0, 'tossup-id-0': str(self.v_tossup.id)})
+        self.v_tossup.refresh_from_db()
+        self.assertEqual(self.v_tossup.author_id, self.victim.id)
+
+    def test_bulk_move_ignores_foreign_question(self):
+        self.client.post('/bulk_change_set/{0}/'.format(self.attacker_set.id), {
+            'confirm': '1', 'change-type': 'move-step2', 'new-set': self.attacker_set.id,
+            'num-tossups': 1, 'num-bonuses': 0, 'tossup-id-0': str(self.v_tossup.id)})
+        self.v_tossup.refresh_from_db()
+        self.assertEqual(self.v_tossup.question_set_id, self.victim_set.id)
+
+    def test_change_question_order_ignores_foreign_question(self):
+        self.client.post('/change_question_order/', {
+            'packet_id': self.atk_packet.id, 'num_questions': 1, 'question_type': 'tossup',
+            'order_data[0][id]': str(self.v_tossup.id), 'order_data[0][order]': 99})
+        self.v_tossup.refresh_from_db()
+        self.assertEqual(self.v_tossup.question_number, 1)
+
+    def test_legitimate_assign_still_works(self):
+        own = self._add_tossup(self.attacker, self.attacker_set, 'own tossup')
+        self.client.post('/assign_tossups_to_packet/', {
+            'packet_id': self.atk_packet.id, 'tossup_ids[]': [str(own.id)]})
+        own.refresh_from_db()
+        self.assertEqual(own.packet_id, self.atk_packet.id)

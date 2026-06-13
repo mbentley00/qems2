@@ -97,8 +97,49 @@ def question_sets (request):
     print(all_sets)
     return render(request, 'question_sets.html', {'question_set_list': all_sets, 'user': writer})
 
+@login_required
+def import_set(request):
+    """Admin-only: create a new question set from an uploaded TSV/CSV in the
+    export format, including comments, and index it for search."""
+    user = request.user.writer
+
+    if not request.user.is_superuser:
+        messages.error(request, 'Only the admin account may import sets.')
+        return HttpResponseRedirect('/failure.html/')
+
+    message = ''
+    message_class = ''
+    summary = None
+
+    if request.method == 'POST':
+        form = ImportSetForm(request.POST, request.FILES)
+        if form.is_valid():
+            from .set_importer import import_set_from_file, SetImportError
+            try:
+                summary = import_set_from_file(
+                    form.cleaned_data['set_file'], form.cleaned_data['set_name'], user)
+                qset = summary['question_set']
+                message = ('Imported "{0}": {1} tossups, {2} bonuses, {3} comments.'
+                           .format(qset.name, summary['tossups'], summary['bonuses'],
+                                   summary['comments']))
+                if summary.get('users_created'):
+                    message += ' Created {0} placeholder commenter account(s).'.format(summary['users_created'])
+                message_class = 'alert-box success'
+            except SetImportError as ex:
+                message = str(ex)
+                message_class = 'alert-box alert'
+            except Exception as ex:
+                message = 'Import failed: {0}'.format(ex)
+                message_class = 'alert-box alert'
+    else:
+        form = ImportSetForm()
+
+    return render(request, 'import_set.html',
+                  {'form': form, 'user': user, 'summary': summary,
+                   'message': message, 'message_class': message_class})
+
 def packet(request):
-    if request.user.is_authenticated():
+    if request.user.is_authenticated:
         player = request.user.get_profile()
         packets = player.packet_set.filter(date_submitted=None)
 
@@ -340,9 +381,12 @@ def categories(request, qset_id, category_id):
     if user not in qset_editors and not qset.is_owner(user) and user not in qset.writer.all():
         message = 'You are not authorized to view this set'
     else:
-        tossups = Tossup.objects.filter(question_set=qset).filter(category=category_id)
-        bonuses = Bonus.objects.filter(question_set=qset).filter(category=category_id)
-            
+        tossups = list(Tossup.objects.filter(question_set=qset).filter(category=category_id)
+                       .select_related(*QUESTION_LIST_RELATED))
+        bonuses = list(Bonus.objects.filter(question_set=qset).filter(category=category_id)
+                       .select_related(*QUESTION_LIST_RELATED))
+        attach_question_comments({t.id: t for t in tossups}, {b.id: b for b in bonuses})
+
     return render(request, 'categories.html',
         {
         'user': user,
@@ -1573,6 +1617,65 @@ def reply_to_comment(request):
 
 
 @login_required
+def add_anchored_comment(request):
+    message = ''
+    message_class = ''
+
+    if request.method == 'POST':
+        question_type = request.POST.get('question_type')
+        question_id = request.POST.get('question_id')
+        comment_text = request.POST.get('comment_text', '').strip()
+        selected_text = request.POST.get('selected_text', '').strip()
+        prefix = request.POST.get('prefix', '')
+        suffix = request.POST.get('suffix', '')
+
+        if not question_id or not comment_text or not selected_text or question_type not in ('tossup', 'bonus'):
+            message = 'Missing required fields.'
+            message_class = 'alert-box warning'
+            return HttpResponse(json.dumps({'message': message, 'message_class': message_class}))
+
+        try:
+            if question_type == 'tossup':
+                question = Tossup.objects.get(id=question_id)
+            else:
+                question = Bonus.objects.get(id=question_id)
+        except (Tossup.DoesNotExist, Bonus.DoesNotExist):
+            message = 'Question not found.'
+            message_class = 'alert-box warning'
+            return HttpResponse(json.dumps({'message': message, 'message_class': message_class}))
+
+        qset = question.question_set
+        user = request.user.writer
+
+        if user not in qset.writer.all() and user not in qset.editor.all() and not qset.is_owner(user):
+            message = 'You are not authorized to comment on this set.'
+            message_class = 'alert-box warning'
+            return HttpResponse(json.dumps({'message': message, 'message_class': message_class}))
+
+        from django.contrib.sites.models import Site
+        new_comment = Comment(
+            content_type=ContentType.objects.get_for_model(question),
+            object_pk=str(question.id),
+            site=Site.objects.get_current(),
+            user=request.user,
+            comment=comment_text,
+        )
+        new_comment.save()
+
+        CommentAnchor.objects.create(
+            comment=new_comment,
+            selected_text=selected_text[:1000],
+            prefix=prefix[:100],
+            suffix=suffix[:100],
+        )
+
+        message = 'Comment posted.'
+        message_class = 'alert-box success'
+
+    return HttpResponse(json.dumps({'message': message, 'message_class': message_class}))
+
+
+@login_required
 def delete_all_comments(request):
     user = request.user.writer
     message = ''
@@ -1599,10 +1702,8 @@ def delete_all_comments(request):
             message_class = 'alert-box warning'
         else:
             if user in qset_editors:
-                for comment in comment_list:
-                    comment.is_removed = True
-                    comment.save()
-                    cache.clear()
+                comment_list.update(is_removed=True)
+                cache.clear()
 
                 message = 'Comments removed'
                 message_class = 'alert-box success'
@@ -1785,7 +1886,11 @@ def assign_tossups_to_packet(request):
     if request.method == 'POST':
         if qset.is_owner(user):
             for tu_id in tossup_ids:
-                tossup = Tossup.objects.get(id=tu_id)
+                # Only questions already in this packet's set may be assigned,
+                # so foreign question IDs can't be pulled across sets
+                tossup = Tossup.objects.filter(id=tu_id, question_set=qset).first()
+                if tossup is None:
+                    continue
                 tossup.packet = packet
                 # Potential race condition?
                 tossup.question_number = Tossup.objects.filter(packet_id=packet_id).count() + 1
@@ -1818,7 +1923,11 @@ def assign_bonuses_to_packet(request):
     if request.method == 'POST':
         if qset.is_owner(user):
             for bs_id in bonus_ids:
-                bonus = Bonus.objects.get(id=bs_id)
+                # Only questions already in this packet's set may be assigned,
+                # so foreign question IDs can't be pulled across sets
+                bonus = Bonus.objects.filter(id=bs_id, question_set=qset).first()
+                if bonus is None:
+                    continue
                 bonus.packet = packet
                 bonus.question_number = Bonus.objects.filter(packet_id=packet_id).count() + 1
                 message = 'Your bonuses have been added to the set!'
@@ -1855,9 +1964,9 @@ def change_question_order(request):
                     id = int(request.POST[id_key])
                     order = int(request.POST[order_key])
                     if question_type == 'tossup':
-                        question = Tossup.objects.get(id=id)
+                        question = Tossup.objects.get(id=id, question_set=qset)
                     elif question_type == 'bonus':
-                        question = Bonus.objects.get(id=id)
+                        question = Bonus.objects.get(id=id, question_set=qset)
                     question.question_number = order
                     question.save()
                     cache.clear()
@@ -1990,7 +2099,7 @@ def edit_distribution(request, dist_id=None):
     message = ''
     message_class = ''
 
-    if request.user.is_authenticated():
+    if request.user.is_authenticated:
         DistributionEntryFormset = formset_factory(DistributionEntryForm, can_delete=True)
         if request.method == 'POST':
             # no dist_id supplied means new dist
@@ -2417,6 +2526,10 @@ def complete_upload(request):
         qset_id = request.POST['qset-id']
         qset = QuestionSet.objects.get(id=qset_id)
 
+        if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+            messages.error(request, 'You are not authorized to add questions to this set!')
+            return HttpResponseRedirect('/failure.html/')
+
         num_tossups = int(request.POST['num-tossups'])
         num_bonuses = int(request.POST['num-bonuses'])
         categories = DistributionEntry.objects.filter(distribution=qset.distribution)
@@ -2485,6 +2598,9 @@ def complete_upload(request):
             new_bonus.part2_answer = strip_markup(request.POST[bs_ans2_name])
             new_bonus.part3_text = strip_markup(request.POST[bs_part3_name])
             new_bonus.part3_answer = strip_markup(request.POST[bs_ans3_name])
+            new_bonus.part1_difficulty = request.POST.get('bonus-difficulty1-{0}'.format(bs_num), '')
+            new_bonus.part2_difficulty = request.POST.get('bonus-difficulty2-{0}'.format(bs_num), '')
+            new_bonus.part3_difficulty = request.POST.get('bonus-difficulty3-{0}'.format(bs_num), '')
 
             bonus_cat = request.POST[bs_cat_name]
             for category in categories:
@@ -2622,23 +2738,37 @@ def search(request, passed_qset_id=None):
                 else:
                     result_ids = []
 
-                questions = []
+                # One bulk fetch per model instead of a query per result
+                parsed_ids = []
+                tossup_ids = []
+                bonus_ids = []
                 for q_id in result_ids:
                     try:
                         fields = q_id.split('.')
                         question_type = fields[1]
                         question_id = int(fields[2])
-                        if question_type == 'tossup':
-                            question = Tossup.objects.get(id=question_id)
-                        elif question_type == 'bonus':
-                            question = Bonus.objects.get(id=question_id)
+                    except (IndexError, ValueError):
+                        print("Error parsing search result id", q_id)
+                        continue
+                    parsed_ids.append((question_type, question_id))
+                    if question_type == 'tossup':
+                        tossup_ids.append(question_id)
+                    elif question_type == 'bonus':
+                        bonus_ids.append(question_id)
 
-                        print(question.question_set == qset)
+                questions_by_key = {}
+                for tossup in Tossup.objects.filter(id__in=tossup_ids).select_related(*QUESTION_LIST_RELATED):
+                    questions_by_key[('tossup', tossup.id)] = tossup
+                for bonus in Bonus.objects.filter(id__in=bonus_ids).select_related(*QUESTION_LIST_RELATED):
+                    questions_by_key[('bonus', bonus.id)] = bonus
 
-                        if str(question.category) == search_category or search_category == 'All':
-                            questions.append(question)
-                    except:
-                        print("Error retrieving search data for search query", query, sys.exc_info()[0])
+                questions = []
+                for key in parsed_ids:
+                    question = questions_by_key.get(key)
+                    if question is None:
+                        continue
+                    if str(question.category) == search_category or search_category == 'All':
+                        questions.append(question)
 
                 result = questions
                 message = ''
@@ -4031,7 +4161,9 @@ def bulk_change_set(request, qset_id):
 
                 if (tu_checked_name in request.POST):
                     tu_id = request.POST[tu_id_name]
-                    tossup = Tossup.objects.get(id=tu_id)
+                    tossup = Tossup.objects.filter(id=tu_id, question_set=qset).first()
+                    if tossup is None:
+                        continue
                     change_tossups.append(tossup)
                     num_questions_selected += 1
 
@@ -4041,7 +4173,9 @@ def bulk_change_set(request, qset_id):
 
                 if (bs_checked_name in request.POST):
                     bs_id = request.POST[bs_id_name]
-                    bonus = Bonus.objects.get(id=bs_id)
+                    bonus = Bonus.objects.filter(id=bs_id, question_set=qset).first()
+                    if bonus is None:
+                        continue
                     change_bonuses.append(bonus)
                     num_questions_selected += 1
 
@@ -4248,14 +4382,18 @@ def bulk_change_author(request, qset_id):
         for tu_num in range(num_tossups):
             tu_id_name = 'tossup-id-{0}'.format(tu_num)
             tu_id = request.POST[tu_id_name]
-            tossup = Tossup.objects.get(id=tu_id)
+            tossup = Tossup.objects.filter(id=tu_id, question_set=qset).first()
+            if tossup is None:
+                continue
             tossup.author = new_author
             tossup.save()
 
         for bs_num in range(num_bonuses):
             bs_id_name = 'bonus-id-{0}'.format(bs_num)
             bs_id = request.POST[bs_id_name]
-            bonus = Bonus.objects.get(id=bs_id)
+            bonus = Bonus.objects.filter(id=bs_id, question_set=qset).first()
+            if bonus is None:
+                continue
             bonus.author = new_author
             bonus.save()
 
@@ -4293,20 +4431,28 @@ def bulk_change_packet(request, qset_id):
         num_tossups = int(request.POST['num-tossups'])
         num_bonuses = int(request.POST['num-bonuses'])
         new_packet_id = request.POST['new-packet']
-        new_packet = Packet.objects.get(id=new_packet_id)
+        # The target packet must belong to this set
+        new_packet = Packet.objects.filter(id=new_packet_id, question_set=qset).first()
+        if new_packet is None:
+            message = 'Could not change packet'
+            return HttpResponseRedirect('/failure.html/')
 
         # TODO: We may want to clear the numbers from these questions in the future
         for tu_num in range(num_tossups):
             tu_id_name = 'tossup-id-{0}'.format(tu_num)
             tu_id = request.POST[tu_id_name]
-            tossup = Tossup.objects.get(id=tu_id)
+            tossup = Tossup.objects.filter(id=tu_id, question_set=qset).first()
+            if tossup is None:
+                continue
             tossup.packet = new_packet
             tossup.save()
 
         for bs_num in range(num_bonuses):
             bs_id_name = 'bonus-id-{0}'.format(bs_num)
             bs_id = request.POST[bs_id_name]
-            bonus = Bonus.objects.get(id=bs_id)
+            bonus = Bonus.objects.filter(id=bs_id, question_set=qset).first()
+            if bonus is None:
+                continue
             bonus.packet = new_packet
             bonus.save()
 
@@ -4354,7 +4500,9 @@ def bulk_move_question(request, qset_id):
         for tu_num in range(num_tossups):
             tu_id_name = 'tossup-id-{0}'.format(tu_num)
             tu_id = request.POST[tu_id_name]
-            tossup = Tossup.objects.get(id=tu_id)
+            tossup = Tossup.objects.filter(id=tu_id, question_set=qset).first()
+            if tossup is None:
+                continue
 
             tossup.question_set = new_set
             tossup.packet = None
@@ -4368,7 +4516,9 @@ def bulk_move_question(request, qset_id):
         for bs_num in range(num_bonuses):
             bs_id_name = 'bonus-id-{0}'.format(bs_num)
             bs_id = request.POST[bs_id_name]
-            bonus = Bonus.objects.get(id=bs_id)
+            bonus = Bonus.objects.filter(id=bs_id, question_set=qset).first()
+            if bonus is None:
+                continue
 
             bonus.question_set = new_set
             bonus.packet = None

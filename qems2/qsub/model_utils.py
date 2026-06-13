@@ -7,7 +7,7 @@ from django.forms.formsets import formset_factory
 from django.forms.models import modelformset_factory
 from django.contrib.contenttypes.models import ContentType, ContentTypeManager
 from django_comments.models import Comment
-from django.db.models import Q
+from django.db.models import Q, Count
 
 import os
 
@@ -370,11 +370,42 @@ def move_comments_to_bonus(tossup, bonus):
 def get_question_type_from_string(question_type):
     return QuestionType.objects.get(question_type=question_type)
 
+QUESTION_LIST_RELATED = ('category', 'author__user', 'editor__user', 'packet',
+                         'question_set', 'question_type')
+
+def attach_question_comments(tossup_dict, bonus_dict):
+    """Bulk-load the comments for the given questions and attach them as
+    .cached_comments (non-removed, oldest first), replacing one query per
+    question row with one query total.  filters.py and the question list
+    templates read this attribute when present."""
+    tossup_ct = ContentType.objects.get_for_model(Tossup).id
+    bonus_ct = ContentType.objects.get_for_model(Bonus).id
+
+    for question_dict in (tossup_dict, bonus_dict):
+        for question in question_dict.values():
+            question.cached_comments = []
+
+    comment_filter = Q()
+    if tossup_dict:
+        comment_filter |= Q(content_type_id=tossup_ct, object_pk__in=[str(pk) for pk in tossup_dict])
+    if bonus_dict:
+        comment_filter |= Q(content_type_id=bonus_ct, object_pk__in=[str(pk) for pk in bonus_dict])
+    if not comment_filter:
+        return
+
+    comments = (Comment.objects.filter(comment_filter, is_removed=False)
+                .select_related('user').order_by('submit_date'))
+    for comment in comments:
+        question_dict = tossup_dict if comment.content_type_id == tossup_ct else bonus_dict
+        question = question_dict.get(int(comment.object_pk))
+        if question is not None:
+            question.cached_comments.append(comment)
+
 def get_tossup_and_bonuses_in_set(qset, question_limit=30, preview_only=False):
     tossup_dict = {}
     tossups = []
     tossup_count = 0
-    for tossup in Tossup.objects.filter(question_set=qset).order_by('-id'):
+    for tossup in Tossup.objects.filter(question_set=qset).order_by('-id').select_related(*QUESTION_LIST_RELATED):
         if (tossup_count < question_limit):
             tossup.question_length = tossup.character_count()
             if (preview_only):
@@ -389,7 +420,7 @@ def get_tossup_and_bonuses_in_set(qset, question_limit=30, preview_only=False):
     bonuses = []
     short_bonuses = []
     bonus_count = 0
-    for bonus in Bonus.objects.filter(question_set=qset).order_by('-id'):
+    for bonus in Bonus.objects.filter(question_set=qset).order_by('-id').select_related(*QUESTION_LIST_RELATED):
         if (bonus_count < question_limit):
             bonus.question_length = bonus.character_count()
             if (preview_only):
@@ -404,41 +435,43 @@ def get_tossup_and_bonuses_in_set(qset, question_limit=30, preview_only=False):
             bonuses.append(bonus)
             bonus_count += 1
         bonus_dict[bonus.id] = bonus
-        
+
+    attach_question_comments(tossup_dict, bonus_dict)
+
     return tossups, tossup_dict, bonuses, bonus_dict
 
 def get_comment_tab_list(tossup_dict, bonus_dict, comment_limit=60):
     comment_tab_list = []
-    
+
     tossup_content_type_id = ContentType.objects.get_for_model(Tossup).id
     bonus_content_type_id = ContentType.objects.get_for_model(Bonus).id
-        
-    comment_count = 0
-    for comment in Comment.objects.filter(Q(content_type_id=tossup_content_type_id) | Q(content_type_id=bonus_content_type_id)).order_by('-submit_date'):
-        if (not comment.is_removed):
-            if (comment.content_type_id == tossup_content_type_id):
-                if (int(comment.object_pk) in tossup_dict):
-                    tossup = tossup_dict[int(comment.object_pk)]            
-                    new_comment = { 'comment': comment,
-                                        'question_text': get_formatted_question_html(tossup.tossup_answer[0:80], True, True, False, False),
-                                        'question_id': tossup.id,
-                                        'question_type': 'tossup'}
-                    comment_tab_list.append(new_comment)
-                    comment_count += 1
-                    if (comment_count >= comment_limit):
-                        break
-            else:
-                if (int(comment.object_pk) in bonus_dict):
-                    bonus = bonus_dict[int(comment.object_pk)]            
-                    new_comment = { 'comment': comment,
-                                        'question_text': get_formatted_question_html_for_bonus_answers(bonus),
-                                        'question_id': bonus.id,
-                                        'question_type': 'bonus'}
-                    comment_tab_list.append(new_comment)
-                    comment_count += 1
-                    if (comment_count >= comment_limit):
-                        break
-    
+
+    comment_filter = Q()
+    if tossup_dict:
+        comment_filter |= Q(content_type_id=tossup_content_type_id,
+                            object_pk__in=[str(pk) for pk in tossup_dict])
+    if bonus_dict:
+        comment_filter |= Q(content_type_id=bonus_content_type_id,
+                            object_pk__in=[str(pk) for pk in bonus_dict])
+    if not comment_filter:
+        return comment_tab_list
+
+    comments = (Comment.objects.filter(comment_filter, is_removed=False)
+                .select_related('user').order_by('-submit_date')[:comment_limit])
+    for comment in comments:
+        if (comment.content_type_id == tossup_content_type_id):
+            tossup = tossup_dict[int(comment.object_pk)]
+            comment_tab_list.append({'comment': comment,
+                                     'question_text': get_formatted_question_html(tossup.tossup_answer[0:80], True, True, False, False),
+                                     'question_id': tossup.id,
+                                     'question_type': 'tossup'})
+        else:
+            bonus = bonus_dict[int(comment.object_pk)]
+            comment_tab_list.append({'comment': comment,
+                                     'question_text': get_formatted_question_html_for_bonus_answers(bonus),
+                                     'question_id': bonus.id,
+                                     'question_type': 'bonus'})
+
     return comment_tab_list
 
 def get_category_overview(qset):
@@ -526,13 +559,21 @@ def get_questions_remaining(qset):
     total_bs_written = 0
     set_status = {}    
     
-    entries = qset.setwidedistributionentry_set.all().order_by('dist_entry__category', 'dist_entry__subcategory')
+    entries = (qset.setwidedistributionentry_set.all()
+               .select_related('dist_entry').order_by('dist_entry__category', 'dist_entry__subcategory'))
+
+    # Count questions per category in two grouped queries instead of two per entry
+    tu_counts = {row['category']: row['n'] for row in
+                 qset.tossup_set.values('category').annotate(n=Count('id'))}
+    bs_counts = {row['category']: row['n'] for row in
+                 qset.bonus_set.values('category').annotate(n=Count('id'))}
+
     for entry in entries:
         tu_required = entry.num_tossups
         bs_required = entry.num_bonuses
         # TODO: really fix extra questions increasing set completion; this is temporary
-        tu_written = qset.tossup_set.filter(category=entry.dist_entry).count()
-        bs_written = qset.bonus_set.filter(category=entry.dist_entry).count()
+        tu_written = tu_counts.get(entry.dist_entry_id, 0)
+        bs_written = bs_counts.get(entry.dist_entry_id, 0)
         tu_written_for_total = min(tu_written, tu_required)
         bs_written_for_total = min(bs_written, bs_required)
         total_tu_req += tu_required
@@ -555,29 +596,25 @@ def get_questions_remaining(qset):
     return set_status, total_tu_req, total_bs_req, tu_needed, bs_needed, set_pct_complete
     
 def get_writer_questions_remaining(qset, total_tu_req, total_bs_req):
-    qset_editors = qset.editor.all()
-    qset_writers = qset.writer.all()    
+    qset_editors = qset.editor.all().select_related('user')
+    qset_writers = qset.writer.all().select_related('user')
     writer_stats = {}
     total_qs_req = max(1, total_tu_req + total_bs_req)
-    
-    for writer in qset_writers:
-        writer_tu_written = len(qset.tossup_set.filter(author=writer))
-        writer_bonus_written = len(qset.bonus_set.filter(author=writer))
+
+    # Count questions per author in two grouped queries instead of two per writer
+    tu_counts = {row['author']: row['n'] for row in
+                 qset.tossup_set.values('author').annotate(n=Count('id'))}
+    bs_counts = {row['author']: row['n'] for row in
+                 qset.bonus_set.values('author').annotate(n=Count('id'))}
+
+    for writer in list(qset_writers) + list(qset_editors):
+        writer_tu_written = tu_counts.get(writer.id, 0)
+        writer_bonus_written = bs_counts.get(writer.id, 0)
         writer_question_percent = (float(writer_tu_written + writer_bonus_written) * 100) / total_qs_req
-        
+
         writer_stats[writer.user.username] = {'tu_written': writer_tu_written,
-                                                    'bonus_written': writer_bonus_written,
-                                                    'question_percent': writer_question_percent,
-                                                    'writer': writer}
-    for writer in qset_editors:
-        writer_tu_written = len(qset.tossup_set.filter(author=writer))
-        writer_bonus_written = len(qset.bonus_set.filter(author=writer))
-        writer_question_percent = (float(writer_tu_written + writer_bonus_written) * 100) / total_qs_req
-        
-        
-        writer_stats[writer.user.username] = {'tu_written': writer_tu_written,
-                                                    'bonus_written': writer_bonus_written,
-                                                    'question_percent': writer_question_percent,
-                                                    'writer': writer}    
-    
+                                              'bonus_written': writer_bonus_written,
+                                              'question_percent': writer_question_percent,
+                                              'writer': writer}
+
     return writer_stats

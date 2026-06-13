@@ -19,7 +19,30 @@
       "Bash(ping:*)",
       "Bash(ls:*)",
       "Bash(pip freeze *)",
-      "Skill(run)"
+      "Skill(run)",
+      "PowerShell(python manage.py runserver)",
+      "PowerShell(git ls-files | ForEach-Object { $f = Get-Item $_ -ErrorAction SilentlyContinue; if \\($f -and $f.Length -gt 500KB\\) { \"{0,12:N0}  {1}\" -f $f.Length, $_ } })",
+      "PowerShell(python C:\\\\Users\\\\mbent\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\test_anchored_comments.py)",
+      "PowerShell(Select-String *)",
+      "PowerShell(python C:\\\\Users\\\\mbent\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\fix_nbsp.py)",
+      "PowerShell(node --version 2>$null; if \\(-not $?\\) { \"no node\" })",
+      "PowerShell(python C:\\\\Users\\\\mbent\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\test_add_pages.py)",
+      "PowerShell(python C:\\\\Users\\\\mbent\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\fix_nbsp2.py)",
+      "PowerShell(python C:\\\\Users\\\\mbent\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\check_nbsp.py)",
+      "PowerShell(Get-ChildItem -Recurse -Filter search_indexes.py C:\\\\Users\\\\mbent\\\\claude\\\\qems2\\\\qems2\\\\qems2 | Select-Object -ExpandProperty FullName; python C:\\\\Users\\\\mbent\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\check_search_index.py 2>$null)",
+      "PowerShell(python C:\\\\Users\\\\mbent\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\inspect_whoosh.py 2>$null)",
+      "PowerShell(python manage.py rebuild_index --noinput)",
+      "PowerShell(python C:\\\\Users\\\\mbent\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\debug_search.py 2>$null)",
+      "PowerShell(python C:\\\\Users\\\\mbent\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\test_extras_packet.py)",
+      "PowerShell(python C:\\\\Users\\\\mbent\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\test_perf_fixes.py)",
+      "PowerShell(python C:\\\\Users\\\\mbent\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\audit_views.py)",
+      "PowerShell(python C:\\\\Users\\\\mbent\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\test_authz_fixes.py 2>$null)",
+      "PowerShell(\\(Get-Content C:\\\\Users\\\\mbent\\\\claude\\\\qems2\\\\qems2\\\\qems2\\\\tests.py | Measure-Object -Line\\).Lines)",
+      "PowerShell(python manage.py check 2>&1 | Select-Object -Last 5)",
+      "PowerShell(python C:\\\\Users\\\\mbent\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\test_prod_settings.py)",
+      "PowerShell(python C:\\\\Users\\\\mbent\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\test_prod_settings.py 2>$null)",
+      "PowerShell($env:SECRET_KEY='build-time-only'; python manage.py collectstatic --noinput 2>&1 | Select-Object -Last 4)",
+      "PowerShell(python C:\\\\Users\\\\mbent\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\test_import_set.py 2>$null)"
     ]
   }
 }
