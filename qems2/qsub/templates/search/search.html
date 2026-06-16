@@ -88,7 +88,7 @@
 
 {% if search_term and result %}
 <div class="panel callout radius text-center"><strong>Results</strong></div>
-<table class="tablesorter table-striped table-hover">
+<table class="tablesorter table-striped table-hover" id="search-results">
     <thead>
     <tr>
         <th>Author</th>
@@ -130,6 +130,45 @@
         <p>No results found.</p>
     </div>
 </div>
+{% endif %}
+
+{% if search_term and result %}
+<script>
+$(function () {
+    var term = "{{ search_term|escapejs }}";
+    // Tokenize: drop websearch operators/quotes, keep words of 2+ chars.
+    var tokens = term.replace(/["()]/g, ' ').split(/\s+/).filter(function (t) {
+        return t.length >= 2 && !/^(or|and|the|not)$/i.test(t);
+    });
+    if (!tokens.length) { return; }
+    var re = new RegExp('(' + tokens.map(function (t) {
+        return t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }).join('|') + ')', 'gi');
+
+    function esc(s) {
+        return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+    function highlight(node) {
+        var kids = Array.prototype.slice.call(node.childNodes);
+        kids.forEach(function (child) {
+            if (child.nodeType === 3) {
+                re.lastIndex = 0;
+                if (re.test(child.nodeValue)) {
+                    re.lastIndex = 0;
+                    var span = document.createElement('span');
+                    span.innerHTML = esc(child.nodeValue).replace(re, '<mark>$1</mark>');
+                    child.parentNode.replaceChild(span, child);
+                }
+            } else if (child.nodeType === 1 && child.nodeName !== 'MARK') {
+                highlight(child);
+            }
+        });
+    }
+    // Only the rendered question text (the edit links), not metadata columns.
+    document.querySelectorAll('#search-results td a[href^="/edit_tossup/"], #search-results td a[href^="/edit_bonus/"]')
+        .forEach(highlight);
+});
+</script>
 {% endif %}
 
 {% endblock %}

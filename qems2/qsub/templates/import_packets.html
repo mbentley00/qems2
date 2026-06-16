@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% block title %}Import Packets - QEMS2{% endblock %}
+
+{% block content %}
+
+<h3 class="page-header">Import Packets into a New Tournament</h3>
+
+{% if message %}
+    <div class="{{ message_class }}">
+        {{ message }}
+        {% if summary.question_set %}
+            <a href="/edit_question_set/{{ summary.question_set.id }}/">Open the new tournament.</a>
+        {% endif %}
+    </div>
+{% endif %}
+
+<p>Upload one or more packet files. A new tournament is created with one packet per file
+(named after the file). Three formats are supported:</p>
+<ul>
+    <li><strong>.json</strong> &mdash; the JSON from
+        <a href="https://github.com/alopezlago/YetAnotherPacketParser" target="_blank">YetAnotherPacketParser</a>
+        / MODAQ. <em>Recommended</em>: formatting (bold/underline/italics/superscript), powers,
+        and categories (from each question's metadata) come through reliably.</li>
+    <li><strong>.docx / .pdf</strong> &mdash; best-effort plain-text parsing of the standard
+        ACF layout (numbered tossups + <code>ANSWER:</code> lines, numbered bonuses with
+        <code>[10]</code> parts). Real packets vary, so use the JSON export when you have it.</li>
+</ul>
+<p>Questions that can't be parsed are skipped and listed below with a reason, so you can fix
+them by hand afterward.</p>
+
+<form action="" method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+    {% if form.non_field_errors %}<div class="alert-box alert">{{ form.non_field_errors }}</div>{% endif %}
+    <div class="row">
+        <div class="small-8 columns">
+            <p><strong>Destination</strong> &mdash; either create a new tournament or add the
+            packets to a set you already have:</p>
+            <label>Create a new tournament named
+                {{ form.set_name }}
+            </label>
+            {% if form.set_name.errors %}{{ form.set_name.errors }}{% endif %}
+            <label>…or add packets to an existing set
+                {{ form.target_set }}
+            </label>
+            {% if form.target_set.errors %}{{ form.target_set.errors }}{% endif %}
+            <label style="margin-top:1rem;">Packet files (.json, .docx, or .pdf) &mdash; select multiple
+                {{ form.packet_files }}
+            </label>
+            {% if form.packet_files.errors %}{{ form.packet_files.errors }}{% endif %}
+        </div>
+    </div>
+    <input type="submit" value="Import Packets" class="button primary right" />
+</form>
+
+{% if summary.packets %}
+    <h5>Imported packets</h5>
+    <table class="table-striped" style="width: 100%;">
+        <thead>
+            <tr><th>Packet</th><th>Tossups</th><th>Bonuses</th><th>Parse errors</th></tr>
+        </thead>
+        <tbody>
+        {% for p in summary.packets %}
+            <tr>
+                <td>{{ p.name }}</td>
+                <td>{{ p.tossups }}</td>
+                <td>{{ p.bonuses }}</td>
+                <td>{% if p.parse_errors %}<span class="label alert">{{ p.parse_errors }}</span>{% else %}0{% endif %}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+{% endif %}
+
+{% if summary and summary.errors %}
+    <div class="panel">
+        <strong>Questions skipped during import ({{ summary.errors|length }}):</strong>
+        <ul>
+        {% for err in summary.errors %}
+            <li>{{ err }}</li>
+        {% endfor %}
+        </ul>
+    </div>
+{% endif %}
+
+{% endblock %}

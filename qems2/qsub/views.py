@@ -28,12 +28,27 @@ from .forms import *
 from .model_utils import *
 from .utils import *
 from .packet_parser import parse_packet_data
-from .duplicate_checker import find_duplicates, find_internal_issues, find_topic_repeats, CRITICAL, WARNING, INFO
+from .duplicate_checker import find_duplicates, find_internal_issues, find_topic_repeats, find_answer_matches, CRITICAL, WARNING, INFO
 from django.utils.safestring import mark_safe
-from haystack.query import SearchQuerySet
 from django_comments.models import Comment
 from django.db.models import Q
+from django.db import connection
+from django.utils import timezone
 from django.core.cache import cache
+
+
+def fulltext_filter(queryset, query):
+    """Full-text match against the maintained search_question_content /
+    search_question_answers fields. Uses Postgres full-text search in
+    production and falls back to icontains on SQLite (local dev)."""
+    if not query:
+        return queryset.none()
+    if connection.vendor == 'postgresql':
+        from django.contrib.postgres.search import SearchVector, SearchQuery
+        vector = SearchVector('search_question_content', 'search_question_answers')
+        return queryset.annotate(qsearch=vector).filter(qsearch=SearchQuery(query, search_type='websearch'))
+    return queryset.filter(
+        Q(search_question_content__icontains=query) | Q(search_question_answers__icontains=query))
 
 from django.contrib.contenttypes.models import ContentType
 
@@ -70,14 +85,19 @@ def question_sets (request):
     all_sets = owned_sets | editor_sets | writer.question_set_writer.all()
     all_sets = all_sets.order_by('date')
     
-    # Sets that are in the future
+    # Sets that are upcoming or finished within the last month
     upcoming_sets = {}
-    
+
     # Sets that are in the past
     completed_sets = {}
-        
+
+    # Keep recently-finished sets in "upcoming" for a month after the
+    # tournament date before moving them to "completed".
+    from datetime import timedelta
+    cutoff = datetime.now().date() - timedelta(days=30)
+
     for qset in (all_sets):
-        if (qset.date >= datetime.now().date()):
+        if (qset.date >= cutoff):
             upcoming_sets[qset.id] = qset
         else:
             completed_sets[qset.id] = qset
@@ -124,6 +144,9 @@ def import_set(request):
                                    summary['comments']))
                 if summary.get('users_created'):
                     message += ' Created {0} placeholder commenter account(s).'.format(summary['users_created'])
+                if summary.get('legacy_authors'):
+                    message += ' Created {0} legacy author account(s) for authors with no current account.'.format(summary['legacy_authors'])
+                message += ' Search indexing is running in the background and will finish shortly.'
                 message_class = 'alert-box success'
             except SetImportError as ex:
                 message = str(ex)
@@ -135,6 +158,61 @@ def import_set(request):
         form = ImportSetForm()
 
     return render(request, 'import_set.html',
+                  {'form': form, 'user': user, 'summary': summary,
+                   'message': message, 'message_class': message_class})
+
+@login_required
+def import_packets(request):
+    """Admin-only: create a new tournament (question set) from uploaded packet
+    files (.docx or .pdf), one packet per file."""
+    user = request.user.writer
+
+    if not request.user.is_superuser:
+        messages.error(request, 'Only the admin account may import packets.')
+        return HttpResponseRedirect('/failure.html/')
+
+    message = ''
+    message_class = ''
+    summary = None
+
+    if request.method == 'POST':
+        form = ImportPacketsForm(request.POST, request.FILES)
+        if form.is_valid():
+            from .packet_set_importer import (import_packets_from_files,
+                                              import_packets_into_set, PacketImportError)
+            files = form.cleaned_data['packet_files']
+            target = form.cleaned_data.get('target_set')
+            try:
+                if target is not None:
+                    summary = import_packets_into_set(files, target, user)
+                    qset = summary['question_set']
+                    message = ('Added {0} packet(s) to "{1}": {2} tossups, {3} bonuses.'
+                               .format(len(summary['packets']), qset.name,
+                                       summary['tossups'], summary['bonuses']))
+                else:
+                    summary = import_packets_from_files(
+                        files, form.cleaned_data['set_name'], user)
+                    qset = summary['question_set']
+                    message = ('Imported "{0}" from {1} packet(s): {2} tossups, {3} bonuses.'
+                               .format(qset.name, len(summary['packets']),
+                                       summary['tossups'], summary['bonuses']))
+                if summary['errors']:
+                    message += ' {0} question(s) could not be parsed (see below).'.format(len(summary['errors']))
+                message_class = 'alert-box success'
+            except PacketImportError as ex:
+                message = str(ex)
+                message_class = 'alert-box alert'
+            except Exception as ex:
+                message = 'Import failed: {0}'.format(ex)
+                message_class = 'alert-box alert'
+        else:
+            errs = form.errors.get('__all__')
+            message = errs[0] if errs else 'Please choose files and a destination (new name or existing set).'
+            message_class = 'alert-box alert'
+    else:
+        form = ImportPacketsForm()
+
+    return render(request, 'import_packets.html',
                   {'form': form, 'user': user, 'summary': summary,
                    'message': message, 'message_class': message_class})
 
@@ -254,7 +332,9 @@ def edit_question_set(request, qset_id):
         messages.error(request, 'You are not authorized to view information about this tournament!')
         return HttpResponseRedirect('/failure.html/')
 
-    if request.method == 'POST':        
+    new_activity = _new_activity_count(user, qset)
+
+    if request.method == 'POST':
         if (qset.is_owner(user) or user in qset_editors):
             form = QuestionSetForm(data=request.POST)
             if form.is_valid():
@@ -264,9 +344,9 @@ def edit_question_set(request, qset_id):
                 qset.distribution = form.cleaned_data['distribution']
                 qset.num_packets = form.cleaned_data['num_packets']
                 qset.char_count_ignores_pronunciation_guides = form.cleaned_data['char_count_ignores_pronunciation_guides']
+                qset.tossups_only = form.cleaned_data['tossups_only']
                 qset.max_acf_tossup_length = form.cleaned_data['max_acf_tossup_length']
                 qset.max_acf_bonus_length = form.cleaned_data['max_acf_bonus_length']
-                qset.max_vhsl_bonus_length = form.cleaned_data['max_vhsl_bonus_length']
                 qset.save()
                 cache.clear()
 
@@ -300,12 +380,19 @@ def edit_question_set(request, qset_id):
                                            'packets': qset.packet_set.all(),
                                            'comment_list': comment_tab_list,
                                            'role': role,
+                                           'new_activity': new_activity,
                                            'message': 'Your changes have been successfully saved.',
                                            'message_class': 'alert-success'})
             else:
-                qset_editors = []
+                # Form invalid: still populate question data so the page isn't
+                # blank (and so an empty render isn't cached).
+                tossups, tossup_dict, bonuses, bonus_dict = get_tossup_and_bonuses_in_set(qset, question_limit=30, preview_only=True)
+                set_status, total_tu_req, total_bs_req, tu_needed, bs_needed, set_pct_complete = get_questions_remaining(qset)
+                writer_stats = get_writer_questions_remaining(qset, total_tu_req, total_bs_req)
+                comment_tab_list = get_comment_tab_list(tossup_dict, bonus_dict)
+                read_only = not (qset.is_owner(user) or user in qset_editors)
         else:
-            render(request, 'failure.html', {'message': 'You are not authorized to change this set!'})
+            return render(request, 'failure.html', {'message': 'You are not authorized to change this set!', 'message_class': 'alert-box alert'})
     else:
         print("Begin edit_question_set get", time.strftime("%H:%M:%S"))
         if user not in qset_editors and not qset.is_owner(user) and user not in qset.writer.all():
@@ -351,6 +438,7 @@ def edit_question_set(request, qset_id):
                                'comment_tab_list': comment_tab_list,
                                'qset': qset,
                                'role': role,
+                               'new_activity': new_activity,
                                'read_only': read_only,
                                'message': message})
 
@@ -436,6 +524,70 @@ def top_category(request, qset_id, category_name):
         'role': role,
     })
 
+def _dup_fingerprint(qset):
+    """A cheap signature of the set's question state; changes whenever a
+    question is added, removed, or edited, so the cached report auto-refreshes."""
+    import hashlib
+    from django.db.models import Count, Max
+    t = Tossup.objects.filter(question_set=qset).aggregate(n=Count('id'), m=Max('last_changed_date'))
+    b = Bonus.objects.filter(question_set=qset).aggregate(n=Count('id'), m=Max('last_changed_date'))
+    raw = '{0}-{1}-{2}-{3}'.format(t['n'], t['m'], b['n'], b['m'])
+    return hashlib.md5(raw.encode('utf-8')).hexdigest()
+
+
+def _dup_render_answer(raw):
+    return get_formatted_question_html(get_primary_answer(raw or ''), True, True, False, False).strip()
+
+
+def _post_submit_dup_matches(qset, question, qtype):
+    """Find duplicate-answer matches for a just-saved question and render their
+    answers, for the 'you may have created a duplicate' warning shown after a
+    question is submitted."""
+    matches = find_answer_matches(qset, question, qtype)
+    for m in matches:
+        m['answer_html'] = _dup_render_answer(m['answer_raw'])
+    return matches
+
+
+def _dup_answer_html(entry, bonus_map):
+    """Rendered answer for an entry. For bonuses, show all three answer lines
+    (each cut at the '[') so the whole bonus is identifiable."""
+    if entry['type'] == 'bonus':
+        bonus = bonus_map.get(entry['id'])
+        if bonus is not None:
+            parts = [_dup_render_answer(a) for a in (bonus.part1_answer, bonus.part2_answer, bonus.part3_answer)
+                     if a and a.strip()]
+            if parts:
+                return ' / '.join(parts)
+    return _dup_render_answer(entry.get('answer_raw'))
+
+
+def _dup_preview_html(raw_text, term, width=280):
+    """A formatted preview window centered on where the repeat (`term`) occurs,
+    falling back to the start of the text. Keeps QEMS markup so italics/
+    underlines render."""
+    raw = (raw_text or '').strip()
+    if not raw:
+        return ''
+    center = 0
+    if term:
+        i = raw.lower().find(term.lower())
+        if i < 0:
+            i = strip_markup(raw).lower().find(term.lower())
+        if i > 0:
+            center = i
+    start = max(0, center - width // 3)
+    end = min(len(raw), start + width)
+    start = max(0, end - width)
+    snippet = raw[start:end]
+    if start > 0 and ' ' in snippet:
+        snippet = snippet.split(' ', 1)[1]
+    if end < len(raw) and ' ' in snippet:
+        snippet = snippet.rsplit(' ', 1)[0]
+    html = get_formatted_question_html(snippet, False, True, False, True)
+    return ('&hellip; ' if start > 0 else '') + html + (' &hellip;' if end < len(raw) else '')
+
+
 @login_required
 def duplicate_check(request, qset_id):
     user = request.user.writer
@@ -447,48 +599,75 @@ def duplicate_check(request, qset_id):
                       {'message': 'You are not authorized to view this set.',
                        'message_class': 'alert-box alert'})
 
-    groups = find_duplicates(qset)
+    # Cache the (expensive) report, keyed by a fingerprint of the question
+    # state so it recomputes only when something actually changed.
+    cache_key = 'dupcheck:{0}:{1}'.format(qset.id, _dup_fingerprint(qset))
+    context = cache.get(cache_key)
 
-    # Add text preview and similarity percentage to each group for the template
-    for group in groups:
-        for entry in group['entries']:
-            text = strip_markup(entry['text'])
-            entry['text_preview'] = text[:120] + '...' if len(text) > 120 else text
-        for pair in group['pairs']:
-            pair['similarity_pct'] = int(pair['similarity'] * 100)
+    if context is None:
+        groups = find_duplicates(qset)
+        internal_issues = find_internal_issues(qset)
+        topic_groups = find_topic_repeats(qset)
 
-    critical_count = sum(1 for g in groups if g['severity'] == CRITICAL)
-    warning_count = sum(1 for g in groups if g['severity'] == WARNING)
-    info_count = sum(1 for g in groups if g['severity'] == INFO)
-    total_questions = sum(len(g['entries']) for g in groups)
+        # Batch-load packets and bonus answers for all referenced questions
+        tu_ids, bs_ids = set(), set()
+        for group_list in (groups, topic_groups):
+            for group in group_list:
+                for entry in group['entries']:
+                    (bs_ids if entry['type'] == 'bonus' else tu_ids).add(entry['id'])
+        bonus_map = {b.id: b for b in Bonus.objects.filter(id__in=bs_ids).select_related('packet')}
+        tu_map = {t.id: t for t in Tossup.objects.filter(id__in=tu_ids).select_related('packet')}
 
-    # Internal issues: bonus repeat answers, tossup clue reuse
-    internal_issues = find_internal_issues(qset)
-    bonus_repeat_count = sum(1 for i in internal_issues if i['issue_type'] == 'bonus_repeat_answer')
-    clue_reuse_count = sum(1 for i in internal_issues if i['issue_type'] == 'tossup_clue_reuse')
+        def packet_of(entry):
+            obj = tu_map.get(entry['id']) if entry['type'] == 'tossup' else bonus_map.get(entry['id'])
+            return obj.packet.packet_name if (obj is not None and obj.packet) else ''
 
-    # Topic repeats: contained answers, shared rare terms, mentions
-    topic_groups = find_topic_repeats(qset)
-    topic_critical = sum(1 for g in topic_groups if g['severity'] == CRITICAL)
-    topic_warning = sum(1 for g in topic_groups if g['severity'] == WARNING)
-    topic_info = sum(1 for g in topic_groups if g['severity'] == INFO)
+        for group in groups:
+            for entry in group['entries']:
+                entry['packet'] = packet_of(entry)
+                entry['answer_html'] = _dup_answer_html(entry, bonus_map)
+                entry['preview_html'] = _dup_preview_html(entry.get('text'), None)
+            for pair in group['pairs']:
+                pair['similarity_pct'] = int(pair['similarity'] * 100)
 
-    return render(request, 'duplicate_check.html', {
-        'qset': qset,
-        'groups': groups,
-        'critical_count': critical_count,
-        'warning_count': warning_count,
-        'info_count': info_count,
-        'total_groups': len(groups),
-        'total_questions': total_questions,
-        'internal_issues': internal_issues,
-        'bonus_repeat_count': bonus_repeat_count,
-        'clue_reuse_count': clue_reuse_count,
-        'topic_groups': topic_groups,
-        'topic_critical': topic_critical,
-        'topic_warning': topic_warning,
-        'topic_info': topic_info,
-    })
+        # Topic repeats are already severity-sorted (critical first). A large
+        # set can have hundreds; rendering them all is the slow part, so only
+        # enrich+render the top N and report how many more exist.
+        TOPIC_RENDER_CAP = 150
+        topic_total = len(topic_groups)
+        topic_render = topic_groups[:TOPIC_RENDER_CAP]
+        for group in topic_render:
+            term = group.get('label')
+            for entry in group['entries']:
+                entry['packet'] = packet_of(entry)
+                entry['answer_html'] = _dup_answer_html(entry, bonus_map)
+                entry['preview_html'] = _dup_preview_html(entry.get('text'), term)
+
+        context = {
+            'groups': groups,
+            'critical_count': sum(1 for g in groups if g['severity'] == CRITICAL),
+            'warning_count': sum(1 for g in groups if g['severity'] == WARNING),
+            'info_count': sum(1 for g in groups if g['severity'] == INFO),
+            'total_groups': len(groups),
+            'total_questions': sum(len(g['entries']) for g in groups),
+            'internal_issues': internal_issues,
+            'bonus_repeat_count': sum(1 for i in internal_issues if i['issue_type'] == 'bonus_repeat_answer'),
+            'clue_reuse_count': sum(1 for i in internal_issues if i['issue_type'] == 'tossup_clue_reuse'),
+            'topic_groups': topic_render,
+            'topic_total': topic_total,
+            'topic_shown': len(topic_render),
+            'topic_truncated': topic_total > len(topic_render),
+            'topic_critical': sum(1 for g in topic_groups if g['severity'] == CRITICAL),
+            'topic_warning': sum(1 for g in topic_groups if g['severity'] == WARNING),
+            'topic_info': sum(1 for g in topic_groups if g['severity'] == INFO),
+            'has_packets': qset.packet_set.exists(),
+        }
+        cache.set(cache_key, context, 1800)
+
+    context = dict(context)
+    context['qset'] = qset
+    context['user'] = user
+    return render(request, 'duplicate_check.html', context)
 
 @login_required
 def view_all_questions(request, qset_id):
@@ -986,6 +1165,7 @@ def add_tossups(request, qset_id, packet_id=None):
                              'message_class': message_class,
                              'tossup' : None,
                              'tossup_id': tossup.id,
+                             'dup_matches': _post_submit_dup_matches(qset, tossup, 'tossup'),
                              'read_only': read_only,
                              'user': user,
                              'qset': qset})
@@ -1110,6 +1290,7 @@ def add_bonuses(request, qset_id, bonus_type, packet_id=None):
                              'message_class': message_class,
                              'bonus': None,
                              'bonus_id': bonus.id,
+                             'dup_matches': _post_submit_dup_matches(qset, bonus, 'bonus'),
                              'read_only': read_only,
                              'question_type': bonus_type,
                              'user': user,
@@ -1160,6 +1341,7 @@ def edit_tossup(request, tossup_id):
     message = ''
     message_class = ''
     read_only = True
+    dup_matches = []
     role = get_role_no_owner(user, qset)
 
     if request.method == 'GET':
@@ -1241,6 +1423,7 @@ def edit_tossup(request, tossup_id):
                     print("Tossup saved")
                     message = 'Your changes have been saved!'
                     message_class = 'alert-box success'
+                    dup_matches = _post_submit_dup_matches(qset, tossup, 'tossup')
 
                 except InvalidTossup as ex:
                     message = str(ex)
@@ -1276,6 +1459,7 @@ def edit_tossup(request, tossup_id):
              'available_tags': build_tag_checkboxes(qset, tossup, tossup.category if tossup else None),
              'message': message,
              'message_class': message_class,
+             'dup_matches': dup_matches,
              'read_only': read_only,
              'user': user})
 
@@ -1289,6 +1473,7 @@ def edit_bonus(request, bonus_id):
     message = ''
     message_class = ''
     read_only = True
+    dup_matches = []
     role = get_role_no_owner(user, qset)
 
     question_type = ACF_STYLE_BONUS
@@ -1381,6 +1566,7 @@ def edit_bonus(request, bonus_id):
                     message = 'Your changes have been saved!'
                     message_class = 'alert-box success'
                     read_only = False
+                    dup_matches = _post_submit_dup_matches(qset, bonus, 'bonus')
                 except InvalidBonus as ex:
                     message = str(ex)
                     message_class = 'alert-box warning'
@@ -1416,6 +1602,7 @@ def edit_bonus(request, bonus_id):
              'available_tags': build_tag_checkboxes(qset, bonus, bonus.category if bonus else None),
              'message': message,
              'message_class': message_class,
+             'dup_matches': dup_matches,
              'read_only': read_only,
              'role': role,
              'user': user})
@@ -1524,9 +1711,9 @@ def delete_set(request):
     if request.method == 'POST':
         qset_id = request.POST['qset_id']
         qset = QuestionSet.objects.get(id=qset_id)
-        role = get_role_no_owner(user, qset)
-        if role == "editor":
-            qset.delete()
+        if qset.is_owner(user) or user in qset.editor.all():
+            from .set_importer import delete_question_set
+            delete_question_set(qset)
             cache.clear()
             message = 'Set deleted'
             message_class = 'alert-box success'
@@ -1669,6 +1856,50 @@ def add_anchored_comment(request):
             suffix=suffix[:100],
         )
 
+        message = 'Comment posted.'
+        message_class = 'alert-box success'
+
+    return HttpResponse(json.dumps({'message': message, 'message_class': message_class}))
+
+
+@login_required
+def add_question_comment(request):
+    """Add a plain (non-anchored) comment to a tossup or bonus. Used by the
+    document viewer's inline comment boxes."""
+    message = ''
+    message_class = ''
+
+    if request.method == 'POST':
+        question_type = request.POST.get('question_type')
+        question_id = request.POST.get('question_id')
+        comment_text = request.POST.get('comment_text', '').strip()
+
+        if not question_id or not comment_text or question_type not in ('tossup', 'bonus'):
+            return HttpResponse(json.dumps({'message': 'Missing required fields.', 'message_class': 'alert-box warning'}))
+
+        try:
+            if question_type == 'tossup':
+                question = Tossup.objects.get(id=question_id)
+            else:
+                question = Bonus.objects.get(id=question_id)
+        except (Tossup.DoesNotExist, Bonus.DoesNotExist):
+            return HttpResponse(json.dumps({'message': 'Question not found.', 'message_class': 'alert-box warning'}))
+
+        qset = question.question_set
+        user = request.user.writer
+        if user not in qset.writer.all() and user not in qset.editor.all() and not qset.is_owner(user):
+            return HttpResponse(json.dumps({'message': 'You are not authorized to comment on this set.', 'message_class': 'alert-box warning'}))
+
+        from django.contrib.sites.models import Site
+        Comment.objects.create(
+            content_type=ContentType.objects.get_for_model(question),
+            object_pk=str(question.id),
+            site=Site.objects.get_current(),
+            user=request.user,
+            comment=comment_text,
+            is_public=True,
+            is_removed=False,
+        )
         message = 'Comment posted.'
         message_class = 'alert-box success'
 
@@ -2723,52 +2954,23 @@ def search(request, passed_qset_id=None):
                 search_all_selected = "checked"
 
             if user in qset.writer.all() or user in qset.editor.all() or qset.is_owner(user):
+                # Postgres full-text search (icontains on SQLite) over the
+                # maintained search fields, scoped to the relevant set(s).
                 if search_all_selected == 'checked':
-                    search_query_set = SearchQuerySet().filter(question_set__in=question_sets)
+                    set_ids = list(question_sets.values_list('id', flat=True))
                 else:
-                    search_query_set = SearchQuerySet().filter(question_set=qset)
-                search_query_set = search_query_set.filter(Q(question_answers=query) | Q(question_content=query))
-
-                if 'qsub.tossup' in search_models and 'qsub.bonus' not in search_models:
-                    result_ids = [r.id for r in search_query_set.models(Tossup)]
-                elif 'qsub.bonus' in search_models and 'qsub.tossup' not in search_models:
-                    result_ids = [r.id for r in search_query_set.models(Bonus)]
-                elif 'qsub.tossup' in search_models and 'qsub.bonus' in search_models:
-                    result_ids = [r.id for r in search_query_set.models(Tossup, Bonus)]
-                else:
-                    result_ids = []
-
-                # One bulk fetch per model instead of a query per result
-                parsed_ids = []
-                tossup_ids = []
-                bonus_ids = []
-                for q_id in result_ids:
-                    try:
-                        fields = q_id.split('.')
-                        question_type = fields[1]
-                        question_id = int(fields[2])
-                    except (IndexError, ValueError):
-                        print("Error parsing search result id", q_id)
-                        continue
-                    parsed_ids.append((question_type, question_id))
-                    if question_type == 'tossup':
-                        tossup_ids.append(question_id)
-                    elif question_type == 'bonus':
-                        bonus_ids.append(question_id)
-
-                questions_by_key = {}
-                for tossup in Tossup.objects.filter(id__in=tossup_ids).select_related(*QUESTION_LIST_RELATED):
-                    questions_by_key[('tossup', tossup.id)] = tossup
-                for bonus in Bonus.objects.filter(id__in=bonus_ids).select_related(*QUESTION_LIST_RELATED):
-                    questions_by_key[('bonus', bonus.id)] = bonus
+                    set_ids = [qset.id]
 
                 questions = []
-                for key in parsed_ids:
-                    question = questions_by_key.get(key)
-                    if question is None:
-                        continue
-                    if str(question.category) == search_category or search_category == 'All':
-                        questions.append(question)
+                if 'qsub.tossup' in search_models:
+                    tu_qs = Tossup.objects.filter(question_set_id__in=set_ids).select_related(*QUESTION_LIST_RELATED)
+                    questions += list(fulltext_filter(tu_qs, query))
+                if 'qsub.bonus' in search_models:
+                    bs_qs = Bonus.objects.filter(question_set_id__in=set_ids).select_related(*QUESTION_LIST_RELATED)
+                    questions += list(fulltext_filter(bs_qs, query))
+
+                if search_category and search_category != 'All':
+                    questions = [q for q in questions if str(q.category) == search_category]
 
                 result = questions
                 message = ''
@@ -3064,6 +3266,7 @@ def add_qems_formatted_runs(paragraph, text, bold=False, is_answer=False):
     power_index = -1
     sub_flag = False
     super_flag = False
+    bold_flag = False
     need_restore_italics = False
 
     if allow_powers:
@@ -3093,7 +3296,7 @@ def add_qems_formatted_runs(paragraph, text, bold=False, is_answer=False):
             buf = ""
 
     def current_state():
-        b = bold or power_flag or parens_flag or underline_flag
+        b = bold or power_flag or parens_flag or underline_flag or bold_flag
         i = italics_flag
         u = underline_flag or prompt_flag
         return b, i, u, sub_flag, super_flag
@@ -3188,6 +3391,16 @@ def add_qems_formatted_runs(paragraph, text, bold=False, is_answer=False):
                 buf = buf[:-1]
             flush(*current_state())
             super_flag = not super_flag
+            index += 1
+            prev2, prev = prev, c
+            continue
+
+        # Bold-only toggle: \B
+        if c == "B" and prev == "\\" and prev2 != "\\":
+            if buf.endswith("\\"):
+                buf = buf[:-1]
+            flush(*current_state())
+            bold_flag = not bold_flag
             index += 1
             prev2, prev = prev, c
             continue
@@ -3352,13 +3565,37 @@ def export_question_set(request, qset_id, output_format):
                     return " | ".join(p for p in parts if p)
 
                 def new_docx():
+                    # Style to match standard quizbowlpackets PDFs: Times New
+                    # Roman 11pt body, black bold headings (centered title).
                     document = Document()
-                    style = document.styles['Normal']
-                    style.font.size = Pt(10)
-                    style.font.name = 'Times New Roman'
-                    style.paragraph_format.space_before = Pt(0)
-                    style.paragraph_format.space_after = Pt(0)
+                    normal = document.styles['Normal']
+                    normal.font.size = Pt(11)
+                    normal.font.name = 'Times New Roman'
+                    normal.paragraph_format.space_before = Pt(0)
+                    normal.paragraph_format.space_after = Pt(0)
+
+                    h1 = document.styles['Heading 1']  # packet/round title
+                    h1.font.name = 'Times New Roman'
+                    h1.font.size = Pt(16)
+                    h1.font.bold = True
+                    h1.font.color.rgb = RGBColor(0, 0, 0)
+                    h1.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    h1.paragraph_format.space_before = Pt(0)
+                    h1.paragraph_format.space_after = Pt(10)
+
+                    h2 = document.styles['Heading 2']  # "Tossups" / "Bonuses"
+                    h2.font.name = 'Times New Roman'
+                    h2.font.size = Pt(13)
+                    h2.font.bold = True
+                    h2.font.color.rgb = RGBColor(0, 0, 0)
+                    h2.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    h2.paragraph_format.space_before = Pt(12)
+                    h2.paragraph_format.space_after = Pt(6)
                     return document
+
+                def end_question(paragraph):
+                    """Blank-line gap between questions, like the reference PDFs."""
+                    paragraph.paragraph_format.space_after = Pt(10)
 
                 def add_tossup_to_doc(document, tossup, num):
                     p = document.add_paragraph()
@@ -3367,17 +3604,21 @@ def export_question_set(request, qset_id, output_format):
                     p_ans = document.add_paragraph()
                     p_ans.add_run("ANSWER: ").bold = True
                     add_qems_formatted_runs(p_ans, safe_text(tossup.tossup_answer), is_answer=True)
+                    last = p_ans
                     meta = question_meta(tossup)
                     if meta:
                         p_meta = document.add_paragraph()
                         run = p_meta.add_run(meta)
                         run.font.size = Pt(8)
                         run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
+                        last = p_meta
+                    end_question(last)
 
                 def add_bonus_to_doc(document, bonus, num):
                     p = document.add_paragraph()
                     p.add_run(f"{num}. ").bold = True
                     add_qems_formatted_runs(p, safe_text(bonus.leadin))
+                    last = p
                     for part_num in range(1, 4):
                         part_text = getattr(bonus, f'part{part_num}_text', None)
                         part_answer = getattr(bonus, f'part{part_num}_answer', None)
@@ -3390,12 +3631,15 @@ def export_question_set(request, qset_id, output_format):
                             p_ans = document.add_paragraph()
                             p_ans.add_run("ANSWER: ").bold = True
                             add_qems_formatted_runs(p_ans, safe_text(part_answer), is_answer=True)
+                            last = p_ans
                     meta = question_meta(bonus)
                     if meta:
                         p_meta = document.add_paragraph()
                         run = p_meta.add_run(meta)
                         run.font.size = Pt(8)
                         run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
+                        last = p_meta
+                    end_question(last)
 
                 def save_docx_bytes(document):
                     buf = io.BytesIO()
@@ -3419,8 +3663,10 @@ def export_question_set(request, qset_id, output_format):
                     document = new_docx()
 
                     packets = Packet.objects.filter(question_set=qset).order_by('packet_name')
-                    for packet in packets:
-                        document.add_heading(packet.packet_name, level=1)
+                    for pkt_i, packet in enumerate(packets):
+                        if pkt_i > 0:
+                            document.add_page_break()
+                        document.add_heading('{0} {1}'.format(qset.name, packet.packet_name), level=1)
                         tossups = Tossup.objects.filter(
                             packet=packet, question_set=qset
                         ).order_by('question_number')
@@ -3736,7 +3982,7 @@ def export_question_set(request, qset_id, output_format):
                     with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
                         for pkt_idx in range(max_packets):
                             document = new_docx()
-                            document.add_heading(f"Packet {pkt_idx + 1}", level=1)
+                            document.add_heading('{0} Packet {1}'.format(qset.name, pkt_idx + 1), level=1)
 
                             tus = tu_packets[pkt_idx]
                             if tus:
@@ -4846,7 +5092,9 @@ def packet_grid(request, qset_id):
                                   'message_class': 'alert-box alert'})
 
     read_only = not (qset.is_owner(user) or user in qset.editor.all())
-    packets = list(qset.packet_set.order_by('packet_name'))
+    # Order by name, but keep the overflow "Extras" packet in the last column.
+    packets = sorted(qset.packet_set.all(),
+                     key=lambda p: (p.packet_name == EXTRAS_PACKET_NAME, p.packet_name))
 
     def build_rows(question_model, preview_func, edit_url):
         cells_by_packet = {}
@@ -4893,6 +5141,14 @@ def packet_grid(request, qset_id):
                               'unassigned_bs': unassigned_bs,
                               'read_only': read_only})
 
+def _log_packet_grid_change(qset, changer, description, prior_states):
+    """Record a packet-grid change with the prior state of each affected
+    question so it can be undone later."""
+    PacketGridLog.objects.create(
+        question_set=qset, changer=changer, description=description,
+        undo_data=json.dumps(prior_states))
+
+
 @login_required
 def move_packet_question(request):
     user = request.user.writer
@@ -4921,6 +5177,13 @@ def move_packet_question(request):
                 occupant = model.objects.filter(
                     packet=target_packet, question_number=target_number).exclude(id=question.id).first()
                 source_packet, source_number = question.packet, question.question_number
+                # Capture prior state for undo before mutating.
+                prior = [{'qtype': question_type, 'id': question.id,
+                          'packet_id': source_packet.id if source_packet else None,
+                          'number': source_number}]
+                if occupant is not None:
+                    prior.append({'qtype': question_type, 'id': occupant.id,
+                                  'packet_id': target_packet.id, 'number': target_number})
                 question.packet = target_packet
                 question.question_number = target_number
                 question.save()
@@ -4928,6 +5191,13 @@ def move_packet_question(request):
                     occupant.packet = source_packet
                     occupant.question_number = source_number
                     occupant.save()
+                src_name = source_packet.packet_name if source_packet else 'Unassigned'
+                desc = 'Moved {0} from {1} #{2} to {3} #{4}'.format(
+                    question_type, src_name, source_number or '?',
+                    target_packet.packet_name, target_number)
+                if occupant is not None:
+                    desc += ' (swapped)'
+                _log_packet_grid_change(qset, user, desc, prior)
                 cache.clear()
                 success = True
                 message = 'Question moved'
@@ -5080,7 +5350,9 @@ def reorder_packet_questions(request):
             if not (qset.is_owner(user) or user in qset.editor.all()):
                 message = 'You are not authorized to reorder questions in this set!'
             else:
+                prior = []
                 for key, model in (('tossup_ids[]', Tossup), ('bonus_ids[]', Bonus)):
+                    qtype = 'tossup' if model is Tossup else 'bonus'
                     ids = [int(x) for x in request.POST.getlist(key)]
                     if not ids:
                         continue
@@ -5091,9 +5363,14 @@ def reorder_packet_questions(request):
                     for number, qid in enumerate(ids, start=1):
                         question = questions[qid]
                         if question.question_number != number:
+                            prior.append({'qtype': qtype, 'id': question.id,
+                                          'packet_id': packet.id, 'number': question.question_number})
                             question.question_number = number
                             changed.append(question)
                     model.objects.bulk_update(changed, ['question_number'])
+                if prior:
+                    _log_packet_grid_change(
+                        qset, user, 'Reordered questions in {0}'.format(packet.packet_name), prior)
                 cache.clear()
                 success = True
                 message = 'Order saved'
@@ -5127,26 +5404,45 @@ def swap_candidates(request):
     if not (qset.is_owner(user) or user in qset.editor.all()):
         return HttpResponse(json.dumps({'error': 'You are not authorized to swap questions in this set!'}))
 
-    entry = question.category
-    if entry is None:
-        return HttpResponse(json.dumps({'error': 'This question has no category.'}))
+    search = request.GET.get('q', '').strip()
 
-    if scope == 'leaf':
-        entry_ids = [entry.id]
-    else:
-        siblings = DistributionEntry.objects.filter(
-            distribution=entry.distribution, category=entry.category)
-        if scope == 'sub':
-            sub_first = (entry.subcategory or '').split(' - ')[0].strip()
-            entry_ids = [e.id for e in siblings
-                         if (e.subcategory or '').split(' - ')[0].strip() == sub_first]
+    if search:
+        # Free-text search across all questions of this type in the set,
+        # ignoring category scope.
+        if question_type == 'tossup':
+            text_filter = Q(tossup_answer__icontains=search) | Q(tossup_text__icontains=search)
         else:
-            entry_ids = [e.id for e in siblings]
+            text_filter = (Q(leadin__icontains=search) |
+                           Q(part1_text__icontains=search) | Q(part1_answer__icontains=search) |
+                           Q(part2_text__icontains=search) | Q(part2_answer__icontains=search) |
+                           Q(part3_text__icontains=search) | Q(part3_answer__icontains=search))
+        candidates = (model.objects.filter(question_set=qset).filter(text_filter)
+                      .exclude(id=question.id).exclude(packet=None)
+                      .select_related('category', 'packet')
+                      .order_by('packet__packet_name', 'question_number')[:200])
+        source_label = 'search: "{0}"'.format(search)
+    else:
+        entry = question.category
+        if entry is None:
+            return HttpResponse(json.dumps({'error': 'This question has no category. Type to search instead.'}))
 
-    candidates = model.objects.filter(question_set=qset, category_id__in=entry_ids) \
-        .exclude(packet=question.packet).exclude(packet=None) \
-        .select_related('category', 'packet') \
-        .order_by('packet__packet_name', 'question_number')[:200]
+        if scope == 'leaf':
+            entry_ids = [entry.id]
+        else:
+            siblings = DistributionEntry.objects.filter(
+                distribution=entry.distribution, category=entry.category)
+            if scope == 'sub':
+                sub_first = (entry.subcategory or '').split(' - ')[0].strip()
+                entry_ids = [e.id for e in siblings
+                             if (e.subcategory or '').split(' - ')[0].strip() == sub_first]
+            else:
+                entry_ids = [e.id for e in siblings]
+
+        candidates = model.objects.filter(question_set=qset, category_id__in=entry_ids) \
+            .exclude(packet=question.packet).exclude(packet=None) \
+            .select_related('category', 'packet') \
+            .order_by('packet__packet_name', 'question_number')[:200]
+        source_label = str(entry)
 
     def preview(q):
         if question_type == 'tossup':
@@ -5167,7 +5463,328 @@ def swap_candidates(request):
         'is_tiebreaker': (q.question_number or 0) > per_packet,
     } for q in candidates]
 
-    return HttpResponse(json.dumps({'candidates': data, 'source_category': str(entry)}))
+    return HttpResponse(json.dumps({'candidates': data, 'source_category': source_label}))
+
+
+@login_required
+def undo_packet_grid_change(request):
+    """Undo the most recent (not-yet-undone) packet-grid change for a set,
+    restoring each affected question's prior packet and number."""
+    user = request.user.writer
+    message = ''
+    success = False
+    if request.method == 'POST':
+        try:
+            qset = QuestionSet.objects.get(id=int(request.POST['qset_id']))
+        except (KeyError, ValueError, QuestionSet.DoesNotExist):
+            return HttpResponse(json.dumps({'success': False, 'message': 'Invalid request!'}))
+        if not (qset.is_owner(user) or user in qset.editor.all()):
+            return HttpResponse(json.dumps({'success': False, 'message': 'You are not authorized to change this set!'}))
+
+        log = PacketGridLog.objects.filter(question_set=qset, undone=False).order_by('-change_date', '-id').first()
+        if log is None:
+            return HttpResponse(json.dumps({'success': False, 'message': 'Nothing to undo.'}))
+        try:
+            prior = json.loads(log.undo_data)
+        except ValueError:
+            prior = []
+        for state in prior:
+            model = Tossup if state.get('qtype') == 'tossup' else Bonus
+            q = model.objects.filter(id=state.get('id'), question_set=qset).first()
+            if q is not None:
+                q.packet_id = state.get('packet_id')
+                q.question_number = state.get('number')
+                q.save()
+        log.undone = True
+        log.save(update_fields=['undone'])
+        cache.clear()
+        success = True
+        message = 'Undid: {0}'.format(log.description)
+    return HttpResponse(json.dumps({'success': success, 'message': message}))
+
+
+@login_required
+def packet_grid_log(request, qset_id):
+    """Show the history of packet-grid changes for a set."""
+    user = request.user.writer
+    qset = QuestionSet.objects.get(id=qset_id)
+    if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+        return render(request, 'failure.html',
+                      {'message': 'You are not authorized to view this set!',
+                       'message_class': 'alert-box alert'})
+    logs = (PacketGridLog.objects.filter(question_set=qset)
+            .select_related('changer__user').order_by('-change_date', '-id')[:500])
+    return render(request, 'packet_grid_log.html',
+                  {'qset': qset, 'user': user, 'logs': logs,
+                   'can_edit': qset.is_owner(user) or user in qset.editor.all()})
+
+
+def _new_activity_count(user, qset):
+    """Count activity (mentions + others' changes to your questions) newer than
+    the last time the user viewed their activity feed for this set."""
+    seen = ActivitySeen.objects.filter(writer=user, question_set=qset).first()
+    last = seen.last_seen if seen else None
+
+    tu_ct = ContentType.objects.get_for_model(Tossup)
+    bs_ct = ContentType.objects.get_for_model(Bonus)
+    tu_ids = [str(i) for i in qset.tossup_set.values_list('id', flat=True)]
+    bs_ids = [str(i) for i in qset.bonus_set.values_list('id', flat=True)]
+
+    mentions = CommentMention.objects.filter(mentioned=user).filter(
+        Q(comment__content_type=tu_ct, comment__object_pk__in=tu_ids) |
+        Q(comment__content_type=bs_ct, comment__object_pk__in=bs_ids)
+    ).exclude(comment__resolution__resolved=True)
+    if last is not None:
+        mentions = mentions.filter(created_date__gt=last)
+    count = mentions.count()
+
+    for model, hist_model in ((Tossup, TossupHistory), (Bonus, BonusHistory)):
+        hids = [h for h in model.objects.filter(question_set=qset)
+                .filter(Q(author=user) | Q(editor=user))
+                .values_list('question_history_id', flat=True) if h]
+        if not hids:
+            continue
+        changes = hist_model.objects.filter(question_history_id__in=hids).exclude(changer=user)
+        if last is not None:
+            changes = changes.filter(change_date__gt=last)
+        count += changes.count()
+    return count
+
+
+@login_required
+def activity(request, qset_id):
+    """Per-user activity on a set: @mentions of you, plus changes other people
+    made to questions you wrote or edited."""
+    user = request.user.writer
+    qset = QuestionSet.objects.get(id=qset_id)
+    if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+        return render(request, 'failure.html',
+                      {'message': 'You are not authorized to view this set!',
+                       'message_class': 'alert-box alert'})
+
+    tu_ct = ContentType.objects.get_for_model(Tossup)
+    bs_ct = ContentType.objects.get_for_model(Bonus)
+    tu_ids = set(str(i) for i in qset.tossup_set.values_list('id', flat=True))
+    bs_ids = set(str(i) for i in qset.bonus_set.values_list('id', flat=True))
+
+    # --- @mentions of you on this set's questions ---
+    mentions = (CommentMention.objects.filter(mentioned=user)
+                .filter(Q(comment__content_type=tu_ct, comment__object_pk__in=tu_ids) |
+                        Q(comment__content_type=bs_ct, comment__object_pk__in=bs_ids))
+                .exclude(comment__resolution__resolved=True)
+                .select_related('comment__user', 'comment__content_type')
+                .order_by('-comment__submit_date')[:100])
+    mention_items = []
+    for m in mentions:
+        c = m.comment
+        is_tu = c.content_type_id == tu_ct.id
+        by = str(c.user) if c.user else (c.user_name or 'unknown')
+        mention_items.append({
+            'date': c.submit_date, 'by': by, 'text': c.comment,
+            'qtype': 'tossup' if is_tu else 'bonus',
+            'edit_url': '{0}{1}/'.format('/edit_tossup/' if is_tu else '/edit_bonus/', c.object_pk),
+        })
+
+    # --- changes by others to questions you authored or edited ---
+    change_items = []
+    for model, hist_model, edit, preview in (
+            (Tossup, TossupHistory, '/edit_tossup/', lambda q: _grid_answer_preview(q.tossup_answer)),
+            (Bonus, BonusHistory, '/edit_bonus/', lambda q: _grid_answer_preview(q.part1_answer, 30))):
+        mine = (model.objects.filter(question_set=qset)
+                .filter(Q(author=user) | Q(editor=user))
+                .select_related('category'))
+        hist_to_q = {q.question_history_id: q for q in mine if q.question_history_id}
+        if not hist_to_q:
+            continue
+        histories = (hist_model.objects.filter(question_history_id__in=hist_to_q.keys())
+                     .exclude(changer=user).select_related('changer__user')
+                     .order_by('-change_date')[:100])
+        for h in histories:
+            q = hist_to_q.get(h.question_history_id)
+            if q is None:
+                continue
+            change_items.append({
+                'date': h.change_date,
+                'by': str(h.changer) if h.changer else 'unknown',
+                'qtype': 'tossup' if model is Tossup else 'bonus',
+                'edit_url': '{0}{1}/'.format(edit, q.id),
+                'preview': preview(q),
+                'role': 'wrote' if q.author_id == user.id else 'edited',
+            })
+    change_items.sort(key=lambda x: x['date'], reverse=True)
+    change_items = change_items[:100]
+
+    # Mark this set's activity as seen (clears the notification badge).
+    ActivitySeen.objects.update_or_create(
+        writer=user, question_set=qset, defaults={'last_seen': timezone.now()})
+
+    return render(request, 'activity.html',
+                  {'qset': qset, 'user': user,
+                   'mention_items': mention_items, 'change_items': change_items})
+
+
+@login_required
+def set_members(request, qset_id):
+    """JSON list of the set's members (username + real name) for the comment
+    @mention autocomplete."""
+    user = request.user.writer
+    qset = QuestionSet.objects.get(id=qset_id)
+    if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+        return HttpResponse(json.dumps({'members': []}))
+    by_name = {}
+    for w in list(qset.all_owners()) + list(qset.editor.all()) + list(qset.writer.all()):
+        u = w.user
+        name = '{0} {1}'.format(u.first_name, u.last_name).strip() or u.username
+        by_name[u.username] = name
+    members = [{'username': k, 'name': v}
+               for k, v in sorted(by_name.items(), key=lambda kv: kv[1].lower())]
+    return HttpResponse(json.dumps({'members': members}))
+
+
+@login_required
+def resolve_comment(request):
+    """Toggle a comment's resolved status. Resolved comments drop off the
+    mentioned writers' activity feeds."""
+    user = request.user.writer
+    if request.method != 'POST':
+        return HttpResponse(json.dumps({'success': False, 'message': 'Invalid request'}))
+    try:
+        comment = Comment.objects.get(id=int(request.POST['comment_id']))
+    except (KeyError, ValueError, Comment.DoesNotExist):
+        return HttpResponse(json.dumps({'success': False, 'message': 'Comment not found'}))
+    target = comment.content_object
+    qset = getattr(target, 'question_set', None)
+    if qset is None or not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+        return HttpResponse(json.dumps({'success': False, 'message': 'You are not authorized.'}))
+    res, created = CommentResolution.objects.get_or_create(
+        comment=comment, defaults={'resolved': True, 'resolved_by': user})
+    if not created:
+        res.resolved = not res.resolved
+    res.resolved_by = user
+    res.save()
+    cache.clear()
+    return HttpResponse(json.dumps({'success': True, 'resolved': res.resolved}))
+
+
+def _question_issue_map(qset):
+    """Map 'tossup-<id>'/'bonus-<id>' -> worst repeat-checker severity for every
+    flagged question in the set. Cached by the dup-check fingerprint so it only
+    recomputes when questions change."""
+    key = 'dupissues:{0}:{1}'.format(qset.id, _dup_fingerprint(qset))
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
+    rank = {CRITICAL: 3, WARNING: 2, INFO: 1}
+    issues = {}
+
+    def add(qtype, qid, sev):
+        k = '{0}-{1}'.format(qtype, qid)
+        if k not in issues or rank.get(sev, 0) > rank.get(issues[k], 0):
+            issues[k] = sev
+
+    for group in find_duplicates(qset):
+        for e in group['entries']:
+            add(e['type'], e['id'], group['severity'])
+    for group in find_topic_repeats(qset):
+        for e in group['entries']:
+            add(e['type'], e['id'], group['severity'])
+    for issue in find_internal_issues(qset):
+        add(issue['question_type'], issue['question_id'], issue['severity'])
+
+    cache.set(key, issues, 1800)
+    return issues
+
+
+@login_required
+def style_check(request, qset_id):
+    """Run the style checker over a set's questions. The style guide is
+    selectable via ?guide=; default is Minkowski."""
+    from . import style_checker
+    user = request.user.writer
+    qset = QuestionSet.objects.get(id=qset_id)
+    if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+        return render(request, 'failure.html',
+                      {'message': 'You are not authorized to view this set!',
+                       'message_class': 'alert-box alert'})
+
+    guide = request.GET.get('guide', style_checker.DEFAULT_GUIDE)
+    if guide not in style_checker.guide_keys():
+        guide = style_checker.DEFAULT_GUIDE
+
+    results = []
+    counts = {'error': 0, 'warning': 0, 'info': 0}
+    checked = 0
+
+    for tu in qset.tossup_set.select_related('packet').order_by('packet__packet_name', 'question_number'):
+        checked += 1
+        issues = style_checker.check_tossup(tu, guide)
+        if issues:
+            for i in issues:
+                counts[i['severity']] = counts.get(i['severity'], 0) + 1
+            results.append({'type': 'tossup', 'id': tu.id, 'edit_url': '/edit_tossup/{0}/'.format(tu.id),
+                            'label': _grid_answer_preview(tu.tossup_answer),
+                            'packet': tu.packet.packet_name if tu.packet else '',
+                            'number': tu.question_number, 'issues': issues})
+    for b in qset.bonus_set.select_related('packet').order_by('packet__packet_name', 'question_number'):
+        checked += 1
+        issues = style_checker.check_bonus(b, guide)
+        if issues:
+            for i in issues:
+                counts[i['severity']] = counts.get(i['severity'], 0) + 1
+            results.append({'type': 'bonus', 'id': b.id, 'edit_url': '/edit_bonus/{0}/'.format(b.id),
+                            'label': _grid_answer_preview(b.part1_answer, 30),
+                            'packet': b.packet.packet_name if b.packet else '',
+                            'number': b.question_number, 'issues': issues})
+
+    return render(request, 'style_check.html',
+                  {'qset': qset, 'user': user, 'results': results, 'counts': counts,
+                   'checked': checked, 'flagged': len(results),
+                   'guides': style_checker.STYLE_GUIDES, 'guide': guide,
+                   'guide_obj': next((g for g in style_checker.STYLE_GUIDES if g['key'] == guide), None)})
+
+
+@login_required
+def packet_issues(request, packet_id):
+    """JSON map of repeat-checker issue severities for the questions in a packet
+    (for the document-view "show issues" toggle)."""
+    user = request.user.writer
+    packet = Packet.objects.get(id=packet_id)
+    qset = packet.question_set
+    if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+        return HttpResponse(json.dumps({'issues': {}}))
+    full = _question_issue_map(qset)
+    keys = set()
+    for t in packet.tossup_set.values_list('id', flat=True):
+        keys.add('tossup-{0}'.format(t))
+    for b in packet.bonus_set.values_list('id', flat=True):
+        keys.add('bonus-{0}'.format(b))
+    issues = {k: v for k, v in full.items() if k in keys}
+    return HttpResponse(json.dumps({'issues': issues}))
+
+
+@login_required
+def packet_style_issues(request, packet_id):
+    """JSON map of style-check issues (per question) for a packet, for the
+    document-view "show style issues" toggle. Style guide via ?guide=."""
+    from . import style_checker
+    user = request.user.writer
+    packet = Packet.objects.get(id=packet_id)
+    qset = packet.question_set
+    if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+        return HttpResponse(json.dumps({'issues': {}}))
+    guide = request.GET.get('guide', style_checker.DEFAULT_GUIDE)
+    if guide not in style_checker.guide_keys():
+        guide = style_checker.DEFAULT_GUIDE
+    issues = {}
+    for tu in packet.tossup_set.all():
+        found = style_checker.check_tossup(tu, guide)
+        if found:
+            issues['tossup-{0}'.format(tu.id)] = found
+    for b in packet.bonus_set.all():
+        found = style_checker.check_bonus(b, guide)
+        if found:
+            issues['bonus-{0}'.format(b.id)] = found
+    return HttpResponse(json.dumps({'issues': issues, 'guide': guide}))
 
 
 #########################################################################
@@ -5230,8 +5847,11 @@ def category_tags(request, qset_id):
     can_edit = qset.is_owner(user) or user in qset.editor.all()
     message = ''
     message_class = ''
+    # Remember the category just used so the add form stays on it after saving
+    selected_path = ''
 
     if request.method == 'POST':
+        selected_path = request.POST.get('category_path', '')
         if not can_edit:
             message = 'Only editors can change tags!'
             message_class = 'alert-box warning'
@@ -5303,5 +5923,6 @@ def category_tags(request, qset_id):
                               'groups': groups,
                               'path_choices': path_choices,
                               'can_edit': can_edit,
+                              'selected_path': selected_path,
                               'message': message,
                               'message_class': message_class})

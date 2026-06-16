@@ -182,6 +182,14 @@
     box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.15);
 }
 
+/* Reflects the formatting at the caret/selection (pressed = active) */
+.rich-editor-toolbar a.rich-editor-btn.active {
+    background-color: #008cba;
+    border-color: #0079a8;
+    color: #fff;
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
 .rich-editor-hint {
     float: right;
     font-size: 0.75em;
@@ -257,7 +265,10 @@
 }
 
 .category-tree-toggle:hover {
-    background: #eef4fa;
+    background: #d9e8f6;
+    /* Override Foundation's button:hover (white text), which made the label
+       unreadable on the light hover background. */
+    color: #004c6d;
 }
 
 .category-tree-toggle.open {
@@ -310,4 +321,59 @@
 .category-tag-btn:active {
     background: #006d9a;
     color: #fff;
+}
+
+/* Unseen-activity notification badge on the My Activity button */
+.activity-badge {
+    display: inline-block;
+    min-width: 1.2em;
+    padding: 0 0.35em;
+    margin-left: 0.25em;
+    font-size: 0.75em;
+    font-weight: bold;
+    line-height: 1.4;
+    color: #fff;
+    background: #f04124;
+    border-radius: 0.7em;
+    text-align: center;
+}
+
+/* @mention autocomplete dropdown for comment boxes */
+.mention-dropdown {
+    position: absolute;
+    z-index: 1000;
+    max-height: 240px;
+    overflow-y: auto;
+    background: #fff;
+    border: 1px solid #bbb;
+    border-radius: 3px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+.mention-item {
+    padding: 0.35em 0.6em;
+    cursor: pointer;
+    font-size: 0.85rem;
+    white-space: nowrap;
+}
+.mention-item.active,
+.mention-item:hover {
+    background: #008cba;
+    color: #fff;
+}
+.mention-username {
+    color: #888;
+    font-size: 0.9em;
+}
+.mention-item.active .mention-username,
+.mention-item:hover .mention-username {
+    color: #d6eefa;
+}
+
+/* Resolved comments are dimmed and marked */
+.comment-resolved {
+    opacity: 0.6;
+}
+.comment-resolved-badge {
+    float: right;
+    margin-left: 0.4em;
 }

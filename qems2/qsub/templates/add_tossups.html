@@ -10,8 +10,7 @@
 
 <h3 class="page-header">Add a Tossup</h3>
 <ul class="button-group even">
-    <li><a class="button primary" href="/add_bonuses/{{ qset.id }}/ACF-style bonus">Switch to adding an ACF bonus</a></li>
-    <li><a class="button primary" href="/add_bonuses/{{ qset.id }}/VHSL bonus">Switch to adding a VHSL bonus</a></li>
+    <li><a class="button primary" href="/add_bonuses/{{ qset.id }}/ACF-style bonus">Switch to adding a bonus</a></li>
 </ul>
 {% autoescape off %}
     {% if message %}
@@ -19,6 +18,7 @@
         {{ message }}{% if tossup_id %} <a href="/edit_tossup/{{ tossup_id }}">View your tossup.</a>{% endif %}
     </div>
     {% endif %}
+    {% include "_dup_warning.html" %}
 {% endautoescape %}
 <form action="" method="post" id="add-tossups">
     {% csrf_token %}

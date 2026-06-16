@@ -36,7 +36,7 @@
             <label>Category
                 <select name="category_path">
                     {% for path in path_choices %}
-                    <option value="{{ path }}">{{ path }}</option>
+                    <option value="{{ path }}"{% if path == selected_path %} selected{% endif %}>{{ path }}</option>
                     {% endfor %}
                 </select>
             </label>

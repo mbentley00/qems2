@@ -33,6 +33,7 @@ $(function () {
         html = html.replace(/__([^_]+)__/g, '<u>$1</u>');
         html = html.replace(/_([^_]+)_/g, '<u><b>$1</b></u>');
         html = html.replace(/~([^~]+)~/g, '<i>$1</i>');
+        html = html.replace(/\\B([\s\S]+?)\\B/g, '<b>$1</b>');
         html = html.replace(/\\S([\s\S]+?)\\S/g, '<sup>$1</sup>');
         html = html.replace(/\\s([\s\S]+?)\\s/g, '<sub>$1</sub>');
         return html;
@@ -77,11 +78,11 @@ $(function () {
 
         var $toolbar = $(
             '<div class="rich-editor-toolbar">' +
-            // QEMS markup has no bold-only, so Bold applies bold+underline
-            // (the required-answer-part convention)
-            '  <a href="#" class="rich-editor-btn" data-cmd="bold,underline" title="Bold (saved as bold+underline)"><b>B</b></a>' +
-            '  <a href="#" class="rich-editor-btn" data-cmd="underline" title="Underline"><u>U</u></a>' +
-            '  <a href="#" class="rich-editor-btn" data-cmd="italic" title="Italic"><i>I</i></a>' +
+            // Bold is bold-only (Ctrl+B); combine with Underline for the
+            // required-answer (bold+underline) convention.
+            '  <a href="#" class="rich-editor-btn" data-cmd="bold" title="Bold (Ctrl+B)"><b>B</b></a>' +
+            '  <a href="#" class="rich-editor-btn" data-cmd="underline" title="Underline (Ctrl+U)"><u>U</u></a>' +
+            '  <a href="#" class="rich-editor-btn" data-cmd="italic" title="Italic (Ctrl+I)"><i>I</i></a>' +
             '  <a href="#" class="rich-editor-btn" data-cmd="subscript" title="Subscript">x<sub>2</sub></a>' +
             '  <a href="#" class="rich-editor-btn" data-cmd="superscript" title="Superscript">x<sup>2</sup></a>' +
             '  <span class="rich-editor-hint">Rich text &mdash; pasting from Google Docs/Word keeps formatting</span>' +
@@ -106,6 +107,43 @@ $(function () {
         }
 
         $editor.on('input blur', syncDown);
+
+        // Remember the caret/selection inside the editor so actions that move
+        // focus away (toolbar buttons, the category-tag tree) can restore it.
+        var savedRange = null;
+        function saveSelection() {
+            var sel = window.getSelection();
+            if (sel && sel.rangeCount && $editor[0].contains(sel.anchorNode)) {
+                savedRange = sel.getRangeAt(0).cloneRange();
+            }
+        }
+        $editor.on('keyup mouseup blur', saveSelection);
+
+        // Reflect the formatting at the caret/selection on the toolbar buttons
+        // (a button appears "pressed" when its style is active).
+        function updateToolbarState() {
+            $toolbar.find('.rich-editor-btn').each(function () {
+                var cmd = $(this).attr('data-cmd');
+                var active = false;
+                try { active = document.queryCommandState(cmd); } catch (e) { active = false; }
+                $(this).toggleClass('active', active);
+            });
+        }
+        $editor.on('keyup mouseup focus', updateToolbarState);
+
+        // Common formatting shortcuts: Ctrl/Cmd + B / I / U. Bold is bold-only.
+        $editor.on('keydown', function (e) {
+            if (e.ctrlKey || e.metaKey) {
+                var k = (e.key || '').toLowerCase();
+                var cmd = k === 'b' ? 'bold' : k === 'u' ? 'underline' : k === 'i' ? 'italic' : null;
+                if (cmd) {
+                    e.preventDefault();
+                    document.execCommand(cmd, false, null);
+                    syncDown();
+                    updateToolbarState();
+                }
+            }
+        });
 
         // Single-paragraph fields: no line breaks
         if (!multiline) {
@@ -156,90 +194,54 @@ $(function () {
                 document.execCommand(cmd, false, null);
             });
             syncDown();
+            updateToolbarState();
         });
 
         if (textarea.id) {
-            registry[textarea.id] = { root: $editor[0], syncDown: syncDown, resyncUp: resyncUp };
+            registry[textarea.id] = {
+                root: $editor[0], syncDown: syncDown, resyncUp: resyncUp,
+                getSavedRange: function () { return savedRange; }
+            };
         }
     }
 
     /* ---------- Category tag insertion (Type Questions page) ---------- */
 
-    function textNodesIn(el) {
-        var walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null, false);
-        var nodes = [];
-        while (walker.nextNode()) { nodes.push(walker.currentNode); }
-        return nodes;
-    }
-
-    function appendToLine(lineNode, str) {
-        if (lineNode.nodeType === Node.TEXT_NODE) {
-            lineNode.textContent = lineNode.textContent.replace(/\s+$/, '') + str;
-        } else {
-            lineNode.appendChild(document.createTextNode(str));
-        }
-    }
-
-    // Remove an existing trailing {Category - Subcategory} tag, which may
-    // span text nodes
-    function removeTrailingTag(lineNode) {
-        var match = lineNode.textContent.match(/\s*\{[^{}]*\}\s*$/);
-        if (!match) { return; }
-        var remove = match[0].length;
-        var nodes = lineNode.nodeType === Node.TEXT_NODE ? [lineNode] : textNodesIn(lineNode);
-        for (var i = nodes.length - 1; i >= 0 && remove > 0; i--) {
-            var t = nodes[i].textContent;
-            var take = Math.min(remove, t.length);
-            nodes[i].textContent = t.slice(0, t.length - take);
-            remove -= take;
-        }
-    }
-
-    // Insert a category tag onto the nearest ANSWER line at/above the caret
-    // in the rich editor for the given textarea id. Returns false if no such
-    // editor exists (caller falls back to plain-textarea handling).
+    // Insert a category tag at the caret in the rich editor for the given
+    // textarea id. Returns false if no such editor exists (caller falls back to
+    // plain-textarea handling). Uses the caret saved before focus moved to the
+    // tag button, and inserts via execCommand so the native undo stack stays
+    // intact (direct DOM edits broke undo and ignored the caret).
     function insertCategoryTag(textareaId, tag) {
         var reg = registry[textareaId];
         if (!reg) { return false; }
         var editor = reg.root;
-
-        // Line nodes are the editor's direct children (divs, or a bare text
-        // node for an unwrapped first line)
-        var lines = Array.prototype.filter.call(editor.childNodes, function (n) {
-            return n.nodeType === Node.ELEMENT_NODE ||
-                   (n.nodeType === Node.TEXT_NODE && n.textContent.trim());
-        });
-
-        // Which line is the caret on?
-        var caretLine = null;
-        var sel = window.getSelection();
-        if (sel && sel.rangeCount && editor.contains(sel.anchorNode) && sel.anchorNode !== editor) {
-            var n = sel.anchorNode;
-            while (n.parentNode && n.parentNode !== editor) { n = n.parentNode; }
-            if (lines.indexOf(n) !== -1) { caretLine = n; }
-        }
-
-        // Walk backward from the caret line (or the end) to the nearest
-        // ANSWER line
-        var start = caretLine ? lines.indexOf(caretLine) : lines.length - 1;
-        var target = null;
-        for (var i = start; i >= 0; i--) {
-            if (/^\s*answer/i.test(lines[i].textContent)) { target = lines[i]; break; }
-        }
-
-        if (target) {
-            removeTrailingTag(target);
-            appendToLine(target, ' ' + tag);
-        } else if (caretLine) {
-            appendToLine(caretLine, ' ' + tag);
-        } else if (lines.length) {
-            appendToLine(lines[lines.length - 1], ' ' + tag);
-        } else {
-            editor.appendChild(document.createTextNode(tag));
-        }
-
-        reg.syncDown();
         editor.focus();
+
+        var sel = window.getSelection();
+        var range = reg.getSavedRange && reg.getSavedRange();
+        if (range && editor.contains(range.startContainer)) {
+            sel.removeAllRanges();
+            sel.addRange(range);
+        } else {
+            // No remembered caret — drop the tag at the very end.
+            range = document.createRange();
+            range.selectNodeContents(editor);
+            range.collapse(false);
+            sel.removeAllRanges();
+            sel.addRange(range);
+        }
+
+        // The tag must be plain text, so turn off any inline formatting active
+        // at the caret before inserting (otherwise the tag inherits e.g. the
+        // underline of the answer it follows).
+        ['bold', 'italic', 'underline', 'subscript', 'superscript'].forEach(function (cmd) {
+            try {
+                if (document.queryCommandState(cmd)) { document.execCommand(cmd, false, null); }
+            } catch (e) { /* command unsupported */ }
+        });
+        document.execCommand('insertText', false, ' ' + tag);
+        reg.syncDown();
         return true;
     }
 

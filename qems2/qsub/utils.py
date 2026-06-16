@@ -148,6 +148,7 @@ def get_formatted_question_html(line, allowUnderlines, allowParens, allowNewLine
     needToRestoreItalicsFlag = False
     subScriptFlag = False
     superScriptFlag = False
+    boldFlag = False
     powerFlag = False
     powerIndex = -1
     promptFlag = False
@@ -231,6 +232,14 @@ def get_formatted_question_html(line, allowUnderlines, allowParens, allowNewLine
             else:
                 superScriptFlag = True
                 output += u"<sup>"
+        elif (c == u"B" and previousChar == u"\\" and secondPreviousChar != u"\\"):
+            output = output[:-1] # Get rid of the escape character
+            if (boldFlag):
+                boldFlag = False
+                output += u"</b>"
+            else:
+                boldFlag = True
+                output += u"<b>"
         else:
             if (c == u"_" and allowUnderlines):
                 if (nextChar == u"_"):
@@ -259,6 +268,9 @@ def get_formatted_question_html(line, allowUnderlines, allowParens, allowNewLine
 
     if (italicsFlag):
         output += u"</i>"
+
+    if (boldFlag):
+        output += u"</b>"
 
     if (underlineFlag):
         output += u"</b></u>"

@@ -28,5 +28,7 @@ RUN SECRET_KEY=build-time-only DJANGO_SETTINGS_MODULE=qems2.settings \
 
 EXPOSE 8000
 
-# Apply migrations at startup, then serve. App Service injects $PORT.
-CMD ["sh", "-c", "python manage.py migrate --noinput && gunicorn qems2.wsgi:application --bind 0.0.0.0:${PORT} --workers 3 --timeout 120"]
+# Normalize line endings (entrypoint.sh may be saved CRLF on Windows) and make
+# it executable, then use it for startup: migrate -> bootstrap -> index -> serve.
+RUN sed -i 's/\r$//' entrypoint.sh && chmod +x entrypoint.sh
+CMD ["./entrypoint.sh"]

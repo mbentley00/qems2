@@ -55,7 +55,8 @@ class QuestionSetForm(forms.ModelForm):
 
     class Meta:
         model = QuestionSet
-        exclude = ['owner', 'public', 'address', 'host']
+        # max_vhsl_bonus_length excluded: VHSL support has been removed from the UI.
+        exclude = ['owner', 'public', 'address', 'host', 'max_vhsl_bonus_length']
 
     def __init__(self, read_only=False, *args, **kwargs):
         super(QuestionSetForm, self).__init__(*args, **kwargs)
@@ -353,6 +354,40 @@ class ImportSetForm(forms.Form):
 
     set_name = forms.CharField(max_length=200, label='New set name')
     set_file = forms.FileField(label='TSV or CSV file (in export format)')
+
+class MultipleFileInput(forms.ClearableFileInput):
+    allow_multiple_selected = True
+
+class MultipleFileField(forms.FileField):
+    """A FileField that accepts and validates several files at once (the stock
+    FileField rejects multiple selection). Returns a list of files."""
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault('widget', MultipleFileInput())
+        super().__init__(*args, **kwargs)
+
+    def clean(self, data, initial=None):
+        single_clean = super().clean
+        if isinstance(data, (list, tuple)):
+            return [single_clean(d, initial) for d in data]
+        return [single_clean(data, initial)]
+
+class ImportPacketsForm(forms.Form):
+
+    set_name = forms.CharField(max_length=200, required=False, label='New tournament name')
+    target_set = forms.ModelChoiceField(
+        queryset=QuestionSet.objects.all().order_by('name'), required=False,
+        label='…or add packets to an existing set')
+    packet_files = MultipleFileField(label='Packet files (.json, .docx, or .pdf)')
+
+    def clean(self):
+        cleaned = super().clean()
+        name = (cleaned.get('set_name') or '').strip()
+        target = cleaned.get('target_set')
+        if not name and not target:
+            raise forms.ValidationError('Enter a new tournament name, or choose an existing set to add to.')
+        if name and target:
+            raise forms.ValidationError('Choose either a new tournament name or an existing set, not both.')
+        return cleaned
 
 class NewPacketsForm(forms.Form):
 

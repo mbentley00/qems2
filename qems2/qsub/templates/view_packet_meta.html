@@ -7,4 +7,6 @@
     <span class="doc-tag">Changed: {{ q.changed_date|date:"m/d/y H:i" }}{% if q.changed_by %} by {{ q.changed_by }}{% endif %}</span>
     <a href="#" class="doc-tag doc-copy-discord" data-key="{{ q.qtype }}-{{ q.id }}" data-mode="spoiler" title="Copy to clipboard in Discord spoiler format">Copy Discord</a>
     <a href="#" class="doc-tag doc-copy-discord" data-key="{{ q.qtype }}-{{ q.id }}" data-mode="plain" title="Copy to clipboard in Discord format without spoilers">No spoilers</a>
+    <a href="#" class="doc-tag doc-add-comment" data-qtype="{{ q.qtype }}" data-qid="{{ q.id }}" title="Add a comment to this question"><i class="fa fa-comment"></i> Comment</a>
+    <a href="{{ q.edit_url }}" target="_blank" rel="noopener" class="doc-tag doc-edit-link" title="Open this question for editing in a new tab"><i class="fa fa-pen-to-square"></i> Edit</a>
 </div>

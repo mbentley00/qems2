@@ -113,7 +113,8 @@ $(function () {
         } else if (isUnderline) {
             inner = wrapInlineMarkup(inner, '__');
         } else if (isBold) {
-            // Bold alone has no QEMS markup — pass through
+            // Bold only -> \Btext\B (mirrors \S/\s for sup/sub)
+            inner = wrapInlineMarkup(inner, '\\B');
         }
         if (isItalic) {
             inner = wrapInlineMarkup(inner, '~');
@@ -449,6 +450,9 @@ $(function () {
         // 4. Tildes (italic) → Discord italic
         text = text.replace(/~([^~]+)~/g, '_$1_');
 
+        // 4b. Bold-only \Btext\B → **text**
+        text = text.replace(/\\B([^\\]+)\\B/g, '**$1**');
+
         // 5. Superscript — no Discord equivalent, just keep text
         text = text.replace(/\\S([^\\]+)\\S/g, '$1');
 
@@ -669,7 +673,15 @@ $(function () {
     function formatTossupForDiscordPlain(text, answer, author, category) {
         var info = { author: author || '', category: category || '' };
 
-        var result = qemsToDiscordMarkup((text || '').trim());
+        var rendered = qemsToDiscordMarkup((text || '').trim());
+        // Bold the power: everything up to and including the (*) marker.
+        var powerIdx = rendered.indexOf('(*)');
+        var result;
+        if (powerIdx !== -1) {
+            result = '**' + rendered.substring(0, powerIdx + 3) + '**' + rendered.substring(powerIdx + 3);
+        } else {
+            result = rendered;
+        }
         answer = (answer || '').trim();
         result += '\nANSWER: ' + qemsToDiscordMarkup(answer);
         if (info.author || info.category) {
@@ -769,6 +781,15 @@ $(function () {
     // 7. Comment Reply UI
     // ========================================================================
 
+    // Toggle a comment's resolved status
+    $(document).on('click', '.resolve-toggle', function (e) {
+        e.preventDefault();
+        var id = $(this).data('comment-id');
+        $.post('/resolve_comment/', { comment_id: id }, function () {
+            location.reload();
+        });
+    });
+
     // Toggle reply form visibility
     $(document).on('click', '.reply-toggle', function (e) {
         e.preventDefault();
@@ -787,6 +808,93 @@ $(function () {
         $form.find('.reply-text').val('');
         $form.hide();
     });
+
+    // ========================================================================
+    // 8. @mention autocomplete for comment boxes
+    // ========================================================================
+
+    (function () {
+        var qsetId = window.QEMS_QSET_ID;
+        if (!qsetId) { return; }
+        var SEL = 'textarea[name="comment"], textarea.reply-text, .doc-comment-box textarea';
+        var members = null, loading = false;
+        var $dd = $('<div class="mention-dropdown" style="display:none;"></div>').appendTo('body');
+        var activeTa = null, matchStart = -1;
+
+        function loadMembers(cb) {
+            if (members) { cb(); return; }
+            if (loading) { return; }
+            loading = true;
+            $.getJSON('/set_members/' + qsetId + '/', function (data) {
+                members = (data && data.members) || [];
+                loading = false;
+                cb();
+            });
+        }
+        function hide() { $dd.hide(); activeTa = null; matchStart = -1; }
+
+        function showFor(ta) {
+            var before = ta.value.slice(0, ta.selectionStart);
+            var m = before.match(/@([\w.\-]*)$/);
+            if (!m) { hide(); return; }
+            var token = m[1].toLowerCase();
+            matchStart = ta.selectionStart - m[0].length;
+            var matches = members.filter(function (mem) {
+                return mem.username.toLowerCase().indexOf(token) !== -1 ||
+                       mem.name.toLowerCase().indexOf(token) !== -1;
+            }).slice(0, 8);
+            if (!matches.length) { hide(); return; }
+            $dd.empty();
+            matches.forEach(function (mem, i) {
+                $('<div class="mention-item">')
+                    .toggleClass('active', i === 0)
+                    .attr('data-username', mem.username)
+                    .html('<strong></strong> <span class="mention-username"></span>')
+                    .find('strong').text(mem.name).end()
+                    .find('.mention-username').text('@' + mem.username).end()
+                    .appendTo($dd);
+            });
+            var off = $(ta).offset();
+            $dd.css({ left: off.left, top: off.top + $(ta).outerHeight(),
+                      minWidth: Math.max(220, $(ta).outerWidth()) }).show();
+            activeTa = ta;
+        }
+
+        function pick($item) {
+            if (!activeTa || !$item || !$item.length) { return; }
+            var username = $item.attr('data-username');
+            var ta = activeTa, val = ta.value, pos = ta.selectionStart;
+            var insert = '@' + username + ' ';
+            ta.value = val.slice(0, matchStart) + insert + val.slice(pos);
+            var newPos = matchStart + insert.length;
+            ta.selectionStart = ta.selectionEnd = newPos;
+            $(ta).trigger('input');
+            hide();
+            ta.focus();
+        }
+
+        $(document).on('input', SEL, function () {
+            var ta = this;
+            loadMembers(function () { showFor(ta); });
+        });
+        $(document).on('keydown', SEL, function (e) {
+            if (!$dd.is(':visible')) { return; }
+            var $items = $dd.find('.mention-item');
+            var idx = $items.index($items.filter('.active'));
+            if (e.key === 'ArrowDown') { e.preventDefault(); idx = Math.min(idx + 1, $items.length - 1); }
+            else if (e.key === 'ArrowUp') { e.preventDefault(); idx = Math.max(idx - 1, 0); }
+            else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); pick($items.eq(idx < 0 ? 0 : idx)); return; }
+            else if (e.key === 'Escape') { hide(); return; }
+            else { return; }
+            $items.removeClass('active');
+            $items.eq(idx).addClass('active');
+        });
+        $(document).on('mousedown', '.mention-item', function (e) {
+            e.preventDefault();
+            pick($(this));
+        });
+        $(document).on('blur', SEL, function () { setTimeout(hide, 150); });
+    })();
 
     // Post reply via AJAX
     $(document).on('click', '.post-reply', function (e) {

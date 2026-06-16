@@ -81,6 +81,7 @@
                     <thead>
                         <tr>
                             <th>Type</th>
+                            {% if has_packets %}<th>Packet</th>{% endif %}
                             <th>Answer</th>
                             <th>Category</th>
                             <th>Author</th>
@@ -98,10 +99,11 @@
                                         <a href="/edit_bonus/{{ entry.id }}/">Bonus {{ entry.part_label }}</a>
                                     {% endif %}
                                 </td>
-                                <td>{{ entry.answer_raw|truncatechars:80 }}</td>
+                                {% if has_packets %}<td>{{ entry.packet }}</td>{% endif %}
+                                <td>{{ entry.answer_html }}</td>
                                 <td>{{ entry.category_str }}</td>
                                 <td>{{ entry.author }}</td>
-                                <td><small>{{ entry.text_preview }}</small></td>
+                                <td><small>{{ entry.preview_html }}</small></td>
                             </tr>
                         {% endfor %}
                         {% endautoescape %}
@@ -122,6 +124,12 @@
 {% endfor %}
 
 <h4 class="page-header" style="margin-top: 2rem;" id="topic-repeats">Topic Repeats</h4>
+
+{% if topic_truncated %}
+    <div class="row"><div class="small-12 columns">
+        <div class="panel callout"><p>Showing the {{ topic_shown }} highest-severity topic repeats of {{ topic_total }} total. Resolve these (or tighten the set) to surface the rest.</p></div>
+    </div></div>
+{% endif %}
 
 {% if not topic_groups %}
     <div class="row">
@@ -151,7 +159,7 @@
                     <thead>
                         <tr>
                             <th>Question</th>
-                            <th>Location</th>
+                            {% if has_packets %}<th>Packet</th>{% endif %}
                             <th>Answer</th>
                             <th>Category</th>
                             <th>Author</th>
@@ -169,11 +177,11 @@
                                         <a href="/edit_bonus/{{ entry.id }}/">Bonus{% if entry.part_label %} {{ entry.part_label }}{% endif %}</a>
                                     {% endif %}
                                 </td>
-                                <td>{{ entry.location }}</td>
-                                <td>{{ entry.answer_raw|truncatechars:70 }}</td>
+                                {% if has_packets %}<td>{{ entry.location }}</td>{% endif %}
+                                <td>{{ entry.answer_html }}</td>
                                 <td>{{ entry.category_str }}</td>
                                 <td>{{ entry.author }}</td>
-                                <td><small>{{ entry.text_preview }}</small></td>
+                                <td><small>{{ entry.preview_html }}</small></td>
                             </tr>
                         {% endfor %}
                         {% endautoescape %}

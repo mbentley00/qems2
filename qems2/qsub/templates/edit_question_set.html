@@ -28,7 +28,25 @@
     {% include "tab_group_2.html" %}
 {% endblock %}
 
+<ul class="button-group even set-tools">
+    <li><a href="/duplicate_check/{{ qset.id }}/" class="button secondary"><i class="fa fa-clone"></i> Duplicate Checker</a></li>
+    <li><a href="/packet_grid/{{ qset.id }}/" class="button secondary"><i class="fa fa-table"></i> Packet Grid</a></li>
+    {% with packets|dictsort:"packet_name"|first as first_packet %}
+    {% if first_packet %}
+    <li><a href="/view_packet/{{ first_packet.id }}/" class="button secondary"><i class="fa fa-file-lines"></i> Document View</a></li>
+    {% endif %}
+    {% endwith %}
+    <li><a href="/category_tags/{{ qset.id }}/" class="button secondary"><i class="fa fa-tags"></i> Category Tags</a></li>
+    <li><a href="/category_overview/{{ qset.id }}/" class="button secondary"><i class="fa fa-list-ul"></i> Category Overview</a></li>
+    <li><a href="/activity/{{ qset.id }}/" class="button secondary"><i class="fa fa-bell"></i> My Activity{% if new_activity %} <span class="activity-badge">{{ new_activity }}</span>{% endif %}</a></li>
+    <li><a href="/style_check/{{ qset.id }}/" class="button secondary"><i class="fa fa-spell-check"></i> Style Check</a></li>
+</ul>
+<style>
+.set-tools { margin-top: -8px; margin-bottom: 18px; }
+</style>
+
 <div class="tabs-content" data-tab="">
+
     <div class="content active" id="qset-info">
         {% autoescape off %}
             {% if message %}
@@ -91,7 +109,7 @@
                     <span class="meter text-center" style="width:{{ set_pct_progress_bar }}"></span>
                 </div>
             </div>
-            <strong>Set Completion Status: {{ set_pct_complete}} &ndash; <a href="/questions_remaining/{{ qset.id }}">{{ tu_needed }} tossups needed, {{ bs_needed }} bonuses needed</a></strong>
+            <strong>Set Completion Status: {{ set_pct_complete}} &ndash; <a href="/questions_remaining/{{ qset.id }}">{{ tu_needed }} tossups needed{% if not qset.tossups_only %}, {{ bs_needed }} bonuses needed{% endif %}</a></strong>
             <br><a href="/category_overview/{{ qset.id }}">Category Overview</a> &middot; <a href="/category_tags/{{ qset.id }}">Category Tags</a>
         </div>
 
@@ -184,20 +202,38 @@
                     </label>
                 </li>
                 <li>
-                    <label>Max VHSL Bonus Length
-                    {{ form.max_vhsl_bonus_length }}
-                    </label>
-                </li>
-                <li>
                     <label>Character Counts Ignore Pronunciation Guides
                         {{ form.char_count_ignores_pronunciation_guides }}
                     </label>
-                </li>                
+                </li>
+                <li>
+                    <label>Tossup-Only Tournament (no bonuses)
+                        {{ form.tossups_only }}
+                    </label>
+                    <small style="color:#888;">Hides bonus requirements; existing bonuses are never deleted.</small>
+                </li>
             </ul>
             {% if role == "editor" %}
                 <input type="submit" value="Submit Changes" class="button primary right" />
             {% endif %}
         </form>
+        <script>
+        $(function () {
+            var $setForm = $('form.clearfix').first();
+            var $tossupsOnly = $setForm.find('[name="tossups_only"]');
+            var wasChecked = $tossupsOnly.is(':checked');
+            var bonusCount = {{ qset.bonus_set.count }};
+            $setForm.on('submit', function (e) {
+                if ($tossupsOnly.is(':checked') && !wasChecked && bonusCount > 0) {
+                    if (!confirm('This tournament has ' + bonusCount + ' bonus(es). Marking it tossup-only hides bonus '
+                        + 'requirements and the bonus list, but does NOT delete the bonuses (uncheck this option to bring '
+                        + 'them back). Continue?')) {
+                        e.preventDefault();
+                    }
+                }
+            });
+        });
+        </script>
         <div class="panel header radius text-center">
             <strong><a href="/question_set_distribution/{{ qset.id }}">Set-Specific Distribution</a></strong>
         </div>        
@@ -206,13 +242,7 @@
                 <strong><a href="/export_question_set/{{ qset.id }}/csv/">Export Question Set to CSV</a></strong> | <strong><a href="/export_question_set/{{ qset.id }}/tsv/">Export to TSV</a></strong> | <strong><a href="/export_question_set/{{ qset.id }}/docx/">Export to Word</a></strong> | <strong><a href="/export_question_set/{{ qset.id }}/docx-by-category/">Export to Word by Category</a></strong> | <strong><a href="/export_question_set/{{ qset.id }}/docx-packetized/">Export Packetized Word</a></strong>
             </div>
             <div class="panel header radius text-center">
-                <strong><a href="http://www.doc-ent.com/qems_packetizer/publish.htm">Download Convert CSV to Word program (requires Windows and Office)</a></strong>
-            </div>            
-            <div class="panel header radius text-center">
                 <strong><a href="/bulk_change_set/{{ qset.id }}">Make Bulk Changes to this Set</a></strong>
-            </div>
-            <div class="panel header radius text-center">
-                <strong><a href="/duplicate_check/{{ qset.id }}/">Check for Duplicates and Topic Repeats</a></strong>
             </div>
         {% endif %}
         {% if role == "editor" %}
@@ -225,9 +255,8 @@
             <strong><a href="/writer_question_set_settings/{{ qset.id }}">Your settings for this set</a></strong>
         </div>
     </div>
-    <div class="content" id="comments"> 
-        {% cache 500 comments qset %}
-   
+    <div class="content" id="comments">
+
             <table class="tablesorter table-striped table-hover" id="comments-table">
                 <thead>
                     <tr>
@@ -252,8 +281,6 @@
                     {% endautoescape %}
                 </tbody>
             </table>
-            
-        {% endcache %}
     </div>
     <div class="content" id="editors">
         {% if role == "editor" %}
@@ -327,7 +354,6 @@
         </table>
     </div>
     <div class="content" id="questions">
-        {% cache 500 questions qset %}
 
             <p><a href="#bonuses">Jump to bonuses</a></p>
             <div id="tossups">
@@ -376,7 +402,9 @@
                 </table>
             </div>
             <p><a href="#tossups">Jump to tossups</a></p>        
-            <div id="bonuses">        
+            <div id="bonuses">
+                {% if not qset.tossups_only or qset.bonus_set.exists %}
+                {% if qset.tossups_only %}<div class="alert-box warning">This is a tossup-only tournament, but it still has these bonuses. They are kept (not deleted) and still appear in packets/exports. Uncheck "Tossup-Only Tournament" above to manage them normally.</div>{% endif %}
                 <div class="panel header radius text-center"><strong>Bonuses</strong></div>
                 <table class="tablesorter table-striped table-hover" id="bonus-table">
                     <thead>
@@ -428,11 +456,10 @@
                     {% endautoescape %}
                     </tbody>
                 </table>
+                {% endif %}
             </div>        
             <p><a href="#tossups">Jump to tossups</a></p>
-            <p><a href="#bonuses">Jump to bonuses</a></p>    
-        
-        {% endcache %}            
+            <p><a href="#bonuses">Jump to bonuses</a></p>
     </div>
     <div class="content" id="packets">
         <ul class="button-group even">

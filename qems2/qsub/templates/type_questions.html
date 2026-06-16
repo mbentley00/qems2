@@ -33,12 +33,12 @@
                 {% regroup dist_entries by dist_entry.category as category_groups %}
                 {% for group in category_groups %}
                     <div class="category-tree-group">
-                        <button type="button" class="category-tree-toggle">
-                            <span class="category-tree-arrow">&#9656;</span>
+                        <button type="button" class="category-tree-toggle{% if group.list|length <= 5 %} open{% endif %}">
+                            <span class="category-tree-arrow">{% if group.list|length <= 5 %}&#9662;{% else %}&#9656;{% endif %}</span>
                             {{ group.grouper }}
                             <span class="category-tree-count">{{ group.list|length }}</span>
                         </button>
-                        <div class="category-tree-children" style="display:none;">
+                        <div class="category-tree-children"{% if group.list|length > 5 %} style="display:none;"{% endif %}>
                         {% for dist_entry in group.list %}
                             <button type="button" class="category-tag-btn" data-tag="{{'{'}}{{ dist_entry }}{{'}'}}" title="{{ dist_entry }}">{% if dist_entry.dist_entry.subcategory %}{{ dist_entry.dist_entry.subcategory }}{% else %}(general){% endif %}</button>
                         {% endfor %}

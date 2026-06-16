@@ -18,16 +18,30 @@
 </ul>
 
 {% if not read_only %}
-<div class="panel radius">
+<div class="panel radius clearfix">
     Drag a question onto another cell to swap the two questions (or onto an empty cell to move it).
     Rows beyond the regular per-packet count are tiebreakers.
-    <a href="/packetize_set/{{ qset.id }}/" class="button small secondary right">Re-packetize</a>
+    <span class="right">
+        <a href="/packet_grid_log/{{ qset.id }}/" class="button small secondary">Change log</a>
+        <button type="button" id="undo-grid-change" class="button small">&#8630; Undo last change</button>
+        <a href="/packetize_set/{{ qset.id }}/" class="button small secondary">Re-packetize</a>
+    </span>
+</div>
+{% else %}
+<div class="panel radius clearfix">
+    Read-only view.
+    <a href="/packet_grid_log/{{ qset.id }}/" class="button small secondary right">Change log</a>
 </div>
 {% endif %}
 
 {% if unassigned_tu or unassigned_bs %}
 <div class="alert-box warning">
-    {{ unassigned_tu }} tossup(s) and {{ unassigned_bs }} bonus(es) are not assigned to any packet.
+    <strong>{{ unassigned_tu }} tossup(s)</strong> and <strong>{{ unassigned_bs }} bonus(es)</strong>
+    are not assigned to any packet, so they won't appear in any packet or export.
+    {% if not read_only %}
+    <a href="/packetize_set/{{ qset.id }}/" class="button tiny" style="margin:0 0 0 0.5rem;">Re-packetize to place them</a>
+    <a href="/search/{{ qset.id }}/" class="button tiny secondary" style="margin-bottom:0;">Find questions</a>
+    {% endif %}
 </div>
 {% endif %}
 
@@ -99,7 +113,10 @@
 
 <div id="swap-dialog" title="Swap with another packet" style="display:none;">
     <p id="swap-source" style="margin-bottom: 8px;"></p>
-    <div style="margin-bottom: 10px;">
+    <div style="margin-bottom: 8px;">
+        <input type="text" id="swap-search" placeholder="Type to search all questions to swap (answer or text)&hellip;" style="width:100%; margin-bottom:0;">
+    </div>
+    <div style="margin-bottom: 10px;" id="swap-scope-row">
         <label style="display:inline; margin-right: 12px;"><input type="radio" name="swap-scope" value="leaf" checked> Same sub-subcategory</label>
         <label style="display:inline; margin-right: 12px;"><input type="radio" name="swap-scope" value="sub"> Same subcategory</label>
         <label style="display:inline;"><input type="radio" name="swap-scope" value="top"> Same category</label>
@@ -171,6 +188,21 @@ $(function() {
     var readOnly = {% if read_only %}true{% else %}false{% endif %};
     if (readOnly) return;
 
+    // Undo the most recent packet-grid change
+    $('#undo-grid-change').on('click', function () {
+        var $btn = $(this);
+        $btn.prop('disabled', true);
+        $.post('/undo_packet_grid_change/', { qset_id: {{ qset.id }} }, function (response) {
+            var json = $.parseJSON(response);
+            if (json.success) {
+                location.reload();
+            } else {
+                alert(json.message || 'Nothing to undo.');
+                $btn.prop('disabled', false);
+            }
+        }).fail(function () { $btn.prop('disabled', false); });
+    });
+
     // Column index -> packet id
     var packetIds = [{% for packet in packets %}{{ packet.id }}{% if not forloop.last %},{% endif %}{% endfor %}];
 
@@ -236,12 +268,16 @@ $(function() {
 
     function loadCandidates() {
         var scope = $('input[name="swap-scope"]:checked').val();
+        var query = $('#swap-search').val().trim();
+        // When searching free-text, category scope doesn't apply.
+        $('#swap-scope-row').css('opacity', query ? 0.4 : 1);
         var $list = $('#swap-candidates');
         $list.html('<em>Loading...</em>');
         $.get('/swap_candidates/', {
             question_type: swapSource.qtype,
             question_id: swapSource.qid,
-            scope: scope
+            scope: scope,
+            q: query
         }, function(response) {
             var json = $.parseJSON(response);
             if (json.error) {
@@ -289,12 +325,20 @@ $(function() {
             answer: $cell.find('.cell-answer').text()
         };
         $('input[name="swap-scope"][value="leaf"]').prop('checked', true);
+        $('#swap-search').val('');
         $swapDialog.dialog('open');
         loadCandidates();
     });
 
     $('input[name="swap-scope"]').on('change', function() {
         if (swapSource) loadCandidates();
+    });
+
+    var swapSearchTimer = null;
+    $('#swap-search').on('input', function() {
+        if (!swapSource) return;
+        clearTimeout(swapSearchTimer);
+        swapSearchTimer = setTimeout(loadCandidates, 250);
     });
 });
 </script>

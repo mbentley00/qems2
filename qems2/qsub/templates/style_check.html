@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% load filters %}
+
+{% block title %}Style Check - {{ qset.name }} - QEMS2{% endblock %}
+
+{% block content %}
+
+<h3 class="page-header">Style Check</h3>
+<ul class="breadcrumbs">
+    <li><a href="/edit_question_set/{{ qset.id }}/">{{ qset.name }}</a></li>
+    <li class="current">Style Check</li>
+</ul>
+
+<form method="get" action="" class="row">
+    <div class="small-8 columns">
+        <label>Style guide
+            <select name="guide" onchange="this.form.submit()">
+                {% for g in guides %}
+                <option value="{{ g.key }}"{% if g.key == guide %} selected{% endif %}>{{ g.name }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        {% if guide_obj.url %}<p><small>Rules based on <a href="{{ guide_obj.url }}" target="_blank" rel="noopener">{{ guide_obj.name }}</a>.</small></p>{% endif %}
+    </div>
+</form>
+
+<div class="panel radius">
+    Checked <strong>{{ checked }}</strong> question{{ checked|pluralize }} &mdash;
+    <strong>{{ flagged }}</strong> with issues:
+    <span class="label alert">{{ counts.error }} error{{ counts.error|pluralize }}</span>
+    <span class="label warning">{{ counts.warning }} warning{{ counts.warning|pluralize }}</span>
+    <span class="label">{{ counts.info }} info</span>
+</div>
+
+{% if not results %}
+<div class="alert-box success">No style issues found for this guide. Nice work!</div>
+{% else %}
+{% for r in results %}
+<div class="panel" style="margin-bottom: 0.75rem;">
+    <strong>
+        {% if r.type == 'tossup' %}<a href="{{ r.edit_url }}" target="_blank">Tossup</a>{% else %}<a href="{{ r.edit_url }}" target="_blank">Bonus</a>{% endif %}
+        {% if r.packet %}<small>({{ r.packet }} #{{ r.number }})</small>{% endif %}
+    </strong>
+    &mdash; {% autoescape off %}{{ r.label }}{% endautoescape %}
+    <ul class="no-bullet" style="margin: 0.4rem 0 0 0;">
+        {% for i in r.issues %}
+        <li>
+            {% if i.severity == 'error' %}<span class="label alert">Error</span>
+            {% elif i.severity == 'warning' %}<span class="label warning">Warning</span>
+            {% else %}<span class="label">Info</span>{% endif %}
+            {{ i.message }}
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+{% endfor %}
+{% endif %}
+
+{% endblock %}

@@ -1,0 +1,28 @@
+{% extends "base-login.html" %}
+
+{% block title %}Sign Up - QEMS2{% endblock %}
+
+{% block content %}
+<h4>Sign Up</h4>
+<p>Already have an account? Then please <a href="{% url 'account_login' %}">sign in</a>.</p>
+
+<form method="post" action="{% url 'account_signup' %}">
+    {% csrf_token %}
+    {% if form.non_field_errors %}
+        <div class="alert-box alert">{{ form.non_field_errors }}</div>
+    {% endif %}
+    {% for field in form %}
+        {% if field.is_hidden %}
+            {{ field }}
+        {% else %}
+            <label for="{{ field.id_for_label }}">{{ field.label }}
+                {{ field }}
+            </label>
+            {% if field.errors %}<div class="alert-box alert">{{ field.errors }}</div>{% endif %}
+            {% if field.help_text %}<p class="small-below">{{ field.help_text|safe }}</p>{% endif %}
+        {% endif %}
+    {% endfor %}
+    {{ redirect_field }}
+    <input type="submit" value="Sign Up" class="button primary expand">
+</form>
+{% endblock %}

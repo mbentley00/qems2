@@ -4,7 +4,10 @@ from collections import defaultdict
 
 from .utils import get_answer_no_formatting, get_primary_answer, strip_markup
 
-# Common English stopwords to exclude from clue comparison
+# Common English stopwords to exclude from clue comparison. Kept deliberately
+# broad: high-frequency, low-specificity words (including quizbowl boilerplate
+# and vague qualifiers like "great"/"grand") create a lot of false topic-repeat
+# noise, so they're excluded from similarity and topic-term detection.
 STOPWORDS = frozenset({
     'a', 'an', 'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
     'of', 'with', 'by', 'from', 'is', 'was', 'are', 'were', 'be', 'been',
@@ -19,6 +22,29 @@ STOPWORDS = frozenset({
     'under', 'again', 'further', 'once', 'here', 'there', 'just', 'very',
     'one', 'two', 'name', 'work', 'title', 'answer', 'question', 'bonus',
     'tossup', 'ten', 'points', 'part',
+    # Vague qualifiers / high-noise content words
+    'great', 'grand', 'first', 'second', 'third', 'last', 'early', 'late',
+    'later', 'earlier', 'modern', 'ancient', 'large', 'small', 'big', 'new',
+    'old', 'high', 'low', 'long', 'short', 'major', 'minor', 'main', 'whole',
+    'many', 'much', 'several', 'various', 'certain', 'another', 'others',
+    'first', 'three', 'four', 'five', 'half',
+    # Common verbs and connectives that aren't topic-distinctive
+    'found', 'founded', 'like', 'made', 'make', 'makes', 'become', 'became',
+    'said', 'says', 'including', 'include', 'included', 'includes', 'named',
+    'called', 'known', 'know', 'used', 'using', 'often', 'given', 'gives',
+    'give', 'take', 'takes', 'taken', 'took', 'while', 'during', 'around',
+    'near', 'against', 'among', 'along', 'throughout', 'through', 'within',
+    'without', 'because', 'since', 'until', 'upon', 'whose', 'began', 'begin',
+    'begun', 'ended', 'ends', 'features', 'feature', 'featured', 'wrote',
+    'written', 'describes', 'described', 'depicts', 'depicted', 'contains',
+    'created', 'create', 'developed', 'produced', 'appears', 'appeared',
+    'became', 'leads', 'leader', 'follows', 'following', 'followed',
+    # Common nouns that flood as shared terms
+    'time', 'times', 'year', 'years', 'day', 'days', 'world', 'people',
+    'area', 'group', 'groups', 'member', 'members', 'form', 'forms', 'type',
+    'types', 'way', 'ways', 'place', 'places', 'century', 'centuries',
+    'number', 'numbers', 'state', 'states', 'city', 'cities', 'country',
+    'countries', 'system', 'systems', 'series', 'event', 'events', 'point',
 })
 
 LEADING_ARTICLES = re.compile(r'^(the|a|an)\s+', re.IGNORECASE)
@@ -181,9 +207,56 @@ def find_duplicates(qset):
             'pairs': pairs,
         })
 
-    # Sort by severity (critical first), then by answer
-    result.sort(key=lambda g: (SEVERITY_ORDER[g['severity']], g['answer']))
+    # Sort by severity (critical first), then by how many questions share the
+    # answer (biggest duplicate clusters first within a severity), then answer.
+    result.sort(key=lambda g: (SEVERITY_ORDER[g['severity']], -len(g['entries']), g['answer']))
     return result
+
+
+def find_answer_matches(qset, question, qtype):
+    """Find other questions in `qset` whose normalized answer matches any answer
+    of `question` (a Tossup or Bonus). Used for the post-submit "you may have
+    created a duplicate" check. Returns a list of lightweight entry dicts."""
+    from .models import Tossup, Bonus
+
+    my_norms = set()
+    if qtype == 'tossup':
+        n = normalize_answer(question.tossup_answer)
+        if n:
+            my_norms.add(n)
+    else:
+        for a in (question.part1_answer, question.part2_answer, question.part3_answer):
+            n = normalize_answer(a)
+            if n:
+                my_norms.add(n)
+    if not my_norms:
+        return []
+
+    matches = []
+    for tu in Tossup.objects.filter(question_set=qset).select_related('category', 'author', 'packet'):
+        if qtype == 'tossup' and tu.id == question.id:
+            continue
+        if normalize_answer(tu.tossup_answer) in my_norms:
+            matches.append({
+                'type': 'tossup', 'id': tu.id, 'answer_raw': tu.tossup_answer,
+                'category_str': _get_category_str(tu), 'author': str(tu.author),
+                'part_label': None,
+                'packet': tu.packet.packet_name if tu.packet else ''})
+
+    for bonus in Bonus.objects.filter(question_set=qset).select_related('category', 'author', 'packet'):
+        if qtype == 'bonus' and bonus.id == question.id:
+            continue
+        for label, ans in (('Part 1', bonus.part1_answer),
+                           ('Part 2', bonus.part2_answer),
+                           ('Part 3', bonus.part3_answer)):
+            n = normalize_answer(ans)
+            if n and n in my_norms:
+                matches.append({
+                    'type': 'bonus', 'id': bonus.id, 'answer_raw': ans,
+                    'category_str': _get_category_str(bonus), 'author': str(bonus.author),
+                    'part_label': label,
+                    'packet': bonus.packet.packet_name if bonus.packet else ''})
+    return matches
 
 
 SENTENCE_SPLIT = re.compile(r'[.;!?]+')
@@ -485,6 +558,15 @@ def find_topic_repeats(qset):
             'text_preview': '', 'text': text,
         })
 
+    # Index question texts by top-level category, with one combined blob per
+    # category, so an answer not mentioned anywhere in its category is skipped
+    # with a single substring check instead of scanning every question.
+    cat_question_texts = defaultdict(list)
+    for qt in question_texts:
+        top = qt['category_str'].split(' - ')[0] if qt['category_str'] else ''
+        cat_question_texts[top].append(qt)
+    cat_blob = {top: ' '.join(q['plain'] for q in qts) for top, qts in cat_question_texts.items()}
+
     seen_mention_labels = set()
     for entry in entries:
         norm = entry['answer_normalized']
@@ -498,10 +580,12 @@ def find_topic_repeats(qset):
             continue
         needle = ' {0} '.format(norm)
         entry_top = entry['category_str'].split(' - ')[0] if entry['category_str'] else ''
-        mentions = [qt for qt in question_texts
+        # Short-circuit: skip unless the answer appears somewhere in its category
+        if not entry_top or needle not in cat_blob.get(entry_top, ''):
+            continue
+        mentions = [qt for qt in cat_question_texts[entry_top]
                     if needle in qt['plain']
-                    and not (qt['type'] == entry['type'] and qt['id'] == entry['id'])
-                    and entry_top and qt['category_str'].split(' - ')[0] == entry_top]
+                    and not (qt['type'] == entry['type'] and qt['id'] == entry['id'])]
         if not mentions:
             continue
         seen_mention_labels.add(norm)

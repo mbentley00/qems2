@@ -8,25 +8,17 @@
 
 {% block content %}
 
-{% if question_type == "ACF-style bonus" %}
-    <h3 class="page-header">Add an ACF Bonus</h3>
-{% else %}
-    <h3 class="page-header">Add a VHSL Bonus</h3>
-{% endif %}
+<h3 class="page-header">Add a Bonus</h3>
 {% autoescape off %}
     {% if message %}
         <div data-alert class="{{ message_class }}">
             {{ message }}{% if bonus_id %} <a href="/edit_bonus/{{ bonus_id }}">View your bonus.</a> {% endif %}
         </div>
     {% endif %}
+    {% include "_dup_warning.html" %}
 {% endautoescape %}
 <ul class="button-group even">
     <li><a class="button primary" href="/add_tossups/{{ qset.id }}">Switch to adding a tossup</a></li>
-    {% if question_type == "ACF-style bonus" %}
-        <li><a class="button primary" href="/add_bonuses/{{ qset.id }}/VHSL bonus">Switch to adding a VHSL bonus</a></li>
-    {% else %}
-        <li><a class="button primary" href="/add_bonuses/{{ qset.id }}/ACF-style bonus">Switch to adding an ACF bonus</a></li>
-    {% endif %}
 </ul>
 <form action="" method="post" id="add-bonuses">
     {% csrf_token %}

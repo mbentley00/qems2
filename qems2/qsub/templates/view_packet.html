@@ -10,9 +10,11 @@
 {% block title %}{{ packet.packet_name }} - QEMS2{% endblock %}
 
 {% block content %}
+{% if qset %}<script>window.QEMS_QSET_ID = {{ qset.id }};</script>{% endif %}
 
 <ul class="breadcrumbs">
     <li><a href="/edit_question_set/{{ qset.id }}/">{{ qset.name }}</a></li>
+    <li><a href="/packet_grid/{{ qset.id }}/">Packet Grid</a></li>
     <li><a href="/edit_packet/{{ packet.id }}">{{ packet.packet_name }}</a></li>
     <li class="current"><a href="/view_packet/{{ packet.id }}/">Document View</a></li>
 </ul>
@@ -25,6 +27,8 @@
             {% if comment_count %}
             <li><a href="#" id="toggle-comments" class="button small secondary"><i class="fa fa-comment"></i> Comments ({{ comment_count }})</a></li>
             {% endif %}
+            <li><a href="#" id="toggle-issues" class="button small secondary" title="Show repeat-checker issues for each question"><i class="fa fa-triangle-exclamation"></i> Repeat Issues</a></li>
+            <li><a href="#" id="toggle-style" class="button small secondary" title="Show style-check issues for each question"><i class="fa fa-spell-check"></i> Style Issues</a></li>
         </ul>
     </div>
     <div class="small-4 columns text-right">
@@ -37,7 +41,10 @@
 
 {% if not read_only %}
 <div class="panel radius doc-hint">
-    Click a question to edit it. Drag a question to change its position; numbering updates automatically.
+    <span class="doc-mode-toggle">
+        <a href="#" class="button tiny doc-mode-btn" data-mode="comment"><i class="fa fa-comment"></i> Comment mode</a><a href="#" class="button tiny secondary doc-mode-btn" data-mode="reorder"><i class="fa fa-arrows-up-down"></i> Reorder mode</a>
+    </span>
+    <span id="doc-mode-hint" style="margin-left:12px;"></span>
 </div>
 {% endif %}
 
@@ -53,7 +60,7 @@
             {% for q in interleaved %}
             <div class="doc-question" id="q-{{ q.qtype }}-{{ q.id }}" data-qtype="{{ q.qtype }}" data-qid="{{ q.id }}" data-edit-url="{{ q.edit_url }}">
                 <span class="doc-qlabel">{% if q.qtype == 'tossup' %}Tossup{% else %}Bonus{% endif %} {{ q.number }}.{% if q.is_tiebreaker %} <span class="doc-tb">(Tiebreaker)</span>{% endif %}</span>
-                {% autoescape off %}{{ q.html }}{% endautoescape %}
+                {% autoescape off %}<span class="doc-qtext">{{ q.html }}</span>{% endautoescape %}
                 {% include "view_packet_meta.html" %}
             </div>
             {% endfor %}
@@ -64,7 +71,7 @@
             {% for q in tossups %}
             <div class="doc-question" id="q-tossup-{{ q.id }}" data-qtype="tossup" data-qid="{{ q.id }}" data-edit-url="{{ q.edit_url }}">
                 <span class="doc-qlabel">{{ q.number }}.{% if q.is_tiebreaker %} <span class="doc-tb">(Tiebreaker)</span>{% endif %}</span>
-                {% autoescape off %}{{ q.html }}{% endautoescape %}
+                {% autoescape off %}<span class="doc-qtext">{{ q.html }}</span>{% endautoescape %}
                 {% include "view_packet_meta.html" %}
             </div>
             {% endfor %}
@@ -75,7 +82,7 @@
             {% for q in bonuses %}
             <div class="doc-question" id="q-bonus-{{ q.id }}" data-qtype="bonus" data-qid="{{ q.id }}" data-edit-url="{{ q.edit_url }}">
                 <span class="doc-qlabel">{{ q.number }}.{% if q.is_tiebreaker %} <span class="doc-tb">(Tiebreaker)</span>{% endif %}</span>
-                {% autoescape off %}{{ q.html }}{% endautoescape %}
+                {% autoescape off %}<span class="doc-qtext">{{ q.html }}</span>{% endautoescape %}
                 {% include "view_packet_meta.html" %}
             </div>
             {% endfor %}
@@ -118,7 +125,53 @@
     border-radius: 3px;
     border: 1px solid transparent;
 }
-.doc-question:hover { background-color: #f5f9ff; border-color: #cfe0f5; cursor: pointer; }
+.doc-question:hover { background-color: #f5f9ff; border-color: #cfe0f5; }
+.doc-qtext { cursor: text; }
+.doc-mode-btn { margin-bottom: 0; }
+.doc-reorder-mode .doc-question { cursor: move; }
+.doc-reorder-mode .doc-qtext { cursor: move; }
+.doc-reorder-mode .doc-question:hover { border-color: #f4b400; background-color: #fffdf5; }
+#doc-context-menu {
+    position: absolute;
+    z-index: 2000;
+    background: #fff;
+    border: 1px solid #bbb;
+    border-radius: 3px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.18);
+    padding: 4px 0;
+    min-width: 180px;
+}
+#doc-context-menu .doc-ctx-item {
+    display: block;
+    padding: 6px 14px;
+    color: #333;
+    font-size: 13px;
+    white-space: nowrap;
+}
+#doc-context-menu .doc-ctx-item:hover { background: #008cba; color: #fff; }
+.doc-issue-badge {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 1px 7px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: bold;
+    color: #fff;
+    vertical-align: middle;
+}
+.doc-issue-critical { background: #f04124; }
+.doc-issue-warning { background: #e99002; }
+.doc-issue-info { background: #008cba; }
+.doc-style-issues {
+    margin-top: 6px;
+    padding: 6px 10px;
+    background: #fcfbf3;
+    border: 1px solid #eee;
+    border-left: 3px solid #e99002;
+    font-size: 12px;
+}
+.doc-style-issues > div { padding: 2px 0; }
+.doc-style-issues .label { text-transform: capitalize; }
 .doc-qlabel { display: inline; font-weight: bold; margin-right: 4px; }
 .doc-category-line { color: #777; font-size: 0.85em; font-style: italic; margin-top: 4px; }
 .doc-tb { color: #b8860b; font-size: 0.9em; }
@@ -188,6 +241,27 @@ a.doc-tag:hover { background: #008CBA; color: #fff; }
 .doc-comment-text { color: #444; }
 .doc-comment-text p { display: block; margin: 0 0 4px 0; }
 .doc-question.doc-commented-highlight { background-color: #fef7e0; border-color: #f4b400; }
+.doc-comment-box {
+    margin-top: 8px;
+    padding: 8px;
+    background: #fafafa;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    cursor: default;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+.doc-comment-box textarea { width: 100%; margin-bottom: 6px; font-size: 13px; }
+.doc-comment-box .button { margin: 0 4px 0 0; }
+a.doc-add-comment:hover { background: #008CBA; color: #fff; }
+.doc-anchor-quote {
+    border-left: 3px solid #f4b400; background: #fef7e0; padding: 3px 8px;
+    margin-bottom: 6px; font-style: italic; font-size: 12px; color: #666;
+}
+#doc-anchor-btn {
+    background: #008CBA; color: #fff; border: none; border-radius: 3px;
+    padding: 4px 10px; font-size: 12px; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+}
+#doc-anchor-btn:hover { background: #0079a8; }
 </style>
 
 {{ discord_payload|json_script:"discord-payload" }}
@@ -197,11 +271,10 @@ $(function() {
     var readOnly = {% if read_only %}true{% else %}false{% endif %};
     var packetId = {{ packet.id }};
     var suppressClick = false;
+    var docMode = 'comment';  // 'comment' (select text to comment) or 'reorder' (drag)
 
-    $('.doc-question').on('click', function(e) {
-        if (suppressClick) return;
-        window.location = $(this).data('edit-url');
-    });
+    // Clicking a question no longer navigates — the primary action is selecting
+    // text to comment on it. Editing is via the explicit "Edit" link (new tab).
 
     // ---- Copy for Discord ----
     var discordData = JSON.parse(document.getElementById('discord-payload').textContent);
@@ -248,6 +321,93 @@ $(function() {
         layoutComments();
     });
 
+    // ---- Toggle: show repeat-checker issues per question ----
+    var issuesLoaded = false, issuesShown = false;
+    var SEV_LABEL = { critical: 'Critical', warning: 'Warning', info: 'Info' };
+    function renderIssues(map) {
+        $('.doc-question').each(function() {
+            var $q = $(this);
+            $q.find('.doc-issue-badge').remove();
+            var sev = map[$q.data('qtype') + '-' + $q.data('qid')];
+            if (sev) {
+                $('<span class="doc-issue-badge doc-issue-' + sev + '"><i class="fa fa-triangle-exclamation"></i> Repeat: ' + (SEV_LABEL[sev] || sev) + '</span>')
+                    .appendTo($q.find('.doc-qlabel').first());
+            }
+        });
+    }
+    $('#toggle-issues').on('click', function(e) {
+        e.preventDefault();
+        var $btn = $(this);
+        if (issuesShown) {
+            $('.doc-issue-badge').hide();
+            issuesShown = false;
+            $btn.removeClass('primary').addClass('secondary');
+            return;
+        }
+        function show() {
+            $('.doc-issue-badge').show();
+            issuesShown = true;
+            $btn.removeClass('secondary').addClass('primary');
+        }
+        if (issuesLoaded) { show(); return; }
+        $btn.html('Loading&hellip;');
+        $.getJSON('/packet_issues/' + packetId + '/', function(data) {
+            renderIssues(data.issues || {});
+            issuesLoaded = true;
+            $btn.html('<i class="fa fa-triangle-exclamation"></i> Repeat Issues');
+            show();
+            if (!$('.doc-issue-badge').length) {
+                $btn.html('<i class="fa fa-check"></i> No repeat issues');
+            }
+        });
+    });
+
+    // ---- Toggle: show style-check issues inline per question ----
+    var styleLoaded = false, styleShown = false;
+    var SEV_CLASS = { error: 'alert', warning: 'warning', info: '' };
+    function renderStyle(map) {
+        $('.doc-style-issues').remove();
+        $('.doc-question').each(function() {
+            var $q = $(this);
+            var list = map[$q.data('qtype') + '-' + $q.data('qid')];
+            if (!list || !list.length) return;
+            var $box = $('<div class="doc-style-issues"></div>');
+            list.forEach(function(it) {
+                var $row = $('<div>');
+                $('<span class="label ' + (SEV_CLASS[it.severity] || '') + '">').text(it.severity).appendTo($row);
+                $row.append(' ').append(document.createTextNode(it.message));
+                $box.append($row);
+            });
+            $q.append($box);
+        });
+    }
+    $('#toggle-style').on('click', function(e) {
+        e.preventDefault();
+        var $btn = $(this);
+        if (styleShown) {
+            $('.doc-style-issues').hide();
+            styleShown = false;
+            $btn.removeClass('primary').addClass('secondary');
+            return;
+        }
+        function show() {
+            $('.doc-style-issues').show();
+            styleShown = true;
+            $btn.removeClass('secondary').addClass('primary');
+        }
+        if (styleLoaded) { show(); return; }
+        $btn.html('Loading&hellip;');
+        $.getJSON('/packet_style_issues/' + packetId + '/', function(data) {
+            renderStyle(data.issues || {});
+            styleLoaded = true;
+            $btn.html('<i class="fa fa-spell-check"></i> Style Issues');
+            show();
+            if (!$('.doc-style-issues').length) {
+                $btn.html('<i class="fa fa-check"></i> No style issues');
+            }
+        });
+    });
+
     // Open by default when the packet has comments
     if ($('.doc-comment-card').length) {
         $('#doc-gutter').addClass('open');
@@ -270,6 +430,128 @@ $(function() {
     }).on('mouseleave', function() {
         $('.doc-comment-card[data-for="' + this.id + '"]').removeClass('active');
     });
+
+    // ---- Add a comment inline (available to anyone who can view/comment) ----
+    $('.doc-add-comment').on('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var $q = $(this).closest('.doc-question');
+        var existing = $q.find('.doc-comment-box');
+        if (existing.length) { existing.remove(); return; }
+        var $box = $('<div class="doc-comment-box">' +
+            '<textarea rows="2" placeholder="Add a comment..."></textarea>' +
+            '<button class="button tiny primary doc-comment-post">Post</button> ' +
+            '<button class="button tiny secondary doc-comment-cancel">Cancel</button>' +
+            '</div>');
+        // Don't let clicks inside the box bubble up to the question (which navigates to edit)
+        $box.on('click', function(ev) { ev.stopPropagation(); });
+        $q.append($box);
+        $box.find('textarea').focus();
+    });
+
+    $(document).on('click', '.doc-comment-cancel', function(e) {
+        e.preventDefault();
+        $(this).closest('.doc-comment-box').remove();
+    });
+
+    $(document).on('click', '.doc-comment-post', function(e) {
+        e.preventDefault();
+        var $box = $(this).closest('.doc-comment-box');
+        var $q = $box.closest('.doc-question');
+        var text = $box.find('textarea').val().trim();
+        if (!text) return;
+        $(this).prop('disabled', true);
+        function done(response) {
+            var json = JSON.parse(response);
+            if (json.message_class.indexOf('success') >= 0) {
+                location.reload();
+            } else {
+                alert(json.message);
+                $box.find('.doc-comment-post').prop('disabled', false);
+            }
+        }
+        var anchor = $box.data('anchor');
+        if (anchor) {
+            $.post('/add_anchored_comment/', {
+                question_type: anchor.qtype, question_id: anchor.qid, comment_text: text,
+                selected_text: anchor.text, prefix: anchor.prefix, suffix: anchor.suffix
+            }, done);
+        } else {
+            $.post('/add_question_comment/', {
+                question_type: $q.data('qtype'), question_id: $q.data('qid'), comment_text: text
+            }, done);
+        }
+    });
+
+    // ---- Anchored comments: just select text in a question and a comment box
+    // opens immediately on the selection (no extra button to hunt for). ----
+    var ANCHOR_CTX = 50;
+
+    function openAnchoredBox(anchor) {
+        var $q = $('.doc-question[data-qtype="' + anchor.qtype + '"][data-qid="' + anchor.qid + '"]').first();
+        if (!$q.length) return;
+        $q.find('.doc-comment-box').remove();
+        var snippet = anchor.text.length > 90 ? anchor.text.substring(0, 90) + '…' : anchor.text;
+        var $box = $('<div class="doc-comment-box">' +
+            '<div class="doc-anchor-quote"></div>' +
+            '<textarea rows="2" placeholder="Comment on the selected text..."></textarea>' +
+            '<button class="button tiny primary doc-comment-post">Post</button> ' +
+            '<button class="button tiny secondary doc-comment-cancel">Cancel</button></div>');
+        $box.find('.doc-anchor-quote').text('“' + snippet + '”');
+        $box.data('anchor', anchor);
+        $box.on('click', function(ev) { ev.stopPropagation(); });
+        $q.append($box);
+        $box.find('textarea').focus();
+    }
+
+    // Right-click on a selection inside a question shows a context menu; the
+    // "Comment on selection" item opens the comment editor. Elsewhere (or with
+    // no selection), the browser's normal context menu is left alone.
+    var $ctxMenu = $('<div id="doc-context-menu" style="display:none;">' +
+        '<a href="#" class="doc-ctx-item" data-action="comment"><i class="fa fa-comment"></i> Comment on selection</a>' +
+        '</div>').appendTo('body');
+    var pendingCtxAnchor = null;
+
+    $(document).on('contextmenu', function(e) {
+        if (docMode !== 'comment') return;
+        if ($(e.target).closest('.doc-comment-box, #doc-context-menu').length) return;
+        var sel = window.getSelection();
+        if (!sel || sel.isCollapsed || !sel.rangeCount) { $ctxMenu.hide(); return; }
+        var range = sel.getRangeAt(0);
+        var node = range.commonAncestorContainer;
+        var regionEl = (node.nodeType === 1 ? node : node.parentNode);
+        var $qtext = $(regionEl).closest('.doc-qtext');
+        var selText = range.toString();
+        if (!$qtext.length || selText.trim().length < 2) { $ctxMenu.hide(); return; }
+        e.preventDefault();  // selection inside a question — show our menu, not the OS one
+        var qtextEl = $qtext[0];
+        var pre = range.cloneRange();
+        pre.selectNodeContents(qtextEl);
+        pre.setEnd(range.startContainer, range.startOffset);
+        var start = pre.toString().length;
+        var full = qtextEl.textContent;
+        var $q = $qtext.closest('.doc-question');
+        pendingCtxAnchor = {
+            qtype: $q.data('qtype'), qid: $q.data('qid'), text: selText,
+            prefix: full.substring(Math.max(0, start - ANCHOR_CTX), start),
+            suffix: full.substring(start + selText.length, start + selText.length + ANCHOR_CTX)
+        };
+        $ctxMenu.css({ top: e.pageY, left: e.pageX }).show();
+    });
+
+    $ctxMenu.on('click', '.doc-ctx-item', function(e) {
+        e.preventDefault();
+        $ctxMenu.hide();
+        if ($(this).data('action') === 'comment' && pendingCtxAnchor) {
+            openAnchoredBox(pendingCtxAnchor);
+        }
+    });
+    // Dismiss the menu on any other click, scroll, or Escape.
+    $(document).on('mousedown', function(e) {
+        if (!$(e.target).closest('#doc-context-menu').length) $ctxMenu.hide();
+    });
+    $(document).on('keydown', function(e) { if (e.key === 'Escape') $ctxMenu.hide(); });
+    $(window).on('scroll', function() { $ctxMenu.hide(); });
 
     if (readOnly) return;
 
@@ -306,6 +588,27 @@ $(function() {
         stop: function() { setTimeout(function() { suppressClick = false; }, 200); },
         update: function() { saveOrder(); }
     });
+
+    // ---- Mode toggle: Comment (select text) vs Reorder (drag) ----
+    var HINTS = {
+        comment: 'Select part of a question, then <strong>right-click</strong> the selection to comment on it. Use the <strong>Edit</strong> link to open a question in a new tab.',
+        reorder: 'Drag a question to change its position; numbering updates automatically.'
+    };
+    function setMode(mode) {
+        docMode = mode;
+        $('.doc-mode-btn').each(function() {
+            var active = $(this).data('mode') === mode;
+            $(this).toggleClass('secondary', !active);
+        });
+        $('#doc-mode-hint').html(HINTS[mode]);
+        $('.doc-list').sortable(mode === 'reorder' ? 'enable' : 'disable');
+        $('.doc-page').toggleClass('doc-reorder-mode', mode === 'reorder');
+    }
+    $('.doc-mode-btn').on('click', function(e) {
+        e.preventDefault();
+        setMode($(this).data('mode'));
+    });
+    setMode('comment');  // default: comment/select mode, dragging off
 });
 </script>
 

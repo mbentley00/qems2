@@ -1,0 +1,23 @@
+{% if dup_matches %}
+<div class="alert-box warning radius" data-alert>
+    <strong>Possible duplicate{{ dup_matches|length|pluralize }} detected.</strong>
+    This question's answer also appears on {{ dup_matches|length }} other question{{ dup_matches|length|pluralize }} in this set.
+    You can revise the question above and re-submit, or proceed anyway &mdash; it's already saved.
+    <ul style="margin-top: 0.5rem;">
+    {% autoescape off %}
+    {% for m in dup_matches %}
+        <li>
+            {% if m.type == 'tossup' %}
+                <a href="/edit_tossup/{{ m.id }}/" target="_blank">Tossup</a>
+            {% else %}
+                <a href="/edit_bonus/{{ m.id }}/" target="_blank">Bonus {{ m.part_label }}</a>
+            {% endif %}
+            &mdash; <strong>{{ m.answer_html }}</strong>
+            <small>({{ m.category_str|default:"uncategorized" }}{% if m.packet %}, {{ m.packet }}{% endif %} &mdash; {{ m.author }})</small>
+        </li>
+    {% endfor %}
+    {% endautoescape %}
+    </ul>
+    <a href="#" onclick="this.closest('.alert-box').style.display='none'; return false;" class="button tiny secondary" style="margin-bottom:0;">Proceed anyway (dismiss)</a>
+</div>
+{% endif %}

@@ -143,10 +143,14 @@ class QuestionSet (models.Model):
     distribution = models.ForeignKey('Distribution', on_delete=models.CASCADE) # TODO: This needs to be deleted eventually
     #teams = models.ForeignKey('Team')
     #tiebreak_dist = models.ForeignKey('TieBreakDistribution')
-    max_acf_tossup_length = models.PositiveIntegerField(default=750)
-    max_acf_bonus_length = models.PositiveIntegerField(default=400)
+    max_acf_tossup_length = models.PositiveIntegerField(default=725)
+    max_acf_bonus_length = models.PositiveIntegerField(default=650)
     max_vhsl_bonus_length = models.PositiveIntegerField(default=100)
     char_count_ignores_pronunciation_guides = models.BooleanField(default=True)
+
+    # When true, this is a tossup-only tournament: bonuses are not expected and
+    # bonus requirements/UI are suppressed.
+    tossups_only = models.BooleanField(default=False)
 
     # Regular (non-tiebreaker) questions per packet, used by auto-packetization
     tossups_per_packet = models.PositiveIntegerField(default=20)
@@ -186,6 +190,21 @@ class Packet (models.Model):
 
     def __str__(self):
         return '{0!s}'.format(self.packet_name)
+
+class PacketGridLog(models.Model):
+    """A change made on the packet grid (move/swap/reorder), recorded with the
+    prior state of each affected question (as JSON) so it can be undone."""
+    question_set = models.ForeignKey(QuestionSet, on_delete=models.CASCADE)
+    changer = models.ForeignKey(Writer, on_delete=models.SET_NULL, null=True,
+                                related_name='packet_grid_changes')
+    change_date = models.DateTimeField(auto_now_add=True)
+    description = models.TextField()
+    # JSON list of prior states: [{"qtype","id","packet_id","number"}, ...]
+    undo_data = models.TextField(default='[]')
+    undone = models.BooleanField(default=False)
+
+    def __str__(self):
+        return '{0!s}: {1!s}'.format(self.change_date, self.description)
 
 class DistributionPerPacket(models.Model):
 
@@ -1129,6 +1148,39 @@ class CommentReply(models.Model):
         on_delete=models.CASCADE,
         related_name='replies'
     )
+
+
+class CommentMention(models.Model):
+    """Records that a comment @mentioned a writer, for their activity feed."""
+    comment = models.ForeignKey(
+        'django_comments.Comment', on_delete=models.CASCADE, related_name='mentions')
+    mentioned = models.ForeignKey(Writer, on_delete=models.CASCADE, related_name='mentions')
+    created_date = models.DateTimeField(auto_now_add=True)
+    seen = models.BooleanField(default=False)
+
+    def __str__(self):
+        return 'mention of {0!s}'.format(self.mentioned)
+
+
+class ActivitySeen(models.Model):
+    """When a writer last viewed their activity feed for a set, so unseen
+    activity (mentions + changes to their questions) can be flagged."""
+    writer = models.ForeignKey(Writer, on_delete=models.CASCADE, related_name='activity_seen')
+    question_set = models.ForeignKey(QuestionSet, on_delete=models.CASCADE)
+    last_seen = models.DateTimeField()
+
+    class Meta:
+        unique_together = ('writer', 'question_set')
+
+
+class CommentResolution(models.Model):
+    """Marks a comment as resolved (a discussion that's been dealt with).
+    A comment is resolved when a row exists here with resolved=True."""
+    comment = models.OneToOneField(
+        'django_comments.Comment', on_delete=models.CASCADE, related_name='resolution')
+    resolved = models.BooleanField(default=True)
+    resolved_by = models.ForeignKey(Writer, on_delete=models.SET_NULL, null=True)
+    resolved_date = models.DateTimeField(auto_now=True)
 
 
 class CommentAnchor(models.Model):

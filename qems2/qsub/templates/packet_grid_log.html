@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% load filters %}
+
+{% block title %}Packet Grid Change Log - {{ qset.name }} - QEMS2{% endblock %}
+
+{% block content %}
+
+<h3 class="page-header">Packet Grid Change Log</h3>
+<ul class="breadcrumbs">
+    <li><a href="/edit_question_set/{{ qset.id }}/">{{ qset.name }}</a></li>
+    <li><a href="/packet_grid/{{ qset.id }}/">Packet Grid</a></li>
+    <li class="current">Change Log</li>
+</ul>
+
+<p>Every move, swap, and reorder made on the packet grid is recorded here. Use the
+<strong>Undo last change</strong> button on the packet grid to revert the most recent change.</p>
+
+{% if not logs %}
+<div class="alert-box info">No packet grid changes have been recorded yet.</div>
+{% else %}
+<table class="table-striped table-hover" style="width:100%;">
+    <thead>
+        <tr>
+            <th style="width:18%;">When</th>
+            <th style="width:18%;">Who</th>
+            <th>Change</th>
+            <th style="width:10%;">Status</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for log in logs %}
+        <tr{% if log.undone %} style="opacity:0.55;"{% endif %}>
+            <td>{{ log.change_date|to_short_datetime }}</td>
+            <td>{% if log.changer %}{{ log.changer }}{% else %}(unknown){% endif %}</td>
+            <td>{{ log.description }}</td>
+            <td>{% if log.undone %}<span class="label secondary">Undone</span>{% else %}<span class="label success">Applied</span>{% endif %}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
+{% endblock %}

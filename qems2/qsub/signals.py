@@ -1,6 +1,8 @@
+import re
 import sys
 import threading
 
+from django.contrib.auth.models import User
 from django.dispatch import receiver
 from django.db.models.signals import post_save
 from django.contrib.sites.models import Site
@@ -10,7 +12,30 @@ from django.conf import settings
 from django_comments.models import Comment
 
 from qems2.qsub.models import (Tossup, Bonus, Writer, WriterQuestionSetSettings,
-                               PerCategoryWriterSettings)
+                               PerCategoryWriterSettings, CommentMention)
+
+
+# @username mention (Django usernames: letters/digits and . @ + - _)
+_MENTION_RE = re.compile(r'@([\w.@+\-]+)')
+
+
+@receiver(post_save, sender=Comment)
+def record_comment_mentions(sender, instance, created, **kwargs):
+    """When a comment is posted, record @username mentions so the mentioned
+    writers see them in their activity feed."""
+    if not created or '@' not in (instance.comment or ''):
+        return
+    try:
+        names = set(m.group(1).rstrip('.') for m in _MENTION_RE.finditer(instance.comment))
+        if not names:
+            return
+        for user in User.objects.filter(username__in=names).select_related('writer'):
+            writer = getattr(user, 'writer', None)
+            if writer is None:
+                continue  # skip @names with no writer profile
+            CommentMention.objects.get_or_create(comment=instance, mentioned=writer)
+    except Exception:
+        print("Error recording comment mentions:", sys.exc_info()[0], sys.exc_info()[1])
 
 
 def _send_mail_async(subject, body, recipients):

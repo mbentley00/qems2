@@ -11,6 +11,7 @@
 {% block title %}{% if bonus %}{{ bonus.part1_answer|answer_no_formatting|short_preview }}{% else %}Edit Bonus{% endif %} - QEMS2{% endblock %}
 
 {% block content %}
+{% if qset %}<script>window.QEMS_QSET_ID = {{ qset.id }};</script>{% endif %}
 
 <h3 class="page-header">Edit Bonus</h3>
 {% if bonus and bonus.category %}
@@ -26,6 +27,7 @@
     {% if message %}
         <div class="{{ message_class }}">{{ message }}</div>
     {% endif %}
+    {% include "_dup_warning.html" %}
     {% if bonus %}
         <div class="panel question radius">
         <div class="anchor-region" data-question-type="bonus" data-question-id="{{ bonus.id }}">
@@ -232,9 +234,6 @@ $(function () {
         <li><a href="/bonus_history/{{ bonus.id }}" class="button primary">History</a></li>
         <li><a href="/delete_bonus/{{ bonus.id }}" class="button primary delete_bonus" value="{{ bonus.id }}" qset-id="{{ qset.id }}">Delete</a></li>
         <li><a href="/convert_bonus/{{ bonus.id }}" class="button primary convert_bonus" value="{{ bonus.id }}" qset-id="{{ qset.id }}" target-type="ACF-style tossup">Convert to ACF tossup</a></li>
-        {% if question_type == "ACF-style bonus" %}
-            <li><a href="/convert_bonus/{{ bonus.id }}" class="button primary convert_bonus" value="{{ bonus.id }}" qset-id="{{ qset.id }}" target-type="VHSL bonus">Convert to VHSL bonus</a></li>
-        {% endif %}
         {% if question_type == "VHSL bonus" %}
             <li><a href="/convert_bonus/{{ bonus.id }}" class="button primary convert_bonus" value="{{ bonus.id }}" qset-id="{{ qset.id }}" target-type="ACF-style bonus">Convert to ACF bonus</a></li>
         {% endif %}
@@ -250,13 +249,15 @@ $(function () {
             {% get_threaded_comments bonus as thread_data %}
             {% for comment in thread_data.top_level %}
                 {% with anchor=thread_data.anchors|get_anchor:comment.id %}
-                <div class="comment-item" data-comment-id="{{ comment.id }}"{% if anchor %} data-anchor-text="{{ anchor.selected_text|force_escape }}" data-anchor-prefix="{{ anchor.prefix|force_escape }}" data-anchor-suffix="{{ anchor.suffix|force_escape }}"{% endif %}>
+                <div class="comment-item{% if comment.id in thread_data.resolved %} comment-resolved{% endif %}" data-comment-id="{{ comment.id }}"{% if anchor %} data-anchor-text="{{ anchor.selected_text|force_escape }}" data-anchor-prefix="{{ anchor.prefix|force_escape }}" data-anchor-suffix="{{ anchor.suffix|force_escape }}"{% endif %}>
                     {% if anchor %}<div class="comment-quote" title="Click to locate in question">{{ anchor.selected_text|force_escape }}</div>{% endif %}
+                    {% if comment.id in thread_data.resolved %}<span class="label success comment-resolved-badge">Resolved</span>{% endif %}
                     <strong>{{ comment.user }}:</strong> {{ comment.comment|safe|comment_html|linebreaks }} ({{ comment.submit_date }})
                     <div class="comment-actions">
                         {% if role == "editor" %}
                             <a href="/delete_comment/{{ comment.id }}" class="delete_comment" value="{{ comment.id }}" qset="{{ qset.id }}">Delete</a>
                         {% endif %}
+                        <a href="#" class="resolve-toggle" data-comment-id="{{ comment.id }}">{% if comment.id in thread_data.resolved %}Unresolve{% else %}Resolve{% endif %}</a>
                         <a href="#" class="reply-toggle" data-comment-id="{{ comment.id }}">Reply</a>
                     </div>
                     <div class="reply-form" id="reply-form-{{ comment.id }}" style="display:none;">

@@ -309,8 +309,10 @@ def get_threaded_comments(obj):
             top_level.append(comment)
 
     anchors = {ca.comment_id: ca for ca in CommentAnchor.objects.filter(comment__in=all_comments)}
+    resolved = set(CommentResolution.objects.filter(comment__in=all_comments, resolved=True)
+                   .values_list('comment_id', flat=True))
 
-    return {'top_level': top_level, 'replies': replies, 'anchors': anchors}
+    return {'top_level': top_level, 'replies': replies, 'anchors': anchors, 'resolved': resolved}
 
 
 #@register.filter(name='compare_categories'):

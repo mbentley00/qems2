@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% load filters %}
+
+{% block title %}My Activity - {{ qset.name }} - QEMS2{% endblock %}
+
+{% block content %}
+
+<h3 class="page-header">My Activity</h3>
+<ul class="breadcrumbs">
+    <li><a href="/edit_question_set/{{ qset.id }}/">{{ qset.name }}</a></li>
+    <li class="current">My Activity</li>
+</ul>
+
+<div class="panel callout radius"><strong>Mentions of you</strong></div>
+{% if not mention_items %}
+<p>No one has @mentioned you in a comment on this set yet. Mention someone in a comment by
+typing <code>@username</code>.</p>
+{% else %}
+<table class="table-striped table-hover" style="width:100%;">
+    <thead><tr><th style="width:16%;">When</th><th style="width:16%;">From</th><th>Comment</th><th style="width:10%;"></th></tr></thead>
+    <tbody>
+    {% autoescape off %}
+    {% for m in mention_items %}
+        <tr>
+            <td>{{ m.date|to_short_datetime }}</td>
+            <td>{{ m.by }}</td>
+            <td>{{ m.text|escape }}</td>
+            <td><a href="{{ m.edit_url }}" class="button tiny secondary" style="margin-bottom:0;">View {{ m.qtype }}</a></td>
+        </tr>
+    {% endfor %}
+    {% endautoescape %}
+    </tbody>
+</table>
+{% endif %}
+
+<div class="panel callout radius" style="margin-top:1.5rem;"><strong>Changes to questions you wrote or edited</strong></div>
+{% if not change_items %}
+<p>No one else has changed a question you wrote or edited in this set yet.</p>
+{% else %}
+<table class="table-striped table-hover" style="width:100%;">
+    <thead><tr><th style="width:16%;">When</th><th style="width:16%;">Changed by</th><th>Question</th><th style="width:14%;">Your role</th><th style="width:10%;"></th></tr></thead>
+    <tbody>
+    {% autoescape off %}
+    {% for c in change_items %}
+        <tr>
+            <td>{{ c.date|to_short_datetime }}</td>
+            <td>{{ c.by }}</td>
+            <td>{{ c.preview }}</td>
+            <td>You {{ c.role }} it</td>
+            <td><a href="{{ c.edit_url }}" class="button tiny secondary" style="margin-bottom:0;">View {{ c.qtype }}</a></td>
+        </tr>
+    {% endfor %}
+    {% endautoescape %}
+    </tbody>
+</table>
+{% endif %}
+
+{% endblock %}

@@ -480,10 +480,11 @@ def get_category_overview(qset):
     # Build a tree of category stats
     # tree[path_tuple] = {'tu_req': ..., 'tu_in_cat': ..., 'bs_req': ..., 'bs_in_cat': ..., 'category_id': ..., 'is_leaf': bool}
     tree = {}
+    tossups_only = getattr(qset, 'tossups_only', False)
 
     for entry in entries:
         tu_required = entry.num_tossups
-        bs_required = entry.num_bonuses
+        bs_required = 0 if tossups_only else entry.num_bonuses
         tu_written = qset.tossup_set.filter(category=entry.dist_entry).count()
         bs_written = qset.bonus_set.filter(category=entry.dist_entry).count()
 
@@ -568,9 +569,11 @@ def get_questions_remaining(qset):
     bs_counts = {row['category']: row['n'] for row in
                  qset.bonus_set.values('category').annotate(n=Count('id'))}
 
+    tossups_only = getattr(qset, 'tossups_only', False)
+
     for entry in entries:
         tu_required = entry.num_tossups
-        bs_required = entry.num_bonuses
+        bs_required = 0 if tossups_only else entry.num_bonuses
         # TODO: really fix extra questions increasing set completion; this is temporary
         tu_written = tu_counts.get(entry.dist_entry_id, 0)
         bs_written = bs_counts.get(entry.dist_entry_id, 0)

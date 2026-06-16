@@ -52,6 +52,9 @@ if os.environ.get('DB_HOST'):
             'PASSWORD': os.environ['DB_PASSWORD'],
             'HOST': os.environ['DB_HOST'],
             'PORT': os.environ.get('DB_PORT', '5432'),
+            # Azure Database for PostgreSQL requires SSL; 'require' is safe for
+            # any managed Postgres. Override with DB_SSLMODE if needed.
+            'OPTIONS': {'sslmode': os.environ.get('DB_SSLMODE', 'require')},
         }
     }
 else:
@@ -150,6 +153,7 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                'qems2.qsub.context_processors.debug_flag',
             ],
         },
     },
@@ -280,7 +284,10 @@ HAYSTACK_CONNECTIONS = {
     },
 }
 
-HAYSTACK_SIGNAL_PROCESSOR = 'haystack.signals.RealtimeSignalProcessor'
+# Search now uses Postgres full-text search (see views.fulltext_filter), so the
+# Whoosh index is no longer written or read. The no-op base processor keeps
+# Haystack inert (no per-save index writes, which were the Azure slowdown).
+HAYSTACK_SIGNAL_PROCESSOR = 'haystack.signals.BaseSignalProcessor'
 
 TEST_RUNNER = 'django.test.runner.DiscoverRunner'
 
