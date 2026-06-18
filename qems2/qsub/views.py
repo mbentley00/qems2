@@ -18,7 +18,7 @@ from openpyxl.styles import Font, Alignment
 
 from django.shortcuts import render
 from django.forms.formsets import formset_factory
-from django.http import HttpResponse, HttpResponseRedirect
+from django.http import HttpResponse, HttpResponseRedirect, JsonResponse
 
 from django.contrib.auth import logout
 from django.contrib.auth.decorators import login_required
@@ -56,6 +56,14 @@ from django.contrib.contenttypes.models import ContentType
 @login_required
 def main (request):
     return question_sets(request)
+
+@login_required
+def about (request):
+    return render(request, 'about.html', {'user': request.user.writer})
+
+@login_required
+def help_page (request):
+    return render(request, 'help.html', {'user': request.user.writer})
 
 @login_required
 def sidebar (request):
@@ -1375,6 +1383,7 @@ def edit_tossup(request, tossup_id):
              'message_class': message_class,
              'read_only': read_only,
              'role': role,
+             'playtest': _question_buzz_data(tossup, 'tossup'),
              'user': user})
 
     elif request.method == 'POST':
@@ -1461,6 +1470,7 @@ def edit_tossup(request, tossup_id):
              'message_class': message_class,
              'dup_matches': dup_matches,
              'read_only': read_only,
+             'playtest': _question_buzz_data(tossup, 'tossup'),
              'user': user})
 
 @login_required
@@ -1512,6 +1522,7 @@ def edit_bonus(request, bonus_id):
              'message_class': message_class,
              'read_only': read_only,
              'role': role,
+             'playtest': _question_buzz_data(bonus, 'bonus'),
              'user': user})
 
     elif request.method == 'POST':
@@ -1605,6 +1616,7 @@ def edit_bonus(request, bonus_id):
              'dup_matches': dup_matches,
              'read_only': read_only,
              'role': role,
+             'playtest': _question_buzz_data(bonus, 'bonus'),
              'user': user})
 
 @login_required
@@ -5321,6 +5333,7 @@ def view_packet(request, packet_id):
     prev_packet = siblings[index - 1] if index > 0 else None
     next_packet = siblings[index + 1] if index + 1 < len(siblings) else None
 
+    from .audio import VOICE_CHOICES
     return render(request, 'view_packet.html',
                              {'qset': qset,
                               'packet': packet,
@@ -5334,8 +5347,84 @@ def view_packet(request, packet_id):
                               'packet_count': len(siblings),
                               'comment_count': comment_count,
                               'discord_payload': discord_payload,
+                              'mp3_voices': VOICE_CHOICES,
                               'read_only': read_only,
                               'user': user})
+
+
+def _packet_mp3_params(request, packet_id):
+    """Shared setup for the MP3 endpoints. Returns (packet, qset, tossups,
+    bonuses, interleaved, include_answers, voice) or an auth failure response."""
+    from .audio import NATURAL_VOICES, DEFAULT_VOICE
+    user = request.user.writer
+    packet = Packet.objects.get(id=packet_id)
+    qset = packet.question_set
+    if not qset.is_owner(user) and user not in qset.editor.all() and user not in qset.writer.all():
+        return render(request, 'failure.html',
+                                 {'message': 'You are not authorized to view this packet!',
+                                  'message_class': 'alert-box alert'})
+    interleaved = request.GET.get('order') == 'interleaved'
+    include_answers = request.GET.get('answers', '1') != '0'
+    voice = request.GET.get('voice') or DEFAULT_VOICE
+    if voice not in NATURAL_VOICES:
+        voice = DEFAULT_VOICE
+    tossups = list(packet.tossup_set.order_by('question_number'))
+    bonuses = list(packet.bonus_set.order_by('question_number'))
+    return packet, qset, tossups, bonuses, interleaved, include_answers, voice
+
+
+@login_required
+def packet_mp3(request, packet_id):
+    """Serve an MP3 reading of a packet. If it is not ready yet, kick off a
+    background render and show a page that polls until it can download.
+
+    Query params: order=separate|interleaved, answers=1|0.
+    """
+    parsed = _packet_mp3_params(request, packet_id)
+    if isinstance(parsed, HttpResponse):
+        return parsed
+    packet, qset, tossups, bonuses, interleaved, include_answers, voice = parsed
+
+    from .audio import cache_file, packet_status, start_generation
+
+    if packet_status(packet, tossups, bonuses, interleaved, include_answers, voice) == 'ready':
+        order_label = 'interleaved' if interleaved else 'grouped'
+        filename = '{0} ({1}).mp3'.format(packet.packet_name, order_label)
+        with open(cache_file(packet.id, interleaved, include_answers, voice), 'rb') as f:
+            response = HttpResponse(f.read(), content_type='audio/mpeg')
+        response['Content-Disposition'] = 'attachment; filename="{0}"'.format(filename)
+        return response
+
+    # Not ready: make sure a background render is running, then show a waiting page.
+    start_generation(packet, tossups, bonuses, interleaved=interleaved,
+                     include_answers=include_answers, voice=voice)
+    return render(request, 'packet_mp3_preparing.html',
+                             {'packet': packet, 'qset': qset,
+                              'order': 'interleaved' if interleaved else 'separate',
+                              'answers': '1' if include_answers else '0',
+                              'voice': voice},
+                             status=202)
+
+
+@login_required
+def packet_mp3_status(request, packet_id):
+    """JSON status for a packet MP3 render: ready | running | error | absent."""
+    parsed = _packet_mp3_params(request, packet_id)
+    if isinstance(parsed, HttpResponse):
+        return parsed
+    packet, qset, tossups, bonuses, interleaved, include_answers, voice = parsed
+
+    from .audio import packet_status, error_message
+    status = packet_status(packet, tossups, bonuses, interleaved, include_answers, voice)
+    data = {'status': status}
+    if status == 'error':
+        data['message'] = error_message(packet.id, interleaved, include_answers, voice) or \
+            'generation failed'
+    response = JsonResponse(data)
+    # Never cache status — each poll must reflect the live generation state.
+    response['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    return response
+
 
 @login_required
 def reorder_packet_questions(request):
@@ -5710,36 +5799,57 @@ def style_check(request, qset_id):
     guide = request.GET.get('guide', style_checker.DEFAULT_GUIDE)
     if guide not in style_checker.guide_keys():
         guide = style_checker.DEFAULT_GUIDE
+    show_dismissed = request.GET.get('show_dismissed') == '1'
+
+    dismissed = set()
+    for d in StyleIssueDismissal.objects.filter(question_set=qset):
+        dismissed.add((d.question_type, d.question_id, d.code, d.token))
 
     results = []
     counts = {'error': 0, 'warning': 0, 'info': 0}
     checked = 0
+    flagged = 0
+    dismissed_count = 0
+
+    def collect(qtype, q, issues, label, packet, number, edit_url):
+        nonlocal flagged, dismissed_count
+        active, shown = [], []
+        for i in issues:
+            i = dict(i, fixable=('fix' in i))
+            i.pop('fix', None)  # keep the transform server-side
+            if (qtype, q.id, i['code'], i.get('token', '')) in dismissed:
+                dismissed_count += 1
+                if show_dismissed:
+                    i['dismissed'] = True
+                    shown.append(i)
+            else:
+                counts[i['severity']] = counts.get(i['severity'], 0) + 1
+                active.append(i)
+        if active:
+            flagged += 1
+        display = active + shown
+        if display:
+            results.append({'type': qtype, 'id': q.id, 'edit_url': edit_url, 'label': label,
+                            'packet': packet, 'number': number, 'issues': display})
 
     for tu in qset.tossup_set.select_related('packet').order_by('packet__packet_name', 'question_number'):
         checked += 1
-        issues = style_checker.check_tossup(tu, guide)
-        if issues:
-            for i in issues:
-                counts[i['severity']] = counts.get(i['severity'], 0) + 1
-            results.append({'type': 'tossup', 'id': tu.id, 'edit_url': '/edit_tossup/{0}/'.format(tu.id),
-                            'label': _grid_answer_preview(tu.tossup_answer),
-                            'packet': tu.packet.packet_name if tu.packet else '',
-                            'number': tu.question_number, 'issues': issues})
+        collect('tossup', tu, style_checker.check_tossup(tu, guide),
+                _grid_answer_preview(tu.tossup_answer),
+                tu.packet.packet_name if tu.packet else '', tu.question_number,
+                '/edit_tossup/{0}/'.format(tu.id))
     for b in qset.bonus_set.select_related('packet').order_by('packet__packet_name', 'question_number'):
         checked += 1
-        issues = style_checker.check_bonus(b, guide)
-        if issues:
-            for i in issues:
-                counts[i['severity']] = counts.get(i['severity'], 0) + 1
-            results.append({'type': 'bonus', 'id': b.id, 'edit_url': '/edit_bonus/{0}/'.format(b.id),
-                            'label': _grid_answer_preview(b.part1_answer, 30),
-                            'packet': b.packet.packet_name if b.packet else '',
-                            'number': b.question_number, 'issues': issues})
+        collect('bonus', b, style_checker.check_bonus(b, guide),
+                _grid_answer_preview(b.part1_answer, 30),
+                b.packet.packet_name if b.packet else '', b.question_number,
+                '/edit_bonus/{0}/'.format(b.id))
 
     return render(request, 'style_check.html',
                   {'qset': qset, 'user': user, 'results': results, 'counts': counts,
-                   'checked': checked, 'flagged': len(results),
-                   'guides': style_checker.STYLE_GUIDES, 'guide': guide,
+                   'checked': checked, 'flagged': flagged, 'guide': guide,
+                   'dismissed_count': dismissed_count, 'show_dismissed': show_dismissed,
+                   'guides': style_checker.STYLE_GUIDES,
                    'guide_obj': next((g for g in style_checker.STYLE_GUIDES if g['key'] == guide), None)})
 
 
@@ -5785,6 +5895,87 @@ def packet_style_issues(request, packet_id):
         if found:
             issues['bonus-{0}'.format(b.id)] = found
     return HttpResponse(json.dumps({'issues': issues, 'guide': guide}))
+
+
+def _style_question(qtype, qid):
+    if qtype == 'tossup':
+        return Tossup.objects.filter(id=qid).first()
+    if qtype == 'bonus':
+        return Bonus.objects.filter(id=qid).first()
+    return None
+
+
+def _can_edit_question(user, qset, question):
+    """Edit rights for applying a fix: owners/editors can always edit; a writer
+    can edit their own question while it is unlocked."""
+    if qset.is_owner(user) or user in qset.editor.all():
+        return True
+    return (question.author_id == user.id) and not question.locked
+
+
+@login_required
+def apply_style_fix(request):
+    """Auto-apply an easy style fix (e.g. insert a missing pronunciation guide)
+    to a question. The fix transform is recomputed server-side from the issue's
+    (code, token); the client only identifies which issue to fix."""
+    from . import style_checker
+    if request.method != 'POST':
+        return HttpResponse(json.dumps({'ok': False, 'error': 'POST required'}), status=405)
+    user = request.user.writer
+    qtype = request.POST.get('question_type', '')
+    qid = request.POST.get('question_id', '')
+    code = request.POST.get('code', '')
+    token = request.POST.get('token', '')
+    guide = request.POST.get('guide', style_checker.DEFAULT_GUIDE)
+    if guide not in style_checker.guide_keys():
+        guide = style_checker.DEFAULT_GUIDE
+
+    question = _style_question(qtype, qid)
+    if question is None:
+        return HttpResponse(json.dumps({'ok': False, 'error': 'No such question'}), status=404)
+    qset = question.question_set
+    if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+        return HttpResponse(json.dumps({'ok': False, 'error': 'Not authorized'}), status=403)
+    if not _can_edit_question(user, qset, question):
+        return HttpResponse(json.dumps({'ok': False, 'error': 'This question is locked'}), status=403)
+
+    fix = style_checker.find_fix(question, qtype, code, token, guide)
+    if not fix:
+        return HttpResponse(json.dumps({'ok': False, 'error': 'Nothing to apply'}), status=400)
+    if not style_checker.apply_fix(question, fix):
+        return HttpResponse(json.dumps({'ok': False, 'error': 'Could not apply automatically'}), status=400)
+    question.save_question(edit_type=QUESTION_EDIT, changer=user)
+    return HttpResponse(json.dumps({'ok': True}))
+
+
+@login_required
+def dismiss_style_issue(request):
+    """Dismiss (or restore) a style-check issue for a question so it is hidden
+    on future runs. Set-wide. POST action=restore to undo."""
+    if request.method != 'POST':
+        return HttpResponse(json.dumps({'ok': False, 'error': 'POST required'}), status=405)
+    user = request.user.writer
+    qtype = request.POST.get('question_type', '')
+    qid = request.POST.get('question_id', '')
+    code = request.POST.get('code', '')
+    token = request.POST.get('token', '')
+    restore = request.POST.get('action', '') == 'restore'
+
+    question = _style_question(qtype, qid)
+    if question is None:
+        return HttpResponse(json.dumps({'ok': False, 'error': 'No such question'}), status=404)
+    qset = question.question_set
+    if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+        return HttpResponse(json.dumps({'ok': False, 'error': 'Not authorized'}), status=403)
+
+    if restore:
+        StyleIssueDismissal.objects.filter(
+            question_type=qtype, question_id=question.id, code=code, token=token).delete()
+    else:
+        StyleIssueDismissal.objects.get_or_create(
+            question_type=qtype, question_id=question.id, code=code, token=token,
+            defaults={'question_set': qset, 'dismissed_by': user})
+    return HttpResponse(json.dumps({'ok': True}))
 
 
 #########################################################################
@@ -5926,3 +6117,431 @@ def category_tags(request, qset_id):
                               'selected_path': selected_path,
                               'message': message,
                               'message_class': message_class})
+
+
+def _member_or_403(request, qset):
+    """Return the writer if they belong to the set, else None."""
+    user = request.user.writer
+    if qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all():
+        return user
+    return None
+
+
+@login_required
+def recap(request, qset_id):
+    """Set-wide "what's changed lately" digest: new questions, recent edits,
+    and recent comments across the whole set over a selectable time window."""
+    qset = QuestionSet.objects.get(id=qset_id)
+    user = _member_or_403(request, qset)
+    if user is None:
+        return render(request, 'failure.html',
+                      {'message': 'You are not authorized to view this set!',
+                       'message_class': 'alert-box alert'})
+
+    try:
+        days = int(request.GET.get('days', 7))
+    except ValueError:
+        days = 7
+    if days not in (1, 3, 7, 14, 30):
+        days = 7
+    from datetime import timedelta
+    since = timezone.now() - timedelta(days=days)
+
+    def location(q):
+        if q.packet_id and q.question_number:
+            return '{0} #{1}'.format(q.packet.packet_name, q.question_number)
+        return 'Unassigned'
+
+    # --- New questions created in the window ---
+    new_questions = []
+    new_tu = (Tossup.objects.filter(question_set=qset, created_date__gte=since)
+              .select_related('packet', 'author__user', 'category').order_by('-created_date'))
+    new_bs = (Bonus.objects.filter(question_set=qset, created_date__gte=since)
+              .select_related('packet', 'author__user', 'category').order_by('-created_date'))
+    for t in new_tu:
+        new_questions.append({
+            'date': t.created_date, 'qtype': 'tossup',
+            'answer': _grid_answer_preview(t.tossup_answer),
+            'author': str(t.author) if t.author else 'unknown',
+            'category': str(t.category) if t.category else '',
+            'location': location(t), 'edit_url': '/edit_tossup/{0}/'.format(t.id)})
+    for b in new_bs:
+        new_questions.append({
+            'date': b.created_date, 'qtype': 'bonus',
+            'answer': _grid_answer_preview(b.part1_answer),
+            'author': str(b.author) if b.author else 'unknown',
+            'category': str(b.category) if b.category else '',
+            'location': location(b), 'edit_url': '/edit_bonus/{0}/'.format(b.id)})
+    new_questions.sort(key=lambda x: x['date'], reverse=True)
+
+    # --- Recent edits (history rows that aren't the question's creation) ---
+    edit_items = []
+    for model, hist_model, edit_url, preview in (
+            (Tossup, TossupHistory, '/edit_tossup/', lambda q: _grid_answer_preview(q.tossup_answer)),
+            (Bonus, BonusHistory, '/edit_bonus/', lambda q: _grid_answer_preview(q.part1_answer))):
+        qs = model.objects.filter(question_set=qset).select_related('packet')
+        hist_to_q = {q.question_history_id: q for q in qs if q.question_history_id}
+        if not hist_to_q:
+            continue
+        histories = (hist_model.objects.filter(question_history_id__in=hist_to_q.keys(),
+                                               change_date__gte=since)
+                     .select_related('changer__user').order_by('-change_date')[:200])
+        for h in histories:
+            q = hist_to_q.get(h.question_history_id)
+            # Skip the very first history row (creation) so this is edits only.
+            if q is None or (q.created_date and h.change_date <= q.created_date):
+                continue
+            edit_items.append({
+                'date': h.change_date, 'qtype': 'tossup' if model is Tossup else 'bonus',
+                'by': str(h.changer) if h.changer else 'unknown',
+                'answer': preview(q), 'location': location(q),
+                'edit_url': '{0}{1}/'.format(edit_url, q.id)})
+    edit_items.sort(key=lambda x: x['date'], reverse=True)
+    edit_items = edit_items[:200]
+
+    # --- Recent comments across the set ---
+    tu_ct = ContentType.objects.get_for_model(Tossup)
+    bs_ct = ContentType.objects.get_for_model(Bonus)
+    tu_ids = [str(i) for i in qset.tossup_set.values_list('id', flat=True)]
+    bs_ids = [str(i) for i in qset.bonus_set.values_list('id', flat=True)]
+    comments = (Comment.objects.filter(is_removed=False, submit_date__gte=since)
+                .filter(Q(content_type=tu_ct, object_pk__in=tu_ids) |
+                        Q(content_type=bs_ct, object_pk__in=bs_ids))
+                .select_related('user', 'content_type').order_by('-submit_date')[:200])
+    comment_items = []
+    for c in comments:
+        is_tu = c.content_type_id == tu_ct.id
+        by = '{0} {1}'.format(c.user.first_name, c.user.last_name).strip() if c.user else ''
+        by = by or (c.user_name or 'unknown')
+        comment_items.append({
+            'date': c.submit_date, 'by': by, 'text': c.comment,
+            'qtype': 'tossup' if is_tu else 'bonus',
+            'edit_url': '{0}{1}/'.format('/edit_tossup/' if is_tu else '/edit_bonus/', c.object_pk)})
+
+    return render(request, 'recap.html',
+                  {'qset': qset, 'user': user, 'days': days,
+                   'new_questions': new_questions,
+                   'edit_items': edit_items,
+                   'comment_items': comment_items,
+                   'new_question_count': len(new_questions),
+                   'edit_count': len(edit_items),
+                   'comment_count': len(comment_items)})
+
+
+def _tossup_reading(tossup):
+    """Turn a tossup into the data the play UI reads clue-by-clue: a list of
+    display words, the index of the power boundary (the word containing the
+    "(*)" power mark, or -1 if unmarked), and the answer as formatted HTML."""
+    plain = strip_markup(tossup.tossup_text or '').replace('\n', ' ').strip()
+    raw_words = [w for w in plain.split(' ') if w != '']
+    power_index = -1
+    words = []
+    for i, w in enumerate(raw_words):
+        if '(*)' in w and power_index == -1:
+            power_index = len(words)
+            w = w.replace('(*)', '').strip()
+            if w == '':
+                continue
+        words.append(w)
+    answer_html = get_formatted_question_html(tossup.tossup_answer, True, True, False, False)
+    return {
+        'id': tossup.id,
+        'qtype': 'tossup',
+        'number': tossup.question_number or 0,
+        'words': words,
+        'power_index': power_index,
+        'answer_html': answer_html,
+        'category': str(tossup.category) if tossup.category else '',
+    }
+
+
+def _bonus_reading(bonus):
+    """Turn a bonus into the data the play UI reveals part-by-part."""
+    is_acf = bonus.get_bonus_type() == ACF_STYLE_BONUS
+    leadin_html = get_formatted_question_html(bonus.leadin, False, True, False, False) if is_acf else ''
+    parts = []
+    fields = [(bonus.part1_text, bonus.part1_answer, bonus.part1_difficulty),
+              (bonus.part2_text, bonus.part2_answer, bonus.part2_difficulty),
+              (bonus.part3_text, bonus.part3_answer, bonus.part3_difficulty)]
+    if not is_acf:
+        fields = fields[:1]
+    for text, answer, difficulty in fields:
+        if text is None or text == '':
+            continue
+        parts.append({
+            'text_html': get_formatted_question_html(text, False, True, False, False),
+            'answer_html': get_formatted_question_html(answer, True, True, False, False),
+            'difficulty': difficulty or '',
+        })
+    return {
+        'id': bonus.id,
+        'qtype': 'bonus',
+        'number': bonus.question_number or 0,
+        'leadin_html': leadin_html,
+        'parts': parts,
+        'category': str(bonus.category) if bonus.category else '',
+    }
+
+
+@login_required
+def play(request, qset_id):
+    """Play the set's questions clue-by-clue (tossups) / part-by-part (bonuses).
+    The player chooses what to play: recent questions (optionally filtered by
+    category) or questions by category, and whether to play tossups, bonuses, or
+    both. Buzzes/results are recorded via AJAX (record_buzz/record_bonus_result)."""
+    qset = QuestionSet.objects.get(id=qset_id)
+    user = _member_or_403(request, qset)
+    if user is None:
+        return render(request, 'failure.html',
+                      {'message': 'You are not authorized to play this set!',
+                       'message_class': 'alert-box alert'})
+
+    mode = request.GET.get('mode', 'recent')
+    if mode not in ('recent', 'category'):
+        mode = 'recent'
+    qtypes = request.GET.get('qtypes', 'both')
+    if qtypes not in ('both', 'tossups', 'bonuses'):
+        qtypes = 'both'
+    if qset.tossups_only:
+        qtypes = 'tossups'
+    try:
+        limit = int(request.GET.get('limit', 30))
+    except ValueError:
+        limit = 30
+    limit = max(1, min(limit, 200))
+    # In recent mode, play either the most-recent N questions ('count') or every
+    # question created in the last N days ('days').
+    recent_by = request.GET.get('recent_by', 'count')
+    if recent_by not in ('count', 'days'):
+        recent_by = 'count'
+    try:
+        days = int(request.GET.get('days', 7))
+    except ValueError:
+        days = 7
+    days = max(1, min(days, 365))
+    selected_cat_ids = [c for c in request.GET.getlist('cats') if c.isdigit()]
+
+    # Categories actually used by this set's questions, for the filter UI.
+    used_cat_ids = set(Tossup.objects.filter(question_set=qset, category__isnull=False)
+                       .values_list('category_id', flat=True))
+    used_cat_ids |= set(Bonus.objects.filter(question_set=qset, category__isnull=False)
+                        .values_list('category_id', flat=True))
+    categories = sorted(
+        ({'id': de.id, 'name': str(de)}
+         for de in DistributionEntry.objects.filter(id__in=used_cat_ids)),
+        key=lambda c: c['name'].lower())
+
+    def gather(model):
+        qs = model.objects.filter(question_set=qset).select_related(
+            'category', 'packet', 'question_type')
+        if selected_cat_ids:
+            qs = qs.filter(category_id__in=selected_cat_ids)
+        if mode == 'recent':
+            qs = qs.order_by('-created_date')
+            if recent_by == 'days':
+                from datetime import timedelta
+                since = timezone.now() - timedelta(days=days)
+                # Cap to keep the page reasonable; this is the most-recent slice.
+                return qs.filter(created_date__gte=since)[:200]
+            return qs[:limit]
+        return qs.order_by('category__category', 'category__subcategory',
+                           'packet__packet_name', 'question_number')[:200]
+
+    tossups, bonuses = [], []
+    if qtypes in ('both', 'tossups'):
+        for t in gather(Tossup):
+            r = _tossup_reading(t)
+            r['edit_url'] = '/edit_tossup/{0}/'.format(t.id)
+            tossups.append(r)
+    if qtypes in ('both', 'bonuses'):
+        for b in gather(Bonus):
+            r = _bonus_reading(b)
+            r['edit_url'] = '/edit_bonus/{0}/'.format(b.id)
+            bonuses.append(r)
+
+    return render(request, 'play.html',
+                  {'qset': qset, 'user': user,
+                   'mode': mode, 'qtypes': qtypes, 'limit': limit,
+                   'recent_by': recent_by, 'days': days,
+                   'categories': categories,
+                   'selected_cat_ids': [int(c) for c in selected_cat_ids],
+                   'tossups_only': qset.tossups_only,
+                   'questions': {'tossups': tossups, 'bonuses': bonuses}})
+
+
+def _get_or_create_session(request, qset, session_id):
+    """Reuse the play session identified by session_id if it belongs to this
+    user and set, otherwise start a new one."""
+    user = request.user.writer
+    if session_id:
+        session = PlaytestSession.objects.filter(id=session_id, question_set=qset,
+                                                 player=user).first()
+        if session is not None:
+            return session
+    return PlaytestSession.objects.create(question_set=qset, player=user,
+                                          source=PLAYTEST_SOURCE_WEB)
+
+
+@login_required
+def record_buzz(request):
+    """Record a tossup buzz from the play UI. Returns the session id so the
+    client can group later buzzes from the same sitting."""
+    if request.method != 'POST':
+        return HttpResponse(json.dumps({'success': False, 'message': 'Invalid request'}))
+    user = request.user.writer
+    try:
+        tossup = Tossup.objects.select_related('question_set').get(id=int(request.POST['tossup_id']))
+    except (KeyError, ValueError, Tossup.DoesNotExist):
+        return HttpResponse(json.dumps({'success': False, 'message': 'Tossup not found'}))
+
+    qset = tossup.question_set
+    if _member_or_403(request, qset) is None:
+        return HttpResponse(json.dumps({'success': False, 'message': 'Not authorized'}))
+
+    correct = request.POST.get('correct') == 'true'
+    powered = request.POST.get('powered') == 'true'
+    neg = request.POST.get('neg') == 'true'
+    try:
+        buzz_word_index = int(request.POST.get('buzz_word_index') or 0)
+        total_words = int(request.POST.get('total_words') or 0)
+        char_position = int(request.POST.get('char_position') or 0)
+    except ValueError:
+        return HttpResponse(json.dumps({'success': False, 'message': 'Bad buzz position'}))
+
+    if correct:
+        value = 15 if powered else 10
+    elif neg:
+        value = -5
+    else:
+        value = 0
+
+    session = _get_or_create_session(request, qset, request.POST.get('session_id'))
+    TossupBuzz.objects.create(
+        tossup=tossup, session=session, player=user,
+        buzz_word_index=buzz_word_index, total_words=total_words,
+        char_position=char_position, correct=correct, powered=powered and correct,
+        value=value, answer_given=request.POST.get('answer_given', '')[:1000],
+        source=PLAYTEST_SOURCE_WEB)
+
+    return HttpResponse(json.dumps({'success': True, 'session_id': session.id, 'value': value}))
+
+
+@login_required
+def record_bonus_result(request):
+    """Record the result of playing a bonus from the play UI."""
+    if request.method != 'POST':
+        return HttpResponse(json.dumps({'success': False, 'message': 'Invalid request'}))
+    user = request.user.writer
+    try:
+        bonus = Bonus.objects.select_related('question_set').get(id=int(request.POST['bonus_id']))
+    except (KeyError, ValueError, Bonus.DoesNotExist):
+        return HttpResponse(json.dumps({'success': False, 'message': 'Bonus not found'}))
+
+    qset = bonus.question_set
+    if _member_or_403(request, qset) is None:
+        return HttpResponse(json.dumps({'success': False, 'message': 'Not authorized'}))
+
+    p1 = request.POST.get('part1_correct') == 'true'
+    p2 = request.POST.get('part2_correct') == 'true'
+    p3 = request.POST.get('part3_correct') == 'true'
+    total = 10 * sum((p1, p2, p3))
+
+    session = _get_or_create_session(request, qset, request.POST.get('session_id'))
+    BonusResult.objects.create(
+        bonus=bonus, session=session, player=user,
+        part1_correct=p1, part2_correct=p2, part3_correct=p3, total=total,
+        source=PLAYTEST_SOURCE_WEB)
+
+    return HttpResponse(json.dumps({'success': True, 'session_id': session.id, 'total': total}))
+
+
+def _question_buzz_data(question, qtype):
+    """Aggregate playtest results for a single question, shown as a panel on its
+    edit page (buzz stats are a property of the question, not a separate list).
+    Returns None when nothing has been recorded yet."""
+    if question is None:
+        return None
+
+    if qtype == 'tossup':
+        buzzes = list(question.buzzes.select_related('player__user').order_by('buzz_date'))
+        if not buzzes:
+            return None
+        correct = [b for b in buzzes if b.correct]
+        powers = [b for b in correct if b.powered]
+        negs = [b for b in buzzes if b.value < 0]
+        fracs = [b.buzz_fraction() for b in correct]
+        words = _tossup_reading(question)['words']
+        rows = []
+        for b in buzzes:
+            heard = ' '.join(words[:b.buzz_word_index]) if words else ''
+            if len(heard) > 140:
+                heard = '...' + heard[-140:]
+            rows.append({
+                'player': b.get_player_name(), 'date': b.buzz_date,
+                'correct': b.correct, 'powered': b.powered, 'value': b.value,
+                'fraction': '{0:.0f}%'.format(100.0 * b.buzz_fraction()),
+                'answer_given': b.answer_given, 'heard': heard, 'source': b.source})
+        return {
+            'qtype': 'tossup', 'plays': len(buzzes), 'correct': len(correct),
+            'powers': len(powers), 'negs': len(negs),
+            'conversion': '{0:.0f}%'.format(100.0 * len(correct) / len(buzzes)),
+            'avg_buzz': '{0:.0f}%'.format(100.0 * sum(fracs) / len(fracs)) if fracs else '—',
+            'rows': rows}
+
+    results = list(question.results.select_related('player__user').order_by('answered_date'))
+    if not results:
+        return None
+    n = len(results)
+    rows = [{
+        'player': r.get_player_name(), 'date': r.answered_date,
+        'p1': r.part1_correct, 'p2': r.part2_correct, 'p3': r.part3_correct,
+        'total': r.total, 'source': r.source} for r in results]
+    return {
+        'qtype': 'bonus', 'plays': n,
+        'avg_points': '{0:.1f}'.format(sum(r.total for r in results) / n),
+        'p1': '{0:.0f}%'.format(100.0 * sum(1 for r in results if r.part1_correct) / n),
+        'p2': '{0:.0f}%'.format(100.0 * sum(1 for r in results if r.part2_correct) / n),
+        'p3': '{0:.0f}%'.format(100.0 * sum(1 for r in results if r.part3_correct) / n),
+        'rows': rows}
+
+
+@login_required
+def api_access(request, qset_id):
+    """Owner/co-owner page to view and manage the set's Discord-bot API key."""
+    qset = QuestionSet.objects.get(id=qset_id)
+    user = request.user.writer
+    if not qset.is_owner(user):
+        return render(request, 'failure.html',
+                      {'message': 'Only the set owner or a co-owner can manage API access.',
+                       'message_class': 'alert-box alert'})
+    api_key = SetApiKey.objects.filter(question_set=qset).first()
+    base_url = request.build_absolute_uri('/').rstrip('/')
+    return render(request, 'api_access.html',
+                  {'qset': qset, 'user': user, 'api_key': api_key, 'base_url': base_url})
+
+
+@login_required
+def generate_set_api_key(request):
+    """Create, rotate, or revoke a set's API key (owner/co-owner only)."""
+    if request.method != 'POST':
+        return HttpResponseRedirect('/main/')
+    user = request.user.writer
+    qset = QuestionSet.objects.get(id=int(request.POST['qset_id']))
+    if not qset.is_owner(user):
+        return render(request, 'failure.html',
+                      {'message': 'Only the set owner or a co-owner can manage API access.',
+                       'message_class': 'alert-box alert'})
+    action = request.POST.get('action', 'generate')
+    if action == 'revoke':
+        SetApiKey.objects.filter(question_set=qset).delete()
+        messages.success(request, 'API key revoked.')
+    else:
+        api_key, _ = SetApiKey.objects.get_or_create(
+            question_set=qset, defaults={'key': SetApiKey.generate_token(), 'created_by': user})
+        # Regenerate always issues a fresh token (revoking the old one).
+        api_key.key = SetApiKey.generate_token()
+        api_key.active = True
+        api_key.created_by = user
+        api_key.save()
+        messages.success(request, 'A new API key has been generated.')
+    return HttpResponseRedirect('/api_access/{0}/'.format(qset.id))

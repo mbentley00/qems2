@@ -9,9 +9,10 @@ ENV PYTHONUNBUFFERED=1 \
     PORT=8000
 
 # psycopg2 needs libpq at runtime; build-essential + libpq-dev to compile the
-# wheel if a prebuilt one isn't available for 3.14.
+# wheel if a prebuilt one isn't available for 3.14. ffmpeg is needed by the
+# packet-to-MP3 feature to stitch/encode audio segments.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential libpq-dev \
+    && apt-get install -y --no-install-recommends build-essential libpq-dev ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

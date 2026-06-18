@@ -43,7 +43,10 @@ def _send_mail_async(subject, body, recipients):
     question never blocks on SMTP."""
     def _send():
         try:
-            send_mail(subject, body, settings.EMAIL_HOST_USER, list(recipients), fail_silently=True)
+            # Send from DEFAULT_FROM_EMAIL: transactional providers require the
+            # From to be a verified sender, which the SMTP username (e.g.
+            # "apikey"/"resend") is not.
+            send_mail(subject, body, settings.DEFAULT_FROM_EMAIL, list(recipients), fail_silently=True)
         except Exception:
             print("Error sending notification mail:", sys.exc_info()[0], sys.exc_info()[1])
     threading.Thread(target=_send, daemon=True).start()
@@ -74,7 +77,9 @@ def email_on_comments(sender, instance, created, **kwargs):
                            .filter(object_pk=target.id, content_type_id=instance.content_type_id)
                            .select_related('user__writer'))
         for comment in thread_comments:
-            if comment.user.writer.send_mail_on_comments:
+            # Bot-posted comments (e.g. from the Discord API) have no Django user.
+            writer = getattr(comment.user, 'writer', None) if comment.user else None
+            if writer is not None and writer.send_mail_on_comments:
                 mail_set.add(comment.user.email)
 
         # Subscribers to all comments on the set, or to this category (two queries)

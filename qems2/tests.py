@@ -1265,3 +1265,99 @@ class CrossSetAuthorizationTests(TestCase):
             'packet_id': self.atk_packet.id, 'tossup_ids[]': [str(own.id)]})
         own.refresh_from_db()
         self.assertEqual(own.packet_id, self.atk_packet.id)
+
+
+class PronunciationGuideTests(TestCase):
+    """Verified-OL pronunciation-guide suggestions (qsub.pron_dict), used by the
+    style checker. These rely on the bundled data/pronunciations.json."""
+
+    def setUp(self):
+        from qems2.qsub import pron_dict
+        pron_dict.reset_cache()
+
+    def _terms(self, text):
+        from qems2.qsub.pron_dict import suggest_guides
+        return {term for term, _pron in suggest_guides(text)}
+
+    def test_suggests_known_proper_noun(self):
+        self.assertIn('Goethe', self._terms('The poet Goethe wrote this work.'))
+
+    def test_suppressed_when_guide_already_present(self):
+        # A parenthetical guide right after the term should suppress the hint.
+        self.assertNotIn('Goethe', self._terms('The poet Goethe ("GUR-tuh") wrote this.'))
+
+    def test_suppressed_when_respelling_present_elsewhere(self):
+        from qems2.qsub.pron_dict import suggest_guides
+        # If the exact respelling already appears, don't re-suggest it.
+        text = 'Goethe, pronounced GUR-tuh, wrote this.'
+        self.assertNotIn('Goethe', {t for t, _ in suggest_guides(text)})
+
+    def test_no_suggestion_for_common_words(self):
+        # Common English words are stoplisted out of the dictionary.
+        self.assertEqual(self._terms('They were at the table by the water.'), set())
+
+    def test_each_term_suggested_once(self):
+        from qems2.qsub.pron_dict import suggest_guides
+        pairs = suggest_guides('Goethe admired Goethe and again Goethe.')
+        self.assertEqual(len([t for t, _ in pairs if t == 'Goethe']), 1)
+
+
+class StyleCheckFixTests(TestCase):
+    """Auto-apply and dismiss of style-check issues (pronunciation guides etc.)."""
+
+    def setUp(self):
+        from qems2.qsub import pron_dict
+        pron_dict.reset_cache()
+        self.owner_user = User.objects.create_user('sc_owner', password='pw', email='o@test.com')
+        self.owner = Writer.objects.get(user=self.owner_user)
+        self.dist = Distribution.objects.create(name='sc dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='Literature', subcategory='European')
+        self.qset = QuestionSet.objects.create(
+            name='SC Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist, tossups_per_packet=1, bonuses_per_packet=1)
+        self.tu = Tossup.objects.create(
+            author=self.owner, question_set=self.qset,
+            tossup_text='The poet Goethe wrote this famous work.', tossup_answer='_Faust_',
+            category=self.de, created_date=datetime.now(), last_changed_date=datetime.now(),
+            question_number=1)
+        self.client.login(username='sc_owner', password='pw')
+
+    def test_apply_pronunciation_fix_inserts_guide(self):
+        resp = self.client.post('/apply_style_fix/', {
+            'question_type': 'tossup', 'question_id': self.tu.id,
+            'code': 'pronunciation', 'token': 'Question|Goethe', 'guide': 'minkowski'})
+        self.assertEqual(resp.status_code, 200)
+        self.tu.refresh_from_db()
+        self.assertIn('GUR-tuh', self.tu.tossup_text)
+
+    def test_apply_is_idempotent_after_guide_present(self):
+        self.client.post('/apply_style_fix/', {
+            'question_type': 'tossup', 'question_id': self.tu.id,
+            'code': 'pronunciation', 'token': 'Question|Goethe', 'guide': 'minkowski'})
+        # Second apply: the issue no longer exists, so it should report failure.
+        resp = self.client.post('/apply_style_fix/', {
+            'question_type': 'tossup', 'question_id': self.tu.id,
+            'code': 'pronunciation', 'token': 'Question|Goethe', 'guide': 'minkowski'})
+        self.assertEqual(resp.status_code, 400)
+
+    def test_dismiss_hides_issue_on_page(self):
+        before = self.client.get('/style_check/%d/?guide=minkowski' % self.qset.id)
+        self.assertIn(b'GUR-tuh', before.content)
+        self.client.post('/dismiss_style_issue/', {
+            'question_type': 'tossup', 'question_id': self.tu.id,
+            'code': 'pronunciation', 'token': 'Question|Goethe'})
+        self.assertTrue(StyleIssueDismissal.objects.filter(
+            question_id=self.tu.id, code='pronunciation', token='Question|Goethe').exists())
+        after = self.client.get('/style_check/%d/?guide=minkowski' % self.qset.id)
+        self.assertNotIn(b'GUR-tuh', after.content)
+
+    def test_restore_undismisses(self):
+        self.client.post('/dismiss_style_issue/', {
+            'question_type': 'tossup', 'question_id': self.tu.id,
+            'code': 'pronunciation', 'token': 'Question|Goethe'})
+        self.client.post('/dismiss_style_issue/', {
+            'question_type': 'tossup', 'question_id': self.tu.id,
+            'code': 'pronunciation', 'token': 'Question|Goethe', 'action': 'restore'})
+        self.assertFalse(StyleIssueDismissal.objects.filter(
+            question_id=self.tu.id, code='pronunciation').exists())

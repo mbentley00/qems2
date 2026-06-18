@@ -39,6 +39,8 @@
     <li><a href="/category_tags/{{ qset.id }}/" class="button secondary"><i class="fa fa-tags"></i> Category Tags</a></li>
     <li><a href="/category_overview/{{ qset.id }}/" class="button secondary"><i class="fa fa-list-ul"></i> Category Overview</a></li>
     <li><a href="/activity/{{ qset.id }}/" class="button secondary"><i class="fa fa-bell"></i> My Activity{% if new_activity %} <span class="activity-badge">{{ new_activity }}</span>{% endif %}</a></li>
+    <li><a href="/recap/{{ qset.id }}/" class="button secondary"><i class="fa fa-clock-rotate-left"></i> Recent Changes</a></li>
+    <li><a href="/play/{{ qset.id }}/" class="button secondary"><i class="fa fa-play"></i> Play</a></li>
     <li><a href="/style_check/{{ qset.id }}/" class="button secondary"><i class="fa fa-spell-check"></i> Style Check</a></li>
 </ul>
 <style>
@@ -236,7 +238,12 @@
         </script>
         <div class="panel header radius text-center">
             <strong><a href="/question_set_distribution/{{ qset.id }}">Set-Specific Distribution</a></strong>
-        </div>        
+        </div>
+        {% if qset|is_set_owner:user %}
+            <div class="panel header radius text-center">
+                <strong><a href="/api_access/{{ qset.id }}/"><i class="fa fa-robot"></i> Bot API</a></strong>
+            </div>
+        {% endif %}
         {% if role == "editor" %}
             <div class="panel header radius text-center">
                 <strong><a href="/export_question_set/{{ qset.id }}/csv/">Export Question Set to CSV</a></strong> | <strong><a href="/export_question_set/{{ qset.id }}/tsv/">Export to TSV</a></strong> | <strong><a href="/export_question_set/{{ qset.id }}/docx/">Export to Word</a></strong> | <strong><a href="/export_question_set/{{ qset.id }}/docx-by-category/">Export to Word by Category</a></strong> | <strong><a href="/export_question_set/{{ qset.id }}/docx-packetized/">Export Packetized Word</a></strong>

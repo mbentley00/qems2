@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% load filters %}
+
+{% block title %}Recent Changes - {{ qset.name }} - QEMS2{% endblock %}
+
+{% block content %}
+
+<h3 class="page-header">Recent Changes</h3>
+<ul class="breadcrumbs">
+    <li><a href="/edit_question_set/{{ qset.id }}/">{{ qset.name }}</a></li>
+    <li class="current">Recent Changes</li>
+</ul>
+
+<div class="recap-controls">
+    <span>Show changes from the last:</span>
+    <ul class="button-group">
+        <li><a href="?days=1" class="button tiny {% if days == 1 %}primary{% else %}secondary{% endif %}">1 day</a></li>
+        <li><a href="?days=3" class="button tiny {% if days == 3 %}primary{% else %}secondary{% endif %}">3 days</a></li>
+        <li><a href="?days=7" class="button tiny {% if days == 7 %}primary{% else %}secondary{% endif %}">7 days</a></li>
+        <li><a href="?days=14" class="button tiny {% if days == 14 %}primary{% else %}secondary{% endif %}">14 days</a></li>
+        <li><a href="?days=30" class="button tiny {% if days == 30 %}primary{% else %}secondary{% endif %}">30 days</a></li>
+    </ul>
+</div>
+
+<div class="recap-summary">
+    <span class="recap-stat"><strong>{{ new_question_count }}</strong> new question{{ new_question_count|pluralize }}</span>
+    <span class="recap-stat"><strong>{{ edit_count }}</strong> edit{{ edit_count|pluralize }}</span>
+    <span class="recap-stat"><strong>{{ comment_count }}</strong> comment{{ comment_count|pluralize }}</span>
+</div>
+
+<div class="panel callout radius"><strong>New questions</strong></div>
+{% if not new_questions %}
+<p>No questions have been added in this window.</p>
+{% else %}
+<table class="table-striped table-hover recap-table">
+    <thead><tr><th>When</th><th>Type</th><th>Answer</th><th>Category</th><th>Author</th><th>Where</th><th></th></tr></thead>
+    <tbody>
+    {% for q in new_questions %}
+        <tr>
+            <td>{{ q.date|to_short_datetime }}</td>
+            <td>{{ q.qtype }}</td>
+            <td>{{ q.answer }}</td>
+            <td>{{ q.category }}</td>
+            <td>{{ q.author }}</td>
+            <td>{{ q.location }}</td>
+            <td><a href="{{ q.edit_url }}" class="button tiny secondary recap-view">View</a></td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
+<div class="panel callout radius" style="margin-top:1.5rem;"><strong>Recent edits</strong></div>
+{% if not edit_items %}
+<p>No questions have been edited in this window.</p>
+{% else %}
+<table class="table-striped table-hover recap-table">
+    <thead><tr><th>When</th><th>Type</th><th>Question</th><th>Edited by</th><th>Where</th><th></th></tr></thead>
+    <tbody>
+    {% for e in edit_items %}
+        <tr>
+            <td>{{ e.date|to_short_datetime }}</td>
+            <td>{{ e.qtype }}</td>
+            <td>{{ e.answer }}</td>
+            <td>{{ e.by }}</td>
+            <td>{{ e.location }}</td>
+            <td><a href="{{ e.edit_url }}" class="button tiny secondary recap-view">View</a></td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
+<div class="panel callout radius" style="margin-top:1.5rem;"><strong>Recent comments</strong></div>
+{% if not comment_items %}
+<p>No comments have been left in this window.</p>
+{% else %}
+<table class="table-striped table-hover recap-table">
+    <thead><tr><th>When</th><th>From</th><th>Comment</th><th>On</th><th></th></tr></thead>
+    <tbody>
+    {% for c in comment_items %}
+        <tr>
+            <td>{{ c.date|to_short_datetime }}</td>
+            <td>{{ c.by }}</td>
+            <td>{{ c.text }}</td>
+            <td>{{ c.qtype }}</td>
+            <td><a href="{{ c.edit_url }}" class="button tiny secondary recap-view">View</a></td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
+<style>
+.recap-controls { margin-bottom: 1rem; display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+.recap-controls .button-group { margin-bottom: 0; }
+.recap-summary { margin-bottom: 1.5rem; }
+.recap-stat { display: inline-block; margin-right: 1.5rem; font-size: 1.1rem; }
+.recap-table { width: 100%; }
+.recap-table td { vertical-align: top; }
+.recap-view { margin-bottom: 0; }
+</style>
+
+{% endblock %}

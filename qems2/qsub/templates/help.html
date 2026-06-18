@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% block title %}Help - QEMS2{% endblock %}
+
+{% block content %}
+{% load static %}
+
+<h3 class="page-header">Help</h3>
+
+<div class="panel">
+    <p>This page covers the basics of using QEMS2. For what the system is and who
+    it's for, see the <a href="/about/">About page</a>.</p>
+</div>
+
+<h4 class="page-header">Getting started</h4>
+<ol>
+    <li>From the <a href="/main/">Home page</a> you'll see the question sets you own,
+        edit, or write for.</li>
+    <li>Owners can <a href="/create_question_set/">create a question set</a> and set
+        up a <a href="/distributions/">distribution</a> (the category breakdown).</li>
+    <li>Open a set to add questions, manage members, and packetize.</li>
+</ol>
+
+<h4 class="page-header">Writing questions</h4>
+<ul class="square">
+    <li>Use <strong>Add a Tossup</strong> / <strong>Add a Bonus</strong> on a set,
+        or <strong>Type Questions</strong> to paste several at once.</li>
+    <li>The editor toolbar produces standard quizbowl markup:
+        <strong>B</strong> = required answer (bold + underline), <strong>U</strong> =
+        underline (prompt/alternate), <strong>I</strong> = italics, and subscript /
+        superscript.</li>
+    <li>Mark the power point with <code>(*)</code> in tossups.</li>
+    <li>Answer lines need an underlined required portion. Put pronunciation guides in
+        parentheses after hard-to-say words.</li>
+</ul>
+
+<h4 class="page-header">Reviewing and comments</h4>
+<ul class="square">
+    <li>Click any span of a question to leave an anchored comment, like a document
+        comment. Reply to and resolve threads, and <code>@mention</code> other
+        members to notify them.</li>
+    <li>The <strong>Activity</strong> feed shows mentions and recent changes to your
+        questions.</li>
+    <li>Editors <strong>lock</strong> a question when it's finished; locked questions
+        can no longer be edited by writers.</li>
+</ul>
+
+<h4 class="page-header">Packetizing</h4>
+<ul class="square">
+    <li><strong>Packetize</strong> a set to auto-distribute questions into packets
+        according to the distribution. Overflow goes to an <em>Extras</em> packet.</li>
+    <li>The <strong>packet grid</strong> lets you drag to swap questions between
+        packets; the <strong>document view</strong> lets you reorder within a packet
+        and copy out to Discord.</li>
+    <li>Packet-level changes can be undone from the packet grid change log.</li>
+</ul>
+
+<h4 class="page-header">Quality checks</h4>
+<ul class="square">
+    <li><strong>Duplicate checker</strong> &mdash; flags repeated answerlines and
+        topic repeats across the set.</li>
+    <li><strong>Style checker</strong> &mdash; checks each question against a style
+        guide (default:
+        <a href="https://minkowski.space/quizbowl/manuals/style/index.html">Minkowski</a>)
+        for mechanical and formatting issues.</li>
+</ul>
+
+<h4 class="page-header">Importing</h4>
+<p>Administrators can import existing material from the Home page:
+<strong>Import Set from TSV</strong> (a round-tripped QEMS export) or
+<strong>Import Packets</strong>, which creates a new set with one packet per
+uploaded <code>.json</code> (YAPP/MODAQ), <code>.docx</code>, or <code>.pdf</code>
+file.</p>
+
+<div class="panel">
+    <p>Still stuck or found a bug?
+    <a href="https://github.com/grapesmoker/qems2/issues">Open an issue on GitHub</a>.</p>
+</div>
+
+{% endblock %}

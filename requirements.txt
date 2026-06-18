@@ -13,3 +13,5 @@ pypdf==6.1.1
 gunicorn
 psycopg2-binary
 whitenoise
+edge-tts
+imageio-ffmpeg

@@ -1,0 +1,63 @@
+{% load filters %}
+{% if playtest %}
+<div class="panel header radius text-center"><strong>Playtest Results</strong></div>
+{% if playtest.qtype == 'tossup' %}
+<div class="playtest-summary">
+    <span class="pt-stat"><strong>{{ playtest.plays }}</strong> buzz{{ playtest.plays|pluralize:"es" }}</span>
+    <span class="pt-stat"><strong>{{ playtest.correct }}</strong> correct ({{ playtest.conversion }})</span>
+    <span class="pt-stat"><strong>{{ playtest.powers }}</strong> power{{ playtest.powers|pluralize }}</span>
+    <span class="pt-stat"><strong>{{ playtest.negs }}</strong> neg{{ playtest.negs|pluralize }}</span>
+    <span class="pt-stat">Avg buzz: <strong>{{ playtest.avg_buzz }}</strong> in</span>
+</div>
+<table class="table-striped playtest-table">
+    <thead><tr><th>When</th><th>Player</th><th>Result</th><th>Buzz point</th><th>Answer given</th><th>Heard up to buzz</th><th>Source</th></tr></thead>
+    <tbody>
+    {% for r in playtest.rows %}
+        <tr>
+            <td>{{ r.date|to_short_datetime }}</td>
+            <td>{{ r.player }}</td>
+            <td>{% if r.correct %}{% if r.powered %}<span class="result-power">Power (+{{ r.value }})</span>{% else %}<span class="result-correct">Correct (+{{ r.value }})</span>{% endif %}{% else %}<span class="result-wrong">Incorrect ({{ r.value }})</span>{% endif %}</td>
+            <td>{{ r.fraction }} in</td>
+            <td>{{ r.answer_given }}</td>
+            <td class="pt-heard">{{ r.heard }}</td>
+            <td>{{ r.source }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="playtest-summary">
+    <span class="pt-stat"><strong>{{ playtest.plays }}</strong> play{{ playtest.plays|pluralize }}</span>
+    <span class="pt-stat">Avg: <strong>{{ playtest.avg_points }}</strong> pts</span>
+    <span class="pt-stat">Part 1: <strong>{{ playtest.p1 }}</strong></span>
+    <span class="pt-stat">Part 2: <strong>{{ playtest.p2 }}</strong></span>
+    <span class="pt-stat">Part 3: <strong>{{ playtest.p3 }}</strong></span>
+</div>
+<table class="table-striped playtest-table">
+    <thead><tr><th>When</th><th>Player</th><th>Part 1</th><th>Part 2</th><th>Part 3</th><th>Total</th><th>Source</th></tr></thead>
+    <tbody>
+    {% for r in playtest.rows %}
+        <tr>
+            <td>{{ r.date|to_short_datetime }}</td>
+            <td>{{ r.player }}</td>
+            <td>{% if r.p1 %}<span class="result-correct">10</span>{% else %}<span class="result-wrong">0</span>{% endif %}</td>
+            <td>{% if r.p2 %}<span class="result-correct">10</span>{% else %}<span class="result-wrong">0</span>{% endif %}</td>
+            <td>{% if r.p3 %}<span class="result-correct">10</span>{% else %}<span class="result-wrong">0</span>{% endif %}</td>
+            <td><strong>{{ r.total }}</strong></td>
+            <td>{{ r.source }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+<style>
+.playtest-summary { margin: 0.5rem 0 0.75rem; }
+.pt-stat { display: inline-block; margin-right: 1.5rem; }
+.playtest-table { width: 100%; font-size: 0.9rem; }
+.playtest-table td { vertical-align: top; }
+.pt-heard { color: #555; max-width: 320px; }
+.result-power { color: #1565c0; font-weight: bold; }
+.result-correct { color: #43AC6A; font-weight: bold; }
+.result-wrong { color: #f04124; }
+</style>
+{% endif %}

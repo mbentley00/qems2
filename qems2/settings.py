@@ -217,16 +217,31 @@ ACCOUNT_SIGNUP_FORM_CLASS = 'qems2.qsub.forms.RegistrationFormWithName'
 
 LOGIN_REDIRECT_URL = "/"
 
-# Email: defaults to the console backend (local dev prints mail to stdout).
-# In production set EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
-# and supply the host/credentials via environment variables.
+# Email: defaults to the console backend (local dev prints mail to stdout), so
+# nothing is actually sent until the SMTP backend + credentials are configured
+# via environment variables. The app sends through a generic SMTP relay, which
+# every transactional provider offers, so switching providers is config-only.
+#
+# Recommended: a transactional email provider (good deliverability, free tier).
+#   SendGrid:  EMAIL_HOST=smtp.sendgrid.net  EMAIL_HOST_USER=apikey
+#              EMAIL_HOST_PASSWORD=<api-key>
+#   Resend:    EMAIL_HOST=smtp.resend.com    EMAIL_HOST_USER=resend
+#              EMAIL_HOST_PASSWORD=<api-key>
+# In all cases also set, in the deployment environment:
+#   EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
+#   EMAIL_PORT=587  EMAIL_USE_TLS=True
+#   DEFAULT_FROM_EMAIL=<a sender address verified with the provider>
+#
+# NOTE: the old smtp-mail.outlook.com default was dropped — Microsoft has
+# disabled Basic Auth (SMTP AUTH) for Outlook.com/most M365 tenants, so
+# username+password SMTP no longer works there.
 EMAIL_BACKEND = os.environ.get('EMAIL_BACKEND', 'django.core.mail.backends.console.EmailBackend')
 EMAIL_USE_TLS = _env_bool('EMAIL_USE_TLS', True)
-DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'qems2@outlook.com')
-SERVER_EMAIL = os.environ.get('SERVER_EMAIL', 'smtp-mail.outlook.com')
-EMAIL_HOST = os.environ.get('EMAIL_HOST', 'smtp-mail.outlook.com')
+DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'qems2@example.com')
+SERVER_EMAIL = os.environ.get('SERVER_EMAIL', DEFAULT_FROM_EMAIL)
+EMAIL_HOST = os.environ.get('EMAIL_HOST', '')
 EMAIL_PORT = int(os.environ.get('EMAIL_PORT', '587'))
-EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', 'qems2@outlook.com')
+EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
 EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
 
 # A sample logging configuration. The only tangible logging

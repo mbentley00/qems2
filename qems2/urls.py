@@ -2,6 +2,7 @@ from django.urls import re_path, include
 from django.views.generic import ListView
 from qems2.qsub.views import *
 from qems2.qsub.models import *
+from qems2.qsub.api import api_ping, api_buzzes, api_bonus_results, api_comments
 
 import django
 
@@ -17,6 +18,8 @@ urlpatterns = [
 
     re_path(r'^main/$', main),
     re_path(r'^$', main),
+    re_path(r'^about/$', about),
+    re_path(r'^help/$', help_page),
     re_path(r'^profile/$', profile),
 
     re_path(r'^question_sets/$', question_sets),
@@ -28,15 +31,31 @@ urlpatterns = [
     re_path(r'^packet_grid/(?P<qset_id>[0-9]+)/$', packet_grid),
     re_path(r'^move_packet_question/$', move_packet_question),
     re_path(r'^view_packet/(?P<packet_id>[0-9]+)/$', view_packet),
+    re_path(r'^packet_mp3/(?P<packet_id>[0-9]+)/$', packet_mp3),
+    re_path(r'^packet_mp3_status/(?P<packet_id>[0-9]+)/$', packet_mp3_status),
     re_path(r'^reorder_packet_questions/$', reorder_packet_questions),
     re_path(r'^undo_packet_grid_change/$', undo_packet_grid_change),
     re_path(r'^packet_grid_log/(?P<qset_id>[0-9]+)/$', packet_grid_log),
     re_path(r'^activity/(?P<qset_id>[0-9]+)/$', activity),
+    re_path(r'^recap/(?P<qset_id>[0-9]+)/$', recap),
+    re_path(r'^play/(?P<qset_id>[0-9]+)/$', play),
+    re_path(r'^record_buzz/$', record_buzz),
+    re_path(r'^record_bonus_result/$', record_bonus_result),
+    re_path(r'^api_access/(?P<qset_id>[0-9]+)/$', api_access),
+    re_path(r'^generate_set_api_key/$', generate_set_api_key),
+
+    # Discord-bot API (per-set key auth, see qsub/api.py)
+    re_path(r'^api/v1/ping/?$', api_ping),
+    re_path(r'^api/v1/buzzes/?$', api_buzzes),
+    re_path(r'^api/v1/bonus_results/?$', api_bonus_results),
+    re_path(r'^api/v1/comments/?$', api_comments),
     re_path(r'^set_members/(?P<qset_id>[0-9]+)/$', set_members),
     re_path(r'^resolve_comment/$', resolve_comment),
     re_path(r'^packet_issues/(?P<packet_id>[0-9]+)/$', packet_issues),
     re_path(r'^style_check/(?P<qset_id>[0-9]+)/$', style_check),
     re_path(r'^packet_style_issues/(?P<packet_id>[0-9]+)/$', packet_style_issues),
+    re_path(r'^apply_style_fix/$', apply_style_fix),
+    re_path(r'^dismiss_style_issue/$', dismiss_style_issue),
     re_path(r'^swap_candidates/$', swap_candidates),
     re_path(r'^category_tags/(?P<qset_id>[0-9]+)/$', category_tags),
     re_path(r'^distributions/$', distributions),

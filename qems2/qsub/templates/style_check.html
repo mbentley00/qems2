@@ -25,6 +25,7 @@
                 {% endfor %}
             </select>
         </label>
+        {% if show_dismissed %}<input type="hidden" name="show_dismissed" value="1">{% endif %}
         {% if guide_obj.url %}<p><small>Rules based on <a href="{{ guide_obj.url }}" target="_blank" rel="noopener">{{ guide_obj.name }}</a>.</small></p>{% endif %}
     </div>
 </form>
@@ -35,6 +36,11 @@
     <span class="label alert">{{ counts.error }} error{{ counts.error|pluralize }}</span>
     <span class="label warning">{{ counts.warning }} warning{{ counts.warning|pluralize }}</span>
     <span class="label">{{ counts.info }} info</span>
+    {% if dismissed_count %}
+    &mdash; <small>{{ dismissed_count }} dismissed
+        {% if show_dismissed %}<a href="?guide={{ guide }}">(hide)</a>{% else %}<a href="?guide={{ guide }}&amp;show_dismissed=1">(show)</a>{% endif %}
+    </small>
+    {% endif %}
 </div>
 
 {% if not results %}
@@ -49,16 +55,61 @@
     &mdash; {% autoescape off %}{{ r.label }}{% endautoescape %}
     <ul class="no-bullet" style="margin: 0.4rem 0 0 0;">
         {% for i in r.issues %}
-        <li>
+        <li class="style-issue{% if i.dismissed %} style-issue-dismissed{% endif %}"
+            data-qtype="{{ r.type }}" data-qid="{{ r.id }}" data-code="{{ i.code }}" data-token="{{ i.token }}">
             {% if i.severity == 'error' %}<span class="label alert">Error</span>
             {% elif i.severity == 'warning' %}<span class="label warning">Warning</span>
             {% else %}<span class="label">Info</span>{% endif %}
-            {{ i.message }}
+            <span class="style-issue-msg">{{ i.message }}</span>
+            <span class="style-issue-actions">
+                {% if i.dismissed %}
+                    <a class="style-action" data-action="restore" title="Restore this issue">undo dismiss</a>
+                {% else %}
+                    {% if i.fixable %}<a class="style-action button tiny" data-action="apply" title="Automatically apply this fix">Apply fix</a>{% endif %}
+                    <a class="style-action" data-action="dismiss" title="Hide this issue from future checks">dismiss</a>
+                {% endif %}
+            </span>
         </li>
         {% endfor %}
     </ul>
 </div>
 {% endfor %}
 {% endif %}
+
+<script>
+$(function () {
+    var GUIDE = "{{ guide|escapejs }}";
+
+    function post(url, li, action, done) {
+        $.post(url, {
+            question_type: li.data('qtype'),
+            question_id: li.data('qid'),
+            code: li.data('code'),
+            token: li.data('token'),
+            action: action || '',
+            guide: GUIDE
+        }).done(function (resp) {
+            if (resp && resp.ok) { done(); }
+            else { alert((resp && resp.error) || 'Action failed.'); }
+        }).fail(function (xhr) {
+            var msg = 'Action failed.';
+            try { msg = JSON.parse(xhr.responseText).error || msg; } catch (e) {}
+            alert(msg);
+        });
+    }
+
+    $('.style-action').on('click', function () {
+        var btn = $(this), li = btn.closest('.style-issue'), action = btn.data('action');
+        btn.css('pointer-events', 'none');
+        if (action === 'apply') {
+            post('/apply_style_fix/', li, '', function () { location.reload(); });
+        } else if (action === 'dismiss') {
+            post('/dismiss_style_issue/', li, '', function () { location.reload(); });
+        } else if (action === 'restore') {
+            post('/dismiss_style_issue/', li, 'restore', function () { location.reload(); });
+        }
+    });
+});
+</script>
 
 {% endblock %}

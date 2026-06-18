@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% block title %}About - QEMS2{% endblock %}
+
+{% block content %}
+{% load static %}
+
+<h3 class="page-header">About QEMS2</h3>
+
+<div class="panel">
+    <p><strong>QEMS2</strong> (the Quizbowl Editing and Management System) is a web
+    application for writing, editing, and packetizing quizbowl question sets.
+    Writers submit tossups and bonuses, editors review and lock them, and set
+    owners manage the distribution and export finished packets.</p>
+</div>
+
+<h4 class="page-header">What you can do</h4>
+<ul class="square">
+    <li><strong>Submit questions</strong> &mdash; write ACF-style tossups and bonuses
+        (and VHSL bonuses) with a rich-text editor that produces the standard
+        quizbowl markup.</li>
+    <li><strong>Edit and review</strong> &mdash; comment on questions, resolve
+        discussions, track an activity feed, and lock questions when they are done.</li>
+    <li><strong>Manage distributions</strong> &mdash; define per-packet category
+        quotas and watch them fill as questions come in.</li>
+    <li><strong>Packetize</strong> &mdash; auto-distribute questions into packets,
+        then fine-tune with the drag-and-drop packet grid and document view.</li>
+    <li><strong>Check quality</strong> &mdash; run the duplicate checker and the
+        style checker before export.</li>
+    <li><strong>Import and export</strong> &mdash; bring in existing material from
+        TSV, JSON (YAPP/MODAQ), <code>.docx</code>, or PDF, and export packets for
+        distribution.</li>
+</ul>
+
+<h4 class="page-header">Roles</h4>
+<p>Access follows a simple hierarchy: <strong>Owner &gt; Editor &gt; Writer</strong>.
+Owners create question sets and assign editors and writers. Editors can edit and
+lock any question in their set. Writers can edit their own unlocked questions.</p>
+
+<div class="panel">
+    <p>QEMS2 is open source. Found a bug or have a suggestion?
+    <a href="https://github.com/grapesmoker/qems2/issues">Report it on GitHub</a>.
+    New here? See the <a href="/help/">Help page</a> to get started.</p>
+</div>
+
+<h4 class="page-header">Credits &amp; data attribution</h4>
+<p>The style checker's pronunciation-guide suggestions are drawn from the
+<a href="https://minkowski.space/quizbowl/pronouncing-dictionary/index.html">Quizbowl
+Pronouncing Dictionary</a> by Ophir Lifshitz, used under the
+<a href="https://opendatacommons.org/licenses/odbl/1-0/">Open Database License
+(ODbL) v1.0</a>. The extracted pronunciation data bundled with QEMS2 is a
+derivative database made available under the same license.</p>
+
+{% endblock %}

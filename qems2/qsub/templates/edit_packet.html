@@ -14,6 +14,7 @@
 <h3 class="page-header clearfix">Editing Packet: {{ packet.packet_name }}
     <span class="right">
         <a href="/view_packet/{{ packet.id }}/" class="button tiny secondary" style="margin: 8px 0 0 0;"><i class="fa fa-file-lines"></i> Document View</a>
+        <a href="/packet_mp3/{{ packet.id }}/" class="button tiny secondary" style="margin: 8px 0 0 6px;" title="Download an MP3 reading of this packet"><i class="fa fa-headphones"></i> Turn into MP3</a>
         <a href="/packet_grid/{{ qset.id }}/" class="button tiny secondary" style="margin: 8px 0 0 6px;"><i class="fa fa-table"></i> Packet Grid</a>
     </span>
 </h3>

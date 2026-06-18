@@ -1,0 +1,496 @@
+{% extends "base.html" %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% load filters %}
+
+{% block title %}Play - {{ qset.name }} - QEMS2{% endblock %}
+
+{% block content %}
+
+{# Forces Django to set the csrftoken cookie so qsub.js's global ajaxSetup can
+   attach the X-CSRFToken header to the buzz/bonus/comment POSTs below. #}
+{% csrf_token %}
+
+<h3 class="page-header">Play</h3>
+<ul class="breadcrumbs">
+    <li><a href="/edit_question_set/{{ qset.id }}/">{{ qset.name }}</a></li>
+    <li class="current">Play</li>
+</ul>
+
+<form method="get" action="/play/{{ qset.id }}/" id="selection-form" class="panel radius">
+    <div class="row">
+        <div class="small-12 medium-4 columns">
+            <label class="pick-label">What to play</label>
+            <label><input type="radio" name="mode" value="recent" {% if mode == 'recent' %}checked{% endif %}> Recent questions</label>
+            <label><input type="radio" name="mode" value="category" {% if mode == 'category' %}checked{% endif %}> By category</label>
+            <div id="recent-limit-wrap" {% if mode != 'recent' %}style="display:none;"{% endif %}>
+                <label class="recent-by-row">
+                    <input type="radio" name="recent_by" value="count" {% if recent_by != 'days' %}checked{% endif %}>
+                    Most recent
+                    <input type="number" name="limit" value="{{ limit }}" min="1" max="200" class="inline-num"> questions
+                </label>
+                <label class="recent-by-row">
+                    <input type="radio" name="recent_by" value="days" {% if recent_by == 'days' %}checked{% endif %}>
+                    All from the last
+                    <input type="number" name="days" value="{{ days }}" min="1" max="365" class="inline-num"> days
+                </label>
+            </div>
+        </div>
+        <div class="small-12 medium-3 columns">
+            <label class="pick-label">Question types</label>
+            {% if tossups_only %}
+                <p><em>This set is tossup-only.</em></p>
+                <input type="hidden" name="qtypes" value="tossups">
+            {% else %}
+                <label><input type="radio" name="qtypes" value="both" {% if qtypes == 'both' %}checked{% endif %}> Tossups &amp; bonuses</label>
+                <label><input type="radio" name="qtypes" value="tossups" {% if qtypes == 'tossups' %}checked{% endif %}> Tossups only</label>
+                <label><input type="radio" name="qtypes" value="bonuses" {% if qtypes == 'bonuses' %}checked{% endif %}> Bonuses only</label>
+            {% endif %}
+        </div>
+        <div class="small-12 medium-5 columns">
+            <label class="pick-label" id="cats-label">Categories <span class="cats-hint">(recent: optional filter)</span></label>
+            {% if not categories %}
+                <p><em>No categorized questions yet.</em></p>
+            {% else %}
+            <div class="cats-box">
+                <p class="cats-actions"><a href="#" id="cats-all">All</a> · <a href="#" id="cats-none">None</a></p>
+                {% for c in categories %}
+                <label class="cat-option"><input type="checkbox" name="cats" value="{{ c.id }}" {% if c.id in selected_cat_ids %}checked{% endif %}> {{ c.name }}</label>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    <button type="submit" class="button">Load questions</button>
+</form>
+
+<div class="play-toolbar">
+    <label class="play-toggle"><input type="checkbox" id="shuffle-toggle"> Shuffle</label>
+    <label class="play-toggle"><input type="checkbox" id="neg-toggle" checked> Negs (&minus;5)</label>
+    <span class="play-spacer"></span>
+    <span id="loaded-count" class="loaded-count"></span>
+</div>
+
+<div id="scoreboard">
+    <span class="score-item">Score: <strong id="score-total">0</strong></span>
+    <span class="score-item">Tossups: <strong id="tu-heard">0</strong> heard, <strong id="tu-correct">0</strong> correct</span>
+    <span class="score-item">Bonuses: <strong id="bs-points">0</strong> pts</span>
+    <span class="score-item" id="progress-label"></span>
+</div>
+
+<div id="play-area">
+    <div id="play-meta"></div>
+
+    <!-- Tossup reading -->
+    <div id="tossup-view" class="play-card" style="display:none;">
+        <div id="tossup-text" class="question-text"></div>
+        <div id="reveal-hint" class="reveal-hint"></div>
+        <div id="tossup-controls">
+            <button id="next-clue-btn" type="button" class="button">Next Clue <span class="key-hint">(N)</span></button>
+            <button id="buzz-btn" type="button" class="button alert">Buzz <span class="key-hint">(Space)</span></button>
+            <button id="skip-btn" type="button" class="button secondary">Skip <span class="key-hint">(Esc)</span></button>
+        </div>
+        <div id="buzz-panel" style="display:none;">
+            <p class="buzz-prompt">You buzzed. What's your answer?</p>
+            <input type="text" id="answer-input" placeholder="Type your answer" autocomplete="off">
+            <button id="submit-answer-btn" type="button" class="button">Submit answer <span class="key-hint">(Enter)</span></button>
+            <div id="reveal-answer" class="reveal-answer" style="display:none;"></div>
+            <div id="judge-controls" style="display:none;">
+                <p class="judge-prompt">Were you correct?</p>
+                <button id="correct-btn" type="button" class="button success">Correct <span class="key-hint">(C)</span></button>
+                <button id="incorrect-btn" type="button" class="button alert">Incorrect <span class="key-hint">(X)</span></button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bonus reading -->
+    <div id="bonus-view" class="play-card" style="display:none;">
+        <div id="bonus-leadin" class="question-text"></div>
+        <div id="bonus-parts"></div>
+    </div>
+
+    <!-- After a question is done: open the full question / add a comment / move on -->
+    <div id="post-question" class="play-card post-card" style="display:none;">
+        <div class="post-actions">
+            <a id="open-question" href="#" target="_blank" rel="noopener" class="button tiny secondary"><i class="fa fa-up-right-from-square"></i> Open full question</a>
+            <button id="next-question-btn" class="button">Next Question <span class="key-hint">(N)</span></button>
+        </div>
+        <div class="post-comment">
+            <label>Add a comment on this question
+                <textarea id="post-comment-text" rows="2" placeholder="Leave a comment for the editors/writer..."></textarea>
+            </label>
+            <button id="post-comment-btn" class="button tiny">Post comment</button>
+            <span id="post-comment-status" class="post-comment-status"></span>
+        </div>
+    </div>
+
+    <div id="play-done" style="display:none;">
+        <div class="panel callout radius">
+            <h4>All done!</h4>
+            <p id="done-summary"></p>
+            <button id="replay-btn" class="button secondary">Play again</button>
+        </div>
+    </div>
+
+    <div id="play-empty" style="display:none;">
+        <div class="alert-box info">No questions match your selection. Adjust the options above and load again.</div>
+    </div>
+</div>
+
+{{ questions|json_script:"questions-data" }}
+
+<style>
+#selection-form { margin-bottom: 1rem; }
+.pick-label { font-weight: bold; display: block; margin-bottom: 0.35rem; }
+#selection-form label { font-weight: normal; }
+.recent-by-row { display: block; margin-bottom: 0.2rem; }
+.inline-num { display: inline-block; width: 70px; margin: 0 0.2rem; height: 1.9rem; padding: 0 0.3rem; }
+.cats-box { max-height: 180px; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; padding: 0.4rem 0.6rem; }
+.cat-option { display: block; margin-bottom: 0.15rem; }
+.cats-actions { margin-bottom: 0.3rem; font-size: 0.85rem; }
+.cats-hint { font-weight: normal; font-size: 0.8rem; color: #777; }
+.play-toolbar { display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap; }
+.play-toggle { margin-bottom: 0; font-weight: bold; }
+.play-toggle input { margin-bottom: 0; }
+.play-spacer { flex: 1; }
+.loaded-count { color: #555; }
+#scoreboard { background: #f3f4f6; border-radius: 4px; padding: 0.6rem 1rem; margin-bottom: 1rem; }
+.score-item { margin-right: 1.5rem; }
+.play-card { border: 1px solid #d9d9d9; border-radius: 6px; padding: 1.25rem; background: #fff; margin-bottom: 1rem; }
+.question-text { font-size: 1.2rem; line-height: 1.7; }
+#tossup-text .power-on { font-weight: bold; }
+.reveal-hint { color: #888; font-size: 0.85rem; margin-top: 0.5rem; min-height: 1.1em; }
+#tossup-controls { margin-top: 1rem; }
+.key-hint { opacity: 0.7; font-size: 0.8em; }
+#buzz-panel { margin-top: 1rem; padding-top: 1rem; border-top: 1px dashed #ccc; }
+.buzz-prompt { font-weight: bold; margin-bottom: 0.5rem; }
+.judge-prompt { font-weight: bold; margin: 0.5rem 0 0.3rem; }
+#answer-input { max-width: 420px; display: inline-block; margin-right: 0.4rem; }
+#submit-answer-btn { vertical-align: top; }
+.reveal-answer { font-size: 1.1rem; margin: 0.75rem 0; padding: 0.6rem; background: #eef6ff; border-radius: 4px; }
+.bonus-part { margin: 0.75rem 0; padding: 0.75rem; border: 1px solid #e5e5e5; border-radius: 4px; }
+.bonus-part .part-answer { margin-top: 0.5rem; padding: 0.5rem; background: #eef6ff; border-radius: 4px; display: none; }
+.bonus-part .part-judge { margin-top: 0.5rem; display: none; }
+.bonus-part.part-correct { border-color: #43AC6A; background: #f3fbf6; }
+.bonus-part.part-incorrect { border-color: #f04124; background: #fdf3f2; }
+.post-card { background: #fafafa; }
+.post-actions { margin-bottom: 0.75rem; }
+.post-comment textarea { margin-bottom: 0.4rem; }
+.post-comment-status { margin-left: 0.6rem; }
+#play-meta { font-size: 1.1rem; margin-bottom: 0.5rem; color: #555; }
+</style>
+
+<script>
+(function () {
+    var DATA = JSON.parse(document.getElementById('questions-data').textContent);
+    var QSET_ID = {{ qset.id }};
+    var CHUNK_SIZE = 8;
+    var sessionId = null;
+
+    // --- Selection form helpers ---
+    $('input[name="mode"]').on('change', function () {
+        var recent = $('input[name="mode"]:checked').val() === 'recent';
+        $('#recent-limit-wrap').toggle(recent);
+        $('.cats-hint').text(recent ? '(recent: optional filter)' : '(pick which to play)');
+    });
+    $('#cats-all').on('click', function (e) { e.preventDefault(); $('input[name="cats"]').prop('checked', true); });
+    $('#cats-none').on('click', function (e) { e.preventDefault(); $('input[name="cats"]').prop('checked', false); });
+
+    // Build the playlist from the loaded questions (server already filtered/ordered).
+    function buildPlaylist(shuffle) {
+        var t = DATA.tossups.slice(), b = DATA.bonuses.slice();
+        if (shuffle) { t = _.shuffle(t); b = _.shuffle(b); }
+        var list = [];
+        if (t.length && b.length) {
+            var n = Math.max(t.length, b.length);
+            for (var i = 0; i < n; i++) {
+                if (i < t.length) { list.push({kind: 'tossup', q: t[i]}); }
+                if (i < b.length) { list.push({kind: 'bonus', q: b[i]}); }
+            }
+        } else {
+            t.forEach(function (x) { list.push({kind: 'tossup', q: x}); });
+            b.forEach(function (x) { list.push({kind: 'bonus', q: x}); });
+        }
+        return list;
+    }
+
+    var playlist = [], pos = -1;
+    var score = 0, tuHeard = 0, tuCorrect = 0, bsPoints = 0;
+
+    var $tossupView = $('#tossup-view'), $bonusView = $('#bonus-view');
+    var $post = $('#post-question'), $done = $('#play-done');
+    var $tossupText = $('#tossup-text');
+
+    // --- Tossup chunk state ---
+    var words = [], powerIndex = -1, chunkEnds = [], revealedChunks = 0, buzzed = false;
+
+    function post(url, data, cb) {
+        if (sessionId) { data.session_id = sessionId; }
+        $.post(url, data, function (resp) {
+            if (resp && resp.session_id) { sessionId = resp.session_id; }
+            if (cb) { cb(resp); }
+        }, 'json');
+    }
+
+    function updateScoreboard() {
+        $('#score-total').text(score);
+        $('#tu-heard').text(tuHeard);
+        $('#tu-correct').text(tuCorrect);
+        $('#bs-points').text(bsPoints);
+        $('#progress-label').text(Math.min(pos + 1, playlist.length) + ' / ' + playlist.length);
+    }
+
+    // Break the tossup into ~CHUNK_SIZE-word chunks, but force a chunk boundary
+    // exactly at the (*) power mark so the power clue is sent on its own.
+    function buildChunks(n, size, power) {
+        var ends = [], i = 0;
+        while (i < n) {
+            var end = Math.min(i + size, n);
+            if (power > i && power < end) { end = power; }
+            ends.push(end);
+            i = end;
+        }
+        return ends;
+    }
+
+    function revealedWords() {
+        return revealedChunks > 0 ? chunkEnds[revealedChunks - 1] : 0;
+    }
+
+    function renderTossupText() {
+        var shown = revealedWords(), html = '';
+        for (var i = 0; i < shown; i++) {
+            var cls = (powerIndex >= 0 && i < powerIndex) ? 'power-on' : '';
+            html += '<span class="' + cls + '">' + _.escape(words[i]) + '</span> ';
+        }
+        $tossupText.html(html);
+        var atEnd = revealedChunks >= chunkEnds.length;
+        $('#next-clue-btn').prop('disabled', atEnd);
+        $('#reveal-hint').text(atEnd ? 'End of question — buzz or skip to the next.'
+                                     : (shown + ' / ' + words.length + ' words shown'));
+    }
+
+    function startTossup(q) {
+        words = q.words; powerIndex = q.power_index;
+        chunkEnds = buildChunks(words.length, CHUNK_SIZE, powerIndex);
+        revealedChunks = words.length ? 1 : 0;
+        buzzed = false;
+        $('#buzz-panel').hide();
+        $('#reveal-answer').hide().html('');
+        $('#judge-controls').hide();
+        $('#answer-input').val('').prop('disabled', false);
+        $('#next-clue-btn').show();
+        $('#buzz-btn').show().prop('disabled', false);
+        $('#skip-btn').show();
+        $tossupView.show();
+        tuHeard++;
+        renderTossupText();
+    }
+
+    function nextClue() {
+        if (buzzed) { return; }
+        if (revealedChunks < chunkEnds.length) {
+            revealedChunks++;
+            renderTossupText();
+        }
+    }
+
+    function doBuzz() {
+        if (buzzed) { return; }
+        buzzed = true;
+        $('#next-clue-btn').prop('disabled', true);
+        $('#buzz-btn').prop('disabled', true);
+        // Ask for the player's answer first; don't reveal the real answer yet.
+        $('#reveal-answer').hide().html('');
+        $('#judge-controls').hide();
+        $('#submit-answer-btn').show();
+        $('#answer-input').val('').prop('disabled', false);
+        $('#buzz-panel').show();
+        $('#answer-input').focus();
+    }
+
+    function submitAnswer() {
+        if (!buzzed) { return; }
+        // Now reveal the real answer and ask the player to self-judge.
+        var q = playlist[pos].q;
+        $('#answer-input').prop('disabled', true);
+        $('#submit-answer-btn').hide();
+        $('#reveal-answer').html('<strong>ANSWER:</strong> ' + q.answer_html).show();
+        $('#judge-controls').show();
+        $('#correct-btn').focus();
+    }
+
+    function judgeTossup(correct) {
+        var q = playlist[pos].q;
+        var heard = revealedWords();
+        var powered = correct && powerIndex >= 0 && heard <= powerIndex;
+        var atEnd = revealedChunks >= chunkEnds.length;
+        var neg = !correct && $('#neg-toggle').is(':checked') && !atEnd;
+        post('/record_buzz/', {
+            tossup_id: q.id,
+            buzz_word_index: heard,
+            total_words: words.length,
+            char_position: words.slice(0, heard).join(' ').length,
+            correct: correct ? 'true' : 'false',
+            powered: powered ? 'true' : 'false',
+            neg: neg ? 'true' : 'false',
+            answer_given: $('#answer-input').val()
+        }, function (resp) {
+            score += (resp && typeof resp.value === 'number') ? resp.value : 0;
+            if (correct) { tuCorrect++; }
+            updateScoreboard();
+        });
+        // Reveal the whole tossup for context.
+        revealedChunks = chunkEnds.length; renderTossupText();
+        $('#judge-controls').hide();
+        showPostQuestion(q);
+    }
+
+    function startBonus(q) {
+        $('#bonus-leadin').html(q.leadin_html || '');
+        var $parts = $('#bonus-parts').empty();
+        q.parts.forEach(function (p, i) {
+            var $p = $(
+                '<div class="bonus-part" data-i="' + i + '">' +
+                '<div class="part-text"><strong>[10' + _.escape(p.difficulty) + ']</strong> ' + p.text_html + '</div>' +
+                '<div class="part-answer"><strong>ANSWER:</strong> ' + p.answer_html + '</div>' +
+                '<div class="part-judge">' +
+                '<button class="button tiny success bonus-correct">Got it (+10)</button> ' +
+                '<button class="button tiny alert bonus-incorrect">Missed</button>' +
+                '</div></div>');
+            $parts.append($p);
+        });
+        $bonusView.show();
+        revealBonusPart(0);
+    }
+
+    function revealBonusPart(i) {
+        var $parts = $('#bonus-parts .bonus-part');
+        if (i >= $parts.length) { finishBonus(); return; }
+        var $p = $parts.eq(i);
+        $p.find('.part-answer').show();
+        $p.find('.part-judge').show();
+    }
+
+    function judgeBonusPart($p, correct) {
+        var i = parseInt($p.data('i'), 10);
+        $p.addClass(correct ? 'part-correct' : 'part-incorrect');
+        $p.find('.part-judge').hide();
+        $p.data('correct', correct);
+        revealBonusPart(i + 1);
+    }
+
+    function finishBonus() {
+        var q = playlist[pos].q;
+        var $parts = $('#bonus-parts .bonus-part');
+        function got(i) { return ($parts.length > i && $parts.eq(i).data('correct')) ? 'true' : 'false'; }
+        post('/record_bonus_result/', {
+            bonus_id: q.id, part1_correct: got(0), part2_correct: got(1), part3_correct: got(2)
+        }, function (resp) {
+            var total = (resp && typeof resp.total === 'number') ? resp.total : 0;
+            score += total; bsPoints += total;
+            updateScoreboard();
+        });
+        showPostQuestion(q);
+    }
+
+    // Show the open-question / comment / next panel for the finished question.
+    function showPostQuestion(q) {
+        $('#open-question').attr('href', q.edit_url);
+        $post.data('qtype', playlist[pos].kind).data('qid', q.id);
+        $('#post-comment-text').val('');
+        $('#post-comment-status').text('');
+        $post.show();
+        $('#next-question-btn').focus();
+    }
+
+    function showCurrent() {
+        $tossupView.hide(); $bonusView.hide(); $post.hide(); $done.hide();
+        if (pos >= playlist.length) {
+            $('#play-meta').text('');
+            $('#done-summary').text('Score: ' + score + ' — ' + tuCorrect + ' tossups, ' + bsPoints + ' bonus points.');
+            $done.show();
+            updateScoreboard();
+            return;
+        }
+        var entry = playlist[pos], q = entry.q;
+        $('#play-meta').text((entry.kind === 'tossup' ? 'Tossup' : 'Bonus') +
+            (q.number ? ' #' + q.number : '') + (q.category ? ' — ' + q.category : ''));
+        if (entry.kind === 'tossup') { startTossup(q); } else { startBonus(q); }
+        updateScoreboard();
+    }
+
+    function next() { pos++; showCurrent(); }
+
+    function start() {
+        playlist = buildPlaylist($('#shuffle-toggle').is(':checked'));
+        pos = -1; score = 0; tuHeard = 0; tuCorrect = 0; bsPoints = 0;
+        $('#play-empty').hide();
+        if (!playlist.length) {
+            $tossupView.hide(); $bonusView.hide(); $post.hide(); $done.hide();
+            $('#play-meta').text('');
+            $('#play-empty').show();
+            updateScoreboard();
+            return;
+        }
+        next();
+    }
+
+    // --- Event wiring ---
+    // Blur after click so a focused control button doesn't swallow the Space
+    // (buzz) / N (next clue) keyboard shortcuts.
+    $('#next-clue-btn').on('click', function () { this.blur(); nextClue(); });
+    $('#buzz-btn').on('click', function () { this.blur(); doBuzz(); });
+    $('#skip-btn').on('click', function () { this.blur(); next(); });
+    $('#submit-answer-btn').on('click', submitAnswer);
+    $('#correct-btn').on('click', function () { judgeTossup(true); });
+    $('#incorrect-btn').on('click', function () { judgeTossup(false); });
+    $('#next-question-btn').on('click', function () { this.blur(); next(); });
+    $('#replay-btn').on('click', start);
+    $('#bonus-parts').on('click', '.bonus-correct', function () { judgeBonusPart($(this).closest('.bonus-part'), true); });
+    $('#bonus-parts').on('click', '.bonus-incorrect', function () { judgeBonusPart($(this).closest('.bonus-part'), false); });
+
+    $('#post-comment-btn').on('click', function () {
+        var text = $.trim($('#post-comment-text').val());
+        if (!text) { $('#post-comment-status').text('Enter a comment first.'); return; }
+        $('#post-comment-status').text('Posting...');
+        $.post('/add_question_comment/', {
+            question_type: $post.data('qtype'), question_id: $post.data('qid'), comment_text: text
+        }, function (resp) {
+            $('#post-comment-status').text(resp.message || 'Posted.');
+            if ((resp.message_class || '').indexOf('success') >= 0) { $('#post-comment-text').val(''); }
+        }, 'json');
+    });
+
+    // Keyboard: Space = buzz, N = next clue / next question, C/X = judge, Esc = skip.
+    $(document).on('keydown', function (e) {
+        if ($(e.target).is('input, textarea, select')) { return; }
+
+        var isSpace = e.code === 'Space' || e.key === ' ' || e.keyCode === 32;
+        if (isSpace && $tossupView.is(':visible') && !buzzed) {
+            e.preventDefault(); doBuzz(); return;
+        }
+        var k = (e.key || '').toLowerCase();
+        if (k === 'n') {
+            if ($post.is(':visible')) { e.preventDefault(); next(); return; }
+            if ($tossupView.is(':visible') && !buzzed) { e.preventDefault(); nextClue(); return; }
+        }
+        if (k === 'c' && $('#judge-controls').is(':visible')) { e.preventDefault(); judgeTossup(true); }
+        else if (k === 'x' && $('#judge-controls').is(':visible')) { e.preventDefault(); judgeTossup(false); }
+        else if (e.key === 'Escape' && $tossupView.is(':visible') && !buzzed) { next(); }
+    });
+
+    // In the answer box, Enter submits the typed answer (then reveal + judge).
+    $('#answer-input').on('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); submitAnswer(); }
+    });
+
+    $('#loaded-count').text(DATA.tossups.length + ' tossups, ' + DATA.bonuses.length + ' bonuses loaded');
+    start();
+})();
+</script>
+
+{% endblock %}

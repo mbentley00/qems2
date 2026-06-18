@@ -377,3 +377,41 @@
     float: right;
     margin-left: 0.4em;
 }
+
+/* Top nav: let the bar wrap instead of overflowing when there are many links
+   (Report Bug / Search / Help / About / Profile / Log Out). */
+.top-bar,
+.top-bar .top-bar-section,
+.top-bar .top-bar-section ul {
+    height: auto;
+}
+.top-bar .top-bar-section {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+}
+.top-bar .top-bar-section .left,
+.top-bar .top-bar-section .right {
+    float: none;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+}
+.top-bar .top-bar-section .right {
+    margin-left: auto;
+}
+.top-bar .top-bar-section li {
+    float: none;
+}
+.top-bar .top-bar-section li > a {
+    white-space: nowrap;
+}
+
+/* Style-check issue actions (Apply fix / dismiss / undo) */
+.style-issue { margin-bottom: 0.25rem; }
+.style-issue-actions { margin-left: 0.5em; font-size: 0.85em; white-space: nowrap; }
+.style-action { cursor: pointer; }
+.style-action.button.tiny { margin: 0 0.3em 0 0; padding: 0.15rem 0.5rem; }
+.style-issue-dismissed { opacity: 0.5; }
+.style-issue-dismissed .style-issue-msg { text-decoration: line-through; }

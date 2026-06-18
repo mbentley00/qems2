@@ -29,7 +29,24 @@
             {% endif %}
             <li><a href="#" id="toggle-issues" class="button small secondary" title="Show repeat-checker issues for each question"><i class="fa fa-triangle-exclamation"></i> Repeat Issues</a></li>
             <li><a href="#" id="toggle-style" class="button small secondary" title="Show style-check issues for each question"><i class="fa fa-spell-check"></i> Style Issues</a></li>
+            <li><a href="/packet_mp3/{{ packet.id }}/?order={{ order }}" id="mp3-link" class="button small secondary" title="Download an MP3 reading of this packet ({{ order }} order)"><i class="fa fa-headphones"></i> Turn into MP3</a></li>
+            <li style="list-style:none;">
+                <select id="mp3-voice" class="button small secondary" style="height:auto;padding:4px 6px;margin:0;" title="Reader voice">
+                    {% for vid, vlabel in mp3_voices %}<option value="{{ vid }}">{{ vlabel }}</option>{% endfor %}
+                </select>
+            </li>
         </ul>
+        <script>
+        (function () {
+            var sel = document.getElementById('mp3-voice');
+            var link = document.getElementById('mp3-link');
+            if (sel && link) {
+                sel.addEventListener('change', function () {
+                    link.href = "/packet_mp3/{{ packet.id }}/?order={{ order }}&voice=" + encodeURIComponent(sel.value);
+                });
+            }
+        })();
+        </script>
     </div>
     <div class="small-4 columns text-right">
         {% if prev_packet %}<a href="/view_packet/{{ prev_packet.id }}/?order={{ order }}" class="button small secondary" title="{{ prev_packet.packet_name }}">&laquo; Prev</a>{% endif %}

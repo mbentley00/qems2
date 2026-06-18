@@ -237,9 +237,11 @@ $(function () {
         {% if question_type == "VHSL bonus" %}
             <li><a href="/convert_bonus/{{ bonus.id }}" class="button primary convert_bonus" value="{{ bonus.id }}" qset-id="{{ qset.id }}" target-type="ACF-style bonus">Convert to ACF bonus</a></li>
         {% endif %}
-        <li><a href="/categories/{{ qset.id }}/{{ bonus.category.id }}" class="button primary">All in category</a></li>        
+        <li><a href="/categories/{{ qset.id }}/{{ bonus.category.id }}" class="button primary">All in category</a></li>
     </ul>
 {% endif %}
+
+{% include "_playtest_results.html" %}
 
 {% if bonus %}
 <div class="panel header radius text-center"><strong>Comments</strong></div>

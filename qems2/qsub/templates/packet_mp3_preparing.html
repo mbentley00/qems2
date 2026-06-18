@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% block title %}Preparing MP3 - QEMS2{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="small-12 columns text-center" style="padding-top: 40px;">
+        <h3>Preparing MP3 &mdash; {{ packet.packet_name }}</h3>
+        <p id="mp3-msg" style="font-size: 16px; color: #555;">
+            <i class="fa fa-spinner fa-spin"></i>
+            Generating audio for this packet. This can take up to a minute for a
+            full packet &mdash; the download will start automatically when it's ready.
+        </p>
+        <p id="mp3-error" class="alert-box alert" style="display:none;"></p>
+        <p>
+            <a href="/view_packet/{{ packet.id }}/?order={{ order }}" class="button small secondary">Back to Document View</a>
+            <a href="/edit_packet/{{ packet.id }}/" class="button small secondary">Back to Packet</a>
+        </p>
+    </div>
+</div>
+
+<script>
+(function () {
+    var statusUrl = "/packet_mp3_status/{{ packet.id }}/?order={{ order }}&answers={{ answers }}&voice={{ voice }}";
+    var downloadUrl = "/packet_mp3/{{ packet.id }}/?order={{ order }}&answers={{ answers }}&voice={{ voice }}";
+    var done = false;
+
+    function poll() {
+        if (done) return;
+        fetch(statusUrl + "&_=" + Date.now(), {cache: "no-store", headers: {"X-Requested-With": "XMLHttpRequest"}})
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (data.status === "ready") {
+                    done = true;
+                    document.getElementById("mp3-msg").innerHTML =
+                        '<i class="fa fa-check"></i> Ready &mdash; your download should begin now.';
+                    window.location = downloadUrl;
+                } else if (data.status === "error") {
+                    done = true;
+                    document.getElementById("mp3-msg").style.display = "none";
+                    var err = document.getElementById("mp3-error");
+                    err.style.display = "block";
+                    err.textContent = "Could not generate audio: " + (data.message || "unknown error");
+                } else {
+                    setTimeout(poll, 2500);
+                }
+            })
+            .catch(function () { setTimeout(poll, 4000); });
+    }
+    setTimeout(poll, 1500);
+})();
+</script>
+{% endblock %}

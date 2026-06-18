@@ -17,6 +17,15 @@ def lookup(dict, key):
 def tossup_or_bonus(type):
     return str(type)
 
+@register.filter(name='is_set_owner')
+def is_set_owner(qset, writer):
+    """True if the writer is the set's owner or a co-owner (used to gate the
+    API access link). Returns False on bad input."""
+    try:
+        return qset.is_owner(writer)
+    except Exception:
+        return False
+
 @register.filter(name='tossups_or_bonuses')
 def tossups_or_bonuses(type):
     if type == 'tossup':

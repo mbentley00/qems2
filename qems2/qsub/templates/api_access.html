@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% load filters %}
+
+{% block title %}Bot API Access - {{ qset.name }} - QEMS2{% endblock %}
+
+{% block content %}
+
+<h3 class="page-header">Bot API Access</h3>
+<ul class="breadcrumbs">
+    <li><a href="/edit_question_set/{{ qset.id }}/">{{ qset.name }}</a></li>
+    <li class="current">Bot API Access</li>
+</ul>
+
+{% if messages %}
+    {% for message in messages %}
+        <div class="alert-box success">{{ message }}</div>
+    {% endfor %}
+{% endif %}
+
+<p>
+    This key lets an external service (such as a Discord playtest bot) record
+    buzzes, bonus results, and comments to <strong>{{ qset.name }}</strong>.
+    Treat it like a password &mdash; anyone with it can write playtest data to
+    this set. Regenerating immediately revokes the old key.
+</p>
+
+<div class="panel radius">
+    {% if api_key %}
+        <label class="key-label">Secret key for this set</label>
+        <div class="key-row">
+            <input type="text" id="api-key-value" value="{{ api_key.key }}" readonly>
+            <button type="button" id="copy-key" class="button secondary">Copy</button>
+        </div>
+        <p class="key-meta">Last generated {{ api_key.created_date }}{% if api_key.created_by %} by {{ api_key.created_by }}{% endif %}.</p>
+        <form method="post" action="/generate_set_api_key/" style="display:inline;">
+            {% csrf_token %}
+            <input type="hidden" name="qset_id" value="{{ qset.id }}">
+            <input type="hidden" name="action" value="generate">
+            <button type="submit" class="button" onclick="return confirm('Regenerate the key? The current key will stop working immediately.');">Regenerate key</button>
+        </form>
+        <form method="post" action="/generate_set_api_key/" style="display:inline;">
+            {% csrf_token %}
+            <input type="hidden" name="qset_id" value="{{ qset.id }}">
+            <input type="hidden" name="action" value="revoke">
+            <button type="submit" class="button alert" onclick="return confirm('Revoke the key? The bot will lose access until a new key is generated.');">Revoke key</button>
+        </form>
+    {% else %}
+        <p>No API key has been generated for this set yet.</p>
+        <form method="post" action="/generate_set_api_key/">
+            {% csrf_token %}
+            <input type="hidden" name="qset_id" value="{{ qset.id }}">
+            <input type="hidden" name="action" value="generate">
+            <button type="submit" class="button">Generate API key</button>
+        </form>
+    {% endif %}
+</div>
+
+<div class="panel callout radius"><strong>How the bot uses it</strong></div>
+<p>
+    Send the key on every request as a Bearer token. Questions are matched by
+    their <strong>answer line</strong> (no QEMS IDs needed); if a question
+    doesn't exist in the set yet, the item comes back <code>unmatched</code> and
+    the bot should retry it later. Include a unique <code>external_id</code> per
+    item so retries don't record duplicates.
+</p>
+
+<pre class="api-docs">Base URL: {{ base_url }}
+Header:   Authorization: Bearer &lt;your key&gt;
+
+# Validate the key
+GET  {{ base_url }}/api/v1/ping
+
+# Record tossup buzzes (who buzzed + optional wrong answer)
+POST {{ base_url }}/api/v1/buzzes
+{
+  "events": [{
+    "external_id": "game42-pkt3-q5-user99",
+    "answer": "Blaise Pascal",
+    "player_name": "someuser#1234",
+    "buzz_word_index": 12, "total_words": 45,
+    "correct": false, "powered": false, "neg": true,
+    "answer_given": "Fermat"
+  }]
+}
+
+# Record bonus results
+POST {{ base_url }}/api/v1/bonus_results
+{
+  "events": [{
+    "external_id": "game42-pkt3-b5-user99",
+    "answer": "Bastille",
+    "player_name": "someuser#1234",
+    "part1_correct": true, "part2_correct": false, "part3_correct": false
+  }]
+}
+
+# Add comments to a question
+POST {{ base_url }}/api/v1/comments
+{
+  "comments": [{
+    "external_id": "game42-pkt3-q5-cmt1",
+    "answer": "Blaise Pascal",
+    "author_name": "someuser#1234",
+    "qtype": "tossup",
+    "text": "Second clue might be too easy."
+  }]
+}
+
+# Each response returns a per-item status:
+# recorded | duplicate | unmatched | ambiguous | error
+</pre>
+
+<style>
+.key-label { font-weight: bold; display: block; margin-bottom: 0.3rem; }
+.key-row { display: flex; gap: 0.5rem; align-items: center; max-width: 640px; }
+#api-key-value { font-family: monospace; margin-bottom: 0; }
+#copy-key { margin-bottom: 0; white-space: nowrap; }
+.key-meta { color: #777; font-size: 0.85rem; margin: 0.4rem 0 0.8rem; }
+.api-docs { background: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.85rem; line-height: 1.5; }
+</style>
+
+<script>
+$(function () {
+    $('#copy-key').on('click', function () {
+        var input = document.getElementById('api-key-value');
+        input.select();
+        input.setSelectionRange(0, 99999);
+        try { document.execCommand('copy'); $(this).text('Copied!'); }
+        catch (e) { $(this).text('Copy failed'); }
+        var btn = this;
+        setTimeout(function () { $(btn).text('Copy'); }, 1500);
+    });
+});
+</script>
+
+{% endblock %}

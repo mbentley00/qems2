@@ -206,6 +206,26 @@ class PacketGridLog(models.Model):
     def __str__(self):
         return '{0!s}: {1!s}'.format(self.change_date, self.description)
 
+class StyleIssueDismissal(models.Model):
+    """Records that a style-check issue was dismissed for a question, so it is
+    hidden on future runs. Identified by (question, rule code, token) where the
+    token distinguishes issues of the same rule (e.g. the term for a missing
+    pronunciation guide, or the field label for a mechanical issue)."""
+    question_set = models.ForeignKey(QuestionSet, on_delete=models.CASCADE)
+    question_type = models.CharField(max_length=10)  # 'tossup' | 'bonus'
+    question_id = models.PositiveIntegerField()
+    code = models.CharField(max_length=40)
+    token = models.CharField(max_length=255, blank=True, default='')
+    dismissed_by = models.ForeignKey(Writer, on_delete=models.SET_NULL, null=True)
+    dismissed_date = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('question_type', 'question_id', 'code', 'token')
+
+    def __str__(self):
+        return 'dismissed {0} {1}/{2} [{3}]'.format(
+            self.question_type, self.question_id, self.code, self.token)
+
 class DistributionPerPacket(models.Model):
 
     #packet = models.ManyToManyField(Packet)
@@ -1195,4 +1215,152 @@ class CommentAnchor(models.Model):
     selected_text = models.TextField()
     prefix = models.CharField(max_length=100, blank=True, default='')
     suffix = models.CharField(max_length=100, blank=True, default='')
+
+
+# Source of a playtest record: questions played in-app vs. imported from a
+# Discord playtest server in a future change.
+PLAYTEST_SOURCE_WEB = 'web'
+PLAYTEST_SOURCE_DISCORD = 'discord'
+PLAYTEST_SOURCES = ((PLAYTEST_SOURCE_WEB, 'Web'), (PLAYTEST_SOURCE_DISCORD, 'Discord'))
+
+
+class PlaytestSession(models.Model):
+    """One play-through of a set's questions, grouping the buzzes and bonus
+    results recorded during it. A session may belong to a logged-in Writer or,
+    for imported Discord playtests, just carry a free-text player name."""
+    question_set = models.ForeignKey(QuestionSet, on_delete=models.CASCADE,
+                                     related_name='playtest_sessions')
+    player = models.ForeignKey(Writer, on_delete=models.SET_NULL, null=True, blank=True,
+                               related_name='playtest_sessions')
+    # Used when the player is not a Writer (e.g. a Discord username on import).
+    player_name = models.CharField(max_length=200, blank=True, default='')
+    source = models.CharField(max_length=20, choices=PLAYTEST_SOURCES,
+                              default=PLAYTEST_SOURCE_WEB)
+    # Optional external id (e.g. a Discord message/game id) so a future importer
+    # can avoid creating duplicate sessions.
+    external_id = models.CharField(max_length=200, blank=True, default='')
+    created_date = models.DateTimeField(auto_now_add=True)
+
+    def get_player_name(self):
+        if self.player is not None:
+            name = self.player.get_real_name().strip()
+            return name or self.player.user.username
+        return self.player_name or 'Anonymous'
+
+    def __str__(self):
+        return 'Playtest by {0!s} on {1!s}'.format(self.get_player_name(), self.question_set)
+
+
+class TossupBuzz(models.Model):
+    """A buzz on a tossup at a particular point in the question, recording
+    where the player buzzed and whether they got it right. Buzzes come from
+    in-app play now and from a Discord playtest server in a future change."""
+    tossup = models.ForeignKey(Tossup, on_delete=models.CASCADE, related_name='buzzes')
+    session = models.ForeignKey(PlaytestSession, on_delete=models.CASCADE, null=True,
+                                blank=True, related_name='buzzes')
+    player = models.ForeignKey(Writer, on_delete=models.SET_NULL, null=True, blank=True,
+                               related_name='tossup_buzzes')
+    player_name = models.CharField(max_length=200, blank=True, default='')
+
+    # 0-based index of the word the player had heard when they buzzed, and the
+    # total number of words in the tossup, so a buzz fraction can be computed
+    # even after the question text is edited.
+    buzz_word_index = models.PositiveIntegerField(default=0)
+    total_words = models.PositiveIntegerField(default=0)
+    # Character offset into the (plain-text) tossup at the buzz point.
+    char_position = models.PositiveIntegerField(default=0)
+
+    correct = models.BooleanField(default=False)
+    # Whether the buzz was inside the power mark (before "(*)").
+    powered = models.BooleanField(default=False)
+    # Score: 15 power, 10 get, -5 neg, 0 otherwise.
+    value = models.IntegerField(default=0)
+    answer_given = models.TextField(blank=True, default='')
+
+    source = models.CharField(max_length=20, choices=PLAYTEST_SOURCES,
+                              default=PLAYTEST_SOURCE_WEB)
+    # Stable id supplied by an external recorder (e.g. the Discord bot) so the
+    # same buzz can be re-sent without being recorded twice. Blank for web play.
+    external_id = models.CharField(max_length=200, blank=True, default='', db_index=True)
+    buzz_date = models.DateTimeField(auto_now_add=True)
+
+    def buzz_fraction(self):
+        """How far into the tossup the buzz happened, 0.0-1.0."""
+        if not self.total_words:
+            return 0.0
+        return min(1.0, float(self.buzz_word_index) / float(self.total_words))
+
+    def get_player_name(self):
+        if self.player is not None:
+            name = self.player.get_real_name().strip()
+            return name or self.player.user.username
+        return self.player_name or 'Anonymous'
+
+    def __str__(self):
+        return 'Buzz on {0!s} ({1!s})'.format(self.tossup, 'correct' if self.correct else 'incorrect')
+
+
+class BonusResult(models.Model):
+    """A play-through of one bonus, recording which parts the player got and
+    the total points. Comes from in-app play now and a future Discord import."""
+    bonus = models.ForeignKey(Bonus, on_delete=models.CASCADE, related_name='results')
+    session = models.ForeignKey(PlaytestSession, on_delete=models.CASCADE, null=True,
+                                blank=True, related_name='bonus_results')
+    player = models.ForeignKey(Writer, on_delete=models.SET_NULL, null=True, blank=True,
+                               related_name='bonus_results')
+    player_name = models.CharField(max_length=200, blank=True, default='')
+
+    part1_correct = models.BooleanField(default=False)
+    part2_correct = models.BooleanField(default=False)
+    part3_correct = models.BooleanField(default=False)
+    # Total points (0-30 for a 3-part bonus).
+    total = models.PositiveIntegerField(default=0)
+
+    source = models.CharField(max_length=20, choices=PLAYTEST_SOURCES,
+                              default=PLAYTEST_SOURCE_WEB)
+    # See TossupBuzz.external_id.
+    external_id = models.CharField(max_length=200, blank=True, default='', db_index=True)
+    answered_date = models.DateTimeField(auto_now_add=True)
+
+    def get_player_name(self):
+        if self.player is not None:
+            name = self.player.get_real_name().strip()
+            return name or self.player.user.username
+        return self.player_name or 'Anonymous'
+
+    def __str__(self):
+        return 'Bonus result on {0!s} ({1!s})'.format(self.bonus, self.total)
+
+
+class SetApiKey(models.Model):
+    """A secret token that grants an external service (e.g. the Discord playtest
+    bot) permission to write buzzes/results/comments to one question set. One
+    key per set; regenerating replaces the token and revokes the old one. Owners
+    and co-owners manage it."""
+    question_set = models.OneToOneField(QuestionSet, on_delete=models.CASCADE,
+                                        related_name='api_key')
+    key = models.CharField(max_length=64, unique=True, db_index=True)
+    active = models.BooleanField(default=True)
+    created_by = models.ForeignKey(Writer, on_delete=models.SET_NULL, null=True)
+    created_date = models.DateTimeField(auto_now=True)
+
+    @staticmethod
+    def generate_token():
+        import secrets
+        return secrets.token_urlsafe(32)
+
+    def __str__(self):
+        return 'API key for {0!s}'.format(self.question_set)
+
+
+class DiscordCommentRef(models.Model):
+    """Links a comment created by the Discord bot to the external id it was sent
+    with, so the same comment isn't posted twice on retries/re-syncs."""
+    external_id = models.CharField(max_length=200, unique=True, db_index=True)
+    comment = models.OneToOneField('django_comments.Comment', on_delete=models.CASCADE,
+                                   related_name='discord_ref')
+    question_set = models.ForeignKey(QuestionSet, on_delete=models.CASCADE)
+
+    def __str__(self):
+        return 'Discord comment {0!s}'.format(self.external_id)
 

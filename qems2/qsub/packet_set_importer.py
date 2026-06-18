@@ -48,6 +48,27 @@ _NOISE_RE = re.compile(
 # Leading question number, e.g. "1. " or "12) ".
 _NUM_PREFIX_RE = re.compile(r'^\s*\d{1,3}[\.\)]\s+')
 
+# Same, but tolerant of leading QEMS markup: packets often bold the question
+# number (and the lead-in), so the line starts with an opening '_' or '~'. The
+# capture keeps that markup so stripping the number doesn't unbalance it.
+_NUM_PREFIX_MARKUP_RE = re.compile(r'^([_~]*\s*)\d{1,3}[\.\)]\s+')
+
+
+def _strip_markup(s):
+    """Drop QEMS markup characters so we can test the underlying text."""
+    return (s.replace('\\S', '').replace('\\s', '')
+             .replace('_', '').replace('~', '').strip())
+
+
+def _strip_num_prefix(s):
+    """Remove a leading '1. '/'2) ' question number, preserving any leading
+    markup so bold/underline spans stay balanced."""
+    return _NUM_PREFIX_MARKUP_RE.sub(r'\1', s, count=1)
+
+
+def _has_num_prefix(s):
+    return bool(_NUM_PREFIX_RE.match(_strip_markup(s)))
+
 # HTML tag -> formatting flag it sets while in scope.
 _TAG_FLAGS = {'b': 'bold', 'strong': 'bold', 'u': 'ul', 'em': 'ital',
               'i': 'ital', 'sup': 'sup', 'sub': 'sub'}
@@ -223,8 +244,8 @@ def _parse_yapp(payload, qset, owner, acf_tu, acf_bn, lookup, name, summary):
 
 # --- docx/pdf text extraction ---------------------------------------------
 
-def _run_to_qems(run):
-    text = run.text or ''
+def _wrap_run_text(text, run):
+    """Wrap a single run's text segment in QEMS markup from its formatting."""
     if not text.strip():
         return text
     pre = suf = ''
@@ -235,16 +256,31 @@ def _run_to_qems(run):
     return pre + text + suf
 
 
-def _para_to_qems(para):
+def _para_lines_to_qems(para):
+    """A docx paragraph often holds several logical lines separated by soft line
+    breaks (``<w:br/>`` -> ``\\n`` in the run text) — real packets put a tossup's
+    stem, its ``ANSWER:`` line and its ``<Author, Category>`` metadata all in one
+    paragraph. Split on those breaks so each becomes its own line, applying run
+    formatting per segment. Returns a list of QEMS-markup lines."""
     if not para.runs:
-        return (para.text or '').strip()
-    return ''.join(_run_to_qems(r) for r in para.runs).strip()
+        return [seg.strip() for seg in (para.text or '').split('\n')]
+    lines = ['']
+    for run in para.runs:
+        segments = (run.text or '').split('\n')
+        for i, seg in enumerate(segments):
+            if i > 0:
+                lines.append('')
+            lines[-1] += _wrap_run_text(seg, run)
+    return [ln.strip() for ln in lines]
 
 
 def _docx_lines(stream):
     from docx import Document
     doc = Document(stream)
-    return [_para_to_qems(p) for p in doc.paragraphs]
+    lines = []
+    for p in doc.paragraphs:
+        lines.extend(_para_lines_to_qems(p))
+    return lines
 
 
 def _pdf_lines(stream):
@@ -296,19 +332,74 @@ def _ensure_underline(ansline):
     return prefix + '_' + primary + '_' + body[len(primary):]
 
 
+def _is_meta_line(s):
+    """A trailing attribution line such as
+    ``<Author, Category - Subcategory> ~id~ <Editor: Name>``."""
+    s = s.strip()
+    return s.startswith('<') and '>' in s
+
+
+def _meta_category(s):
+    """Return (category, subcategory) from a metadata line, or None if it
+    carries no category (e.g. ``<Author>`` with no comma)."""
+    inner = s.strip()[1:s.strip().index('>')]
+    if ',' not in inner:
+        return None
+    _author, cat, sub = _split_metadata(inner)
+    return (cat, sub) if cat else None
+
+
+def _category_tag(cat, sub):
+    # parse_packet_data matches against "category - subcategory" (see
+    # create_tossup), so always emit both halves joined by " - ".
+    return '{' + cat + ' - ' + sub + '}'
+
+
 def _normalize_lines(lines):
+    """Back-compat: normalized lines only (used by diagnostics)."""
+    return _normalize_docx_lines(lines)[0]
+
+
+def _normalize_docx_lines(lines):
+    """Turn raw docx/pdf lines into the stem/ANSWER/[10x] line stream that
+    parse_packet_data expects, and pull out per-question categories.
+
+    * Section headers / page furniture and the leading tournament-title lines
+      (anything before the first numbered question) are dropped.
+    * Each question's ``<Author, Category - Subcategory>`` metadata line is
+      removed and its category folded into the preceding answer as a
+      ``{Category - Subcategory}`` tag, so the questions get categorized.
+
+    Returns ``(cleaned_lines, categories)`` where ``categories`` is the set of
+    ``(category, subcategory)`` pairs seen."""
     cleaned = []
+    categories = set()
+    last_answer_idx = None
+    started = False
     for ln in lines:
         s = (ln or '').strip()
         if not s or _NOISE_RE.match(s):
             continue
+        if _is_meta_line(s):
+            cat_sub = _meta_category(s)
+            if cat_sub:
+                categories.add(cat_sub)
+                if last_answer_idx is not None and '{' not in cleaned[last_answer_idx]:
+                    cleaned[last_answer_idx] += ' ' + _category_tag(*cat_sub)
+            continue
+        if not started:
+            # Skip the tournament title / front matter until the first question.
+            if not (_has_num_prefix(s) or is_answer(s) or is_bpart(s)):
+                continue
+            started = True
         if is_answer(s):
             cleaned.append(_ensure_underline(s))
+            last_answer_idx = len(cleaned) - 1
         elif is_bpart(s):
             cleaned.append(s)
         else:
-            cleaned.append(_NUM_PREFIX_RE.sub('', s))
-    return cleaned
+            cleaned.append(_strip_num_prefix(s))
+    return cleaned, categories
 
 
 def _extract_lines_from_bytes(data, ext):
@@ -380,8 +471,9 @@ def _save_questions(questions, qset, packet, owner, kind, summary):
 # --- import ----------------------------------------------------------------
 
 def _prepare_files(uploaded_files):
-    """Validate and read each uploaded file once; pre-parse JSON. Returns
-    (prepared_items, json_payloads)."""
+    """Validate and read each uploaded file once; pre-parse JSON and extract +
+    normalize docx/pdf lines (so a single read covers category discovery and
+    parsing). Returns (prepared_items, json_payloads, docx_categories)."""
     files = list(uploaded_files)
     if not files:
         raise PacketImportError('No files were uploaded.')
@@ -392,7 +484,7 @@ def _prepare_files(uploaded_files):
                 'Unsupported file "{0}". Only .json, .docx and .pdf are accepted.'.format(f.name))
     files.sort(key=lambda f: (f.name or '').lower())
 
-    prepared, json_payloads = [], []
+    prepared, json_payloads, docx_categories = [], [], set()
     for f in files:
         ext = os.path.splitext((f.name or '').lower())[1]
         name = _packet_name_from_file(f.name)
@@ -406,8 +498,32 @@ def _prepare_files(uploaded_files):
             json_payloads.append(payload)
             prepared.append({'name': name, 'ext': ext, 'payload': payload})
         else:
-            prepared.append({'name': name, 'ext': ext, 'data': raw})
-    return prepared, json_payloads
+            try:
+                lines, categories = _normalize_docx_lines(_extract_lines_from_bytes(raw, ext))
+            except Exception as ex:
+                prepared.append({'name': name, 'ext': ext, 'error': 'could not read file ({0})'.format(ex)})
+                continue
+            docx_categories |= categories
+            prepared.append({'name': name, 'ext': ext, 'lines': lines})
+    return prepared, json_payloads, docx_categories
+
+
+def _ensure_categories(qset, categories, lookup=None):
+    """Create DistributionEntry + SetWideDistributionEntry rows for any
+    (category, subcategory) not already in the set's distribution. Updates and
+    returns `lookup` if given."""
+    if lookup is None:
+        lookup = {(e.category, e.subcategory): e
+                  for e in DistributionEntry.objects.filter(distribution=qset.distribution)}
+    for (cat, sub) in categories:
+        if (cat, sub) in lookup:
+            continue
+        entry = DistributionEntry.objects.create(
+            distribution=qset.distribution, category=cat, subcategory=sub)
+        SetWideDistributionEntry.objects.create(
+            question_set=qset, dist_entry=entry, num_tossups=0, num_bonuses=0)
+        lookup[(cat, sub)] = entry
+    return lookup
 
 
 def _unique_packet_name(name, used):
@@ -452,7 +568,7 @@ def import_packets_from_files(uploaded_files, set_name=None, owner=None, existin
     QuestionSet named `set_name`, or — when `existing_qset` is given — adds the
     packets to that set. Returns a summary dict; raises PacketImportError on a
     fatal problem."""
-    prepared, json_payloads = _prepare_files(uploaded_files)
+    prepared, json_payloads, docx_categories = _prepare_files(uploaded_files)
 
     summary = {'packets': [], 'tossups': 0, 'bonuses': 0, 'errors': []}
 
@@ -473,10 +589,12 @@ def import_packets_from_files(uploaded_files, set_name=None, owner=None, existin
                     distribution=distribution)
                 owner.question_set_editor.add(qset)
                 category_lookup = _build_distribution_from_metadata(qset, json_payloads)
+                _ensure_categories(qset, docx_categories, category_lookup)
                 used_names = set()
             else:
                 qset = existing_qset
                 category_lookup = _lookup_for_existing_set(qset, json_payloads)
+                _ensure_categories(qset, docx_categories, category_lookup)
                 used_names = set(p.packet_name for p in qset.packet_set.all())
 
             acf_tu = QuestionType.objects.filter(question_type=ACF_STYLE_TOSSUP).first()
@@ -499,8 +617,7 @@ def import_packets_from_files(uploaded_files, set_name=None, owner=None, existin
                             item['payload'], qset, owner, acf_tu, acf_bn, category_lookup, name, summary)
                         parse_errors = 0
                     else:
-                        lines = _normalize_lines(_extract_lines_from_bytes(item['data'], item['ext']))
-                        tossups, bonuses, t_errs, b_errs = parse_packet_data(lines, qset)
+                        tossups, bonuses, t_errs, b_errs = parse_packet_data(item['lines'], qset)
                         for e in list(t_errs) + list(b_errs):
                             summary['errors'].append('{0}: {1}'.format(name, _describe_parse_error(e)))
                         parse_errors = len(t_errs) + len(b_errs)
