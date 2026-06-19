@@ -1364,3 +1364,26 @@ class DiscordCommentRef(models.Model):
     def __str__(self):
         return 'Discord comment {0!s}'.format(self.external_id)
 
+
+class DiscordThread(models.Model):
+    """A link to the Discord playtest thread for a question, recorded by the bot
+    so editors can jump straight to the discussion. Attached to the question
+    itself (not embedded in a comment). Exactly one of tossup/bonus is set."""
+    question_set = models.ForeignKey(QuestionSet, on_delete=models.CASCADE,
+                                     related_name='discord_threads')
+    tossup = models.ForeignKey(Tossup, on_delete=models.CASCADE, null=True, blank=True,
+                               related_name='discord_threads')
+    bonus = models.ForeignKey(Bonus, on_delete=models.CASCADE, null=True, blank=True,
+                              related_name='discord_threads')
+    url = models.URLField(max_length=500)
+    title = models.CharField(max_length=300, blank=True, default='')
+    # Stable id from the bot so the same thread link isn't stored twice.
+    external_id = models.CharField(max_length=200, blank=True, default='', db_index=True)
+    created_date = models.DateTimeField(auto_now_add=True)
+
+    def question(self):
+        return self.tossup or self.bonus
+
+    def __str__(self):
+        return 'Discord thread {0!s}'.format(self.url)
+

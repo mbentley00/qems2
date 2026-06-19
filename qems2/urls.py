@@ -2,7 +2,7 @@ from django.urls import re_path, include
 from django.views.generic import ListView
 from qems2.qsub.views import *
 from qems2.qsub.models import *
-from qems2.qsub.api import api_ping, api_buzzes, api_bonus_results, api_comments
+from qems2.qsub.api import api_ping, api_buzzes, api_bonus_results, api_comments, api_threads
 
 import django
 
@@ -49,6 +49,7 @@ urlpatterns = [
     re_path(r'^api/v1/buzzes/?$', api_buzzes),
     re_path(r'^api/v1/bonus_results/?$', api_bonus_results),
     re_path(r'^api/v1/comments/?$', api_comments),
+    re_path(r'^api/v1/threads/?$', api_threads),
     re_path(r'^set_members/(?P<qset_id>[0-9]+)/$', set_members),
     re_path(r'^resolve_comment/$', resolve_comment),
     re_path(r'^packet_issues/(?P<packet_id>[0-9]+)/$', packet_issues),

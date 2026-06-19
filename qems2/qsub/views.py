@@ -1384,6 +1384,7 @@ def edit_tossup(request, tossup_id):
              'read_only': read_only,
              'role': role,
              'playtest': _question_buzz_data(tossup, 'tossup'),
+             'discord_threads': tossup.discord_threads.order_by('created_date'),
              'user': user})
 
     elif request.method == 'POST':
@@ -1471,6 +1472,7 @@ def edit_tossup(request, tossup_id):
              'dup_matches': dup_matches,
              'read_only': read_only,
              'playtest': _question_buzz_data(tossup, 'tossup'),
+             'discord_threads': tossup.discord_threads.order_by('created_date'),
              'user': user})
 
 @login_required
@@ -1523,6 +1525,7 @@ def edit_bonus(request, bonus_id):
              'read_only': read_only,
              'role': role,
              'playtest': _question_buzz_data(bonus, 'bonus'),
+             'discord_threads': bonus.discord_threads.order_by('created_date'),
              'user': user})
 
     elif request.method == 'POST':
@@ -1617,6 +1620,7 @@ def edit_bonus(request, bonus_id):
              'read_only': read_only,
              'role': role,
              'playtest': _question_buzz_data(bonus, 'bonus'),
+             'discord_threads': bonus.discord_threads.order_by('created_date'),
              'user': user})
 
 @login_required

@@ -1,0 +1,10 @@
+{% if discord_threads %}
+<div class="panel header radius text-center"><strong>Discord Playtest Thread{{ discord_threads|length|pluralize }}</strong></div>
+<p class="discord-threads">
+    {% for th in discord_threads %}<a href="{{ th.url }}" target="_blank" rel="noopener">{{ th.title|default:"Open thread in Discord" }}</a>{% if not forloop.last %} &middot; {% endif %}{% endfor %}
+</p>
+<style>
+.discord-threads { margin: 0.4rem 0 1rem; }
+.discord-threads a { margin-right: 0.25rem; }
+</style>
+{% endif %}

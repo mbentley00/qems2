@@ -69,7 +69,7 @@ def email_on_comments(sender, instance, created, **kwargs):
 
         mail_set = set()
         author = target.author
-        if author.send_mail_on_comments:
+        if author and author.user and author.user.email and author.send_mail_on_comments:
             mail_set.add(author.user.email)
 
         # Everyone on this comment thread (one query)
@@ -97,17 +97,22 @@ def email_on_comments(sender, instance, created, **kwargs):
         for category_settings in category_subscribers:
             mail_set.add(category_settings.writer_question_set_settings.writer.user.email)
 
-        # No mail for your own comment
-        mail_set.discard(instance.user.email)
+        # No mail for your own comment (bot comments have no Django user).
+        if instance.user is not None:
+            mail_set.discard(instance.user.email)
+        mail_set.discard(None)
+        mail_set.discard('')
         if not mail_set:
             return
 
+        commenter = (instance.user_name or '').strip() or (
+            str(instance.user) if instance.user else 'someone')
         qset = str(target.question_set)
         subject = "New QEMS2 comment for " + str(target) + " in set " + qset
         body = ('The question on "{0!s}" for the set "{1!s}" has a new comment by {2!s}:\n\n{3!s}\n\n'
                 'View the question at {4!s}.\n\n'
                 'To opt out of these e-mails, change the settings in your profile.').format(
-            str(target), qset, str(instance.user), instance.comment, _question_url(target))
+            str(target), qset, commenter, instance.comment, _question_url(target))
         _send_mail_async(subject, body, mail_set)
     except Exception:
         print("Error sending mail for comments:", sys.exc_info()[0], sys.exc_info()[1])

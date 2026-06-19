@@ -26,8 +26,12 @@ from django_comments.models import Comment
 
 from .models import (
     QuestionSet, Tossup, Bonus, TossupBuzz, BonusResult, PlaytestSession,
-    SetApiKey, DiscordCommentRef, PLAYTEST_SOURCE_DISCORD)
+    SetApiKey, DiscordCommentRef, DiscordThread, PLAYTEST_SOURCE_DISCORD)
 from .utils import get_answer_no_formatting, get_primary_answer
+
+
+# Display name for comments posted by the Discord playtest bot.
+DISCORD_BOT_NAME = 'Cliff'
 
 
 # --- helpers -----------------------------------------------------------------
@@ -115,16 +119,43 @@ def _bonus_index(qset):
 
 def _resolve(idx, answer):
     """Match a supplied answer against an index. Returns ('ok', id),
-    ('unmatched', None), or ('ambiguous', None)."""
-    n = _norm(answer)
-    if not n:
-        return ('unmatched', None)
-    ids = idx.get(n)
+    ('unmatched', None), or ('ambiguous', None). Tries both the primary answer
+    (before any '[...]') and the full normalized line, so a caller can send a
+    whole answer line like 'witchcraft [accept ...]' and still match a question
+    stored with differently-worded acceptable answers."""
+    ids = set()
+    for form in _answer_forms(answer):
+        ids |= idx.get(form, set())
     if not ids:
         return ('unmatched', None)
     if len(ids) > 1:
         return ('ambiguous', None)
     return ('ok', next(iter(ids)))
+
+
+def _resolve_question(t_idx, b_idx, answer, hint):
+    """Resolve an answer (+ optional qtype hint) to one question. Returns
+    ('ok', 'tossup'|'bonus', id), ('ambiguous', None, None), or
+    ('unmatched', None, None)."""
+    candidates = []
+    if hint in (None, '', 'tossup'):
+        s, qid = _resolve(t_idx, answer)
+        if s == 'ok':
+            candidates.append(('tossup', qid))
+        elif s == 'ambiguous':
+            candidates.append(('ambiguous', None))
+    if hint in (None, '', 'bonus'):
+        s, qid = _resolve(b_idx, answer)
+        if s == 'ok':
+            candidates.append(('bonus', qid))
+        elif s == 'ambiguous':
+            candidates.append(('ambiguous', None))
+    real = [c for c in candidates if c[0] != 'ambiguous']
+    if len(real) > 1 or (not real and any(c[0] == 'ambiguous' for c in candidates)):
+        return ('ambiguous', None, None)
+    if not real:
+        return ('unmatched', None, None)
+    return ('ok', real[0][0], real[0][1])
 
 
 def _discord_session(qset, player_name):
@@ -275,8 +306,10 @@ def api_comments(request):
     b_idx = _bonus_index(qset)
 
     eids = [c.get('external_id') for c in comments if isinstance(c, dict) and c.get('external_id')]
-    seen = set(DiscordCommentRef.objects.filter(external_id__in=eids)
-               .values_list('external_id', flat=True)) if eids else set()
+    existing_refs = {r.external_id: r for r in
+                     DiscordCommentRef.objects.filter(external_id__in=eids)
+                     .select_related('comment')} if eids else {}
+    seen = set(existing_refs)
     site = Site.objects.get_current()
     tu_ct = ContentType.objects.get_for_model(Tossup)
     bs_ct = ContentType.objects.get_for_model(Bonus)
@@ -287,10 +320,22 @@ def api_comments(request):
             results.append({'external_id': '', 'status': 'error', 'error': 'not an object'})
             continue
         eid = (c.get('external_id') or '').strip()
-        if eid and eid in seen:
-            results.append({'external_id': eid, 'status': 'duplicate'})
-            continue
         text = (c.get('text') or '').strip()
+        if eid and eid in seen:
+            # Already synced. Refresh the comment in place when the text changed
+            # (e.g. new discussion added to the thread) so re-syncs stay current.
+            ref = existing_refs.get(eid)
+            if ref is None:
+                results.append({'external_id': eid, 'status': 'duplicate'})
+            elif not text:
+                results.append({'external_id': eid, 'status': 'error', 'error': 'empty text'})
+            elif ref.comment.comment != text:
+                ref.comment.comment = text
+                ref.comment.save(update_fields=['comment'])
+                results.append({'external_id': eid, 'status': 'updated'})
+            else:
+                results.append({'external_id': eid, 'status': 'duplicate'})
+            continue
         if not text:
             results.append({'external_id': eid, 'status': 'error', 'error': 'empty text'})
             continue
@@ -319,15 +364,74 @@ def api_comments(request):
             continue
 
         ct, qid = real[0]
-        author = (c.get('author_name') or '').strip() or 'Discord'
+        # Comments from the bot are attributed to the bot's persona, not the
+        # individual playtester. Discord thread links live on the question (see
+        # api_threads), not inside the comment text.
         comment = Comment.objects.create(
             content_type=ct, object_pk=str(qid), site=site, user=None,
-            user_name=author, comment=text, is_public=True, is_removed=False)
+            user_name=DISCORD_BOT_NAME, comment=text, is_public=True, is_removed=False)
         if eid:
-            DiscordCommentRef.objects.create(
+            ref = DiscordCommentRef.objects.create(
                 external_id=eid, comment=comment, question_set=qset)
+            existing_refs[eid] = ref
             seen.add(eid)
         results.append({'external_id': eid, 'status': 'recorded',
                         'qtype': 'tossup' if ct == tu_ct else 'bonus'})
+
+    return _api_json({'ok': True, 'results': results})
+
+
+@discord_api
+def api_threads(request):
+    """Attach Discord thread links to questions, shown on the question itself
+    (not inside a comment). Body: {"threads": [{external_id, answer, url, title,
+    qtype?}, ...]}. `answer` is matched like comments; optional `qtype`
+    ('tossup'|'bonus') disambiguates. Idempotent per `external_id`; without one,
+    deduped per (question, url)."""
+    threads, err = _load_events(request, 'threads')
+    if err:
+        return err
+    qset = request.api_qset
+    t_idx = _tossup_index(qset)
+    b_idx = _bonus_index(qset)
+
+    eids = [t.get('external_id') for t in threads if isinstance(t, dict) and t.get('external_id')]
+    seen = set(DiscordThread.objects.filter(question_set=qset, external_id__in=eids)
+               .values_list('external_id', flat=True)) if eids else set()
+
+    results = []
+    for t in threads:
+        if not isinstance(t, dict):
+            results.append({'external_id': '', 'status': 'error', 'error': 'not an object'})
+            continue
+        eid = (t.get('external_id') or '').strip()
+        if eid and eid in seen:
+            results.append({'external_id': eid, 'status': 'duplicate'})
+            continue
+        url = (t.get('url') or '').strip()
+        if not url:
+            results.append({'external_id': eid, 'status': 'error', 'error': 'empty url'})
+            continue
+        status, qtype, qid = _resolve_question(t_idx, b_idx, t.get('answer'), t.get('qtype'))
+        if status != 'ok':
+            results.append({'external_id': eid, 'status': status})
+            continue
+
+        title = (t.get('title') or '')[:300]
+        tossup_id = qid if qtype == 'tossup' else None
+        bonus_id = qid if qtype == 'bonus' else None
+        if eid:
+            DiscordThread.objects.create(
+                question_set=qset, tossup_id=tossup_id, bonus_id=bonus_id,
+                url=url, title=title, external_id=eid)
+            seen.add(eid)
+            results.append({'external_id': eid, 'status': 'recorded', 'qtype': qtype})
+        else:
+            _, created = DiscordThread.objects.get_or_create(
+                question_set=qset, tossup_id=tossup_id, bonus_id=bonus_id, url=url,
+                defaults={'title': title})
+            results.append({'external_id': eid,
+                            'status': 'recorded' if created else 'duplicate',
+                            'qtype': qtype})
 
     return _api_json({'ok': True, 'results': results})
