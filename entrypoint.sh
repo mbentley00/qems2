@@ -9,6 +9,12 @@ python manage.py migrate --noinput
 echo "[entrypoint] bootstrapping question types + admin user"
 python manage.py bootstrap_deploy
 
+# One-time data repair (idempotent): decode HTML-escaped punctuation that an
+# older import left in question text (apostrophes as &#x27;, etc.). A no-op once
+# the data is clean, so it is safe to leave in place.
+echo "[entrypoint] repairing escaped question entities"
+python manage.py fix_question_entities || echo "[entrypoint] entity repair skipped"
+
 # Daily database backup. Runs as a single background process (one per
 # container, not per gunicorn worker) so it reaches Postgres from inside Azure
 # without a public firewall rule. Dumps land in $BACKUP_DIR (default

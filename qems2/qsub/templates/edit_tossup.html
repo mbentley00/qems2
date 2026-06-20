@@ -47,7 +47,7 @@
     {% endautoescape %}
 {% endif %}
 
-<form action="" method="post" class="clearfix">
+<form action="" method="post" class="clearfix" id="edit-tossup">
     {% csrf_token %}
     {{ form.non_field_errors }}
 

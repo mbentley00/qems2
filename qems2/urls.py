@@ -30,6 +30,8 @@ urlpatterns = [
     re_path(r'^packetize_set/(?P<qset_id>[0-9]+)/$', packetize_set),
     re_path(r'^packet_grid/(?P<qset_id>[0-9]+)/$', packet_grid),
     re_path(r'^move_packet_question/$', move_packet_question),
+    re_path(r'^unassign_packet_question/$', unassign_packet_question),
+    re_path(r'^assign_unpacketized/$', assign_unpacketized),
     re_path(r'^view_packet/(?P<packet_id>[0-9]+)/$', view_packet),
     re_path(r'^packet_mp3/(?P<packet_id>[0-9]+)/$', packet_mp3),
     re_path(r'^packet_mp3_status/(?P<packet_id>[0-9]+)/$', packet_mp3_status),

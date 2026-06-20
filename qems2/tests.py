@@ -1844,3 +1844,128 @@ class QuestionSetSettingsSaveTests(TestCase):
         self.assertEqual(self.qset.max_acf_tossup_length, 198)
         # The packetization fields kept their defaults (not wiped by the form).
         self.assertEqual(self.qset.tossups_per_packet, 20)
+
+
+class UnpacketizedAssignmentTests(TestCase):
+    """Unpacketized questions: assign into empty slots + new packets, unassign,
+    and grid context exposes them."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        self.acf_tu = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('up_owner', password='pw', email='u@test.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='up dist')
+        self.qset = QuestionSet.objects.create(
+            name='UP Set', date=timezone.now(), host='', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist, tossups_per_packet=2, bonuses_per_packet=2)
+        self.p1 = Packet.objects.create(question_set=self.qset, packet_name='Packet 01', created_by=self.owner)
+        # Packet 01 has a tossup at slot 1; slot 2 is empty.
+        self.placed = self._tu('placed', packet=self.p1, number=1)
+        self.client.login(username='up_owner', password='pw')
+
+    def _tu(self, ans, packet=None, number=None):
+        return Tossup.objects.create(
+            author=self.owner, question_set=self.qset, packet=packet, question_number=number,
+            question_type=self.acf_tu, tossup_text='Stem (*) end.', tossup_answer='_%s_' % ans,
+            created_date=datetime.now(), last_changed_date=datetime.now())
+
+    def test_assign_fills_empty_slot_then_new_packets(self):
+        # 3 unpacketized tossups: 1 fills Packet 01 slot 2, 2 go to a new packet.
+        a = self._tu('aaa'); b = self._tu('bbb'); c = self._tu('ccc')
+        resp = self.client.post('/assign_unpacketized/', {'qset_id': self.qset.id})
+        self.assertTrue(json.loads(resp.content)['success'])
+        a.refresh_from_db(); b.refresh_from_db(); c.refresh_from_db()
+        # One of them filled Packet 01 slot 2.
+        in_p1 = [q for q in (a, b, c) if q.packet_id == self.p1.id]
+        self.assertEqual(len(in_p1), 1)
+        self.assertEqual(in_p1[0].question_number, 2)
+        # A new packet was created for the other two.
+        self.assertEqual(Packet.objects.filter(question_set=self.qset).count(), 2)
+        self.assertEqual(Tossup.objects.filter(question_set=self.qset, packet=None).count(), 0)
+        # The already-placed question is untouched.
+        self.placed.refresh_from_db()
+        self.assertEqual(self.placed.question_number, 1)
+
+    def test_assign_noop_when_nothing_unpacketized(self):
+        resp = self.client.post('/assign_unpacketized/', {'qset_id': self.qset.id})
+        data = json.loads(resp.content)
+        self.assertTrue(data['success'])
+        self.assertEqual(Packet.objects.filter(question_set=self.qset).count(), 1)
+
+    def test_unassign_returns_question_to_pool(self):
+        resp = self.client.post('/unassign_packet_question/', {
+            'question_type': 'tossup', 'question_id': self.placed.id})
+        self.assertTrue(json.loads(resp.content)['success'])
+        self.placed.refresh_from_db()
+        self.assertIsNone(self.placed.packet_id)
+        self.assertIsNone(self.placed.question_number)
+
+    def test_grid_shows_unpacketized(self):
+        self._tu('lonely')
+        resp = self.client.get('/packet_grid/{0}/'.format(self.qset.id))
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context['unassigned_tu'], 1)
+        self.assertContains(resp, 'unpacketized-panel')
+        self.assertContains(resp, 'assign-unpacketized-btn')
+
+    def test_writer_cannot_assign(self):
+        wu = User.objects.create_user('up_writer', password='pw', email='w2@test.com')
+        writer = Writer.objects.get(user=wu)
+        self.qset.writer.add(writer)
+        self.client.logout(); self.client.login(username='up_writer', password='pw')
+        self._tu('x')
+        resp = self.client.post('/assign_unpacketized/', {'qset_id': self.qset.id})
+        self.assertFalse(json.loads(resp.content)['success'])
+
+
+class ImportEntityStorageTests(TestCase):
+    """YAPP import stores literal punctuation (apostrophes/ampersands), not
+    HTML entities, and the cleanup command repairs old escaped data."""
+
+    def setUp(self):
+        import json as _json
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        self._json = _json
+        self._Upload = SimpleUploadedFile
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        self.user, _ = User.objects.get_or_create(username='ent_importer')
+        self.writer = Writer.objects.get(user=self.user.id)
+
+    def _file(self, name, payload):
+        return self._Upload(name, self._json.dumps(payload).encode('utf-8'),
+                            content_type='application/json')
+
+    def test_import_stores_literal_apostrophe_and_ampersand(self):
+        from qems2.qsub.packet_set_importer import import_packets_from_files
+        payload = {'tossups': [
+            {'question': "This author&#x27;s novel about Crosby &amp; Nash. (*) end.",
+             'answer': 'ANSWER: _Pratt &amp; Whitney_', 'metadata': 'A, Science - Physics'}]}
+        summary = import_packets_from_files([self._file('P.json', payload)], 'Ent Set', self.writer)
+        tu = Tossup.objects.get(question_set=summary['question_set'])
+        self.assertIn("author's novel", tu.tossup_text)
+        self.assertIn("Crosby & Nash", tu.tossup_text)
+        self.assertNotIn('&#x27;', tu.tossup_text)
+        self.assertNotIn('&amp;', tu.tossup_text)
+        self.assertIn('Pratt & Whitney', tu.tossup_answer)
+
+    def test_cleanup_command_fixes_existing(self):
+        from django.core.management import call_command
+        from datetime import datetime
+        acf = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        dist = Distribution.objects.create(name='c dist')
+        qset = QuestionSet.objects.create(
+            name='C Set', date=timezone.now(), host='', address='', owner=self.writer,
+            num_packets=1, distribution=dist)
+        tu = Tossup.objects.create(
+            author=self.writer, question_set=qset, question_type=acf,
+            tossup_text='Bach&#x27;s fugue &amp; chorale &lt;kept&gt;.',
+            tossup_answer='_J.S. Bach_', created_date=datetime.now(),
+            last_changed_date=datetime.now(), question_number=1)
+        call_command('fix_question_entities')
+        tu.refresh_from_db()
+        self.assertEqual(tu.tossup_text, "Bach's fugue & chorale &lt;kept&gt;.")
+        # Angle brackets left escaped so they can't inject a tag.
+        self.assertIn('&lt;kept&gt;', tu.tossup_text)

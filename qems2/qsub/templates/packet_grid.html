@@ -20,11 +20,13 @@
 {% if not read_only %}
 <div class="panel radius clearfix">
     Drag a question onto another cell to swap the two questions (or onto an empty cell to move it).
-    Rows beyond the regular per-packet count are tiebreakers.
+    Drag an unpacketized question (below) onto a cell to place it; drag a cell question onto the
+    unpacketized panel to remove it from its packet. Rows beyond the per-packet count are tiebreakers.
     <span class="right">
         <a href="/packet_grid_log/{{ qset.id }}/" class="button small secondary">Change log</a>
         <button type="button" id="undo-grid-change" class="button small">&#8630; Undo last change</button>
-        <a href="/packetize_set/{{ qset.id }}/" class="button small secondary">Re-packetize</a>
+        <button type="button" id="assign-unpacketized-btn" class="button small success">Assign unpacketized to packets</button>
+        <a href="/packetize_set/{{ qset.id }}/" class="button small alert repacketize-link">Re-packetize</a>
     </span>
 </div>
 {% else %}
@@ -34,16 +36,47 @@
 </div>
 {% endif %}
 
-{% if unassigned_tu or unassigned_bs %}
-<div class="alert-box warning">
-    <strong>{{ unassigned_tu }} tossup(s)</strong> and <strong>{{ unassigned_bs }} bonus(es)</strong>
-    are not assigned to any packet, so they won't appear in any packet or export.
-    {% if not read_only %}
-    <a href="/packetize_set/{{ qset.id }}/" class="button tiny" style="margin:0 0 0 0.5rem;">Re-packetize to place them</a>
-    <a href="/search/{{ qset.id }}/" class="button tiny secondary" style="margin-bottom:0;">Find questions</a>
-    {% endif %}
+<div class="panel radius unpacketized-panel{% if not unassigned_tu and not unassigned_bs %} unpacketized-empty{% endif %}" id="unpacketized-panel">
+    <div class="clearfix" style="margin-bottom:6px;">
+        <strong>Unpacketized</strong>
+        <span class="unp-counts">(<span id="unp-tu-count">{{ unassigned_tu }}</span> tossups, <span id="unp-bs-count">{{ unassigned_bs }}</span> bonuses)</span>
+        <span class="right">
+            <input type="text" id="unp-filter" placeholder="Filter unpacketized&hellip;" style="margin-bottom:0; display:inline-block; width:240px;">
+            <button type="button" id="unp-toggle" class="button tiny secondary" style="margin-bottom:0;">Hide</button>
+        </span>
+    </div>
+    <p class="unp-help">These questions aren't in any packet (newly written questions land here). They
+    won't appear in any packet or export until placed.{% if not read_only %} Drag one onto a grid cell, or use
+    <em>Assign unpacketized to packets</em> above.{% endif %}</p>
+    <div id="unp-body">
+        <div class="unp-section">
+            <div class="unp-section-title">Tossups (<span class="unp-tu-shown">{{ unassigned_tu }}</span>)</div>
+            <div class="unp-list" id="unp-tu-list" data-qtype="tossup">
+                {% for q in unpacketized_tu %}
+                <span class="unp-item" data-qtype="tossup" data-qid="{{ q.id }}" data-search="{{ q.answer|lower }} {{ q.category|lower }}">
+                    <a href="{{ q.edit_url }}" class="unp-answer">{{ q.answer }}</a>
+                    <span class="unp-category">{{ q.category }}</span>
+                </span>
+                {% empty %}
+                <span class="unp-none">None</span>
+                {% endfor %}
+            </div>
+        </div>
+        <div class="unp-section">
+            <div class="unp-section-title">Bonuses (<span class="unp-bs-shown">{{ unassigned_bs }}</span>)</div>
+            <div class="unp-list" id="unp-bs-list" data-qtype="bonus">
+                {% for q in unpacketized_bs %}
+                <span class="unp-item" data-qtype="bonus" data-qid="{{ q.id }}" data-search="{{ q.answer|lower }} {{ q.category|lower }}">
+                    <a href="{{ q.edit_url }}" class="unp-answer">{{ q.answer }}</a>
+                    <span class="unp-category">{{ q.category }}</span>
+                </span>
+                {% empty %}
+                <span class="unp-none">None</span>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
 </div>
-{% endif %}
 
 {% if not packets %}
 <div class="alert-box info">This set has no packets yet. <a href="/packetize_set/{{ qset.id }}/">Packetize the set</a> to create them.</div>
@@ -181,12 +214,74 @@
     z-index: 100;
     max-width: 220px;
 }
+.unpacketized-panel { background: #fcfcfc; border: 1px solid #ddd; }
+.unpacketized-panel.unpacketized-empty { opacity: 0.75; }
+.unpacketized-panel.drop-target { outline: 2px dashed #008CBA; background: #eef7fb; }
+.unp-counts { color: #777; margin-left: 6px; }
+.unp-help { font-size: 0.8em; color: #777; margin: 4px 0 8px; }
+.unp-section { margin-bottom: 10px; }
+.unp-section-title { font-weight: bold; font-size: 0.85em; margin-bottom: 4px; }
+.unp-list {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    max-height: 200px; overflow-y: auto;
+    padding: 6px; border: 1px solid #eee; background: #fff; border-radius: 3px;
+}
+.unp-item {
+    display: inline-flex; flex-direction: column;
+    border: 1px solid #cdd9e5; background: #f1f6fb; border-radius: 3px;
+    padding: 3px 8px; font-size: 0.8em; cursor: move; max-width: 220px;
+}
+.unp-item.ui-draggable-dragging { z-index: 200; }
+.unp-item .unp-answer { font-weight: bold; display: block; }
+.unp-item .unp-category { color: #777; font-size: 0.9em; }
+.unp-item.filtered-out { display: none; }
+.unp-none { color: #999; font-size: 0.85em; }
 </style>
 
 <script>
 $(function() {
     var readOnly = {% if read_only %}true{% else %}false{% endif %};
+
+    // --- Unpacketized panel: filter + collapse (available read-only too) ---
+    function updateUnpShownCounts() {
+        $('.unp-tu-shown').text($('#unp-tu-list .unp-item').not('.filtered-out').length);
+        $('.unp-bs-shown').text($('#unp-bs-list .unp-item').not('.filtered-out').length);
+    }
+    $('#unp-filter').on('input', function() {
+        var q = $(this).val().trim().toLowerCase();
+        $('.unp-item').each(function() {
+            var hit = !q || ($(this).data('search') + '').indexOf(q) !== -1;
+            $(this).toggleClass('filtered-out', !hit);
+        });
+        updateUnpShownCounts();
+    });
+    $('#unp-toggle').on('click', function() {
+        var $body = $('#unp-body');
+        $body.slideToggle(120);
+        $(this).text($(this).text() === 'Hide' ? 'Show' : 'Hide');
+    });
+
     if (readOnly) return;
+
+    // Warn before the destructive re-packetize (overwrites all assignments).
+    $('.repacketize-link').on('click', function(e) {
+        if (!confirm('Re-packetize will OVERWRITE every existing packet assignment '
+            + 'for this set and re-deal all questions from scratch. This cannot be '
+            + 'easily undone. Continue?')) {
+            e.preventDefault();
+        }
+    });
+
+    // Assign unpacketized questions into empty slots / new packets (non-destructive).
+    $('#assign-unpacketized-btn').on('click', function() {
+        var $btn = $(this);
+        $btn.prop('disabled', true);
+        $.post('/assign_unpacketized/', { qset_id: {{ qset.id }} }, function(response) {
+            var json = $.parseJSON(response);
+            alert(json.message || (json.success ? 'Done.' : 'Failed.'));
+            if (json.success) { location.reload(); } else { $btn.prop('disabled', false); }
+        }).fail(function() { $btn.prop('disabled', false); });
+    });
 
     // Undo the most recent packet-grid change
     $('#undo-grid-change').on('click', function () {
@@ -234,9 +329,13 @@ $(function() {
             $(this).removeClass('drag-over');
             var $source = ui.draggable;
             var $target = $(this);
+            // Source may be a grid cell or an unpacketized chip.
+            var qid = $source.hasClass('unp-item')
+                ? $source.data('qid')
+                : $source.find('.cell-answer').data('qid');
             $.post('/move_packet_question/', {
                 question_type: $source.data('qtype'),
-                question_id: $source.find('.cell-answer').data('qid'),
+                question_id: qid,
                 target_packet_id: packetIdForCell($target),
                 target_number: $target.data('num')
             }, function(response) {
@@ -254,6 +353,40 @@ $(function() {
     $('.grid-cell').on('click', '.cell-answer', function(e) {
         if ($(this).closest('.grid-cell').hasClass('ui-draggable-dragging-source')) {
             e.preventDefault();
+        }
+    });
+
+    // Unpacketized chips: draggable onto grid cells (placing/swapping).
+    $('.unp-item').draggable({
+        helper: function() {
+            return $('<div class="grid-helper">').text($(this).find('.unp-answer').text());
+        },
+        cursorAt: { top: 10, left: 10 },
+        revert: 'invalid',
+        appendTo: 'body',
+        scroll: true,
+        start: function() { $(this).addClass('ui-draggable-dragging'); },
+        stop: function() { $(this).removeClass('ui-draggable-dragging'); }
+    });
+    $('#unp-body').on('click', '.unp-answer', function(e) {
+        if ($(this).closest('.unp-item').hasClass('ui-draggable-dragging')) e.preventDefault();
+    });
+
+    // Drop a grid-cell question onto the panel to remove it from its packet.
+    $('#unpacketized-panel').droppable({
+        accept: function(draggable) { return $(draggable).hasClass('grid-cell'); },
+        over: function() { $(this).addClass('drop-target'); },
+        out: function() { $(this).removeClass('drop-target'); },
+        drop: function(event, ui) {
+            $(this).removeClass('drop-target');
+            var $src = ui.draggable;
+            $.post('/unassign_packet_question/', {
+                question_type: $src.data('qtype'),
+                question_id: $src.find('.cell-answer').data('qid')
+            }, function(response) {
+                var json = $.parseJSON(response);
+                if (json.success) { location.reload(); } else { alert(json.message); }
+            });
         }
     });
 

@@ -29,7 +29,6 @@ from bs4 import BeautifulSoup, NavigableString
 from django.db import transaction
 from django.db.models.signals import post_save
 from django.utils import timezone
-from django.utils.html import escape
 
 from qems2.qsub.models import (QuestionSet, Distribution, DistributionEntry,
                                SetWideDistributionEntry, Packet, Tossup, Bonus,
@@ -132,9 +131,14 @@ def _walk(node, fmt, out, is_answer):
 
 
 def _html_to_qems(html, is_answer):
-    """Convert YAPP's sanitized HTML to QEMS markup, then escape literal
-    angle brackets/ampersands so they render as text (markup chars are left
-    intact)."""
+    """Convert YAPP's sanitized HTML to QEMS markup.
+
+    BeautifulSoup already decodes HTML entities to real characters, so the text
+    is stored verbatim — literal apostrophes, quotes and ampersands — matching
+    how hand-written QEMS questions are stored (the renderer treats the text as
+    safe HTML). Only ``<``/``>`` are escaped, so a stray angle bracket in the
+    content can't inject a tag; QEMS markup chars (``_ ~ \\S \\s``) are untouched.
+    """
     if not html:
         return ''
     soup = BeautifulSoup(html, 'html.parser')
@@ -142,7 +146,7 @@ def _html_to_qems(html, is_answer):
     _walk(soup, {'bold': False, 'ul': False, 'ital': False, 'sup': False, 'sub': False},
           out, is_answer)
     text = re.sub(r'\s+', ' ', ''.join(out)).strip()
-    return escape(text)
+    return text.replace('<', '&lt;').replace('>', '&gt;')
 
 
 # --- metadata ("Author, Category - Subcategory") --------------------------

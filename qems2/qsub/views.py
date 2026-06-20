@@ -5050,7 +5050,9 @@ def packetize_set(request, qset_id):
                               'message_class': message_class})
 
 def _grid_answer_preview(text, limit=45):
-    answer = get_answer_no_formatting(get_primary_answer(text or '')).strip()
+    # Decode HTML entities (imported answers store apostrophes as &#x27; etc.);
+    # the template re-escapes safely, so the grid shows real characters.
+    answer = html.unescape(get_answer_no_formatting(get_primary_answer(text or ''))).strip()
     if len(answer) > limit:
         answer = answer[:limit].rstrip() + '...'
     return answer
@@ -5081,7 +5083,7 @@ def packet_grid(request, qset_id):
             cells_by_packet.setdefault(question.packet_id, {})[number] = {
                 'id': question.id,
                 'answer': preview_func(question),
-                'category': str(question.category) if question.category else '',
+                'category': html.unescape(str(question.category)) if question.category else '',
                 'edit_url': '{0}{1}/'.format(edit_url, question.id),
             }
         rows = []
@@ -5100,8 +5102,26 @@ def packet_grid(request, qset_id):
             _grid_answer_preview(b.part2_answer, 20),
             _grid_answer_preview(b.part3_answer, 20)])), '/edit_bonus/')
 
-    unassigned_tu = qset.tossup_set.filter(packet=None).count()
-    unassigned_bs = qset.bonus_set.filter(packet=None).count()
+    def build_unpacketized(question_model, preview_func):
+        items = []
+        for question in (question_model.objects.filter(question_set=qset, packet=None)
+                         .select_related('category').order_by('id')):
+            items.append({
+                'id': question.id,
+                'answer': preview_func(question),
+                'category': html.unescape(str(question.category)) if question.category else '',
+                'edit_url': '/edit_{0}/{1}/'.format(
+                    'tossup' if question_model is Tossup else 'bonus', question.id),
+            })
+        return items
+
+    unpacketized_tu = build_unpacketized(
+        Tossup, lambda t: _grid_answer_preview(t.tossup_answer))
+    unpacketized_bs = build_unpacketized(
+        Bonus, lambda b: ' / '.join(filter(None, [
+            _grid_answer_preview(b.part1_answer, 20),
+            _grid_answer_preview(b.part2_answer, 20),
+            _grid_answer_preview(b.part3_answer, 20)])))
 
     return render(request, 'packet_grid.html',
                              {'qset': qset,
@@ -5111,8 +5131,10 @@ def packet_grid(request, qset_id):
                               'bonus_rows': bonus_rows,
                               'tossups_per_packet': qset.tossups_per_packet,
                               'bonuses_per_packet': qset.bonuses_per_packet,
-                              'unassigned_tu': unassigned_tu,
-                              'unassigned_bs': unassigned_bs,
+                              'unassigned_tu': len(unpacketized_tu),
+                              'unassigned_bs': len(unpacketized_bs),
+                              'unpacketized_tu': unpacketized_tu,
+                              'unpacketized_bs': unpacketized_bs,
                               'read_only': read_only})
 
 def _log_packet_grid_change(qset, changer, description, prior_states):
@@ -5179,6 +5201,167 @@ def move_packet_question(request):
             message = 'Invalid request!'
         except (Tossup.DoesNotExist, Bonus.DoesNotExist, Packet.DoesNotExist):
             message = 'Question or packet not found!'
+
+    return HttpResponse(json.dumps({'success': success, 'message': message}))
+
+
+@login_required
+def unassign_packet_question(request):
+    """Remove a question from its packet (back to the unpacketized pool)."""
+    user = request.user.writer
+    message = ''
+    success = False
+    if request.method == 'POST':
+        try:
+            question_type = request.POST['question_type']
+            question_id = int(request.POST['question_id'])
+            model = Tossup if question_type == 'tossup' else Bonus
+            question = model.objects.get(id=question_id)
+            qset = question.question_set
+            if not (qset.is_owner(user) or user in qset.editor.all()):
+                message = 'You are not authorized to move questions in this set!'
+            elif question.packet_id is None:
+                success = True
+                message = 'Already unpacketized'
+            else:
+                prior = [{'qtype': question_type, 'id': question.id,
+                          'packet_id': question.packet_id, 'number': question.question_number}]
+                src_name = question.packet.packet_name
+                src_num = question.question_number
+                question.packet = None
+                question.question_number = None
+                question.save()
+                _log_packet_grid_change(
+                    qset, user, 'Unpacketized {0} from {1} #{2}'.format(
+                        question_type, src_name, src_num or '?'), prior)
+                cache.clear()
+                success = True
+                message = 'Question unpacketized'
+        except (KeyError, ValueError):
+            message = 'Invalid request!'
+        except (Tossup.DoesNotExist, Bonus.DoesNotExist):
+            message = 'Question not found!'
+    return HttpResponse(json.dumps({'success': success, 'message': message}))
+
+
+def _create_packets_continuing(qset, count, existing, user):
+    """Create `count` new packets, continuing the existing naming scheme
+    ("Round 01" -> "Round 11"), and return them. Mirrors _ensure_packets."""
+    base = 'Packet'
+    if existing:
+        m = re.match(r'^(.*?)\s*\d+$', existing[-1].packet_name or '')
+        if m and m.group(1).strip():
+            base = m.group(1).strip()
+    names = set(p.packet_name for p in qset.packet_set.all())
+    created = []
+    next_num = len(existing) + 1
+    while len(created) < count:
+        name = '{0} {1:02d}'.format(base, next_num)
+        next_num += 1
+        if name in names:
+            continue
+        created.append(Packet.objects.create(
+            question_set=qset, packet_name=name, created_by=user))
+        names.add(name)
+    return created
+
+
+@login_required
+def assign_unpacketized(request):
+    """Non-destructively place unpacketized questions: first into empty slots of
+    existing packets, then into newly created packets for any overflow. Does not
+    move questions that are already assigned."""
+    user = request.user.writer
+    message = ''
+    success = False
+    if request.method != 'POST':
+        return HttpResponse(json.dumps({'success': False, 'message': 'Invalid request'}))
+    try:
+        qset = QuestionSet.objects.get(id=int(request.POST['qset_id']))
+    except (KeyError, ValueError, QuestionSet.DoesNotExist):
+        return HttpResponse(json.dumps({'success': False, 'message': 'Set not found'}))
+    if not (qset.is_owner(user) or user in qset.editor.all()):
+        return HttpResponse(json.dumps(
+            {'success': False, 'message': 'You are not authorized to packetize this set!'}))
+
+    def natural_key(p):
+        nums = re.findall(r'\d+', p.packet_name or '')
+        return (p.packet_name == EXTRAS_PACKET_NAME,
+                int(nums[0]) if nums else float('inf'), p.packet_name or '')
+
+    prior = []
+    placed = 0
+
+    def fill_existing(model, per_packet, qtype, packets):
+        """Fill empty slots in existing packets; return questions left over."""
+        nonlocal placed
+        unassigned = list(model.objects.filter(question_set=qset, packet=None).order_by('id'))
+        if not unassigned:
+            return []
+        occupied = defaultdict(set)
+        for q in model.objects.filter(question_set=qset, packet__in=packets):
+            if q.question_number:
+                occupied[q.packet_id].add(q.question_number)
+        qi = 0
+        for p in packets:
+            for n in range(1, per_packet + 1):
+                if qi >= len(unassigned):
+                    return []
+                if n not in occupied[p.id]:
+                    q = unassigned[qi]
+                    qi += 1
+                    prior.append({'qtype': qtype, 'id': q.id, 'packet_id': None, 'number': None})
+                    q.packet = p
+                    q.question_number = n
+                    q.save()
+                    placed += 1
+        return unassigned[qi:]
+
+    def fill_new(model, per_packet, qtype, leftovers, new_packets):
+        nonlocal placed
+        qi = 0
+        for p in new_packets:
+            for n in range(1, per_packet + 1):
+                if qi >= len(leftovers):
+                    return
+                q = leftovers[qi]
+                qi += 1
+                prior.append({'qtype': qtype, 'id': q.id, 'packet_id': None, 'number': None})
+                q.packet = p
+                q.question_number = n
+                q.save()
+                placed += 1
+
+    with transaction.atomic():
+        existing = sorted(qset.packet_set.exclude(packet_name=EXTRAS_PACKET_NAME),
+                          key=natural_key)
+        tu_per = qset.tossups_per_packet or 20
+        bs_per = qset.bonuses_per_packet or 20
+        rem_tu = fill_existing(Tossup, tu_per, 'tossup', existing)
+        rem_bs = fill_existing(Bonus, bs_per, 'bonus', existing)
+
+        n_new = max(math.ceil(len(rem_tu) / tu_per) if rem_tu else 0,
+                    math.ceil(len(rem_bs) / bs_per) if rem_bs else 0)
+        if n_new:
+            new_packets = _create_packets_continuing(qset, n_new, existing, user)
+            fill_new(Tossup, tu_per, 'tossup', rem_tu, new_packets)
+            fill_new(Bonus, bs_per, 'bonus', rem_bs, new_packets)
+            qset.num_packets = max(qset.num_packets or 0, len(existing) + n_new)
+            qset.save(update_fields=['num_packets'])
+
+        if prior:
+            _log_packet_grid_change(
+                qset, user,
+                'Assigned {0} unpacketized question(s){1}'.format(
+                    placed, ' (+{0} new packet(s))'.format(n_new) if n_new else ''),
+                prior)
+            cache.clear()
+            success = True
+            message = 'Placed {0} question(s){1}.'.format(
+                placed, ' and created {0} new packet(s)'.format(n_new) if n_new else '')
+        else:
+            success = True
+            message = 'No unpacketized questions to place.'
 
     return HttpResponse(json.dumps({'success': success, 'message': message}))
 

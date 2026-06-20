@@ -252,8 +252,8 @@ $(function () {
 
     /* ---------- Wire up the pages ---------- */
 
-    // Add-tossup / add-bonus pages: single-paragraph fields
-    $('#add-tossups, #add-bonuses').first().find(FIELD_SELECTOR).each(function () {
+    // Add-tossup / add-bonus and edit-tossup / edit-bonus pages: per-field editors
+    $('#add-tossups, #add-bonuses, #edit-tossup, #edit-bonus').first().find(FIELD_SELECTOR).each(function () {
         enhance(this, false);
     });
 
