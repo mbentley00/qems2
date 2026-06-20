@@ -1663,3 +1663,125 @@ class DiscordCommentDisplayTests(TestCase):
         self.assertIn('discord-badge', html)
         self.assertIn('https://discord.com/y', html)
         self.assertIn('toggle-discord-comments', html)  # the filter
+
+
+class PacketizedWordExportTests(TestCase):
+    """The 'Export Packetized Word' output follows the actual packets/order,
+    uses Times New Roman 12 + narrow margins, the <Author, Category - Subcategory>
+    ~Id~ <Editor: Name> attribution line, keeps each question as one paragraph,
+    and attaches open comments as Word comments."""
+
+    def setUp(self):
+        import io as _io, zipfile as _zip
+        from docx import Document as _Doc
+        from django.contrib.contenttypes.models import ContentType
+        from django.contrib.sites.models import Site
+        from django_comments.models import Comment
+        self._io, self._zip, self._Doc = _io, _zip, _Doc
+        self.Comment = Comment
+        self.site = Site.objects.get_current()
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        self.acf_tu = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.acf_bn = QuestionType.objects.get(question_type=ACF_STYLE_BONUS)
+        self.ou = User.objects.create_user('pw_owner', password='pw', email='p@test.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(
+            name='pw dist', acf_tossup_per_period_count=1, acf_bonus_per_period_count=1)
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='Science', subcategory='Biology')
+        self.qset = QuestionSet.objects.create(
+            name='PW Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=2, distribution=self.dist)
+        self.owner.question_set_editor.add(self.qset)
+        # Two packets, natural-sort order check: "Packet 10" must come after "Packet 2".
+        self.p2 = Packet.objects.create(question_set=self.qset, packet_name='Packet 2', created_by=self.owner)
+        self.p10 = Packet.objects.create(question_set=self.qset, packet_name='Packet 10', created_by=self.owner)
+        self.tu_p2 = Tossup.objects.create(
+            author=self.owner, editor=self.owner, question_set=self.qset, packet=self.p2,
+            question_type=self.acf_tu, category=self.de, edited=True,
+            tossup_text='Packet two stem. (*) end.', tossup_answer='_Photosynthesis_',
+            created_date=datetime.now(), last_changed_date=datetime.now(), question_number=1)
+        self.tu_p10 = Tossup.objects.create(
+            author=self.owner, question_set=self.qset, packet=self.p10,
+            question_type=self.acf_tu, category=self.de,
+            tossup_text='Packet ten stem. (*) end.', tossup_answer='_Mitochondria_',
+            created_date=datetime.now(), last_changed_date=datetime.now(), question_number=1)
+        self.bn_p2 = Bonus.objects.create(
+            author=self.owner, question_set=self.qset, packet=self.p2,
+            question_type=self.acf_bn, category=self.de,
+            leadin='Lead.', part1_text='P1', part1_answer='_Alpha_',
+            part2_text='P2', part2_answer='_Beta_', part3_text='P3', part3_answer='_Gamma_',
+            created_date=datetime.now(), last_changed_date=datetime.now(), question_number=1)
+        self.tu_ct = ContentType.objects.get_for_model(Tossup)
+        self.client.login(username='pw_owner', password='pw')
+
+    def _open_zip(self, output_format):
+        resp = self.client.get('/export_question_set/{0}/{1}/'.format(self.qset.id, output_format))
+        self.assertEqual(resp.status_code, 200)
+        return self._zip.ZipFile(self._io.BytesIO(resp.content))
+
+    def _doc(self, zf, name):
+        return self._Doc(self._io.BytesIO(zf.read(name)))
+
+    def test_zip_has_one_docx_per_packet_natural_sorted(self):
+        zf = self._open_zip('docx-packetized')
+        names = zf.namelist()
+        self.assertIn('Packet 2.docx', names)
+        self.assertIn('Packet 10.docx', names)
+        self.assertIn('Answer Matrix.xlsx', names)
+
+    def test_packet_docx_uses_its_own_questions(self):
+        zf = self._open_zip('docx-packetized')
+        text2 = '\n'.join(p.text for p in self._doc(zf, 'Packet 2.docx').paragraphs)
+        text10 = '\n'.join(p.text for p in self._doc(zf, 'Packet 10.docx').paragraphs)
+        self.assertIn('Photosynthesis', text2)
+        self.assertNotIn('Mitochondria', text2)
+        self.assertIn('Mitochondria', text10)
+
+    def test_style_font_and_margins(self):
+        zf = self._open_zip('docx-packetized')
+        doc = self._doc(zf, 'Packet 2.docx')
+        from docx.shared import Pt, Inches
+        self.assertEqual(doc.styles['Normal'].font.name, 'Times New Roman')
+        self.assertEqual(doc.styles['Normal'].font.size, Pt(12))
+        sec = doc.sections[0]
+        self.assertEqual(sec.left_margin, Inches(0.5))
+        self.assertEqual(sec.top_margin, Inches(0.5))
+
+    def test_attribution_line_format(self):
+        zf = self._open_zip('docx-packetized')
+        doc = self._doc(zf, 'Packet 2.docx')
+        full = '\n'.join(p.text for p in doc.paragraphs)
+        # Edited tossup -> editor included; matches <Author, Cat - Sub> ~id~ <Editor: ...>
+        self.assertIn('<{0}, Science - Biology> ~{1}~ <Editor:'.format(
+            self.owner.get_real_name(), self.tu_p2.id), full)
+
+    def test_each_tossup_is_single_paragraph(self):
+        zf = self._open_zip('docx-packetized')
+        doc = self._doc(zf, 'Packet 2.docx')
+        # The tossup stem, ANSWER, and attribution share one paragraph.
+        tu_paras = [p for p in doc.paragraphs
+                    if 'Packet two stem' in p.text]
+        self.assertEqual(len(tu_paras), 1)
+        self.assertIn('ANSWER:', tu_paras[0].text)
+        self.assertIn('~{0}~'.format(self.tu_p2.id), tu_paras[0].text)
+        self.assertTrue(tu_paras[0].paragraph_format.keep_together)
+
+    def test_open_comments_become_word_comments_resolved_excluded(self):
+        from qems2.qsub.models import CommentResolution
+        open_c = self.Comment.objects.create(
+            content_type=self.tu_ct, object_pk=str(self.tu_p2.id), site=self.site,
+            user=self.ou, user_name='', comment='please fix the power mark',
+            is_public=True, is_removed=False)
+        resolved_c = self.Comment.objects.create(
+            content_type=self.tu_ct, object_pk=str(self.tu_p2.id), site=self.site,
+            user=self.ou, user_name='', comment='this one is handled',
+            is_public=True, is_removed=False)
+        CommentResolution.objects.create(comment=resolved_c, resolved=True, resolved_by=self.owner)
+        zf = self._open_zip('docx-packetized')
+        # python-docx exposes comments on the document.
+        doc = self._doc(zf, 'Packet 2.docx')
+        texts = [c.text for c in doc.comments]
+        self.assertTrue(any('please fix the power mark' in t for t in texts))
+        self.assertFalse(any('this one is handled' in t for t in texts))

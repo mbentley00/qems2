@@ -3,6 +3,7 @@ import csv
 import io
 import math
 import random
+import re
 import zipfile
 import unicodecsv
 import time
@@ -11,7 +12,7 @@ import sys
 from collections import defaultdict
 
 from docx import Document
-from docx.shared import Pt, RGBColor
+from docx.shared import Pt, RGBColor, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment
@@ -3570,22 +3571,91 @@ def export_question_set(request, qset_id, output_format):
 
                 return response
             elif output_format in ("docx", "docx-by-category", "docx-packetized"):
+                tu_comment_ct = ContentType.objects.get_for_model(Tossup)
+                bs_comment_ct = ContentType.objects.get_for_model(Bonus)
+
                 def question_meta(q):
-                    """Build metadata line: category, writer, editor."""
-                    parts = []
-                    if q.category:
-                        parts.append(safe_category(q.category))
-                    parts.append(safe_name(q.author))
+                    """Attribution line in the standard QEMS packet format:
+                    ``<Author, Category - Subcategory> ~Id~ <Editor: Name>``."""
+                    author = safe_name(q.author)
+                    cat = safe_category(q.category)
+                    if author and cat:
+                        head = '<{0}, {1}>'.format(author, cat)
+                    elif author:
+                        head = '<{0}>'.format(author)
+                    elif cat:
+                        head = '<{0}>'.format(cat)
+                    else:
+                        head = ''
+                    meta = '{0} ~{1}~'.format(head, q.id).strip()
                     if q.edited and q.editor:
-                        parts.append("Ed. " + safe_name(q.editor))
-                    return " | ".join(p for p in parts if p)
+                        meta += ' <Editor: {0}>'.format(safe_name(q.editor))
+                    return meta
+
+                def _initials(name):
+                    parts = (name or '').split()
+                    return ''.join(p[0] for p in parts[:2]).upper() or 'QC'
+
+                def open_comment_threads(question, ct):
+                    """Open (non-removed, unresolved) comments on a question, as
+                    (author, text) pairs with any replies folded into the text.
+                    Resolved threads and replies under them are skipped."""
+                    comments = list(Comment.objects.filter(
+                        content_type=ct, object_pk=str(question.id), is_removed=False
+                    ).select_related('user').order_by('submit_date'))
+                    if not comments:
+                        return []
+                    ids = [c.id for c in comments]
+                    resolved = set(CommentResolution.objects.filter(
+                        comment_id__in=ids, resolved=True).values_list('comment_id', flat=True))
+                    parent_of = dict(CommentReply.objects.filter(
+                        comment_id__in=ids).values_list('comment_id', 'parent_id'))
+
+                    def author_of(c):
+                        if c.user_id and c.user:
+                            return c.user.get_username()
+                        return c.user_name or 'Anonymous'
+
+                    replies = defaultdict(list)
+                    tops = []
+                    for c in comments:
+                        pid = parent_of.get(c.id)
+                        (replies[pid].append(c) if pid is not None else tops.append(c))
+
+                    out = []
+                    for c in tops:
+                        if c.id in resolved:
+                            continue
+                        text = strip_markup(c.comment or '').strip()
+                        for r in replies.get(c.id, []):
+                            text += '\n↳ {0}: {1}'.format(
+                                author_of(r), strip_markup(r.comment or '').strip())
+                        out.append((author_of(c), text))
+                    return out
+
+                def attach_open_comments(document, paragraph, question, ct):
+                    """Add each open comment on the question as a Word comment
+                    anchored to the question's paragraph."""
+                    if not paragraph.runs:
+                        return
+                    for author, text in open_comment_threads(question, ct):
+                        if not text:
+                            continue
+                        document.add_comment(paragraph.runs, text=text,
+                                             author=author or 'QEMS', initials=_initials(author))
 
                 def new_docx():
-                    # Style to match standard quizbowlpackets PDFs: Times New
-                    # Roman 11pt body, black bold headings (centered title).
+                    # Match the reference PACE packets: Times New Roman 12pt body,
+                    # Word "Narrow" (0.5") margins, black bold centered headings.
                     document = Document()
+                    for section in document.sections:
+                        section.top_margin = Inches(0.5)
+                        section.bottom_margin = Inches(0.5)
+                        section.left_margin = Inches(0.5)
+                        section.right_margin = Inches(0.5)
+
                     normal = document.styles['Normal']
-                    normal.font.size = Pt(11)
+                    normal.font.size = Pt(12)
                     normal.font.name = 'Times New Roman'
                     normal.paragraph_format.space_before = Pt(0)
                     normal.paragraph_format.space_after = Pt(0)
@@ -3609,53 +3679,51 @@ def export_question_set(request, qset_id, output_format):
                     h2.paragraph_format.space_after = Pt(6)
                     return document
 
-                def end_question(paragraph):
-                    """Blank-line gap between questions, like the reference PDFs."""
-                    paragraph.paragraph_format.space_after = Pt(10)
+                def _line_break(paragraph):
+                    paragraph.add_run().add_break()
 
                 def add_tossup_to_doc(document, tossup, num):
+                    # One paragraph per tossup (stem / answer / attribution on
+                    # their own lines) so Word keeps the whole question together.
                     p = document.add_paragraph()
+                    p.paragraph_format.keep_together = True
+                    p.paragraph_format.space_after = Pt(10)
                     p.add_run(f"{num}. ").bold = True
                     add_qems_formatted_runs(p, safe_text(tossup.tossup_text))
-                    p_ans = document.add_paragraph()
-                    p_ans.add_run("ANSWER: ").bold = True
-                    add_qems_formatted_runs(p_ans, safe_text(tossup.tossup_answer), is_answer=True)
-                    last = p_ans
+                    _line_break(p)
+                    p.add_run("ANSWER: ").bold = True
+                    add_qems_formatted_runs(p, safe_text(tossup.tossup_answer), is_answer=True)
                     meta = question_meta(tossup)
                     if meta:
-                        p_meta = document.add_paragraph()
-                        run = p_meta.add_run(meta)
-                        run.font.size = Pt(8)
-                        run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
-                        last = p_meta
-                    end_question(last)
+                        _line_break(p)
+                        p.add_run(meta)
+                    attach_open_comments(document, p, tossup, tu_comment_ct)
 
                 def add_bonus_to_doc(document, bonus, num):
+                    # One paragraph per bonus (leadin, each part + answer, then
+                    # attribution) so the whole bonus stays together.
                     p = document.add_paragraph()
+                    p.paragraph_format.keep_together = True
+                    p.paragraph_format.space_after = Pt(10)
                     p.add_run(f"{num}. ").bold = True
                     add_qems_formatted_runs(p, safe_text(bonus.leadin))
-                    last = p
                     for part_num in range(1, 4):
                         part_text = getattr(bonus, f'part{part_num}_text', None)
                         part_answer = getattr(bonus, f'part{part_num}_answer', None)
                         part_diff = getattr(bonus, f'part{part_num}_difficulty', '')
                         if part_text:
                             diff_tag = part_diff if part_diff else ''
-                            p_part = document.add_paragraph()
-                            p_part.add_run(f"[10{diff_tag}] ").bold = True
-                            add_qems_formatted_runs(p_part, safe_text(part_text))
-                            p_ans = document.add_paragraph()
-                            p_ans.add_run("ANSWER: ").bold = True
-                            add_qems_formatted_runs(p_ans, safe_text(part_answer), is_answer=True)
-                            last = p_ans
+                            _line_break(p)
+                            p.add_run(f"[10{diff_tag}] ").bold = True
+                            add_qems_formatted_runs(p, safe_text(part_text))
+                            _line_break(p)
+                            p.add_run("ANSWER: ").bold = True
+                            add_qems_formatted_runs(p, safe_text(part_answer), is_answer=True)
                     meta = question_meta(bonus)
                     if meta:
-                        p_meta = document.add_paragraph()
-                        run = p_meta.add_run(meta)
-                        run.font.size = Pt(8)
-                        run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
-                        last = p_meta
-                    end_question(last)
+                        _line_break(p)
+                        p.add_run(meta)
+                    attach_open_comments(document, p, bonus, bs_comment_ct)
 
                 def save_docx_bytes(document):
                     buf = io.BytesIO()
@@ -3765,186 +3833,30 @@ def export_question_set(request, qset_id, output_format):
                     return response
 
                 else:  # output_format == "docx-packetized"
-                    dist = qset.distribution
-                    tu_per_packet = dist.acf_tossup_per_period_count
-                    bo_per_packet = dist.acf_bonus_per_period_count
+                    # Export the set's actual packets in their packetized order
+                    # (one .docx per packet, questions in question_number order),
+                    # not a fresh re-deal. Packets are natural-sorted by name so
+                    # "Packet 2" precedes "Packet 10".
+                    def _packet_sort_key(pk):
+                        nums = re.findall(r'\d+', pk.packet_name or '')
+                        return (int(nums[0]) if nums else float('inf'),
+                                pk.packet_name or '', pk.id)
 
-                    all_tossups = list(
-                        Tossup.objects.filter(question_set=qset)
-                        .select_related('category', 'author', 'editor')
-                    )
-                    all_bonuses = list(
-                        Bonus.objects.filter(question_set=qset)
-                        .select_related('category', 'author', 'editor')
-                    )
+                    packets = sorted(Packet.objects.filter(question_set=qset),
+                                     key=_packet_sort_key)
 
-                    def get_top_cat(q):
-                        return q.category.category if q.category else 'Uncategorized'
+                    packet_tus, packet_bos = [], []
+                    for packet in packets:
+                        packet_tus.append(list(
+                            Tossup.objects.filter(packet=packet, question_set=qset)
+                            .select_related('category', 'author', 'editor')
+                            .order_by('question_number')))
+                        packet_bos.append(list(
+                            Bonus.objects.filter(packet=packet, question_set=qset)
+                            .select_related('category', 'author', 'editor')
+                            .order_by('question_number')))
 
-                    def deal_into_packets(questions, per_packet):
-                        """Deal questions into packets with even category spread.
-
-                        Computes per-packet targets from actual question counts,
-                        then uses fractional accumulation to distribute each
-                        category evenly across packets.
-                        """
-                        # Bucket by top-level category
-                        by_cat = defaultdict(list)
-                        for q in questions:
-                            by_cat[get_top_cat(q)].append(q)
-                        # Shuffle within each category
-                        for cat_list in by_cat.values():
-                            random.shuffle(cat_list)
-
-                        n_packets = max(1, math.ceil(len(questions) / per_packet)) if per_packet else 1
-                        packets = [[] for _ in range(n_packets)]
-
-                        # Compute per-packet target from actual counts
-                        cat_per_pkt = {}
-                        for cat, qs in by_cat.items():
-                            cat_per_pkt[cat] = len(qs) / n_packets
-
-                        # Sort categories: largest quota first for best packing
-                        sorted_cats = sorted(
-                            by_cat.keys(),
-                            key=lambda c: cat_per_pkt.get(c, 0),
-                            reverse=True
-                        )
-
-                        # Track fractional accumulator per category
-                        accum = {cat: 0.0 for cat in sorted_cats}
-
-                        for pkt_idx in range(n_packets):
-                            remaining = per_packet
-                            for cat in sorted_cats:
-                                if not by_cat[cat] or remaining <= 0:
-                                    continue
-                                accum[cat] += cat_per_pkt[cat]
-                                take = min(int(round(accum[cat])), remaining, len(by_cat[cat]))
-                                accum[cat] -= take
-                                for _ in range(take):
-                                    packets[pkt_idx].append(by_cat[cat].pop(0))
-                                    remaining -= 1
-
-                            # If packet not full, fill from largest remaining pools
-                            if remaining > 0:
-                                for cat in sorted(sorted_cats, key=lambda c: len(by_cat[c]), reverse=True):
-                                    while by_cat[cat] and remaining > 0:
-                                        packets[pkt_idx].append(by_cat[cat].pop(0))
-                                        remaining -= 1
-
-                        # Any leftovers go into the last packet
-                        leftovers = []
-                        for cat in sorted_cats:
-                            leftovers.extend(by_cat[cat])
-                        if leftovers:
-                            packets[-1].extend(leftovers)
-
-                        return packets
-
-                    def order_for_packet(questions):
-                        """Order questions within a packet for good quizbowl flow.
-
-                        Goals:
-                        - No back-to-back same category
-                        - Major categories (>=2 questions) spread across both halves
-                        - Maximize distance between same-category questions
-                        Uses a greedy slot-filling approach with Monte Carlo fallback.
-                        """
-                        if len(questions) <= 2:
-                            return questions
-
-                        by_cat = defaultdict(list)
-                        for q in questions:
-                            by_cat[get_top_cat(q)].append(q)
-
-                        n = len(questions)
-                        half = n // 2
-
-                        # Sort categories by count descending (major cats first)
-                        sorted_cats = sorted(by_cat.keys(), key=lambda c: len(by_cat[c]), reverse=True)
-
-                        # Pre-assign slots for major categories to ensure spread
-                        slots = [None] * n
-                        used = set()
-
-                        for cat in sorted_cats:
-                            cat_qs = by_cat[cat]
-                            count = len(cat_qs)
-                            if count >= 2:
-                                # Spread evenly: place one in each segment
-                                segment_size = n / count
-                                for i, q in enumerate(cat_qs):
-                                    ideal = int(i * segment_size + segment_size / 2)
-                                    # Find nearest free slot
-                                    best_slot = None
-                                    best_dist = n + 1
-                                    for s in range(n):
-                                        if s in used:
-                                            continue
-                                        d = abs(s - ideal)
-                                        if d < best_dist:
-                                            best_dist = d
-                                            best_slot = s
-                                    if best_slot is not None:
-                                        slots[best_slot] = q
-                                        used.add(best_slot)
-
-                        # Place remaining single-category questions in free slots
-                        free_slots = [i for i in range(n) if i not in used]
-                        remaining_qs = []
-                        for cat in sorted_cats:
-                            for q in by_cat[cat]:
-                                if q not in [s for s in slots if s is not None]:
-                                    remaining_qs.append(q)
-                        random.shuffle(remaining_qs)
-                        for slot, q in zip(free_slots, remaining_qs):
-                            slots[slot] = q
-
-                        # Monte Carlo refinement: swap to reduce back-to-back
-                        def score(order):
-                            """Higher is better: sum of distances between same-cat questions."""
-                            total = 0
-                            last = {}
-                            for i, q in enumerate(order):
-                                c = get_top_cat(q)
-                                if c in last:
-                                    total += i - last[c]
-                                last[c] = i
-                            # Penalty for adjacent same-category
-                            for i in range(len(order) - 1):
-                                if get_top_cat(order[i]) == get_top_cat(order[i + 1]):
-                                    total -= 10
-                            return total
-
-                        best = list(slots)
-                        best_score = score(best)
-                        for _ in range(200):
-                            candidate = list(best)
-                            i, j = random.sample(range(n), 2)
-                            candidate[i], candidate[j] = candidate[j], candidate[i]
-                            s = score(candidate)
-                            if s > best_score:
-                                best = candidate
-                                best_score = s
-
-                        return best
-
-                    tu_packets = deal_into_packets(all_tossups, tu_per_packet)
-                    bo_packets = deal_into_packets(all_bonuses, bo_per_packet)
-
-                    # Order within each packet
-                    tu_packets = [order_for_packet(p) for p in tu_packets]
-                    bo_packets = [order_for_packet(p) for p in bo_packets]
-
-                    # Ensure same number of packets for tossups and bonuses
-                    max_packets = max(len(tu_packets), len(bo_packets))
-                    while len(tu_packets) < max_packets:
-                        tu_packets.append([])
-                    while len(bo_packets) < max_packets:
-                        bo_packets.append([])
-
-                    # Build answer matrix workbook
+                    # Build answer matrix workbook from the actual packets
                     wb = Workbook()
 
                     # Tossup answers sheet
@@ -3952,14 +3864,14 @@ def export_question_set(request, qset_id, output_format):
                     ws_tu.title = "Tossup Answers"
                     header_font = Font(bold=True)
                     wrap = Alignment(wrap_text=True, vertical='top')
-                    max_tu = max((len(p) for p in tu_packets), default=0)
+                    max_tu = max((len(p) for p in packet_tus), default=0)
                     # Header row
                     ws_tu.cell(row=1, column=1, value="Packet").font = header_font
                     for col in range(1, max_tu + 1):
                         ws_tu.cell(row=1, column=col + 1, value=col).font = header_font
-                    for pkt_idx, tus in enumerate(tu_packets):
+                    for pkt_idx, (packet, tus) in enumerate(zip(packets, packet_tus)):
                         row = pkt_idx + 2
-                        ws_tu.cell(row=row, column=1, value=f"Packet {pkt_idx + 1}").font = header_font
+                        ws_tu.cell(row=row, column=1, value=packet.packet_name).font = header_font
                         for q_idx, tossup in enumerate(tus):
                             answer = get_answer_no_formatting(
                                 get_primary_answer(tossup.tossup_answer)
@@ -3972,13 +3884,13 @@ def export_question_set(request, qset_id, output_format):
 
                     # Bonus answers sheet
                     ws_bo = wb.create_sheet("Bonus Answers")
-                    max_bo = max((len(p) for p in bo_packets), default=0)
+                    max_bo = max((len(p) for p in packet_bos), default=0)
                     ws_bo.cell(row=1, column=1, value="Packet").font = header_font
                     for col in range(1, max_bo + 1):
                         ws_bo.cell(row=1, column=col + 1, value=col).font = header_font
-                    for pkt_idx, bos in enumerate(bo_packets):
+                    for pkt_idx, (packet, bos) in enumerate(zip(packets, packet_bos)):
                         row = pkt_idx + 2
-                        ws_bo.cell(row=row, column=1, value=f"Packet {pkt_idx + 1}").font = header_font
+                        ws_bo.cell(row=row, column=1, value=packet.packet_name).font = header_font
                         for q_idx, bonus in enumerate(bos):
                             answers = []
                             for part_num in range(1, 4):
@@ -3993,27 +3905,62 @@ def export_question_set(request, qset_id, output_format):
                     for col_idx in range(1, max_bo + 2):
                         ws_bo.column_dimensions[ws_bo.cell(row=1, column=col_idx).column_letter].width = 24
 
+                    # Unpacketed questions (if any) go into a trailing document,
+                    # kept out of the per-packet answer matrix.
+                    unpacketed_tus = list(
+                        Tossup.objects.filter(packet__isnull=True, question_set=qset)
+                        .select_related('category', 'author', 'editor')
+                        .order_by('question_number'))
+                    unpacketed_bos = list(
+                        Bonus.objects.filter(packet__isnull=True, question_set=qset)
+                        .select_related('category', 'author', 'editor')
+                        .order_by('question_number'))
+
+                    def _safe_filename(name):
+                        return re.sub(r'[\\/:*?"<>|]', '_', name or 'Packet').strip() or 'Packet'
+
                     # Package everything into a zip
                     zip_buf = io.BytesIO()
                     with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
-                        for pkt_idx in range(max_packets):
+                        used_names = set()
+                        for packet, tus, bos in zip(packets, packet_tus, packet_bos):
                             document = new_docx()
-                            document.add_heading('{0} Packet {1}'.format(qset.name, pkt_idx + 1), level=1)
-
-                            tus = tu_packets[pkt_idx]
+                            document.add_heading(
+                                '{0} {1}'.format(qset.name, packet.packet_name), level=1)
                             if tus:
                                 document.add_heading('Tossups', level=2)
                                 for i, tossup in enumerate(tus, 1):
-                                    add_tossup_to_doc(document, tossup, i)
-
-                            bos = bo_packets[pkt_idx]
+                                    add_tossup_to_doc(
+                                        document, tossup, tossup.question_number or i)
                             if bos:
                                 document.add_heading('Bonuses', level=2)
                                 for i, bonus in enumerate(bos, 1):
-                                    add_bonus_to_doc(document, bonus, i)
+                                    add_bonus_to_doc(
+                                        document, bonus, bonus.question_number or i)
+                            base = _safe_filename(packet.packet_name)
+                            fname = base
+                            n = 2
+                            while fname in used_names:
+                                fname = '{0} ({1})'.format(base, n)
+                                n += 1
+                            used_names.add(fname)
+                            zf.writestr(f"{fname}.docx", save_docx_bytes(document))
 
-                            zf.writestr(f"Packet {pkt_idx + 1}.docx",
-                                        save_docx_bytes(document))
+                        if unpacketed_tus or unpacketed_bos:
+                            document = new_docx()
+                            document.add_heading(
+                                '{0} Unpacketed'.format(qset.name), level=1)
+                            if unpacketed_tus:
+                                document.add_heading('Tossups', level=2)
+                                for i, tossup in enumerate(unpacketed_tus, 1):
+                                    add_tossup_to_doc(
+                                        document, tossup, tossup.question_number or i)
+                            if unpacketed_bos:
+                                document.add_heading('Bonuses', level=2)
+                                for i, bonus in enumerate(unpacketed_bos, 1):
+                                    add_bonus_to_doc(
+                                        document, bonus, bonus.question_number or i)
+                            zf.writestr("Unpacketed.docx", save_docx_bytes(document))
 
                         # Add answer matrix
                         xlsx_buf = io.BytesIO()
