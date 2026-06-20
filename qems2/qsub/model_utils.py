@@ -373,6 +373,57 @@ def get_question_type_from_string(question_type):
 QUESTION_LIST_RELATED = ('category', 'author__user', 'editor__user', 'packet',
                          'question_set', 'question_type')
 
+def mark_discord_comments(comments):
+    """Tag each comment with ``.is_discord`` and ``.discord_thread_url`` so
+    templates can show Discord (bot) comments apart from human ones and link
+    straight to the playtest thread.
+
+    A comment is treated as a Discord comment when it has a DiscordCommentRef
+    (the authoritative marker) or, as a fallback, when it was posted with no
+    user under the bot's display name. The thread url is the Discord thread on
+    the comment's own question, if any. Accepts comments spanning several
+    questions; runs a small fixed number of queries. Returns the same list."""
+    comments = list(comments)
+    if not comments:
+        return comments
+
+    ref_ids = set(DiscordCommentRef.objects
+                  .filter(comment_id__in=[c.id for c in comments])
+                  .values_list('comment_id', flat=True))
+
+    tu_ct = ContentType.objects.get_for_model(Tossup).id
+    bs_ct = ContentType.objects.get_for_model(Bonus).id
+
+    tu_ids, bs_ids = set(), set()
+    for c in comments:
+        c.is_discord = (c.id in ref_ids or
+                        (c.user_id is None and c.user_name == DISCORD_BOT_NAME))
+        if c.is_discord:
+            try:
+                pk = int(c.object_pk)
+            except (TypeError, ValueError):
+                continue
+            (tu_ids if c.content_type_id == tu_ct else bs_ids).add(pk)
+
+    thread_by_q = {}  # (content_type_id, question_id) -> first thread url
+    if tu_ids:
+        for th in DiscordThread.objects.filter(tossup_id__in=tu_ids).order_by('id'):
+            thread_by_q.setdefault((tu_ct, th.tossup_id), th.url)
+    if bs_ids:
+        for th in DiscordThread.objects.filter(bonus_id__in=bs_ids).order_by('id'):
+            thread_by_q.setdefault((bs_ct, th.bonus_id), th.url)
+
+    for c in comments:
+        url = ''
+        if c.is_discord:
+            try:
+                url = thread_by_q.get((c.content_type_id, int(c.object_pk)), '')
+            except (TypeError, ValueError):
+                url = ''
+        c.discord_thread_url = url
+    return comments
+
+
 def attach_question_comments(tossup_dict, bonus_dict):
     """Bulk-load the comments for the given questions and attach them as
     .cached_comments (non-removed, oldest first), replacing one query per
@@ -395,6 +446,7 @@ def attach_question_comments(tossup_dict, bonus_dict):
 
     comments = (Comment.objects.filter(comment_filter, is_removed=False)
                 .select_related('user').order_by('submit_date'))
+    comments = mark_discord_comments(comments)
     for comment in comments:
         question_dict = tossup_dict if comment.content_type_id == tossup_ct else bonus_dict
         question = question_dict.get(int(comment.object_pk))
@@ -458,6 +510,7 @@ def get_comment_tab_list(tossup_dict, bonus_dict, comment_limit=60):
 
     comments = (Comment.objects.filter(comment_filter, is_removed=False)
                 .select_related('user').order_by('-submit_date')[:comment_limit])
+    comments = mark_discord_comments(comments)
     for comment in comments:
         if (comment.content_type_id == tossup_content_type_id):
             tossup = tossup_dict[int(comment.object_pk)]

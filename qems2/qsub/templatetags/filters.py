@@ -294,12 +294,15 @@ def get_threaded_comments(obj):
     Returns a dict with 'top_level' (list of comments) and 'replies' (dict of parent_id -> [comments]).
     Usage: {% get_threaded_comments obj as thread_data %}
     """
+    from qems2.qsub.model_utils import mark_discord_comments
     content_type = ContentType.objects.get_for_model(obj)
-    all_comments = Comment.objects.filter(
+    all_comments = list(Comment.objects.filter(
         content_type=content_type,
         object_pk=str(obj.pk),
         is_removed=False,
-    ).order_by('submit_date')
+    ).order_by('submit_date'))
+    # Tag bot comments (.is_discord / .discord_thread_url) for the template.
+    mark_discord_comments(all_comments)
 
     # Get all reply mappings
     reply_comment_ids = set()

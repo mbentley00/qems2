@@ -1361,3 +1361,305 @@ class StyleCheckFixTests(TestCase):
             'code': 'pronunciation', 'token': 'Question|Goethe', 'action': 'restore'})
         self.assertFalse(StyleIssueDismissal.objects.filter(
             question_id=self.tu.id, code='pronunciation').exists())
+
+
+class YappAnswerCategoryImportTests(TestCase):
+    """Categories embedded in YAPP answer lines (e.g. ANSWER: _x_ <Biology>)
+    are parsed, mapped onto existing set categories, and generated for new sets."""
+
+    def setUp(self):
+        import json as _json
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        self._json = _json
+        self._Upload = SimpleUploadedFile
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        QuestionType.objects.get_or_create(question_type=VHSL_BONUS)
+        self.user, _ = User.objects.get_or_create(username="yapp_importer")
+        self.writer = Writer.objects.get(user=self.user.id)
+
+    def _file(self, name, payload):
+        data = self._json.dumps(payload).encode('utf-8')
+        return self._Upload(name, data, content_type='application/json')
+
+    def test_metadata_field_author_comma_category(self):
+        # The de-facto standard: a "<Author, Category - Subcategory>" line after
+        # the answer, which YAPP stores (brackets stripped) in `metadata`.
+        from qems2.qsub.packet_set_importer import import_packets_from_files
+        payload = {'tossups': [
+            {'question': 'A plant process. (*) Sugar.',
+             'answer': 'ANSWER: _Photosynthesis_',
+             'metadata': 'Jane Smith, Science - Biology'}]}
+        summary = import_packets_from_files(
+            [self._file('P.json', payload)], 'Meta Set', self.writer)
+        tu = Tossup.objects.get(question_set=summary['question_set'])
+        self.assertEqual((tu.category.category, tu.category.subcategory),
+                         ('Science', 'Biology'))
+
+    def test_metadata_field_category_without_author(self):
+        # "<Painting - 1900-2000>" form: no author, no comma.
+        from qems2.qsub.packet_set_importer import import_packets_from_files
+        payload = {'tossups': [
+            {'question': 'A famous work. (*) Oil on canvas.',
+             'answer': 'ANSWER: _The Scream_',
+             'metadata': 'Painting - 1900-2000'}]}
+        summary = import_packets_from_files(
+            [self._file('P.json', payload)], 'NoAuthor Set', self.writer)
+        tu = Tossup.objects.get(question_set=summary['question_set'])
+        self.assertEqual((tu.category.category, tu.category.subcategory),
+                         ('Painting', '1900-2000'))
+
+    def test_metadata_lone_token_stays_uncategorized(self):
+        # A bare "<Jane Smith>" is an author, not a category.
+        from qems2.qsub.packet_set_importer import import_packets_from_files
+        payload = {'tossups': [
+            {'question': 'Something. (*) here.',
+             'answer': 'ANSWER: _Thing_', 'metadata': 'Jane Smith'}]}
+        summary = import_packets_from_files(
+            [self._file('P.json', payload)], 'Lone Set', self.writer)
+        tu = Tossup.objects.get(question_set=summary['question_set'])
+        self.assertIsNone(tu.category)
+
+    def test_new_set_generates_categories_from_answer_line(self):
+        from qems2.qsub.packet_set_importer import import_packets_from_files
+        payload = {
+            'tossups': [
+                {'question': 'A plant process. (*) It makes sugar.',
+                 'answer': 'ANSWER: _Photosynthesis_ &lt;Biology&gt;', 'metadata': 'Jane Doe'},
+                {'question': 'A famous physicist. (*) Relativity.',
+                 'answer': 'ANSWER: _Einstein_ &lt;Science - Physics&gt;', 'metadata': ''},
+            ],
+            'bonuses': [
+                {'leadin': 'Answer these.', 'parts': ['Part one.', 'Part two.', 'Part three.'],
+                 'answers': ['_one_', '_two_', '_three_ &lt;History&gt;'], 'metadata': ''},
+            ],
+        }
+        summary = import_packets_from_files(
+            [self._file('Packet 1.json', payload)], 'YAPP Set', self.writer)
+        qset = summary['question_set']
+        self.assertEqual(summary['tossups'], 2)
+        self.assertEqual(summary['bonuses'], 1)
+
+        entries = {(e.category, e.subcategory)
+                   for e in DistributionEntry.objects.filter(distribution=qset.distribution)}
+        self.assertIn(('Biology', ''), entries)
+        self.assertIn(('Science', 'Physics'), entries)
+        self.assertIn(('History', ''), entries)
+
+        photo = Tossup.objects.get(tossup_answer__contains='Photosynthesis')
+        self.assertIsNotNone(photo.category)
+        self.assertEqual(photo.category.category, 'Biology')
+        # The trailing tag is stripped from the stored answer.
+        self.assertNotIn('Biology', photo.tossup_answer)
+        self.assertNotIn('&lt;', photo.tossup_answer)
+
+        bonus = Bonus.objects.get(question_set=qset)
+        self.assertEqual(bonus.category.category, 'History')
+        self.assertNotIn('History', bonus.part3_answer)
+
+    def test_existing_set_maps_answer_category_to_existing_entry(self):
+        from qems2.qsub.packet_set_importer import import_packets_into_set
+        dist = Distribution.objects.create(name='Existing Dist')
+        qset = QuestionSet.objects.create(
+            name='Existing Set', date=timezone.now(), host='', address='',
+            owner=self.writer, num_packets=1, distribution=dist)
+        existing = DistributionEntry.objects.create(
+            distribution=dist, category='Science', subcategory='Biology')
+        SetWideDistributionEntry.objects.create(
+            question_set=qset, dist_entry=existing, num_tossups=0, num_bonuses=0)
+
+        before = DistributionEntry.objects.filter(distribution=dist).count()
+        payload = {'tossups': [
+            {'question': 'A plant process. (*) Sugar.',
+             'answer': 'ANSWER: _Photosynthesis_ &lt;Biology&gt;', 'metadata': ''}]}
+        import_packets_into_set([self._file('Add.json', payload)], qset, self.writer)
+
+        # A bare "Biology" answer tag resolves onto "Science - Biology"; no dup.
+        self.assertEqual(DistributionEntry.objects.filter(distribution=dist).count(), before)
+        tu = Tossup.objects.get(question_set=qset)
+        self.assertEqual(tu.category_id, existing.id)
+
+
+class BuzzHistoryLinkTests(TestCase):
+    """Buzzes/results link to the question version current when they were
+    recorded — for web play and for Discord imports — via TossupBuzz.history_url."""
+
+    def setUp(self):
+        import json as _json
+        self._json = _json
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        self.acf_tu = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.acf_bn = QuestionType.objects.get(question_type=ACF_STYLE_BONUS)
+        self.owner_user = User.objects.create_user('bz_owner', password='pw', email='b@test.com')
+        self.owner = Writer.objects.get(user=self.owner_user)
+        self.dist = Distribution.objects.create(name='bz dist')
+        self.qset = QuestionSet.objects.create(
+            name='BZ Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        # Owners are added to the editor set in practice (the importer does this);
+        # the history view authorizes by writer/editor membership.
+        self.owner.question_set_editor.add(self.qset)
+        self.tu = Tossup(
+            author=self.owner, question_set=self.qset, question_type=self.acf_tu,
+            tossup_text='An early version of the stem. (*) The end.',
+            tossup_answer='_Photosynthesis_', question_number=1)
+        self.tu.save_question(edit_type=QUESTION_CREATE, changer=self.owner)
+        self.bn = Bonus(
+            author=self.owner, question_set=self.qset, question_type=self.acf_bn,
+            leadin='Name these.', part1_text='P1', part1_answer='_Alpha_',
+            part2_text='P2', part2_answer='_Beta_', part3_text='P3', part3_answer='_Gamma_',
+            question_number=1)
+        self.bn.save_question(edit_type=QUESTION_CREATE, changer=self.owner)
+
+    def test_latest_history_is_most_recent_version(self):
+        first = self.tu.latest_history()
+        self.tu.tossup_text = 'An edited version of the stem. (*) The end.'
+        self.tu.save_question(edit_type=QUESTION_EDIT, changer=self.owner)
+        second = self.tu.latest_history()
+        self.assertNotEqual(first.id, second.id)
+        self.assertGreater(second.id, first.id)
+
+    def test_web_buzz_links_to_current_version(self):
+        self.client.login(username='bz_owner', password='pw')
+        resp = self.client.post('/record_buzz/', {
+            'tossup_id': self.tu.id, 'correct': 'true', 'powered': 'false',
+            'neg': 'false', 'buzz_word_index': 3, 'total_words': 8, 'char_position': 20,
+            'answer_given': 'photosynthesis'})
+        self.assertTrue(self._json.loads(resp.content)['success'])
+        buzz = TossupBuzz.objects.get(tossup=self.tu)
+        self.assertIsNotNone(buzz.tossup_history_id)
+        self.assertEqual(buzz.tossup_history_id, self.tu.latest_history().id)
+        self.assertEqual(
+            buzz.history_url(),
+            '/tossup_history/{0}/?v={1}#version-{1}'.format(self.tu.id, buzz.tossup_history_id))
+
+    def test_buzz_keeps_old_version_after_question_is_edited(self):
+        self.client.login(username='bz_owner', password='pw')
+        self.client.post('/record_buzz/', {
+            'tossup_id': self.tu.id, 'correct': 'true', 'buzz_word_index': 2,
+            'total_words': 8, 'char_position': 10})
+        buzz = TossupBuzz.objects.get(tossup=self.tu)
+        played_version = buzz.tossup_history_id
+        # Edit the question after the buzz: the buzz still points at the old text.
+        self.tu.tossup_text = 'Totally rewritten. (*) Done.'
+        self.tu.save_question(edit_type=QUESTION_EDIT, changer=self.owner)
+        buzz.refresh_from_db()
+        self.assertEqual(buzz.tossup_history_id, played_version)
+        self.assertNotEqual(buzz.tossup_history_id, self.tu.latest_history().id)
+
+    def test_web_bonus_result_links_to_current_version(self):
+        self.client.login(username='bz_owner', password='pw')
+        resp = self.client.post('/record_bonus_result/', {
+            'bonus_id': self.bn.id, 'part1_correct': 'true',
+            'part2_correct': 'false', 'part3_correct': 'true'})
+        self.assertTrue(self._json.loads(resp.content)['success'])
+        result = BonusResult.objects.get(bonus=self.bn)
+        self.assertEqual(result.bonus_history_id, self.bn.latest_history().id)
+        self.assertEqual(
+            result.history_url(),
+            '/bonus_history/{0}/?v={1}#version-{1}'.format(self.bn.id, result.bonus_history_id))
+
+    def test_discord_buzz_links_to_current_version(self):
+        key = SetApiKey.objects.create(
+            question_set=self.qset, key=SetApiKey.generate_token(),
+            active=True, created_by=self.owner)
+        body = self._json.dumps({'events': [
+            {'external_id': 'd1', 'answer': 'Photosynthesis', 'player_name': 'Alice',
+             'buzz_word_index': 4, 'total_words': 8, 'correct': True}]})
+        resp = self.client.post('/api/v1/buzzes', data=body,
+                                content_type='application/json',
+                                HTTP_AUTHORIZATION='Bearer ' + key.key)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(self._json.loads(resp.content)['results'][0]['status'], 'recorded')
+        buzz = TossupBuzz.objects.get(external_id='d1')
+        self.assertEqual(buzz.source, PLAYTEST_SOURCE_DISCORD)
+        self.assertEqual(buzz.tossup_history_id, self.tu.latest_history().id)
+
+    def test_history_view_highlights_linked_version(self):
+        self.client.login(username='bz_owner', password='pw')
+        hid = self.tu.latest_history().id
+        resp = self.client.get('/tossup_history/{0}/?v={1}'.format(self.tu.id, hid))
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        self.assertIn('id="version-{0}"'.format(hid), html)
+        self.assertIn('history-version-highlight', html)
+
+
+class DiscordCommentDisplayTests(TestCase):
+    """Discord (bot) comments are distinguishable from human comments and carry
+    a link to the Discord thread."""
+
+    def setUp(self):
+        from django.contrib.contenttypes.models import ContentType
+        from django.contrib.sites.models import Site
+        from django_comments.models import Comment
+        self.Comment = Comment
+        self.site = Site.objects.get_current()
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.owner_user = User.objects.create_user('dc_owner', password='pw', email='d@test.com')
+        self.owner = Writer.objects.get(user=self.owner_user)
+        self.dist = Distribution.objects.create(name='dc dist')
+        self.qset = QuestionSet.objects.create(
+            name='DC Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.tu = Tossup.objects.create(
+            author=self.owner, question_set=self.qset,
+            tossup_text='Stem. (*) end.', tossup_answer='_Answer_',
+            created_date=datetime.now(), last_changed_date=datetime.now(), question_number=1)
+        self.tu_ct = ContentType.objects.get_for_model(Tossup)
+
+    def _comment(self, text, user=None, user_name=''):
+        return self.Comment.objects.create(
+            content_type=self.tu_ct, object_pk=str(self.tu.id), site=self.site,
+            user=user, user_name=user_name, comment=text, is_public=True, is_removed=False)
+
+    def test_ref_comment_marked_with_thread_url(self):
+        from qems2.qsub.model_utils import mark_discord_comments
+        thread = DiscordThread.objects.create(
+            question_set=self.qset, tossup=self.tu,
+            url='https://discord.com/channels/1/2/3', title='Thread')
+        bot = self._comment('From the bot', user=None, user_name=DISCORD_BOT_NAME)
+        DiscordCommentRef.objects.create(external_id='c1', comment=bot, question_set=self.qset)
+        human = self._comment('From a person', user=self.owner_user, user_name='')
+
+        mark_discord_comments([bot, human])
+        self.assertTrue(bot.is_discord)
+        self.assertEqual(bot.discord_thread_url, thread.url)
+        self.assertFalse(human.is_discord)
+        self.assertEqual(human.discord_thread_url, '')
+
+    def test_botname_fallback_without_ref(self):
+        from qems2.qsub.model_utils import mark_discord_comments
+        # No DiscordCommentRef, but posted under the bot name with no user.
+        bot = self._comment('orphaned bot comment', user=None, user_name=DISCORD_BOT_NAME)
+        mark_discord_comments([bot])
+        self.assertTrue(bot.is_discord)
+        # No thread recorded -> empty url, still flagged as Discord.
+        self.assertEqual(bot.discord_thread_url, '')
+
+    def test_threaded_comments_tag_marks_discord(self):
+        from qems2.qsub.templatetags.filters import get_threaded_comments
+        DiscordThread.objects.create(
+            question_set=self.qset, tossup=self.tu, url='https://discord.com/x', title='T')
+        bot = self._comment('bot', user=None, user_name=DISCORD_BOT_NAME)
+        DiscordCommentRef.objects.create(external_id='c2', comment=bot, question_set=self.qset)
+        data = get_threaded_comments(self.tu)
+        marked = {c.id: c for c in data['top_level']}
+        self.assertTrue(marked[bot.id].is_discord)
+        self.assertEqual(marked[bot.id].discord_thread_url, 'https://discord.com/x')
+
+    def test_edit_tossup_page_shows_discord_styling(self):
+        self.owner.question_set_editor.add(self.qset)
+        self.client.login(username='dc_owner', password='pw')
+        DiscordThread.objects.create(
+            question_set=self.qset, tossup=self.tu, url='https://discord.com/y', title='T')
+        bot = self._comment('bot says hi', user=None, user_name=DISCORD_BOT_NAME)
+        DiscordCommentRef.objects.create(external_id='c3', comment=bot, question_set=self.qset)
+        resp = self.client.get('/edit_tossup/{0}/'.format(self.tu.id))
+        html = resp.content.decode()
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('comment-discord', html)
+        self.assertIn('discord-badge', html)
+        self.assertIn('https://discord.com/y', html)
+        self.assertIn('toggle-discord-comments', html)  # the filter

@@ -704,6 +704,14 @@ class Tossup (models.Model):
 
         return tossups, bonuses
 
+    def latest_history(self):
+        """The most recent TossupHistory row (the version current right now), or
+        None if this tossup has no history yet."""
+        if self.question_history_id is None:
+            return None
+        return (TossupHistory.objects.filter(question_history_id=self.question_history_id)
+                .order_by('-id').first())
+
     def save_question(self, edit_type, changer):
 
         if (self.question_history is None):
@@ -720,7 +728,7 @@ class Tossup (models.Model):
         if (edit_type == QUESTION_PROOFREAD):
             self.proofreader = changer
             self.proofread_date = timezone.now()
-        
+
         self.tossup_answer = strip_answer_from_answer_line(self.tossup_answer)
         tossup_history = TossupHistory()
         tossup_history.tossup_text = self.tossup_text
@@ -1016,6 +1024,14 @@ class Bonus(models.Model):
 
         return tossups, bonuses
 
+    def latest_history(self):
+        """The most recent BonusHistory row (the version current right now), or
+        None if this bonus has no history yet."""
+        if self.question_history_id is None:
+            return None
+        return (BonusHistory.objects.filter(question_history_id=self.question_history_id)
+                .order_by('-id').first())
+
     def save_question(self, edit_type, changer):
         if (self.question_history is None):
             qh = QuestionHistory()
@@ -1223,6 +1239,10 @@ PLAYTEST_SOURCE_WEB = 'web'
 PLAYTEST_SOURCE_DISCORD = 'discord'
 PLAYTEST_SOURCES = ((PLAYTEST_SOURCE_WEB, 'Web'), (PLAYTEST_SOURCE_DISCORD, 'Discord'))
 
+# Display name the Discord playtest bot posts comments under (so its comments
+# can be recognized and styled apart from human ones even without a stored ref).
+DISCORD_BOT_NAME = 'Cliff'
+
 
 class PlaytestSession(models.Model):
     """One play-through of a set's questions, grouping the buzzes and bonus
@@ -1279,10 +1299,22 @@ class TossupBuzz(models.Model):
 
     source = models.CharField(max_length=20, choices=PLAYTEST_SOURCES,
                               default=PLAYTEST_SOURCE_WEB)
+    # The version of the tossup that was current when this buzz was recorded, so
+    # results can link straight to the exact text the player saw even after the
+    # question is later edited. Set on record (web and Discord import).
+    tossup_history = models.ForeignKey('TossupHistory', on_delete=models.SET_NULL,
+                                       null=True, blank=True, related_name='buzzes')
     # Stable id supplied by an external recorder (e.g. the Discord bot) so the
     # same buzz can be re-sent without being recorded twice. Blank for web play.
     external_id = models.CharField(max_length=200, blank=True, default='', db_index=True)
     buzz_date = models.DateTimeField(auto_now_add=True)
+
+    def history_url(self):
+        """Deep link to the version of the tossup this buzz was recorded on."""
+        if self.tossup_history_id is None:
+            return ''
+        return '/tossup_history/{0}/?v={1}#version-{1}'.format(
+            self.tossup_id, self.tossup_history_id)
 
     def buzz_fraction(self):
         """How far into the tossup the buzz happened, 0.0-1.0."""
@@ -1318,9 +1350,20 @@ class BonusResult(models.Model):
 
     source = models.CharField(max_length=20, choices=PLAYTEST_SOURCES,
                               default=PLAYTEST_SOURCE_WEB)
+    # The version of the bonus current when this result was recorded. See
+    # TossupBuzz.tossup_history.
+    bonus_history = models.ForeignKey('BonusHistory', on_delete=models.SET_NULL,
+                                      null=True, blank=True, related_name='results')
     # See TossupBuzz.external_id.
     external_id = models.CharField(max_length=200, blank=True, default='', db_index=True)
     answered_date = models.DateTimeField(auto_now_add=True)
+
+    def history_url(self):
+        """Deep link to the version of the bonus this result was recorded on."""
+        if self.bonus_history_id is None:
+            return ''
+        return '/bonus_history/{0}/?v={1}#version-{1}'.format(
+            self.bonus_id, self.bonus_history_id)
 
     def get_player_name(self):
         if self.player is not None:

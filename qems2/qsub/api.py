@@ -26,12 +26,10 @@ from django_comments.models import Comment
 
 from .models import (
     QuestionSet, Tossup, Bonus, TossupBuzz, BonusResult, PlaytestSession,
-    SetApiKey, DiscordCommentRef, DiscordThread, PLAYTEST_SOURCE_DISCORD)
+    TossupHistory, BonusHistory,
+    SetApiKey, DiscordCommentRef, DiscordThread, PLAYTEST_SOURCE_DISCORD,
+    DISCORD_BOT_NAME)
 from .utils import get_answer_no_formatting, get_primary_answer
-
-
-# Display name for comments posted by the Discord playtest bot.
-DISCORD_BOT_NAME = 'Cliff'
 
 
 # --- helpers -----------------------------------------------------------------
@@ -115,6 +113,20 @@ def _bonus_index(qset):
         for f in forms:
             idx[f].add(b.id)
     return idx
+
+
+def _latest_history_ids(model, history_model, question_ids):
+    """Map each question id to the id of its current (most recent) history row,
+    so imported buzzes/results can link to the version that was current at import
+    time. Two queries total regardless of how many questions."""
+    qh_by_q = dict(model.objects.filter(id__in=question_ids)
+                   .values_list('id', 'question_history_id'))
+    qh_ids = [qh for qh in qh_by_q.values() if qh]
+    latest_by_qh = {}
+    for hid, qh in (history_model.objects.filter(question_history_id__in=qh_ids)
+                    .order_by('id').values_list('id', 'question_history_id')):
+        latest_by_qh[qh] = hid  # ascending order leaves the largest id last
+    return {qid: latest_by_qh.get(qh) for qid, qh in qh_by_q.items()}
 
 
 def _resolve(idx, answer):
@@ -207,6 +219,10 @@ def api_buzzes(request):
     seen = set(TossupBuzz.objects.filter(external_id__in=eids)
                .values_list('external_id', flat=True)) if eids else set()
 
+    # Current question version per matched tossup, fetched once (see history_url).
+    resolved_ids = [_resolve(idx, e.get('answer'))[1] for e in events if isinstance(e, dict)]
+    hist_ids = _latest_history_ids(Tossup, TossupHistory, [q for q in resolved_ids if q])
+
     results = []
     for e in events:
         if not isinstance(e, dict):
@@ -238,6 +254,7 @@ def api_buzzes(request):
             char_position=_int(e.get('char_position')),
             correct=correct, powered=powered, value=value,
             answer_given=(e.get('answer_given') or '')[:1000],
+            tossup_history_id=hist_ids.get(qid),
             source=PLAYTEST_SOURCE_DISCORD, external_id=eid)
         if eid:
             seen.add(eid)
@@ -260,6 +277,10 @@ def api_bonus_results(request):
     eids = [e.get('external_id') for e in events if isinstance(e, dict) and e.get('external_id')]
     seen = set(BonusResult.objects.filter(external_id__in=eids)
                .values_list('external_id', flat=True)) if eids else set()
+
+    # Current question version per matched bonus, fetched once (see history_url).
+    resolved_ids = [_resolve(idx, e.get('answer'))[1] for e in events if isinstance(e, dict)]
+    hist_ids = _latest_history_ids(Bonus, BonusHistory, [q for q in resolved_ids if q])
 
     results = []
     for e in events:
@@ -284,6 +305,7 @@ def api_bonus_results(request):
             bonus_id=qid, session=_discord_session(qset, name), player=None,
             player_name=name, part1_correct=p1, part2_correct=p2, part3_correct=p3,
             total=10 * sum((p1, p2, p3)),
+            bonus_history_id=hist_ids.get(qid),
             source=PLAYTEST_SOURCE_DISCORD, external_id=eid)
         if eid:
             seen.add(eid)

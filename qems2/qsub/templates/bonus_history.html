@@ -30,10 +30,13 @@
 
 {% autoescape off %}
     {% for bh in bonus_histories %}
+        <div id="version-{{ bh.id }}" class="history-version{% if highlight_version == bh.id|stringformat:'s' %} history-version-highlight{% endif %}">
+        {% if highlight_version == bh.id|stringformat:'s' %}<div class="history-version-badge">Version played for the linked result</div>{% endif %}
         {{ bh|bonus_html }}
         {% if not read_only %}
             <a href="/restore_bonus/" class="restore_bonus button primary" value="{{ bh.id }}" qset="{{ qset.id }}">Restore this version</a>
         {% endif %}
+        </div>
     {% endfor %}
 
     {% for th in tossup_histories %}
@@ -45,6 +48,12 @@
         {% endif %}
     {% endfor %}
 {% endautoescape %}
+
+<style>
+.history-version { padding: 0.25rem 0.5rem; margin-bottom: 0.5rem; }
+.history-version-highlight { border: 2px solid #1565c0; border-radius: 4px; background: #e8f1fb; }
+.history-version-badge { color: #1565c0; font-weight: bold; margin-bottom: 0.25rem; }
+</style>
 
 {% include "dialog.html" %}
 

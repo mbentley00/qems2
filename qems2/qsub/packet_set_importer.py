@@ -6,8 +6,11 @@ Each uploaded file becomes one packet. Three input formats are supported:
   (https://github.com/alopezlago/YetAnotherPacketParser). This is the most
   reliable path: questions are already cleanly separated with HTML formatting,
   so we just convert that HTML to QEMS markup. Each question's category is read
-  from its ``metadata`` ("Author, Category - Subcategory") and a distribution is
-  built from the categories seen.
+  from its ``metadata`` ("Author, Category - Subcategory"), falling back to a
+  category tag left in the answer line itself (e.g. ``ANSWER: _x_ <Biology>``),
+  and a distribution is built from the categories seen. When adding to an
+  existing set those categories are mapped onto its distribution (a bare
+  "Biology" onto a "Science - Biology" entry); for a new set they are generated.
 * **.docx / .pdf** &mdash; best-effort plain-text parsing (standard ACF layout:
   numbered tossups + ``ANSWER:`` lines, numbered bonuses with ``[10]`` parts).
   Real packets vary a lot, so prefer the JSON path when available.
@@ -159,50 +162,206 @@ def _split_metadata(meta):
     return author, cat, ''
 
 
-def _tally_category(counts, meta, idx):
-    _author, cat, sub = _split_metadata(meta)
-    if cat:
-        counts.setdefault((cat, sub), [0, 0])[idx] += 1
+def _metadata_category(meta):
+    """(category, subcategory) from a YAPP ``metadata`` string, or None.
+
+    YAPP recognizes a line after the answer that starts with ``<...>`` as
+    "post-question metadata", strips the angle brackets, and stores the inner
+    text verbatim in this field. The de-facto convention is
+    ``<Author, Category - Subcategory>``, so:
+
+      * with a comma  -> text after the first comma is the category path;
+      * no comma but ``' - '`` -> the whole string is ``Category - Subcategory``
+        (e.g. ``<Painting - 1900-2000>``, which carries no author);
+      * a lone token (no comma, no ``' - '``) -> treated as an author, leaving
+        the question uncategorized rather than inventing a category from a name.
+    """
+    meta = (meta or '').strip()
+    # Tolerate a metadata value that still has its surrounding angle brackets.
+    if meta.startswith('<') and meta.endswith('>'):
+        meta = meta[1:-1].strip()
+    if not meta:
+        return None
+    if ',' in meta:
+        _author, cat, sub = _split_metadata(meta)
+        return (cat, sub) if cat else None
+    if ' - ' in meta:
+        cat, sub = meta.split(' - ', 1)
+        cat, sub = cat.strip(), sub.strip()
+        return (cat, sub) if cat else None
+    return None
 
 
-def _build_distribution_from_metadata(qset, payloads):
-    """Create DistributionEntry + SetWideDistributionEntry rows from the
-    categories seen across all YAPP payloads. Returns {(cat, sub): entry}."""
+# --- category tags embedded in the answer line ----------------------------
+#
+# Some packets don't separate the trailing category tag into YAPP's
+# ``metadata`` field — it stays at the end of the answer itself, e.g.
+# ``ANSWER: _Photosynthesis_ <Biology>`` or ``<Ed. Smith, Science - Biology>``.
+# YAPP escapes those angle brackets (``&lt;...&gt;``) since they aren't real
+# formatting, but some files keep them literal; we handle both, plus ``{...}``.
+
+# Tags whose first token is a real HTML/formatting tag aren't categories.
+_FORMATTING_TAGS = {'b', 'strong', 'u', 'em', 'i', 'sup', 'sub', 'br',
+                    'span', 'p', 'a', 'div'}
+
+# A plausible category tag: letters present, no sentence-like content / URLs,
+# and only characters that show up in category names.
+_CATEGORY_TAG_RE = re.compile(r"^[\w ,/&()'.\-–]+$")
+
+_TRAIL_TAG_RES = (
+    re.compile(r'&lt;(?P<i>.*?)&gt;\s*$'),
+    re.compile(r'<(?P<i>[^<>]*?)>\s*$'),
+    re.compile(r'\{(?P<i>[^{}]*?)\}\s*$'),
+)
+
+
+def _parse_category_tag(inner):
+    """Parse the inside of a ``<...>`` answer tag into (category, subcategory),
+    or None if it doesn't look like a category. Unlike question ``metadata``,
+    an answer tag with no comma is the category itself (not an author)."""
+    if '<' in inner or '&' in inner:        # only parse if it can carry markup
+        inner = BeautifulSoup(inner, 'html.parser').get_text()
+    inner = inner.strip()
+    if not inner or len(inner) > 60 or not re.search(r'[A-Za-z]', inner):
+        return None
+    if not _CATEGORY_TAG_RE.match(inner):
+        return None
+    if ',' in inner:
+        # "Author, Category - Subcategory" style.
+        _author, cat, sub = _split_metadata(inner)
+    elif ' - ' in inner:
+        cat, sub = inner.split(' - ', 1)
+    else:
+        cat, sub = inner, ''
+    cat, sub = cat.strip(), sub.strip()
+    return (cat, sub) if cat else None
+
+
+def _split_answer_category(answer_html):
+    """Return ``(answer_html_without_tag, (cat, sub) or None)``. Pulls a
+    trailing category tag off the answer so it doesn't clutter the stored
+    answer, and reports the category it carried."""
+    if not answer_html:
+        return answer_html, None
+    for rx in _TRAIL_TAG_RES:
+        m = rx.search(answer_html)
+        if not m:
+            continue
+        inner = m.group('i').strip()
+        # Ignore opening/closing formatting tags (<b>, </sup>, ...).
+        first = inner.lstrip('/').split()[0].rstrip('/').lower() if inner else ''
+        if first in _FORMATTING_TAGS:
+            continue
+        cat_sub = _parse_category_tag(inner)
+        if cat_sub:
+            return answer_html[:m.start()].rstrip(), cat_sub
+    return answer_html, None
+
+
+def _answer_category_for_question(q, is_bonus):
+    """The category carried by a question's answer line(s), or None. Bonuses
+    have one tag per the convention, usually after the last part."""
+    answers = (q.get('answers') or []) if is_bonus else [q.get('answer', '')]
+    for a in reversed(answers):
+        _stripped, cat_sub = _split_answer_category(a)
+        if cat_sub:
+            return cat_sub
+    return None
+
+
+def _find_entry(cat, sub, lookup):
+    """Map a (category, subcategory) onto an existing distribution entry,
+    tolerating case and partial paths (e.g. a bare ``Biology`` from an answer
+    line resolving to a ``Science - Biology`` entry). Returns the entry or
+    None. `lookup` is keyed by exact (category, subcategory)."""
+    cat_l, sub_l = cat.strip().lower(), sub.strip().lower()
+    items = [((c.strip().lower(), s.strip().lower()), e) for (c, s), e in lookup.items()]
+    for (c, s), e in items:                      # exact (case-insensitive)
+        if c == cat_l and s == sub_l:
+            return e
+    if not sub_l:                                # single token: cat or sub match
+        for (c, s), e in items:
+            if cat_l == c or cat_l == s:
+                return e
+    else:
+        for (c, s), e in items:                  # subcategory match, same/empty cat
+            if sub_l == s and (cat_l == c or not c):
+                return e
+        for (c, s), e in items:                  # subcategory match, any cat
+            if sub_l == s:
+                return e
+    return None
+
+
+def _question_category(q, is_bonus, lookup):
+    """Resolve the distribution entry for a YAPP question, preferring its
+    ``metadata`` category and falling back to a tag in the answer line."""
+    cs = _metadata_category(q.get('metadata')) or _answer_category_for_question(q, is_bonus)
+    return _find_entry(cs[0], cs[1], lookup) if cs else None
+
+
+def _prepare_yapp_categories(qset, json_payloads, lookup, is_new):
+    """Ensure every category referenced by the YAPP payloads — whether in the
+    ``metadata`` field or embedded in an answer line — exists in the set's
+    distribution, extending `lookup` in place. Metadata categories are treated
+    as canonical, so answer-line categories are merged onto them when they
+    resolve (a bare ``Biology`` onto an existing ``Science - Biology``) rather
+    than creating duplicates. For a brand-new set, seeds the per-category
+    tossup/bonus counts; existing sets keep their distribution targets."""
     counts = {}
-    for payload in payloads:
-        for t in payload.get('tossups') or []:
-            _tally_category(counts, t.get('metadata'), 0)
-        for b in payload.get('bonuses') or []:
-            _tally_category(counts, b.get('metadata'), 1)
-    lookup = {}
-    for (cat, sub), (n_tu, n_bs) in counts.items():
-        entry = DistributionEntry.objects.create(
-            distribution=qset.distribution, category=cat, subcategory=sub)
-        SetWideDistributionEntry.objects.create(
-            question_set=qset, dist_entry=entry, num_tossups=n_tu, num_bonuses=n_bs)
-        lookup[(cat, sub)] = entry
+
+    def resolve_or_create(cat, sub, idx):
+        entry = _find_entry(cat, sub, lookup)
+        if entry is None:
+            entry = DistributionEntry.objects.create(
+                distribution=qset.distribution, category=cat, subcategory=sub)
+            SetWideDistributionEntry.objects.create(
+                question_set=qset, dist_entry=entry, num_tossups=0, num_bonuses=0)
+            lookup[(cat, sub)] = entry
+        counts.setdefault(entry.id, [0, 0])[idx] += 1
+
+    # Pass 1: metadata categories establish the canonical entries. Defer the
+    # questions that only carry a category in the answer line.
+    answer_only = []
+    for payload in json_payloads:
+        for idx, key in ((0, 'tossups'), (1, 'bonuses')):
+            for q in payload.get(key) or []:
+                cs = _metadata_category(q.get('metadata'))
+                if cs:
+                    resolve_or_create(cs[0], cs[1], idx)
+                else:
+                    acs = _answer_category_for_question(q, is_bonus=(idx == 1))
+                    if acs:
+                        answer_only.append((acs[0], acs[1], idx))
+
+    # Pass 2: answer-line categories, merged onto the metadata ones above.
+    for cat, sub, idx in answer_only:
+        resolve_or_create(cat, sub, idx)
+
+    if is_new:
+        for entry_id, (n_tu, n_bs) in counts.items():
+            SetWideDistributionEntry.objects.filter(dist_entry_id=entry_id).update(
+                num_tossups=n_tu, num_bonuses=n_bs)
     return lookup
 
 
 # --- YAPP question builders ------------------------------------------------
 
-def _yapp_category(meta, lookup):
-    _author, cat, sub = _split_metadata(meta)
-    return lookup.get((cat, sub)) if cat else None
-
 
 def _build_tossup_from_yapp(t, qset, owner, acf_type, lookup):
+    answer_html, _cat = _split_answer_category(t.get('answer', ''))
     return Tossup(
         question_set=qset,
         tossup_text=_html_to_qems(t.get('question', ''), is_answer=False),
-        tossup_answer=_html_to_qems(t.get('answer', ''), is_answer=True),
-        category=_yapp_category(t.get('metadata'), lookup),
+        tossup_answer=_html_to_qems(answer_html, is_answer=True),
+        category=_question_category(t, is_bonus=False, lookup=lookup),
         author=owner, question_type=acf_type, locked=False, edited=False)
 
 
 def _build_bonus_from_yapp(b, qset, owner, acf_type, lookup):
     parts = b.get('parts') or []
-    answers = b.get('answers') or []
+    # Strip any trailing category tag off the part answers before conversion.
+    answers = [_split_answer_category(a)[0] for a in (b.get('answers') or [])]
     diffs = b.get('difficultyModifiers') or []
 
     def part(i):
@@ -221,7 +380,7 @@ def _build_bonus_from_yapp(b, qset, owner, acf_type, lookup):
         part1_text=part(0), part1_answer=ans(0), part1_difficulty=diff(0),
         part2_text=part(1), part2_answer=ans(1), part2_difficulty=diff(1),
         part3_text=part(2), part3_answer=ans(2), part3_difficulty=diff(2),
-        category=_yapp_category(b.get('metadata'), lookup),
+        category=_question_category(b, is_bonus=True, lookup=lookup),
         author=owner, question_type=acf_type, locked=False, edited=False)
 
 
@@ -537,27 +696,6 @@ def _unique_packet_name(name, used):
     return '{0} ({1})'.format(name, i)
 
 
-def _lookup_for_existing_set(qset, json_payloads):
-    """Map (category, subcategory) -> DistributionEntry for the set's existing
-    distribution, extended with any new categories seen in the JSON metadata
-    (added to the set's distribution so the imported questions can be filed)."""
-    lookup = {(e.category, e.subcategory): e
-              for e in DistributionEntry.objects.filter(distribution=qset.distribution)}
-    needed = set()
-    for payload in json_payloads:
-        for q in (payload.get('tossups') or []) + (payload.get('bonuses') or []):
-            _a, cat, sub = _split_metadata(q.get('metadata'))
-            if cat and (cat, sub) not in lookup:
-                needed.add((cat, sub))
-    for (cat, sub) in needed:
-        entry = DistributionEntry.objects.create(
-            distribution=qset.distribution, category=cat, subcategory=sub)
-        SetWideDistributionEntry.objects.create(
-            question_set=qset, dist_entry=entry, num_tossups=0, num_bonuses=0)
-        lookup[(cat, sub)] = entry
-    return lookup
-
-
 def import_packets_into_set(uploaded_files, qset, owner):
     """Add packets (one per uploaded file) to an EXISTING question set."""
     return import_packets_from_files(uploaded_files, owner=owner, existing_qset=qset)
@@ -588,12 +726,16 @@ def import_packets_from_files(uploaded_files, set_name=None, owner=None, existin
                     owner=owner, num_packets=len([p for p in prepared if 'error' not in p]) or 1,
                     distribution=distribution)
                 owner.question_set_editor.add(qset)
-                category_lookup = _build_distribution_from_metadata(qset, json_payloads)
+                category_lookup = {}
+                _prepare_yapp_categories(qset, json_payloads, category_lookup, is_new=True)
                 _ensure_categories(qset, docx_categories, category_lookup)
                 used_names = set()
             else:
                 qset = existing_qset
-                category_lookup = _lookup_for_existing_set(qset, json_payloads)
+                category_lookup = {
+                    (e.category, e.subcategory): e
+                    for e in DistributionEntry.objects.filter(distribution=qset.distribution)}
+                _prepare_yapp_categories(qset, json_payloads, category_lookup, is_new=False)
                 _ensure_categories(qset, docx_categories, category_lookup)
                 used_names = set(p.packet_name for p in qset.packet_set.all())
 

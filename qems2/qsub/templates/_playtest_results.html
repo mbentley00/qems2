@@ -10,7 +10,7 @@
     <span class="pt-stat">Avg buzz: <strong>{{ playtest.avg_buzz }}</strong> in</span>
 </div>
 <table class="table-striped playtest-table">
-    <thead><tr><th>When</th><th>Player</th><th>Result</th><th>Buzz point</th><th>Answer given</th><th>Heard up to buzz</th><th>Source</th></tr></thead>
+    <thead><tr><th>When</th><th>Player</th><th>Result</th><th>Buzz point</th><th>Answer given</th><th>Heard up to buzz</th><th>Source</th><th>Version</th></tr></thead>
     <tbody>
     {% for r in playtest.rows %}
         <tr>
@@ -21,6 +21,7 @@
             <td>{{ r.answer_given }}</td>
             <td class="pt-heard">{{ r.heard }}</td>
             <td>{{ r.source }}</td>
+            <td>{% if r.history_url %}<a href="{{ r.history_url }}" title="View the version of this question played for this buzz">version</a>{% else %}&mdash;{% endif %}</td>
         </tr>
     {% endfor %}
     </tbody>
@@ -34,7 +35,7 @@
     <span class="pt-stat">Part 3: <strong>{{ playtest.p3 }}</strong></span>
 </div>
 <table class="table-striped playtest-table">
-    <thead><tr><th>When</th><th>Player</th><th>Part 1</th><th>Part 2</th><th>Part 3</th><th>Total</th><th>Source</th></tr></thead>
+    <thead><tr><th>When</th><th>Player</th><th>Part 1</th><th>Part 2</th><th>Part 3</th><th>Total</th><th>Source</th><th>Version</th></tr></thead>
     <tbody>
     {% for r in playtest.rows %}
         <tr>
@@ -45,6 +46,7 @@
             <td>{% if r.p3 %}<span class="result-correct">10</span>{% else %}<span class="result-wrong">0</span>{% endif %}</td>
             <td><strong>{{ r.total }}</strong></td>
             <td>{{ r.source }}</td>
+            <td>{% if r.history_url %}<a href="{{ r.history_url }}" title="View the version of this question played for this result">version</a>{% else %}&mdash;{% endif %}</td>
         </tr>
     {% endfor %}
     </tbody>

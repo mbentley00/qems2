@@ -4177,6 +4177,7 @@ def tossup_history(request, tossup_id):
                                          'tossup': tossup,
                                          'tossup_histories': tossup_histories,
                                          'bonus_histories': bonus_histories,
+                                         'highlight_version': request.GET.get('v', ''),
                                          'message': message,
                                          'message_class': message_class})
 
@@ -4225,6 +4226,7 @@ def bonus_history(request, bonus_id):
                                          'bonus': bonus,
                                          'tossup_histories': tossup_histories,
                                          'bonus_histories': bonus_histories,
+                                         'highlight_version': request.GET.get('v', ''),
                                          'message': message,
                                          'message_class': message_class})
 
@@ -6425,7 +6427,7 @@ def record_buzz(request):
         buzz_word_index=buzz_word_index, total_words=total_words,
         char_position=char_position, correct=correct, powered=powered and correct,
         value=value, answer_given=request.POST.get('answer_given', '')[:1000],
-        source=PLAYTEST_SOURCE_WEB)
+        tossup_history=tossup.latest_history(), source=PLAYTEST_SOURCE_WEB)
 
     return HttpResponse(json.dumps({'success': True, 'session_id': session.id, 'value': value}))
 
@@ -6454,7 +6456,7 @@ def record_bonus_result(request):
     BonusResult.objects.create(
         bonus=bonus, session=session, player=user,
         part1_correct=p1, part2_correct=p2, part3_correct=p3, total=total,
-        source=PLAYTEST_SOURCE_WEB)
+        bonus_history=bonus.latest_history(), source=PLAYTEST_SOURCE_WEB)
 
     return HttpResponse(json.dumps({'success': True, 'session_id': session.id, 'total': total}))
 
@@ -6484,7 +6486,8 @@ def _question_buzz_data(question, qtype):
                 'player': b.get_player_name(), 'date': b.buzz_date,
                 'correct': b.correct, 'powered': b.powered, 'value': b.value,
                 'fraction': '{0:.0f}%'.format(100.0 * b.buzz_fraction()),
-                'answer_given': b.answer_given, 'heard': heard, 'source': b.source})
+                'answer_given': b.answer_given, 'heard': heard, 'source': b.source,
+                'history_url': b.history_url()})
         return {
             'qtype': 'tossup', 'plays': len(buzzes), 'correct': len(correct),
             'powers': len(powers), 'negs': len(negs),
@@ -6499,7 +6502,8 @@ def _question_buzz_data(question, qtype):
     rows = [{
         'player': r.get_player_name(), 'date': r.answered_date,
         'p1': r.part1_correct, 'p2': r.part2_correct, 'p3': r.part3_correct,
-        'total': r.total, 'source': r.source} for r in results]
+        'total': r.total, 'source': r.source, 'history_url': r.history_url()}
+        for r in results]
     return {
         'qtype': 'bonus', 'plays': n,
         'avg_points': '{0:.1f}'.format(sum(r.total for r in results) / n),

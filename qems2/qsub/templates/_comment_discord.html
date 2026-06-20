@@ -1,0 +1,35 @@
+{% comment %}
+Styling + a show/hide filter for Discord (bot) comments. Include once per page
+that lists comments. Discord comments are expected to carry the `comment-discord`
+class; the toggle flips a body class that hides them, remembered in localStorage.
+{% endcomment %}
+<style>
+.comment-discord { border-left: 3px solid #5865F2; background: #f5f6ff; padding-left: 0.5rem; }
+tr.comment-discord { background: #f5f6ff; }
+.discord-badge { display:inline-block; background:#5865F2; color:#fff; font-size:0.7rem;
+    font-weight:bold; padding:0 0.35rem; border-radius:3px; vertical-align:middle; margin-right:0.25rem; }
+.discord-thread-link { font-size:0.85rem; margin-left:0.4rem; white-space:nowrap; }
+.discord-filter { display:inline-block; font-weight:normal; font-size:0.9rem; margin:0.25rem 0 0.5rem; }
+body.comments-hide-discord .comment-discord { display:none; }
+</style>
+<label class="discord-filter"><input type="checkbox" class="toggle-discord-comments"> Hide Discord (bot) comments</label>
+<script>
+(function(){
+    var KEY = 'qemsHideDiscordComments';
+    function apply(on){ document.body.classList.toggle('comments-hide-discord', on); }
+    document.addEventListener('DOMContentLoaded', function(){
+        var on = localStorage.getItem(KEY) === '1';
+        var boxes = document.querySelectorAll('.toggle-discord-comments');
+        boxes.forEach(function(cb){ cb.checked = on; });
+        apply(on);
+        boxes.forEach(function(cb){
+            cb.addEventListener('change', function(){
+                var v = cb.checked;
+                localStorage.setItem(KEY, v ? '1' : '0');
+                document.querySelectorAll('.toggle-discord-comments').forEach(function(o){ o.checked = v; });
+                apply(v);
+            });
+        });
+    });
+})();
+</script>
