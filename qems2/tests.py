@@ -1685,6 +1685,8 @@ class PacketizedWordExportTests(TestCase):
         self.acf_tu = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
         self.acf_bn = QuestionType.objects.get(question_type=ACF_STYLE_BONUS)
         self.ou = User.objects.create_user('pw_owner', password='pw', email='p@test.com')
+        self.ou.first_name, self.ou.last_name = 'Pat', 'Writer'
+        self.ou.save()
         self.owner = Writer.objects.get(user=self.ou)
         self.dist = Distribution.objects.create(
             name='pw dist', acf_tossup_per_period_count=1, acf_bonus_per_period_count=1)
@@ -1754,8 +1756,8 @@ class PacketizedWordExportTests(TestCase):
         doc = self._doc(zf, 'Packet 2.docx')
         full = '\n'.join(p.text for p in doc.paragraphs)
         # Edited tossup -> editor included; matches <Author, Cat - Sub> ~id~ <Editor: ...>
-        self.assertIn('<{0}, Science - Biology> ~{1}~ <Editor:'.format(
-            self.owner.get_real_name(), self.tu_p2.id), full)
+        self.assertIn('<{0}, Science - Biology> ~{1}~ <Editor: {0}>'.format(
+            self.owner.get_real_name().strip(), self.tu_p2.id), full)
 
     def test_each_tossup_is_single_paragraph(self):
         zf = self._open_zip('docx-packetized')
@@ -1785,3 +1787,60 @@ class PacketizedWordExportTests(TestCase):
         texts = [c.text for c in doc.comments]
         self.assertTrue(any('please fix the power mark' in t for t in texts))
         self.assertFalse(any('this one is handled' in t for t in texts))
+
+    def test_html_entities_decoded_and_blank_author_omitted(self):
+        # A tossup whose stored text has HTML entities (as YAPP import produces)
+        # and whose author has no real name.
+        blank_user = User.objects.create_user('noname', password='pw', email='n@test.com')
+        blank_writer = Writer.objects.get(user=blank_user)
+        tu = Tossup.objects.create(
+            author=blank_writer, question_set=self.qset, packet=self.p2,
+            question_type=self.acf_tu, category=self.de,
+            tossup_text='This artist&#x27;s work &amp; legacy. (*) end.',
+            tossup_answer='_Church_', created_date=datetime.now(),
+            last_changed_date=datetime.now(), question_number=2)
+        zf = self._open_zip('docx-packetized')
+        doc = self._doc(zf, 'Packet 2.docx')
+        full = '\n'.join(p.text for p in doc.paragraphs)
+        self.assertIn("This artist's work & legacy.", full)
+        self.assertNotIn('&#x27;', full)
+        self.assertNotIn('&amp;', full)
+        # Blank author -> no "< ," artifact; just the category.
+        self.assertIn('<Science - Biology> ~{0}~'.format(tu.id), full)
+        self.assertNotIn('< ,', full)
+
+
+class QuestionSetSettingsSaveTests(TestCase):
+    """Editing question-set settings (e.g. max tossup character count) persists.
+    Regression: tossups_per_packet/bonuses_per_packet were required by the form
+    but never rendered, so every save failed validation silently."""
+
+    def setUp(self):
+        self.ou = User.objects.create_user('qs_owner', password='pw', email='q@test.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='qs dist')
+        self.qset = QuestionSet.objects.create(
+            name='QS Set', date=timezone.now(), host='', address='', owner=self.owner,
+            num_packets=5, distribution=self.dist, max_acf_tossup_length=725)
+        self.client.login(username='qs_owner', password='pw')
+
+    def test_form_is_valid_with_rendered_fields_only(self):
+        from qems2.qsub.forms import QuestionSetForm
+        form = QuestionSetForm(data={
+            'name': 'QS Set', 'date': '01/01/2026', 'num_packets': '5',
+            'distribution': str(self.dist.id), 'max_acf_tossup_length': '198',
+            'max_acf_bonus_length': '650',
+            'char_count_ignores_pronunciation_guides': 'on', 'tossups_only': ''})
+        self.assertTrue(form.is_valid(), form.errors)
+
+    def test_edit_persists_max_tossup_length(self):
+        resp = self.client.post('/edit_question_set/{0}/'.format(self.qset.id), {
+            'name': 'QS Set', 'date': '01/01/2026', 'num_packets': '5',
+            'distribution': str(self.dist.id), 'max_acf_tossup_length': '198',
+            'max_acf_bonus_length': '650',
+            'char_count_ignores_pronunciation_guides': 'on', 'tossups_only': ''})
+        self.assertEqual(resp.status_code, 200)
+        self.qset.refresh_from_db()
+        self.assertEqual(self.qset.max_acf_tossup_length, 198)
+        # The packetization fields kept their defaults (not wiped by the form).
+        self.assertEqual(self.qset.tossups_per_packet, 20)

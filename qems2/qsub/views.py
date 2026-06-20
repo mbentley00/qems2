@@ -1,5 +1,6 @@
 import json
 import csv
+import html
 import io
 import math
 import random
@@ -3271,6 +3272,11 @@ def add_qems_formatted_runs(paragraph, text, bold=False, is_answer=False):
     if text is None:
         return paragraph
 
+    # Stored question text is HTML-escaped (e.g. apostrophes as &#x27; from the
+    # YAPP import). Word gets raw characters, not a browser, so decode entities
+    # first or they'd render literally as "&#x27;".
+    text = html.unescape(text)
+
     allow_underlines = True
     allow_parens = True
     allow_powers = not is_answer  # powers only in question text
@@ -3577,8 +3583,10 @@ def export_question_set(request, qset_id, output_format):
                 def question_meta(q):
                     """Attribution line in the standard QEMS packet format:
                     ``<Author, Category - Subcategory> ~Id~ <Editor: Name>``."""
-                    author = safe_name(q.author)
-                    cat = safe_category(q.category)
+                    # get_real_name() pads with spaces and is blank when a writer
+                    # has no name, so strip before deciding what to include.
+                    author = html.unescape(safe_name(q.author)).strip()
+                    cat = html.unescape(safe_category(q.category)).strip()
                     if author and cat:
                         head = '<{0}, {1}>'.format(author, cat)
                     elif author:
@@ -3588,8 +3596,9 @@ def export_question_set(request, qset_id, output_format):
                     else:
                         head = ''
                     meta = '{0} ~{1}~'.format(head, q.id).strip()
-                    if q.edited and q.editor:
-                        meta += ' <Editor: {0}>'.format(safe_name(q.editor))
+                    editor = html.unescape(safe_name(q.editor)).strip() if q.editor else ''
+                    if q.edited and editor:
+                        meta += ' <Editor: {0}>'.format(editor)
                     return meta
 
                 def _initials(name):

@@ -56,7 +56,11 @@ class QuestionSetForm(forms.ModelForm):
     class Meta:
         model = QuestionSet
         # max_vhsl_bonus_length excluded: VHSL support has been removed from the UI.
-        exclude = ['owner', 'public', 'address', 'host', 'max_vhsl_bonus_length']
+        # tossups_per_packet / bonuses_per_packet are managed on the packetization
+        # page, not this form; leaving them in made the form (which never renders
+        # them) fail validation on every submit, so edits silently didn't save.
+        exclude = ['owner', 'public', 'address', 'host', 'max_vhsl_bonus_length',
+                   'tossups_per_packet', 'bonuses_per_packet']
 
     def __init__(self, read_only=False, *args, **kwargs):
         super(QuestionSetForm, self).__init__(*args, **kwargs)
