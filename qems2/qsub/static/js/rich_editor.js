@@ -89,6 +89,13 @@ $(function () {
             '</div>');
         var $editor = $('<div class="rich-editor" contenteditable="true" spellcheck="true"></div>');
         if (multiline) { $editor.addClass('rich-editor-multiline'); }
+        // Give the long "stem"/leadin/part-text fields a taller default so a
+        // long question fits without scrolling (answer fields stay compact).
+        var TALL_FIELDS = ['id_tossup_text', 'id_leadin',
+                           'id_part1_text', 'id_part2_text', 'id_part3_text'];
+        if (textarea.id && TALL_FIELDS.indexOf(textarea.id) !== -1) {
+            $editor.addClass('rich-editor-tall');
+        }
         $editor.html(qemsToHtml($ta.val(), multiline));
 
         // The expanding-textareas plugin wraps textareas in div.expanding —
@@ -252,9 +259,13 @@ $(function () {
 
     /* ---------- Wire up the pages ---------- */
 
-    // Add-tossup / add-bonus and edit-tossup / edit-bonus pages: per-field editors
-    $('#add-tossups, #add-bonuses, #edit-tossup, #edit-bonus').first().find(FIELD_SELECTOR).each(function () {
-        enhance(this, false);
+    // Add-tossup / add-bonus and edit-tossup / edit-bonus pages: per-field editors.
+    // Edit pages allow line breaks (you sometimes need to reflow a stored
+    // question); the add pages stay single-line.
+    var $qForm = $('#add-tossups, #add-bonuses, #edit-tossup, #edit-bonus').first();
+    var allowLineBreaks = $qForm.is('#edit-tossup, #edit-bonus');
+    $qForm.find(FIELD_SELECTOR).each(function () {
+        enhance(this, allowLineBreaks);
     });
 
     // Type Questions page: one big line-oriented box

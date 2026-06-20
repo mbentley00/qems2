@@ -95,7 +95,7 @@ class RoleAssignmentForm(forms.ModelForm):
 
 class TossupForm(forms.ModelForm):
 
-    tossup_text = forms.CharField(widget=forms.Textarea(attrs={'rows': 5, 'class': 'expanding'}))
+    tossup_text = forms.CharField(widget=forms.Textarea(attrs={'rows': 10, 'class': 'expanding'}))
     tossup_answer = forms.CharField(widget=forms.Textarea(attrs={'rows': 1, 'class': 'expanding'}))
     search_question_content = forms.CharField(widget=forms.HiddenInput, required=False)
     search_question_answers = forms.CharField(widget=forms.HiddenInput, required=False)

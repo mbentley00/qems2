@@ -424,17 +424,23 @@ $(function() {
             }
             $list.empty();
             $.each(json.candidates, function(_, cand) {
+                var label = cand.unpacketized
+                    ? '(unpacketized): '
+                    : cand.packet_name + ' #' + cand.number + (cand.is_tiebreaker ? ' (TB)' : '') + ': ';
                 var $row = $('<div class="swap-candidate">')
-                    .append($('<span class="swap-cand-packet">').text(cand.packet_name + ' #' + cand.number + (cand.is_tiebreaker ? ' (TB)' : '') + ': '))
+                    .append($('<span class="swap-cand-packet">').text(label))
                     .append($('<span>').text(cand.answer + ' '))
                     .append($('<div class="swap-cand-category">').text(cand.category));
                 $row.on('click', function() {
-                    $.post('/move_packet_question/', {
-                        question_type: swapSource.qtype,
-                        question_id: swapSource.qid,
-                        target_packet_id: cand.packet_id,
-                        target_number: cand.number
-                    }, function(response) {
+                    // For a packetized candidate, move the source into the
+                    // candidate's slot. For an unpacketized candidate, move the
+                    // candidate into the source's slot (swapping the source out).
+                    var post = cand.unpacketized
+                        ? { question_type: swapSource.qtype, question_id: cand.id,
+                            target_packet_id: swapSource.pid, target_number: swapSource.num }
+                        : { question_type: swapSource.qtype, question_id: swapSource.qid,
+                            target_packet_id: cand.packet_id, target_number: cand.number };
+                    $.post('/move_packet_question/', post, function(response) {
                         var json = $.parseJSON(response);
                         if (json.success) {
                             location.reload();
@@ -455,7 +461,9 @@ $(function() {
         swapSource = {
             qtype: $cell.data('qtype'),
             qid: $cell.find('.cell-answer').data('qid'),
-            answer: $cell.find('.cell-answer').text()
+            answer: $cell.find('.cell-answer').text(),
+            pid: packetIdForCell($cell),
+            num: $cell.data('num')
         };
         $('input[name="swap-scope"][value="leaf"]').prop('checked', true);
         $('#swap-search').val('');

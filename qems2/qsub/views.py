@@ -5135,6 +5135,8 @@ def packet_grid(request, qset_id):
                               'unassigned_bs': len(unpacketized_bs),
                               'unpacketized_tu': unpacketized_tu,
                               'unpacketized_bs': unpacketized_bs,
+                              'extra_crumb': 'Packet Grid',
+                              'extra_crumb_url': '/packet_grid/{0}/'.format(qset.id),
                               'read_only': read_only})
 
 def _log_packet_grid_change(qset, changer, description, prior_states):
@@ -5651,7 +5653,7 @@ def swap_candidates(request):
                            Q(part2_text__icontains=search) | Q(part2_answer__icontains=search) |
                            Q(part3_text__icontains=search) | Q(part3_answer__icontains=search))
         candidates = (model.objects.filter(question_set=qset).filter(text_filter)
-                      .exclude(id=question.id).exclude(packet=None)
+                      .exclude(id=question.id)
                       .select_related('category', 'packet')
                       .order_by('packet__packet_name', 'question_number')[:200])
         source_label = 'search: "{0}"'.format(search)
@@ -5673,7 +5675,7 @@ def swap_candidates(request):
                 entry_ids = [e.id for e in siblings]
 
         candidates = model.objects.filter(question_set=qset, category_id__in=entry_ids) \
-            .exclude(packet=question.packet).exclude(packet=None) \
+            .exclude(packet=question.packet) \
             .select_related('category', 'packet') \
             .order_by('packet__packet_name', 'question_number')[:200]
         source_label = str(entry)
@@ -5687,14 +5689,17 @@ def swap_candidates(request):
             _grid_answer_preview(q.part3_answer, 20)]))
 
     per_packet = qset.tossups_per_packet if question_type == 'tossup' else qset.bonuses_per_packet
+    # Show unpacketized candidates first so they're easy to grab.
+    candidates = sorted(candidates, key=lambda q: (q.packet_id is not None,))
     data = [{
         'id': q.id,
         'packet_id': q.packet_id,
-        'packet_name': q.packet.packet_name,
+        'packet_name': q.packet.packet_name if q.packet_id else '(unpacketized)',
         'number': q.question_number,
-        'answer': preview(q),
-        'category': str(q.category) if q.category else '',
-        'is_tiebreaker': (q.question_number or 0) > per_packet,
+        'answer': html.unescape(preview(q)),
+        'category': html.unescape(str(q.category)) if q.category else '',
+        'is_tiebreaker': (q.question_number or 0) > per_packet if q.packet_id else False,
+        'unpacketized': q.packet_id is None,
     } for q in candidates]
 
     return HttpResponse(json.dumps({'candidates': data, 'source_category': source_label}))

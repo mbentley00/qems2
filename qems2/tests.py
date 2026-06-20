@@ -1919,6 +1919,23 @@ class UnpacketizedAssignmentTests(TestCase):
         resp = self.client.post('/assign_unpacketized/', {'qset_id': self.qset.id})
         self.assertFalse(json.loads(resp.content)['success'])
 
+    def test_swap_candidates_includes_unpacketized(self):
+        # Source is a packetized tossup; an unpacketized tossup in the same
+        # category should show up as a swap candidate flagged unpacketized.
+        de = DistributionEntry.objects.create(
+            distribution=self.dist, category='Science', subcategory='Biology')
+        src = self._tu('source', packet=self.p1, number=2)
+        src.category = de; src.save()
+        free = self._tu('freebie')
+        free.category = de; free.save()
+        resp = self.client.get('/swap_candidates/', {
+            'question_type': 'tossup', 'question_id': src.id, 'scope': 'top'})
+        data = json.loads(resp.content)
+        cands = {c['id']: c for c in data['candidates']}
+        self.assertIn(free.id, cands)
+        self.assertTrue(cands[free.id]['unpacketized'])
+        self.assertEqual(cands[free.id]['packet_name'], '(unpacketized)')
+
 
 class ImportEntityStorageTests(TestCase):
     """YAPP import stores literal punctuation (apostrophes/ampersands), not
