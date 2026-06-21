@@ -32,6 +32,7 @@ urlpatterns = [
     re_path(r'^move_packet_question/$', move_packet_question),
     re_path(r'^unassign_packet_question/$', unassign_packet_question),
     re_path(r'^assign_unpacketized/$', assign_unpacketized),
+    re_path(r'^set_packet_order/$', set_packet_order),
     re_path(r'^view_packet/(?P<packet_id>[0-9]+)/$', view_packet),
     re_path(r'^packet_revision/(?P<packet_id>[0-9]+)/$', packet_revision),
     re_path(r'^packet_mp3/(?P<packet_id>[0-9]+)/$', packet_mp3),

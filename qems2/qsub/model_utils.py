@@ -10,6 +10,35 @@ from django_comments.models import Comment
 from django.db.models import Q, Count
 
 import os
+import re
+
+from qems2.qsub.utils import EXTRAS_PACKET_NAME
+
+
+def _natural_packet_key(packet):
+    """Natural sort key for a packet: by the first number in its name
+    ("Round 2" before "Round 10"), with extras/tiebreaker packets last."""
+    name = packet.packet_name or ''
+    lower = name.lower()
+    is_special = (name == EXTRAS_PACKET_NAME or 'extra' in lower
+                  or 'tiebreak' in lower or 'tie-break' in lower or lower.endswith(' tb'))
+    nums = re.findall(r'\d+', name)
+    number = int(nums[0]) if nums else float('inf')
+    return (1 if is_special else 0, number, lower)
+
+
+def sorted_packets(qset):
+    """Packets in display order: an explicit user-set order (Packet.sort_order)
+    when present, otherwise a natural sort by name with extras/tiebreakers last."""
+    packets = list(qset.packet_set.all())
+    if any(p.sort_order is not None for p in packets):
+        packets.sort(key=lambda p: (p.sort_order is None,
+                                    p.sort_order if p.sort_order is not None else 0,
+                                    _natural_packet_key(p)))
+    else:
+        packets.sort(key=_natural_packet_key)
+    return packets
+
 
 def compute_packet_requirements(qset):
     '''

@@ -101,11 +101,17 @@ def fpercent(x, y):
 @register.filter(name='packet_completion')
 def packet_completion(packet):
     """Completion of a packet against the set's regular per-packet counts,
-    e.g. '100% (20/20 TU, 20/20 B)'."""
+    e.g. '100% (20/20 TU, 20/20 B)'. For a tossups-only set, bonuses are
+    excluded entirely (e.g. '100% (20/20 TU)')."""
     qset = packet.question_set
     tu = packet.tossup_set.count()
-    bs = packet.bonus_set.count()
     tu_needed = qset.tossups_per_packet
+    if getattr(qset, 'tossups_only', False):
+        if tu_needed == 0:
+            return ''
+        pct = 100.0 * min(tu, tu_needed) / tu_needed
+        return '{0:0.0f}% ({1}/{2} TU)'.format(pct, tu, tu_needed)
+    bs = packet.bonus_set.count()
     bs_needed = qset.bonuses_per_packet
     total_needed = tu_needed + bs_needed
     if total_needed == 0:

@@ -1936,6 +1936,23 @@ class UnpacketizedAssignmentTests(TestCase):
         self.assertTrue(cands[free.id]['unpacketized'])
         self.assertEqual(cands[free.id]['packet_name'], '(unpacketized)')
 
+    def test_grid_empty_cells_have_add_link(self):
+        # Leave a gap (slot 2 empty, slot 3 filled) so a real empty cell renders
+        # with a "+ add" link to add a question to that packet.
+        self._tu('gap', packet=self.p1, number=3)
+        resp = self.client.get('/packet_grid/{0}/'.format(self.qset.id))
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        self.assertIn('/add_tossups/{0}/{1}/'.format(self.qset.id, self.p1.id), html)
+
+    def test_doc_view_has_swap_buttons(self):
+        self._tu('swapme', packet=self.p1, number=1)
+        resp = self.client.get('/view_packet/{0}/'.format(self.p1.id))
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        self.assertIn('doc-swap-btn', html)
+        self.assertIn('doc-swap-dialog', html)
+
     def test_packet_revision_changes_on_edit_and_move(self):
         # The document-view staleness token changes when a question in the
         # packet is edited or moved out.
@@ -2073,3 +2090,120 @@ class PacketCommentAndPostTests(TestCase):
         # Careful-notes heads-up for the read_carefully tossup.
         self.assertIn('read these answer lines carefully', body)
         self.assertIn('Tricky Answer', body)
+
+    def test_packet_status_shows_subcategories(self):
+        de = DistributionEntry.objects.create(
+            distribution=self.dist, category='Painting', subcategory='1900-2000')
+        SetWideDistributionEntry.objects.create(
+            question_set=self.qset, dist_entry=de, num_tossups=4, num_bonuses=0)
+        resp = self.client.get('/edit_packet/{0}/'.format(self.packet.id))
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode()
+        self.assertIn('Painting', body)        # top-level row
+        self.assertIn('1900-2000', body)       # subcategory detail row
+        self.assertIn('status-subcat', body)
+
+
+class TossupsOnlyCompletionTests(TestCase):
+    """packet_completion omits bonuses for tossups-only sets."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('to_owner', password='pw', email='to@test.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='to dist')
+
+    def _make_set(self, tossups_only):
+        from datetime import datetime
+        qset = QuestionSet.objects.create(
+            name='TO Set', date=timezone.now(), host='', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist, tossups_only=tossups_only,
+            tossups_per_packet=2, bonuses_per_packet=2)
+        packet = Packet.objects.create(question_set=qset, packet_name='P1', created_by=self.owner)
+        for i in (1, 2):
+            Tossup.objects.create(author=self.owner, question_set=qset, packet=packet,
+                question_type=self.acf, tossup_text='S (*) e.', tossup_answer='_A_',
+                created_date=datetime.now(), last_changed_date=datetime.now(), question_number=i)
+        return packet
+
+    def test_tossups_only_completion_has_no_bonus(self):
+        from qems2.qsub.templatetags.filters import packet_completion
+        s = packet_completion(self._make_set(True))
+        self.assertIn('TU', s)
+        self.assertNotIn(' B)', s)
+        self.assertIn('100%', s)
+
+    def test_normal_completion_shows_bonus(self):
+        from qems2.qsub.templatetags.filters import packet_completion
+        s = packet_completion(self._make_set(False))
+        self.assertIn('TU', s)
+        self.assertIn(' B)', s)
+
+
+class PacketOrderingTests(TestCase):
+    """Natural packet ordering, extras-last, and user-set custom order."""
+
+    def setUp(self):
+        self.ou = User.objects.create_user('po_owner', password='pw', email='po@test.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='po dist')
+        self.qset = QuestionSet.objects.create(
+            name='PO Set', date=timezone.now(), host='', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.owner.question_set_editor.add(self.qset)
+        names = ['Round 10', 'Round 2', 'Round 1', 'Extras', 'Round 9']
+        self.packets = {n: Packet.objects.create(question_set=self.qset, packet_name=n, created_by=self.owner)
+                        for n in names}
+        self.client.login(username='po_owner', password='pw')
+
+    def test_natural_sort_extras_last(self):
+        from qems2.qsub.model_utils import sorted_packets
+        order = [p.packet_name for p in sorted_packets(self.qset)]
+        self.assertEqual(order, ['Round 1', 'Round 2', 'Round 9', 'Round 10', 'Extras'])
+
+    def test_custom_order_overrides(self):
+        ids = [self.packets['Round 2'].id, self.packets['Extras'].id, self.packets['Round 1'].id,
+               self.packets['Round 9'].id, self.packets['Round 10'].id]
+        resp = self.client.post('/set_packet_order/', {
+            'qset_id': self.qset.id, 'packet_ids[]': [str(i) for i in ids]})
+        self.assertTrue(json.loads(resp.content)['success'])
+        from qems2.qsub.model_utils import sorted_packets
+        order = [p.packet_name for p in sorted_packets(self.qset)]
+        self.assertEqual(order, ['Round 2', 'Extras', 'Round 1', 'Round 9', 'Round 10'])
+
+    def test_grid_has_reorder_and_unassign_controls(self):
+        resp = self.client.get('/packet_grid/{0}/'.format(self.qset.id))
+        html = resp.content.decode()
+        self.assertIn('reorder-packets-btn', html)
+        self.assertIn('reorder-packets-dialog', html)
+
+
+class GridUnassignTests(TestCase):
+    """The per-cell unassign control removes a question from its packet."""
+
+    def setUp(self):
+        from datetime import datetime
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('gu_owner', password='pw', email='gu@test.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='gu dist')
+        self.qset = QuestionSet.objects.create(
+            name='GU Set', date=timezone.now(), host='', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.owner.question_set_editor.add(self.qset)
+        self.packet = Packet.objects.create(question_set=self.qset, packet_name='Round 1', created_by=self.owner)
+        self.tu = Tossup.objects.create(author=self.owner, question_set=self.qset, packet=self.packet,
+            question_type=self.acf, tossup_text='S (*) e.', tossup_answer='_A_',
+            created_date=datetime.now(), last_changed_date=datetime.now(), question_number=1)
+        self.client.login(username='gu_owner', password='pw')
+
+    def test_unassign_button_rendered_and_works(self):
+        resp = self.client.get('/packet_grid/{0}/'.format(self.qset.id))
+        self.assertIn('unassign-btn', resp.content.decode())
+        r = self.client.post('/unassign_packet_question/', {
+            'question_type': 'tossup', 'question_id': self.tu.id})
+        self.assertTrue(json.loads(r.content)['success'])
+        self.tu.refresh_from_db()
+        self.assertIsNone(self.tu.packet_id)

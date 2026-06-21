@@ -292,7 +292,7 @@ def create_question_set (request):
                                        'tossups': Tossup.objects.filter(question_set=question_set),
                                        'bonuses': Bonus.objects.filter(question_set=question_set),
                                        'comment_tab_list': comment_tab_list,
-                                       'packets': question_set.packet_set.all(),})
+                                       'packets': sorted_packets(question_set),})
         else:
             print(form.errors)
             distributions = Distribution.objects.all()
@@ -387,7 +387,7 @@ def edit_question_set(request, qset_id):
                                            'bs_needed': bs_needed,
                                            'tossups': tossups,
                                            'bonuses': bonuses,
-                                           'packets': qset.packet_set.all(),
+                                           'packets': sorted_packets(qset),
                                            'comment_list': comment_tab_list,
                                            'role': role,
                                            'new_activity': new_activity,
@@ -444,7 +444,7 @@ def edit_question_set(request, qset_id):
                                'upload_form': QuestionUploadForm(),
                                'tossups': tossups,
                                'bonuses': bonuses,
-                               'packets': qset.packet_set.all(),
+                               'packets': sorted_packets(qset),
                                'comment_tab_list': comment_tab_list,
                                'qset': qset,
                                'role': role,
@@ -1036,8 +1036,8 @@ def edit_packet(request, packet_id):
     message = ''
     message_class = ''
     read_only = True
-    tossup_status = {}
-    bonus_status = {}
+    tossup_status = []
+    bonus_status = []
 
     if request.method == 'GET':
         if qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all():
@@ -1046,36 +1046,50 @@ def edit_packet(request, packet_id):
             if user not in qset.writer.all():
                 read_only = False
 
-            # Per-packet requirements by top-level category: use the
-            # packetization quotas when defined, otherwise the set-wide
-            # totals divided by the packet count
+            # Per-packet requirements, shown per top-level category AND broken
+            # out by subcategory so it's clear which subcategories are needed.
+            # Use the packetization quota for a path when defined, otherwise the
+            # set-wide total for that path divided by the packet count.
             num_packets = max(qset.num_packets, 1)
-            quota_by_path = {e.path: e for e in PacketizationEntry.objects.filter(question_set=qset, depth=0)}
+            quota_by_path = {e.path: e for e in PacketizationEntry.objects.filter(question_set=qset)}
 
-            top_totals = {}
-            for swde in qset.setwidedistributionentry_set.select_related('dist_entry'):
-                top = swde.dist_entry.category
-                totals = top_totals.setdefault(top, [0, 0])
-                totals[0] += swde.num_tossups or 0
-                totals[1] += swde.num_bonuses or 0
+            def _req(path, total, attr):
+                quota = quota_by_path.get(path)
+                if quota is not None and getattr(quota, attr) is not None:
+                    return float(getattr(quota, attr))
+                return round(total / float(num_packets), 1)
 
-            for top, (tu_total, bs_total) in top_totals.items():
-                quota = quota_by_path.get(top)
-                if quota is not None and quota.min_tossups is not None:
-                    tossups_required = float(quota.min_tossups)
-                else:
-                    tossups_required = round(tu_total / float(num_packets), 1)
-                if quota is not None and quota.min_bonuses is not None:
-                    bonuses_required = float(quota.min_bonuses)
-                else:
-                    bonuses_required = round(bs_total / float(num_packets), 1)
+            entries = list(qset.setwidedistributionentry_set.select_related('dist_entry')
+                           .order_by('dist_entry__category', 'dist_entry__subcategory'))
+            by_top = {}
+            for swde in entries:
+                by_top.setdefault(swde.dist_entry.category, []).append(swde)
 
-                tu_in_cat = Tossup.objects.filter(packet=packet, category__category=top).count()
-                bs_in_cat = Bonus.objects.filter(packet=packet, category__category=top).count()
-                tossup_status[top] = {'tu_req': tossups_required,
-                                      'tu_in_cat': tu_in_cat}
-                bonus_status[top] = {'bs_req': bonuses_required,
-                                     'bs_in_cat': bs_in_cat}
+            tossup_status = []
+            bonus_status = []
+            for top, swdes in by_top.items():
+                tu_total = sum(s.num_tossups or 0 for s in swdes)
+                bs_total = sum(s.num_bonuses or 0 for s in swdes)
+                tu_in_top = Tossup.objects.filter(packet=packet, category__category=top).count()
+                bs_in_top = Bonus.objects.filter(packet=packet, category__category=top).count()
+                tossup_status.append({'label': top, 'is_sub': False,
+                                      'tu_req': _req(top, tu_total, 'min_tossups'), 'tu_in_cat': tu_in_top})
+                bonus_status.append({'label': top, 'is_sub': False,
+                                     'bs_req': _req(top, bs_total, 'min_bonuses'), 'bs_in_cat': bs_in_top})
+                # Subcategory detail rows (only when the category has subcategories).
+                for swde in swdes:
+                    de = swde.dist_entry
+                    if not de.subcategory:
+                        continue
+                    path = '{0} - {1}'.format(de.category, de.subcategory)
+                    tossup_status.append({
+                        'label': de.subcategory, 'is_sub': True,
+                        'tu_req': _req(path, swde.num_tossups or 0, 'min_tossups'),
+                        'tu_in_cat': Tossup.objects.filter(packet=packet, category=de).count()})
+                    bonus_status.append({
+                        'label': de.subcategory, 'is_sub': True,
+                        'bs_req': _req(path, swde.num_bonuses or 0, 'min_bonuses'),
+                        'bs_in_cat': Bonus.objects.filter(packet=packet, category=de).count()})
 
 
         else:
@@ -5130,9 +5144,9 @@ def packet_grid(request, qset_id):
                                   'message_class': 'alert-box alert'})
 
     read_only = not (qset.is_owner(user) or user in qset.editor.all())
-    # Order by name, but keep the overflow "Extras" packet in the last column.
-    packets = sorted(qset.packet_set.all(),
-                     key=lambda p: (p.packet_name == EXTRAS_PACKET_NAME, p.packet_name))
+    # Natural order (Round 2 before Round 10), extras last, honoring any
+    # user-set custom order (Packet.sort_order).
+    packets = sorted_packets(qset)
 
     def build_rows(question_model, preview_func, edit_url):
         cells_by_packet = {}
@@ -5150,10 +5164,13 @@ def packet_grid(request, qset_id):
             }
         rows = []
         for number in range(1, max_num + 1):
-            rows.append({
-                'num': number,
-                'cells': [cells_by_packet.get(p.id, {}).get(number) for p in packets],
-            })
+            cells = []
+            for p in packets:
+                cell = cells_by_packet.get(p.id, {}).get(number)
+                # Empty slot: carry the packet id so the grid can offer an
+                # "add a question here" link (handy for tiebreaker rows).
+                cells.append(cell if cell is not None else {'empty': True, 'packet_id': p.id})
+            rows.append({'num': number, 'cells': cells})
         return rows
 
     tossup_rows = build_rows(
@@ -5267,6 +5284,38 @@ def move_packet_question(request):
             message = 'Question or packet not found!'
 
     return HttpResponse(json.dumps({'success': success, 'message': message}))
+
+
+@login_required
+def set_packet_order(request):
+    """Persist a user-defined packet order (drag-to-reorder on the grid).
+    Body: qset_id, packet_ids[] in the desired order."""
+    user = request.user.writer
+    if request.method != 'POST':
+        return HttpResponse(json.dumps({'success': False, 'message': 'Invalid request'}))
+    try:
+        qset = QuestionSet.objects.get(id=int(request.POST['qset_id']))
+    except (KeyError, ValueError, QuestionSet.DoesNotExist):
+        return HttpResponse(json.dumps({'success': False, 'message': 'Set not found'}))
+    if not (qset.is_owner(user) or user in qset.editor.all()):
+        return HttpResponse(json.dumps({'success': False, 'message': 'Not authorized'}))
+    ids = request.POST.getlist('packet_ids[]')
+    valid = {p.id: p for p in qset.packet_set.all()}
+    order = 1
+    to_update = []
+    for pid in ids:
+        try:
+            p = valid.get(int(pid))
+        except (TypeError, ValueError):
+            p = None
+        if p is not None:
+            p.sort_order = order
+            to_update.append(p)
+            order += 1
+    if to_update:
+        Packet.objects.bulk_update(to_update, ['sort_order'])
+        cache.clear()
+    return HttpResponse(json.dumps({'success': True, 'message': 'Order saved'}))
 
 
 @login_required
@@ -5586,7 +5635,7 @@ def view_packet(request, packet_id):
     attach_comments(bonuses, Bonus)
     comment_count = sum(len(q['comments']) for q in tossups + bonuses)
 
-    siblings = list(qset.packet_set.order_by('packet_name'))
+    siblings = sorted_packets(qset)
     index = next((i for i, p in enumerate(siblings) if p.id == packet.id), 0)
     prev_packet = siblings[index - 1] if index > 0 else None
     next_packet = siblings[index + 1] if index + 1 < len(siblings) else None
@@ -5816,7 +5865,8 @@ def swap_candidates(request):
         'unpacketized': q.packet_id is None,
     } for q in candidates]
 
-    return HttpResponse(json.dumps({'candidates': data, 'source_category': source_label}))
+    return HttpResponse(json.dumps({'candidates': data, 'source_category': source_label,
+                                    'source_answer': html.unescape(preview(question))}))
 
 
 @login_required

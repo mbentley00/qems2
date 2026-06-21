@@ -133,6 +133,19 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 </script>
 
+<div id="doc-swap-dialog" title="Swap with another question" style="display:none;">
+    <p id="doc-swap-source" style="margin-bottom: 8px;"></p>
+    <div style="margin-bottom: 8px;">
+        <input type="text" id="doc-swap-search" placeholder="Type to search all questions to swap (answer or text)&hellip;" style="width:100%; margin-bottom:0;">
+    </div>
+    <div style="margin-bottom: 10px;" id="doc-swap-scope-row">
+        <label style="display:inline; margin-right: 12px;"><input type="radio" name="doc-swap-scope" value="leaf" checked> Same sub-subcategory</label>
+        <label style="display:inline; margin-right: 12px;"><input type="radio" name="doc-swap-scope" value="sub"> Same subcategory</label>
+        <label style="display:inline;"><input type="radio" name="doc-swap-scope" value="top"> Same category</label>
+    </div>
+    <div id="doc-swap-candidates"></div>
+</div>
+
 <div class="doc-flex">
 <div class="doc-page">
     <div class="doc-header">
@@ -143,8 +156,8 @@ document.addEventListener('DOMContentLoaded', function () {
     {% if order == 'interleaved' %}
         <div class="doc-list" id="doc-list-interleaved">
             {% for q in interleaved %}
-            <div class="doc-question" id="q-{{ q.qtype }}-{{ q.id }}" data-qtype="{{ q.qtype }}" data-qid="{{ q.id }}" data-edit-url="{{ q.edit_url }}">
-                <span class="doc-qlabel">{% if q.qtype == 'tossup' %}Tossup{% else %}Bonus{% endif %} {{ q.number }}.{% if q.is_tiebreaker %} <span class="doc-tb">(Tiebreaker)</span>{% endif %}</span>
+            <div class="doc-question" id="q-{{ q.qtype }}-{{ q.id }}" data-qtype="{{ q.qtype }}" data-qid="{{ q.id }}" data-num="{{ q.number }}" data-edit-url="{{ q.edit_url }}">
+                <span class="doc-qlabel">{% if q.qtype == 'tossup' %}Tossup{% else %}Bonus{% endif %} {{ q.number }}.{% if q.is_tiebreaker %} <span class="doc-tb">(Tiebreaker)</span>{% endif %}</span>{% if not read_only %}<a href="#" class="doc-swap-btn" title="Swap this question with another">&#8644; swap</a>{% endif %}
                 {% autoescape off %}<span class="doc-qtext">{{ q.html }}</span>{% endautoescape %}
                 {% include "view_packet_meta.html" %}
             </div>
@@ -154,8 +167,8 @@ document.addEventListener('DOMContentLoaded', function () {
         <h4 class="doc-section">Tossups</h4>
         <div class="doc-list" id="doc-list-tossups">
             {% for q in tossups %}
-            <div class="doc-question" id="q-tossup-{{ q.id }}" data-qtype="tossup" data-qid="{{ q.id }}" data-edit-url="{{ q.edit_url }}">
-                <span class="doc-qlabel">{{ q.number }}.{% if q.is_tiebreaker %} <span class="doc-tb">(Tiebreaker)</span>{% endif %}</span>
+            <div class="doc-question" id="q-tossup-{{ q.id }}" data-qtype="tossup" data-qid="{{ q.id }}" data-num="{{ q.number }}" data-edit-url="{{ q.edit_url }}">
+                <span class="doc-qlabel">{{ q.number }}.{% if q.is_tiebreaker %} <span class="doc-tb">(Tiebreaker)</span>{% endif %}</span>{% if not read_only %}<a href="#" class="doc-swap-btn" title="Swap this question with another">&#8644; swap</a>{% endif %}
                 {% autoescape off %}<span class="doc-qtext">{{ q.html }}</span>{% endautoescape %}
                 {% include "view_packet_meta.html" %}
             </div>
@@ -165,8 +178,8 @@ document.addEventListener('DOMContentLoaded', function () {
         <h4 class="doc-section">Bonuses</h4>
         <div class="doc-list" id="doc-list-bonuses">
             {% for q in bonuses %}
-            <div class="doc-question" id="q-bonus-{{ q.id }}" data-qtype="bonus" data-qid="{{ q.id }}" data-edit-url="{{ q.edit_url }}">
-                <span class="doc-qlabel">{{ q.number }}.{% if q.is_tiebreaker %} <span class="doc-tb">(Tiebreaker)</span>{% endif %}</span>
+            <div class="doc-question" id="q-bonus-{{ q.id }}" data-qtype="bonus" data-qid="{{ q.id }}" data-num="{{ q.number }}" data-edit-url="{{ q.edit_url }}">
+                <span class="doc-qlabel">{{ q.number }}.{% if q.is_tiebreaker %} <span class="doc-tb">(Tiebreaker)</span>{% endif %}</span>{% if not read_only %}<a href="#" class="doc-swap-btn" title="Swap this question with another">&#8644; swap</a>{% endif %}
                 {% autoescape off %}<span class="doc-qtext">{{ q.html }}</span>{% endautoescape %}
                 {% include "view_packet_meta.html" %}
             </div>
@@ -184,7 +197,7 @@ document.addEventListener('DOMContentLoaded', function () {
 <style>
 .doc-page {
     background: #fff;
-    max-width: 850px;
+    max-width: 1150px;
     margin: 0 auto 40px auto;
     padding: 50px 60px;
     box-shadow: 0 0 12px rgba(0,0,0,0.25);
@@ -213,6 +226,15 @@ document.addEventListener('DOMContentLoaded', function () {
 .doc-question:hover { background-color: #f5f9ff; border-color: #cfe0f5; }
 .doc-qtext { cursor: text; }
 .doc-mode-btn { margin-bottom: 0; }
+.doc-swap-btn { color:#bbb; margin-left:8px; font-size:0.85em; font-weight:bold; white-space:nowrap; }
+.doc-question:hover .doc-swap-btn { color:#008cba; }
+.doc-swap-btn:hover { color:#005f7a !important; text-decoration:underline; }
+.doc-reorder-mode .doc-swap-btn { display:none; }
+#doc-swap-candidates { max-height: 320px; overflow-y: auto; }
+.doc-swap-candidate { padding:6px 8px; border-bottom:1px solid #eee; cursor:pointer; font-size:0.85em; }
+.doc-swap-candidate:hover { background-color:#d9edf7; }
+.doc-swap-candidate .swap-cand-packet { font-weight:bold; }
+.doc-swap-candidate .swap-cand-category { color:#777; font-size:0.9em; }
 .doc-reorder-mode .doc-question { cursor: move; }
 .doc-reorder-mode .doc-qtext { cursor: move; }
 .doc-reorder-mode .doc-question:hover { border-color: #f4b400; background-color: #fffdf5; }
@@ -289,7 +311,7 @@ document.addEventListener('DOMContentLoaded', function () {
     border-radius: 3px;
 }
 .doc-flex { display: flex; justify-content: center; align-items: flex-start; }
-.doc-flex .doc-page { flex: 0 1 850px; margin: 0 0 40px 0; min-width: 0; }
+.doc-flex .doc-page { flex: 0 1 1150px; margin: 0 0 40px 0; min-width: 0; }
 .doc-gutter {
     width: 300px;
     flex-shrink: 0;
@@ -547,24 +569,30 @@ $(function() {
         if (!text) return;
         $(this).prop('disabled', true);
         function done(response) {
-            var json = JSON.parse(response);
-            if (json.message_class.indexOf('success') >= 0) {
+            var json;
+            try { json = (typeof response === 'string') ? JSON.parse(response) : response; }
+            catch (err) { alert('Comment failed: unexpected response.'); $box.find('.doc-comment-post').prop('disabled', false); return; }
+            if (json && (json.message_class || '').indexOf('success') >= 0) {
                 location.reload();
             } else {
-                alert(json.message);
+                alert((json && json.message) || 'Could not post comment.');
                 $box.find('.doc-comment-post').prop('disabled', false);
             }
+        }
+        function failed(xhr) {
+            alert('Could not post comment (error ' + (xhr && xhr.status) + ').');
+            $box.find('.doc-comment-post').prop('disabled', false);
         }
         var anchor = $box.data('anchor');
         if (anchor) {
             $.post('/add_anchored_comment/', {
                 question_type: anchor.qtype, question_id: anchor.qid, comment_text: text,
                 selected_text: anchor.text, prefix: anchor.prefix, suffix: anchor.suffix
-            }, done);
+            }, done).fail(failed);
         } else {
             $.post('/add_question_comment/', {
                 question_type: $q.data('qtype'), question_id: $q.data('qid'), comment_text: text
-            }, done);
+            }, done).fail(failed);
         }
     });
 
@@ -594,41 +622,64 @@ $(function() {
     // no selection), the browser's normal context menu is left alone.
     var $ctxMenu = $('<div id="doc-context-menu" style="display:none;">' +
         '<a href="#" class="doc-ctx-item" data-action="comment"><i class="fa fa-comment"></i> Comment on selection</a>' +
+        '<a href="#" class="doc-ctx-item" data-action="toggle-mode"><i class="fa fa-arrows-up-down"></i> <span class="ctx-mode-label"></span></a>' +
         '</div>').appendTo('body');
     var pendingCtxAnchor = null;
 
     $(document).on('contextmenu', function(e) {
-        if (docMode !== 'comment') return;
+        // Only intercept inside the document page (leave the OS menu elsewhere).
+        if (!$(e.target).closest('.doc-page').length) return;
         if ($(e.target).closest('.doc-comment-box, #doc-context-menu').length) return;
+
+        // Comment-on-selection item: only when a real selection sits in a question.
+        pendingCtxAnchor = null;
+        var $commentItem = $ctxMenu.find('[data-action="comment"]').hide();
         var sel = window.getSelection();
-        if (!sel || sel.isCollapsed || !sel.rangeCount) { $ctxMenu.hide(); return; }
-        var range = sel.getRangeAt(0);
-        var node = range.commonAncestorContainer;
-        var regionEl = (node.nodeType === 1 ? node : node.parentNode);
-        var $qtext = $(regionEl).closest('.doc-qtext');
-        var selText = range.toString();
-        if (!$qtext.length || selText.trim().length < 2) { $ctxMenu.hide(); return; }
-        e.preventDefault();  // selection inside a question — show our menu, not the OS one
-        var qtextEl = $qtext[0];
-        var pre = range.cloneRange();
-        pre.selectNodeContents(qtextEl);
-        pre.setEnd(range.startContainer, range.startOffset);
-        var start = pre.toString().length;
-        var full = qtextEl.textContent;
-        var $q = $qtext.closest('.doc-question');
-        pendingCtxAnchor = {
-            qtype: $q.data('qtype'), qid: $q.data('qid'), text: selText,
-            prefix: full.substring(Math.max(0, start - ANCHOR_CTX), start),
-            suffix: full.substring(start + selText.length, start + selText.length + ANCHOR_CTX)
-        };
+        if (sel && !sel.isCollapsed && sel.rangeCount) {
+            var range = sel.getRangeAt(0);
+            var node = range.commonAncestorContainer;
+            var regionEl = (node.nodeType === 1 ? node : node.parentNode);
+            var $qtext = $(regionEl).closest('.doc-qtext');
+            var selText = range.toString();
+            if ($qtext.length && selText.trim().length >= 2) {
+                var qtextEl = $qtext[0];
+                var pre = range.cloneRange();
+                pre.selectNodeContents(qtextEl);
+                pre.setEnd(range.startContainer, range.startOffset);
+                var start = pre.toString().length;
+                var full = qtextEl.textContent;
+                var $q = $qtext.closest('.doc-question');
+                pendingCtxAnchor = {
+                    qtype: $q.data('qtype'), qid: $q.data('qid'), text: selText,
+                    prefix: full.substring(Math.max(0, start - ANCHOR_CTX), start),
+                    suffix: full.substring(start + selText.length, start + selText.length + ANCHOR_CTX)
+                };
+                $commentItem.show();
+            }
+        }
+
+        // Mode-toggle item (editors only). Right-click flips comment/reorder.
+        var $modeItem = $ctxMenu.find('[data-action="toggle-mode"]');
+        if (readOnly) {
+            $modeItem.hide();
+        } else {
+            $modeItem.show().find('.ctx-mode-label').text(
+                docMode === 'reorder' ? 'Switch to comment mode' : 'Switch to reorder mode');
+        }
+
+        if (!pendingCtxAnchor && readOnly) { $ctxMenu.hide(); return; }  // nothing to show
+        e.preventDefault();
         $ctxMenu.css({ top: e.pageY, left: e.pageX }).show();
     });
 
     $ctxMenu.on('click', '.doc-ctx-item', function(e) {
         e.preventDefault();
         $ctxMenu.hide();
-        if ($(this).data('action') === 'comment' && pendingCtxAnchor) {
+        var action = $(this).data('action');
+        if (action === 'comment' && pendingCtxAnchor) {
             openAnchoredBox(pendingCtxAnchor);
+        } else if (action === 'toggle-mode' && !readOnly) {
+            setMode(docMode === 'reorder' ? 'comment' : 'reorder');
         }
     });
     // Dismiss the menu on any other click, scroll, or Escape.
@@ -639,6 +690,72 @@ $(function() {
     $(window).on('scroll', function() { $ctxMenu.hide(); });
 
     if (readOnly) return;
+
+    // ---- Swap a question with another (mirrors the packet grid) ----
+    var swapSource = null;
+    var $swapDialog = $('#doc-swap-dialog').dialog({ autoOpen: false, modal: true, width: 600, closeOnEscape: true });
+    $(document).on('click', '.ui-widget-overlay', function() {
+        $('.ui-dialog-content:visible').each(function() { $(this).dialog('close'); });
+    });
+
+    function loadSwapCandidates() {
+        var scope = $('input[name="doc-swap-scope"]:checked').val();
+        var query = $('#doc-swap-search').val().trim();
+        $('#doc-swap-scope-row').css('opacity', query ? 0.4 : 1);
+        var $list = $('#doc-swap-candidates');
+        $list.html('<em>Loading...</em>');
+        $.get('/swap_candidates/', {
+            question_type: swapSource.qtype, question_id: swapSource.qid,
+            scope: scope, q: query
+        }, function(response) {
+            var json = $.parseJSON(response);
+            if (json.error) { $list.html('<div class="alert-box warning">' + json.error + '</div>'); return; }
+            $('#doc-swap-source').html('Swapping: <strong>' + (json.source_answer || swapSource.answer) + '</strong> <span class="swap-cand-category">(' + json.source_category + ')</span>');
+            if (!json.candidates.length) { $list.html('<em>No matching questions.</em>'); return; }
+            $list.empty();
+            $.each(json.candidates, function(_, cand) {
+                var label = cand.unpacketized ? '(unpacketized): '
+                    : cand.packet_name + ' #' + cand.number + (cand.is_tiebreaker ? ' (TB)' : '') + ': ';
+                var $row = $('<div class="doc-swap-candidate">')
+                    .append($('<span class="swap-cand-packet">').text(label))
+                    .append($('<span>').text(cand.answer + ' '))
+                    .append($('<div class="swap-cand-category">').text(cand.category));
+                $row.on('click', function() {
+                    var post = cand.unpacketized
+                        ? { question_type: swapSource.qtype, question_id: cand.id,
+                            target_packet_id: packetId, target_number: swapSource.num }
+                        : { question_type: swapSource.qtype, question_id: swapSource.qid,
+                            target_packet_id: cand.packet_id, target_number: cand.number };
+                    $.post('/move_packet_question/', post, function(r) {
+                        var j = $.parseJSON(r);
+                        if (j.success) { location.reload(); } else { alert(j.message); }
+                    });
+                });
+                $list.append($row);
+            });
+        });
+    }
+
+    $('.doc-page').on('click', '.doc-swap-btn', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var $q = $(this).closest('.doc-question');
+        swapSource = {
+            qtype: $q.data('qtype'), qid: $q.data('qid'), num: $q.data('num'),
+            answer: $q.find('.doc-qlabel').text().replace(/\s+$/, '')
+        };
+        $('input[name="doc-swap-scope"][value="leaf"]').prop('checked', true);
+        $('#doc-swap-search').val('');
+        $swapDialog.dialog('open');
+        loadSwapCandidates();
+    });
+    $('input[name="doc-swap-scope"]').on('change', function() { if (swapSource) loadSwapCandidates(); });
+    var docSwapTimer = null;
+    $('#doc-swap-search').on('input', function() {
+        if (!swapSource) return;
+        clearTimeout(docSwapTimer);
+        docSwapTimer = setTimeout(loadSwapCandidates, 250);
+    });
 
     function saveOrder() {
         var data = { packet_id: packetId };
@@ -679,8 +796,10 @@ $(function() {
         comment: 'Select part of a question, then <strong>right-click</strong> the selection to comment on it. Use the <strong>Edit</strong> link to open a question in a new tab.',
         reorder: 'Drag a question to change its position; numbering updates automatically.'
     };
+    var MODE_KEY = 'qemsDocMode';
     function setMode(mode) {
         docMode = mode;
+        try { localStorage.setItem(MODE_KEY, mode); } catch (e) { /* ignore */ }
         $('.doc-mode-btn').each(function() {
             var active = $(this).data('mode') === mode;
             $(this).toggleClass('secondary', !active);
@@ -693,7 +812,10 @@ $(function() {
         e.preventDefault();
         setMode($(this).data('mode'));
     });
-    setMode('comment');  // default: comment/select mode, dragging off
+    // Restore the last-used mode so it survives a reload (e.g. after a swap).
+    var savedMode = 'comment';
+    try { if (localStorage.getItem(MODE_KEY) === 'reorder') savedMode = 'reorder'; } catch (e) { /* ignore */ }
+    setMode(savedMode);
 });
 </script>
 

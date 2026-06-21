@@ -207,6 +207,12 @@
     vertical-align: bottom;
 }
 
+.char-count-note { margin: 0.25rem 0 0.75rem; color: #555; font-size: 0.9em; }
+.char-count-note .char-count-excluded { color: #888; }
+.packet-assignment { padding: 4px 0; font-size: 0.95em; }
+.packet-assignment .prefix { display: inline; background: none; border: none; padding: 0 6px 0 0; font-weight: bold; }
+.packet-assignment .packet-grid-link { margin-left: 8px; font-size: 0.85em; }
+
 .rich-editor {
     border: 1px solid #ccc;
     border-radius: 0 0 3px 3px;

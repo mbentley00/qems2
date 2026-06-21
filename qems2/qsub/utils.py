@@ -315,6 +315,35 @@ def strip_moderator_instructions(line):
     line = INLINE_DIRECTIVE_RE.sub('', line)
     return line
 
+
+def get_char_count_exclusions(line, ignore_pronunciation):
+    """The snippets dropped before counting characters, so the UI can explain
+    what wasn't counted: moderator-instruction sentences (e.g. "Description
+    acceptable"), inline directives ([emphasize]), and — when the set ignores
+    them — pronunciation guides. Returns a de-duplicated list of strings."""
+    if not line:
+        return []
+    found = []
+    for m in MODERATOR_INSTRUCTION_RE.finditer(line):
+        s = m.group(0).strip(' ~.!?\t\n')
+        if s:
+            found.append(s)
+    for m in INLINE_DIRECTIVE_RE.finditer(line):
+        s = m.group(0).strip()
+        if s:
+            found.append(s)
+    if ignore_pronunciation and re.search(r'(?<!\\)\([^()]*\)', line):
+        found.append('pronunciation guides')
+    # De-dupe, preserving order.
+    seen = set()
+    out = []
+    for s in found:
+        key = s.lower()
+        if key not in seen:
+            seen.add(key)
+            out.append(s)
+    return out
+
 def get_character_count(line, ignore_pronunciation):
     line = strip_moderator_instructions(line)
     if not ignore_pronunciation:

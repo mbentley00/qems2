@@ -185,6 +185,9 @@ class Packet (models.Model):
     # authors = models.ManyToManyField(Player)
     question_set = models.ForeignKey(QuestionSet, on_delete=models.CASCADE)
     #team = models.ForeignKey(Team)
+    # Explicit display order set by the user (drag-to-reorder on the packet
+    # grid). When null, packets fall back to a natural sort by name.
+    sort_order = models.PositiveIntegerField(null=True, blank=True)
 
     created_by = models.ForeignKey(Writer, on_delete=models.CASCADE, related_name='packet_creator')
 
@@ -593,6 +596,14 @@ class Tossup (models.Model):
         
         return get_character_count(self.tossup_text, char_count_ignores_pronunciation_guides)
 
+    def character_count_exclusions(self):
+        """Text excluded from this tossup's character count (moderator
+        instructions, directives, pronunciation guides)."""
+        ignore = True
+        if self.get_question_set() is not None:
+            ignore = self.question_set.char_count_ignores_pronunciation_guides
+        return get_char_count_exclusions(self.tossup_text, ignore)
+
     def save(self, *args, **kwargs):
         self.setup_search_fields()
         super(Tossup, self).save(*args, **kwargs)
@@ -806,6 +817,22 @@ class Bonus(models.Model):
         part2_count = get_character_count(self.part2_text, char_count_ignores_pronunciation_guides)
         part3_count = get_character_count(self.part3_text, char_count_ignores_pronunciation_guides)
         return leadin_count + part1_count + part2_count + part3_count
+
+    def character_count_exclusions(self):
+        """Text excluded from this bonus's character count across leadin/parts."""
+        ignore = True
+        if self.get_question_set() is not None:
+            ignore = self.question_set.char_count_ignores_pronunciation_guides
+        out = []
+        for field in (self.leadin, self.part1_text, self.part2_text, self.part3_text):
+            out.extend(get_char_count_exclusions(field, ignore))
+        seen = set()
+        deduped = []
+        for s in out:
+            if s.lower() not in seen:
+                seen.add(s.lower())
+                deduped.append(s)
+        return deduped
 
     def save(self, *args, **kwargs):
         self.setup_search_fields()

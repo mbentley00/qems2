@@ -25,9 +25,20 @@
     <span class="right">
         <a href="/packet_grid_log/{{ qset.id }}/" class="button small secondary">Change log</a>
         <button type="button" id="undo-grid-change" class="button small">&#8630; Undo last change</button>
+        <button type="button" id="reorder-packets-btn" class="button small secondary">Reorder packets</button>
         <button type="button" id="assign-unpacketized-btn" class="button small success">Assign unpacketized to packets</button>
         <a href="/packetize_set/{{ qset.id }}/" class="button small alert repacketize-link">Re-packetize</a>
     </span>
+</div>
+
+<div id="reorder-packets-dialog" title="Reorder packets" style="display:none;">
+    <p>Drag the packets into the order you want them to appear.</p>
+    <ul id="packet-order-list" style="list-style:none; margin:0; max-height:340px; overflow-y:auto;">
+        {% for packet in packets %}
+        <li data-packet-id="{{ packet.id }}" class="packet-order-item">&#9776; {{ packet.packet_name }}</li>
+        {% endfor %}
+    </ul>
+    <button type="button" id="save-packet-order" class="button small primary" style="margin-top:10px;">Save order</button>
 </div>
 {% else %}
 <div class="panel radius clearfix">
@@ -98,11 +109,13 @@
             <tr{% if row.num > tossups_per_packet %} class="tiebreaker-row"{% endif %}>
                 <td class="num-col">{{ row.num }}{% if row.num > tossups_per_packet %} (TB){% endif %}</td>
                 {% for cell in row.cells %}
-                <td class="grid-cell" data-qtype="tossup" data-num="{{ row.num }}">
-                    {% if cell %}
+                <td class="grid-cell{% if cell.empty %} grid-cell-empty{% endif %}" data-qtype="tossup" data-num="{{ row.num }}">
+                    {% if cell.id %}
                         <a href="{{ cell.edit_url }}" class="cell-answer" data-qid="{{ cell.id }}">{{ cell.answer }}</a>
                         <div class="cell-category">{{ cell.category }}</div>
-                        {% if not read_only %}<a href="#" class="swap-btn" title="Swap with a question from another packet">&#8644;</a>{% endif %}
+                        {% if not read_only %}<a href="#" class="swap-btn" title="Swap with a question from another packet">&#8644;</a><a href="#" class="unassign-btn" title="Remove from packet (unassign)">&#10005;</a>{% endif %}
+                    {% elif not read_only %}
+                        <a href="/add_tossups/{{ qset.id }}/{{ cell.packet_id }}/" class="grid-add" title="Add a tossup to this packet">+ add</a>
                     {% endif %}
                 </td>
                 {% endfor %}
@@ -128,11 +141,13 @@
             <tr{% if row.num > bonuses_per_packet %} class="tiebreaker-row"{% endif %}>
                 <td class="num-col">{{ row.num }}{% if row.num > bonuses_per_packet %} (TB){% endif %}</td>
                 {% for cell in row.cells %}
-                <td class="grid-cell" data-qtype="bonus" data-num="{{ row.num }}">
-                    {% if cell %}
+                <td class="grid-cell{% if cell.empty %} grid-cell-empty{% endif %}" data-qtype="bonus" data-num="{{ row.num }}">
+                    {% if cell.id %}
                         <a href="{{ cell.edit_url }}" class="cell-answer" data-qid="{{ cell.id }}">{{ cell.answer }}</a>
                         <div class="cell-category">{{ cell.category }}</div>
-                        {% if not read_only %}<a href="#" class="swap-btn" title="Swap with a question from another packet">&#8644;</a>{% endif %}
+                        {% if not read_only %}<a href="#" class="swap-btn" title="Swap with a question from another packet">&#8644;</a><a href="#" class="unassign-btn" title="Remove from packet (unassign)">&#10005;</a>{% endif %}
+                    {% elif not read_only %}
+                        <a href="/add_bonuses/{{ qset.id }}/ACF-style bonus/{{ cell.packet_id }}/" class="grid-add" title="Add a bonus to this packet">+ add</a>
                     {% endif %}
                 </td>
                 {% endfor %}
@@ -158,7 +173,15 @@
 </div>
 
 <style>
-.grid-scroll { overflow-x: auto; margin-bottom: 30px; }
+/* Break out of the centered page column so the grid can use the full screen
+   width (helpful when zoomed out / on a wide monitor); it still scrolls
+   horizontally when the packets are wider than the viewport. */
+.grid-scroll {
+    overflow-x: auto;
+    margin-bottom: 30px;
+    width: 96vw;
+    margin-left: calc(-48vw + 50%);
+}
 .swap-btn {
     position: absolute;
     top: 0;
@@ -168,9 +191,25 @@
     font-weight: bold;
     line-height: 1.2;
 }
+.unassign-btn {
+    position: absolute;
+    top: 0;
+    right: 22px;
+    color: #ccc;
+    font-size: 1em;
+    font-weight: bold;
+    line-height: 1.3;
+}
 .grid-cell { position: relative; }
 .grid-cell:hover .swap-btn { color: #555; }
 .swap-btn:hover { color: #008CBA !important; }
+.grid-cell:hover .unassign-btn { color: #999; }
+.unassign-btn:hover { color: #c0392b !important; }
+.packet-order-item {
+    padding: 7px 10px; margin-bottom: 4px; border: 1px solid #cdd9e5;
+    background: #f1f6fb; border-radius: 3px; cursor: move;
+}
+.packet-order-item.ui-sortable-helper { background: #fff; }
 #swap-candidates { max-height: 320px; overflow-y: auto; }
 .swap-candidate {
     padding: 6px 8px;
@@ -205,6 +244,9 @@
 .cell-answer { display: block; font-weight: bold; }
 .cell-category { color: #777; font-size: 0.9em; }
 .grid-cell.drag-over { background-color: #d9edf7 !important; outline: 2px dashed #008CBA; }
+.grid-add { display: block; color: #bbb; font-weight: bold; text-align: center; padding: 2px 0; }
+.grid-cell-empty:hover { background-color: #eef7ee !important; }
+.grid-cell-empty:hover .grid-add { color: #43AC6A; }
 .grid-cell.ui-draggable-dragging-source { opacity: 0.4; }
 .grid-helper {
     background: #fff;
@@ -283,6 +325,34 @@ $(function() {
         }).fail(function() { $btn.prop('disabled', false); });
     });
 
+    // Remove a single question from its packet (back to the unpacketized pool).
+    $('.packet-grid').on('click', '.unassign-btn', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var $cell = $(this).closest('.grid-cell');
+        $.post('/unassign_packet_question/', {
+            question_type: $cell.data('qtype'),
+            question_id: $cell.find('.cell-answer').data('qid')
+        }, function(response) {
+            var json = $.parseJSON(response);
+            if (json.success) { location.reload(); } else { alert(json.message); }
+        });
+    });
+
+    // Reorder packets (drag-to-reorder, persisted as the custom packet order).
+    var $reorderDialog = $('#reorder-packets-dialog').dialog({ autoOpen: false, modal: true, width: 420 });
+    $('#packet-order-list').sortable({ axis: 'y', placeholder: 'packet-order-item' });
+    $('#reorder-packets-btn').on('click', function() { $reorderDialog.dialog('open'); });
+    $('#save-packet-order').on('click', function() {
+        var ids = $('#packet-order-list .packet-order-item').map(function() {
+            return $(this).data('packet-id');
+        }).get();
+        $.post('/set_packet_order/', { qset_id: {{ qset.id }}, 'packet_ids[]': ids }, function(response) {
+            var json = $.parseJSON(response);
+            if (json.success) { location.reload(); } else { alert(json.message || 'Could not save order.'); }
+        });
+    });
+
     // Undo the most recent packet-grid change
     $('#undo-grid-change').on('click', function () {
         var $btn = $(this);
@@ -306,6 +376,19 @@ $(function() {
         return packetIds[idx];
     }
 
+    // Horizontally scroll a grid when dragging near its left/right edge, so a
+    // question can be moved to an off-screen packet.
+    function autoScrollGrids(event) {
+        var x = event.pageX, EDGE = 70, STEP = 28;
+        $('.grid-scroll').each(function() {
+            var $el = $(this), off = $el.offset();
+            if (!off) return;
+            var left = off.left, right = left + $el.outerWidth();
+            if (x > right - EDGE) { this.scrollLeft += STEP; }
+            else if (x < left + EDGE) { this.scrollLeft -= STEP; }
+        });
+    }
+
     $('.grid-cell').has('.cell-answer').draggable({
         cancel: '.swap-btn',
         helper: function() {
@@ -314,6 +397,7 @@ $(function() {
         cursorAt: { top: 10, left: 10 },
         start: function() { $(this).addClass('ui-draggable-dragging-source'); },
         stop: function() { $(this).removeClass('ui-draggable-dragging-source'); },
+        drag: function(event) { autoScrollGrids(event); },
         revert: 'invalid',
         appendTo: 'body',
         scroll: true
@@ -365,6 +449,7 @@ $(function() {
         revert: 'invalid',
         appendTo: 'body',
         scroll: true,
+        drag: function(event) { autoScrollGrids(event); },
         start: function() { $(this).addClass('ui-draggable-dragging'); },
         stop: function() { $(this).removeClass('ui-draggable-dragging'); }
     });
@@ -396,7 +481,14 @@ $(function() {
     var $swapDialog = $('#swap-dialog').dialog({
         autoOpen: false,
         modal: true,
-        width: 600
+        width: 600,
+        closeOnEscape: true
+    });
+
+    // Click outside a modal dialog (on the overlay) closes it; Escape already
+    // closes via closeOnEscape.
+    $(document).on('click', '.ui-widget-overlay', function() {
+        $('.ui-dialog-content:visible').each(function() { $(this).dialog('close'); });
     });
 
     function loadCandidates() {

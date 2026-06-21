@@ -40,10 +40,10 @@
             </tr>
             </thead>
             <tbody>
-            {% for cat, entry in tossup_status.items|sort %}
-            <tr>
+            {% for entry in tossup_status %}
+            <tr class="{% if entry.is_sub %}status-subcat{% else %}status-topcat{% endif %}">
                 <td>
-                    {{ cat }}
+                    {% if entry.is_sub %}<span class="status-sub-indent">&#8627;</span> {% endif %}{{ entry.label }}
                 </td>
                 <td>
                     {{ entry.tu_in_cat }}
@@ -58,6 +58,7 @@
             {% endfor %}
             </tbody>
         </table>
+        {% if not qset.tossups_only %}
         <table class="tablesorter table-striped table-hover" id="packet-status-bonus-table">
             <thead>
             <tr>
@@ -68,10 +69,10 @@
             </tr>
             </thead>
             <tbody>
-            {% for cat, entry in bonus_status.items|sort %}
-            <tr>
+            {% for entry in bonus_status %}
+            <tr class="{% if entry.is_sub %}status-subcat{% else %}status-topcat{% endif %}">
                 <td>
-                    {{ cat }}
+                    {% if entry.is_sub %}<span class="status-sub-indent">&#8627;</span> {% endif %}{{ entry.label }}
                 </td>
                 <td>
                     {{ entry.bs_in_cat }}
@@ -86,6 +87,14 @@
             {% endfor %}
             </tbody>
         </table>
+        {% endif %}
+        <style>
+        #packet-status-tossup-table .status-topcat td:first-child,
+        #packet-status-bonus-table .status-topcat td:first-child { font-weight: bold; }
+        #packet-status-tossup-table .status-subcat td:first-child,
+        #packet-status-bonus-table .status-subcat td:first-child { padding-left: 1.5rem; color: #555; }
+        .status-sub-indent { color: #999; }
+        </style>
         <div class="panel header radius text-center"><strong>Packet Comments</strong></div>
         <div class="row">
             <div class="small-8 columns end">

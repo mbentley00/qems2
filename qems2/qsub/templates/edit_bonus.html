@@ -113,6 +113,14 @@
             </label>
         {% endif %}
         </div>
+        {% if bonus %}
+        <p class="char-count-note">
+            Character count: <strong>{{ bonus.character_count }}</strong> / {{ qset.max_acf_bonus_length }}
+            {% with ex=bonus.character_count_exclusions %}{% if ex %}
+            <br><small class="char-count-excluded">Not counted: {% for e in ex %}&ldquo;{{ e }}&rdquo;{% if not forloop.last %}, {% endif %}{% endfor %}</small>
+            {% endif %}{% endwith %}
+        </p>
+        {% endif %}
         <div class="row">
         {% for field in form %}
             {% if field.html_name == "category" or field.html_name == "author" %}
@@ -145,14 +153,15 @@
                 </div>
             </div>-->
             <div class="small-4 columns end">
-                <div class="row collapse">
-                    <div class="small-4 columns">
-                        <span class="prefix text-left" for="{{ form.packet.id_for_label }}">Packet</span>
-                    </div>
-                    <div class="small-8 columns">
-                        {{ form.packet }}
-                    </div>
-                    {% if form.packet.errors %}{{ form.packet.errors }}{% endif %}
+                {{ form.packet.as_hidden }}
+                <div class="packet-assignment">
+                    <span class="prefix text-left">Packet</span>
+                    {% if bonus.packet %}
+                        <strong>{{ bonus.packet.packet_name }}</strong>{% if bonus.question_number %} &mdash; #{{ bonus.question_number }}{% endif %}
+                    {% else %}
+                        <em>Unpacketized</em>
+                    {% endif %}
+                    <a href="/packet_grid/{{ qset.id }}/" class="packet-grid-link">Packet grid</a>
                 </div>
             </div>
             <div class="small-8 columns">
