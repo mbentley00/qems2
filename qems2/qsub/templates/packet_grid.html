@@ -115,7 +115,7 @@
                         <div class="cell-category">{{ cell.category }}</div>
                         {% if not read_only %}<a href="#" class="swap-btn" title="Swap with a question from another packet">&#8644;</a><a href="#" class="unassign-btn" title="Remove from packet (unassign)">&#10005;</a>{% endif %}
                     {% elif not read_only %}
-                        <a href="/add_tossups/{{ qset.id }}/{{ cell.packet_id }}/" class="grid-add" title="Add a tossup to this packet">+ add</a>
+                        <a href="#" class="grid-add grid-fill" title="Find a question for this empty slot">+ place&hellip;</a>
                     {% endif %}
                 </td>
                 {% endfor %}
@@ -147,7 +147,7 @@
                         <div class="cell-category">{{ cell.category }}</div>
                         {% if not read_only %}<a href="#" class="swap-btn" title="Swap with a question from another packet">&#8644;</a><a href="#" class="unassign-btn" title="Remove from packet (unassign)">&#10005;</a>{% endif %}
                     {% elif not read_only %}
-                        <a href="/add_bonuses/{{ qset.id }}/ACF-style bonus/{{ cell.packet_id }}/" class="grid-add" title="Add a bonus to this packet">+ add</a>
+                        <a href="#" class="grid-add grid-fill" title="Find a question for this empty slot">+ place&hellip;</a>
                     {% endif %}
                 </td>
                 {% endfor %}
@@ -370,10 +370,14 @@ $(function() {
 
     // Column index -> packet id
     var packetIds = [{% for packet in packets %}{{ packet.id }}{% if not forloop.last %},{% endif %}{% endfor %}];
+    var packetNames = [{% for packet in packets %}"{{ packet.packet_name|escapejs }}"{% if not forloop.last %},{% endif %}{% endfor %}];
 
     function packetIdForCell($cell) {
         var idx = $cell.index() - 1;  // first column is the number column
         return packetIds[idx];
+    }
+    function packetNameForCell($cell) {
+        return packetNames[$cell.index() - 1];
     }
 
     // Horizontally scroll a grid when dragging near its left/right edge, so a
@@ -492,26 +496,31 @@ $(function() {
     });
 
     function loadCandidates() {
-        var scope = $('input[name="swap-scope"]:checked').val();
+        var fill = swapSource.fill;
         var query = $('#swap-search').val().trim();
-        // When searching free-text, category scope doesn't apply.
-        $('#swap-scope-row').css('opacity', query ? 0.4 : 1);
+        // Category scope only applies when swapping an existing question.
+        $('#swap-scope-row').toggle(!fill).css('opacity', query ? 0.4 : 1);
         var $list = $('#swap-candidates');
         $list.html('<em>Loading...</em>');
-        $.get('/swap_candidates/', {
-            question_type: swapSource.qtype,
-            question_id: swapSource.qid,
-            scope: scope,
-            q: query
-        }, function(response) {
+        var params = fill
+            ? { question_type: swapSource.qtype, qset_id: {{ qset.id }}, q: query }
+            : { question_type: swapSource.qtype, question_id: swapSource.qid,
+                scope: $('input[name="swap-scope"]:checked').val(), q: query };
+        $.get('/swap_candidates/', params, function(response) {
             var json = $.parseJSON(response);
             if (json.error) {
                 $list.html('<div class="alert-box warning">' + json.error + '</div>');
                 return;
             }
-            $('#swap-source').html('Swapping: <strong>' + swapSource.answer + '</strong> <span class="swap-cand-category">(' + json.source_category + ')</span>');
+            if (fill) {
+                $('#swap-source').html('Place a question in <strong>' + swapSource.packetName + ' #' + swapSource.num + '</strong>');
+            } else {
+                $('#swap-source').html('Swapping: <strong>' + swapSource.answer + '</strong> <span class="swap-cand-category">(' + json.source_category + ')</span>');
+            }
             if (json.candidates.length === 0) {
-                $list.html('<em>No matching questions in other packets.</em>');
+                $list.html(fill
+                    ? '<em>No unpacketized questions &mdash; type to search all questions.</em>'
+                    : '<em>No matching questions in other packets.</em>');
                 return;
             }
             $list.empty();
@@ -524,10 +533,10 @@ $(function() {
                     .append($('<span>').text(cand.answer + ' '))
                     .append($('<div class="swap-cand-category">').text(cand.category));
                 $row.on('click', function() {
-                    // For a packetized candidate, move the source into the
-                    // candidate's slot. For an unpacketized candidate, move the
-                    // candidate into the source's slot (swapping the source out).
-                    var post = cand.unpacketized
+                    // Fill mode (or an unpacketized candidate): move the chosen
+                    // question into this slot. Otherwise move the source into the
+                    // candidate's slot (a true swap).
+                    var post = (fill || cand.unpacketized)
                         ? { question_type: swapSource.qtype, question_id: cand.id,
                             target_packet_id: swapSource.pid, target_number: swapSource.num }
                         : { question_type: swapSource.qtype, question_id: swapSource.qid,
@@ -551,6 +560,7 @@ $(function() {
         e.stopPropagation();
         var $cell = $(this).closest('.grid-cell');
         swapSource = {
+            fill: false,
             qtype: $cell.data('qtype'),
             qid: $cell.find('.cell-answer').data('qid'),
             answer: $cell.find('.cell-answer').text(),
@@ -558,6 +568,24 @@ $(function() {
             num: $cell.data('num')
         };
         $('input[name="swap-scope"][value="leaf"]').prop('checked', true);
+        $('#swap-search').val('');
+        $swapDialog.dialog('open');
+        loadCandidates();
+    });
+
+    // Empty slot: open the swap dialog to find/place an existing or unpacketized
+    // question (instead of only adding a brand-new one).
+    $('.grid-cell').on('click', '.grid-fill', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var $cell = $(this).closest('.grid-cell');
+        swapSource = {
+            fill: true,
+            qtype: $cell.data('qtype'),
+            pid: packetIdForCell($cell),
+            num: $cell.data('num'),
+            packetName: packetNameForCell($cell)
+        };
         $('#swap-search').val('');
         $swapDialog.dialog('open');
         loadCandidates();

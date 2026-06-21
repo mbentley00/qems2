@@ -1936,14 +1936,26 @@ class UnpacketizedAssignmentTests(TestCase):
         self.assertTrue(cands[free.id]['unpacketized'])
         self.assertEqual(cands[free.id]['packet_name'], '(unpacketized)')
 
-    def test_grid_empty_cells_have_add_link(self):
+    def test_grid_empty_cells_open_fill_dialog(self):
         # Leave a gap (slot 2 empty, slot 3 filled) so a real empty cell renders
-        # with a "+ add" link to add a question to that packet.
+        # the "+ place" trigger that opens the swap dialog (not a new-question link).
         self._tu('gap', packet=self.p1, number=3)
         resp = self.client.get('/packet_grid/{0}/'.format(self.qset.id))
         self.assertEqual(resp.status_code, 200)
         html = resp.content.decode()
-        self.assertIn('/add_tossups/{0}/{1}/'.format(self.qset.id, self.p1.id), html)
+        self.assertIn('grid-fill', html)
+        self.assertNotIn('/add_tossups/', html)
+
+    def test_swap_candidates_fill_mode_lists_unpacketized(self):
+        free = self._tu('freebie')  # unpacketized
+        self._tu('placed2', packet=self.p1, number=2)
+        resp = self.client.get('/swap_candidates/', {
+            'question_type': 'tossup', 'qset_id': self.qset.id})
+        data = json.loads(resp.content)
+        self.assertTrue(data['fill_mode'])
+        ids = {c['id'] for c in data['candidates']}
+        self.assertIn(free.id, ids)
+        self.assertNotIn(self.placed.id, ids)
 
     def test_doc_view_has_swap_buttons(self):
         self._tu('swapme', packet=self.p1, number=1)

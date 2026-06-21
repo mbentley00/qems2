@@ -52,50 +52,27 @@
     <li class="current"><a href="/view_packet/{{ packet.id }}/">Document View</a></li>
 </ul>
 
-<div class="row">
-    <div class="small-8 columns">
-        <ul class="button-group">
-            <li><a href="?order=separate" class="button small {% if order == 'separate' %}primary{% else %}secondary{% endif %}">Tossups then Bonuses</a></li>
-            <li><a href="?order=interleaved" class="button small {% if order == 'interleaved' %}primary{% else %}secondary{% endif %}">Interleaved</a></li>
-            {% if comment_count %}
-            <li><a href="#" id="toggle-comments" class="button small secondary"><i class="fa fa-comment"></i> Comments ({{ comment_count }})</a></li>
-            {% endif %}
-            <li><a href="#" id="toggle-issues" class="button small secondary" title="Show repeat-checker issues for each question"><i class="fa fa-triangle-exclamation"></i> Repeat Issues</a></li>
-            <li><a href="#" id="toggle-style" class="button small secondary" title="Show style-check issues for each question"><i class="fa fa-spell-check"></i> Style Issues</a></li>
-            <li><a href="/packet_mp3/{{ packet.id }}/?order={{ order }}" id="mp3-link" class="button small secondary" title="Download an MP3 reading of this packet ({{ order }} order)"><i class="fa fa-headphones"></i> Turn into MP3</a></li>
-            <li style="list-style:none;">
-                <select id="mp3-voice" class="button small secondary" style="height:auto;padding:4px 6px;margin:0;" title="Reader voice">
-                    {% for vid, vlabel in mp3_voices %}<option value="{{ vid }}">{{ vlabel }}</option>{% endfor %}
-                </select>
-            </li>
-        </ul>
-        <script>
-        (function () {
-            var sel = document.getElementById('mp3-voice');
-            var link = document.getElementById('mp3-link');
-            if (sel && link) {
-                sel.addEventListener('change', function () {
-                    link.href = "/packet_mp3/{{ packet.id }}/?order={{ order }}&voice=" + encodeURIComponent(sel.value);
-                });
-            }
-        })();
-        </script>
+<div class="doc-toolbar">
+    <div class="doc-toolbar-group">
+        <a href="?order=separate" class="button tiny {% if order == 'separate' %}primary{% else %}secondary{% endif %}">Tossups then Bonuses</a>
+        <a href="?order=interleaved" class="button tiny {% if order == 'interleaved' %}primary{% else %}secondary{% endif %}">Interleaved</a>
+        {% if comment_count %}<a href="#" id="toggle-comments" class="button tiny secondary"><i class="fa fa-comment"></i> Comments ({{ comment_count }})</a>{% endif %}
+        <a href="#" id="toggle-issues" class="button tiny secondary" title="Show repeat-checker issues for each question"><i class="fa fa-triangle-exclamation"></i> Repeat Issues</a>
+        <a href="#" id="toggle-style" class="button tiny secondary" title="Show style-check issues for each question"><i class="fa fa-spell-check"></i> Style Issues</a>
+        <a href="/packet_mp3/{{ packet.id }}/?order={{ order }}" id="mp3-link" class="button tiny secondary" title="Download an MP3 reading of this packet"><i class="fa fa-headphones"></i> MP3</a>
+        {% if not read_only %}
+        <a href="#" class="button tiny doc-mode-btn" data-mode="comment"><i class="fa fa-comment"></i> Comment</a><a href="#" class="button tiny secondary doc-mode-btn" data-mode="reorder"><i class="fa fa-arrows-up-down"></i> Reorder</a>
+        {% endif %}
     </div>
-    <div class="small-4 columns text-right">
-        {% if prev_packet %}<a href="/view_packet/{{ prev_packet.id }}/?order={{ order }}" class="button small secondary" title="{{ prev_packet.packet_name }}">&laquo; Prev</a>{% endif %}
-        <span style="margin: 0 6px;">{{ packet_index }} of {{ packet_count }}</span>
-        {% if next_packet %}<a href="/view_packet/{{ next_packet.id }}/?order={{ order }}" class="button small secondary" title="{{ next_packet.packet_name }}">Next &raquo;</a>{% endif %}
-        <a href="/packet_grid/{{ qset.id }}/" class="button small secondary">Packet Grid</a>
+    <div class="doc-toolbar-group">
+        {% if prev_packet %}<a href="/view_packet/{{ prev_packet.id }}/?order={{ order }}" class="button tiny secondary" title="{{ prev_packet.packet_name }}">&laquo; Prev</a>{% endif %}
+        <span class="doc-packet-count">{{ packet_index }} of {{ packet_count }}</span>
+        {% if next_packet %}<a href="/view_packet/{{ next_packet.id }}/?order={{ order }}" class="button tiny secondary" title="{{ next_packet.packet_name }}">Next &raquo;</a>{% endif %}
+        <a href="/packet_grid/{{ qset.id }}/" class="button tiny secondary">Packet Grid</a>
     </div>
 </div>
-
 {% if not read_only %}
-<div class="panel radius doc-hint">
-    <span class="doc-mode-toggle">
-        <a href="#" class="button tiny doc-mode-btn" data-mode="comment"><i class="fa fa-comment"></i> Comment mode</a><a href="#" class="button tiny secondary doc-mode-btn" data-mode="reorder"><i class="fa fa-arrows-up-down"></i> Reorder mode</a>
-    </span>
-    <span id="doc-mode-hint" style="margin-left:12px;"></span>
-</div>
+<div id="doc-mode-hint" class="doc-mode-hint"></div>
 {% endif %}
 
 {% if careful_notes %}
@@ -157,7 +134,7 @@ document.addEventListener('DOMContentLoaded', function () {
         <div class="doc-list" id="doc-list-interleaved">
             {% for q in interleaved %}
             <div class="doc-question" id="q-{{ q.qtype }}-{{ q.id }}" data-qtype="{{ q.qtype }}" data-qid="{{ q.id }}" data-num="{{ q.number }}" data-edit-url="{{ q.edit_url }}">
-                <span class="doc-qlabel">{% if q.qtype == 'tossup' %}Tossup{% else %}Bonus{% endif %} {{ q.number }}.{% if q.is_tiebreaker %} <span class="doc-tb">(Tiebreaker)</span>{% endif %}</span>{% if not read_only %}<a href="#" class="doc-swap-btn" title="Swap this question with another">&#8644; swap</a>{% endif %}
+                <span class="doc-qlabel">{% if q.qtype == 'tossup' %}Tossup{% else %}Bonus{% endif %} {{ q.number }}.{% if q.is_tiebreaker %} <span class="doc-tb">(Tiebreaker)</span>{% endif %}</span>
                 {% autoescape off %}<span class="doc-qtext">{{ q.html }}</span>{% endautoescape %}
                 {% include "view_packet_meta.html" %}
             </div>
@@ -168,7 +145,7 @@ document.addEventListener('DOMContentLoaded', function () {
         <div class="doc-list" id="doc-list-tossups">
             {% for q in tossups %}
             <div class="doc-question" id="q-tossup-{{ q.id }}" data-qtype="tossup" data-qid="{{ q.id }}" data-num="{{ q.number }}" data-edit-url="{{ q.edit_url }}">
-                <span class="doc-qlabel">{{ q.number }}.{% if q.is_tiebreaker %} <span class="doc-tb">(Tiebreaker)</span>{% endif %}</span>{% if not read_only %}<a href="#" class="doc-swap-btn" title="Swap this question with another">&#8644; swap</a>{% endif %}
+                <span class="doc-qlabel">{{ q.number }}.{% if q.is_tiebreaker %} <span class="doc-tb">(Tiebreaker)</span>{% endif %}</span>
                 {% autoescape off %}<span class="doc-qtext">{{ q.html }}</span>{% endautoescape %}
                 {% include "view_packet_meta.html" %}
             </div>
@@ -179,7 +156,7 @@ document.addEventListener('DOMContentLoaded', function () {
         <div class="doc-list" id="doc-list-bonuses">
             {% for q in bonuses %}
             <div class="doc-question" id="q-bonus-{{ q.id }}" data-qtype="bonus" data-qid="{{ q.id }}" data-num="{{ q.number }}" data-edit-url="{{ q.edit_url }}">
-                <span class="doc-qlabel">{{ q.number }}.{% if q.is_tiebreaker %} <span class="doc-tb">(Tiebreaker)</span>{% endif %}</span>{% if not read_only %}<a href="#" class="doc-swap-btn" title="Swap this question with another">&#8644; swap</a>{% endif %}
+                <span class="doc-qlabel">{{ q.number }}.{% if q.is_tiebreaker %} <span class="doc-tb">(Tiebreaker)</span>{% endif %}</span>
                 {% autoescape off %}<span class="doc-qtext">{{ q.html }}</span>{% endautoescape %}
                 {% include "view_packet_meta.html" %}
             </div>
@@ -225,6 +202,11 @@ document.addEventListener('DOMContentLoaded', function () {
 }
 .doc-question:hover { background-color: #f5f9ff; border-color: #cfe0f5; }
 .doc-qtext { cursor: text; }
+.doc-toolbar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 8px; }
+.doc-toolbar-group { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.doc-toolbar .button { margin: 0; }
+.doc-packet-count { font-size: 0.85em; color: #555; margin: 0 4px; }
+.doc-mode-hint { font-size: 0.85em; color: #666; margin-bottom: 10px; }
 .doc-mode-btn { margin-bottom: 0; }
 .doc-swap-btn { color:#bbb; margin-left:8px; font-size:0.85em; font-weight:bold; white-space:nowrap; }
 .doc-question:hover .doc-swap-btn { color:#008cba; }
@@ -694,8 +676,14 @@ $(function() {
     // ---- Swap a question with another (mirrors the packet grid) ----
     var swapSource = null;
     var $swapDialog = $('#doc-swap-dialog').dialog({ autoOpen: false, modal: true, width: 600, closeOnEscape: true });
+    // Close on click outside (the modal overlay) or Escape.
     $(document).on('click', '.ui-widget-overlay', function() {
-        $('.ui-dialog-content:visible').each(function() { $(this).dialog('close'); });
+        if ($swapDialog.dialog('isOpen')) { $swapDialog.dialog('close'); }
+    });
+    $(document).on('keydown', function(e) {
+        if ((e.key === 'Escape' || e.keyCode === 27) && $swapDialog.dialog('isOpen')) {
+            $swapDialog.dialog('close');
+        }
     });
 
     function loadSwapCandidates() {
@@ -793,8 +781,8 @@ $(function() {
 
     // ---- Mode toggle: Comment (select text) vs Reorder (drag) ----
     var HINTS = {
-        comment: 'Select part of a question, then <strong>right-click</strong> the selection to comment on it. Use the <strong>Edit</strong> link to open a question in a new tab.',
-        reorder: 'Drag a question to change its position; numbering updates automatically.'
+        comment: 'Comment mode: select text and right-click to comment (or use the per-question Comment tag). Right-click toggles mode.',
+        reorder: 'Reorder mode: drag a question to reposition it; numbering updates automatically. Right-click toggles mode.'
     };
     var MODE_KEY = 'qemsDocMode';
     function setMode(mode) {

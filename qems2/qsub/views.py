@@ -5783,39 +5783,61 @@ def reorder_packet_questions(request):
 
 @login_required
 def swap_candidates(request):
-    """JSON list of questions in other packets that could be swapped with the
-    given question, filtered by category scope: 'leaf' (same sub-subcategory),
-    'sub' (same subcategory) or 'top' (same general category)."""
+    """JSON list of questions that could go in a slot. With a source
+    ``question_id`` it lists swap candidates filtered by category scope ('leaf',
+    'sub', 'top') or free-text. Without one (filling an empty slot) it lists
+    unpacketized questions, or — with a search — any matching question."""
     user = request.user.writer
+    question_type = request.GET.get('question_type')
+    if question_type not in ('tossup', 'bonus'):
+        return HttpResponse(json.dumps({'error': 'Invalid question type.'}))
+    model = Tossup if question_type == 'tossup' else Bonus
+    search = request.GET.get('q', '').strip()
+    raw_qid = request.GET.get('question_id')
+    fill_mode = not raw_qid  # empty-slot mode: find any question to place
 
-    try:
-        question_type = request.GET['question_type']
-        question_id = int(request.GET['question_id'])
-        scope = request.GET.get('scope', 'leaf')
-        if scope not in ('leaf', 'sub', 'top'):
-            scope = 'leaf'
-        model = Tossup if question_type == 'tossup' else Bonus
-        question = model.objects.get(id=question_id)
-    except (KeyError, ValueError, Tossup.DoesNotExist, Bonus.DoesNotExist):
-        return HttpResponse(json.dumps({'error': 'Question not found!'}))
+    if fill_mode:
+        try:
+            qset = QuestionSet.objects.get(id=int(request.GET['qset_id']))
+        except (KeyError, ValueError, QuestionSet.DoesNotExist):
+            return HttpResponse(json.dumps({'error': 'Set not found.'}))
+        question = None
+    else:
+        try:
+            question = model.objects.get(id=int(raw_qid))
+        except (ValueError, Tossup.DoesNotExist, Bonus.DoesNotExist):
+            return HttpResponse(json.dumps({'error': 'Question not found!'}))
+        qset = question.question_set
 
-    qset = question.question_set
     if not (qset.is_owner(user) or user in qset.editor.all()):
         return HttpResponse(json.dumps({'error': 'You are not authorized to swap questions in this set!'}))
 
-    search = request.GET.get('q', '').strip()
-
-    if search:
-        # Free-text search across all questions of this type in the set,
-        # ignoring category scope.
+    def text_filter_for(term):
         if question_type == 'tossup':
-            text_filter = Q(tossup_answer__icontains=search) | Q(tossup_text__icontains=search)
+            return Q(tossup_answer__icontains=term) | Q(tossup_text__icontains=term)
+        return (Q(leadin__icontains=term) |
+                Q(part1_text__icontains=term) | Q(part1_answer__icontains=term) |
+                Q(part2_text__icontains=term) | Q(part2_answer__icontains=term) |
+                Q(part3_text__icontains=term) | Q(part3_answer__icontains=term))
+
+    scope = request.GET.get('scope', 'leaf')
+    if scope not in ('leaf', 'sub', 'top'):
+        scope = 'leaf'
+
+    if fill_mode:
+        if search:
+            candidates = (model.objects.filter(question_set=qset).filter(text_filter_for(search))
+                          .select_related('category', 'packet')
+                          .order_by('packet__packet_name', 'question_number')[:200])
+            source_label = 'search: "{0}"'.format(search)
         else:
-            text_filter = (Q(leadin__icontains=search) |
-                           Q(part1_text__icontains=search) | Q(part1_answer__icontains=search) |
-                           Q(part2_text__icontains=search) | Q(part2_answer__icontains=search) |
-                           Q(part3_text__icontains=search) | Q(part3_answer__icontains=search))
-        candidates = (model.objects.filter(question_set=qset).filter(text_filter)
+            # Default to the unpacketized pool — the questions you'd most want
+            # to drop into an empty slot.
+            candidates = (model.objects.filter(question_set=qset, packet=None)
+                          .select_related('category', 'packet').order_by('id')[:200])
+            source_label = 'unpacketized'
+    elif search:
+        candidates = (model.objects.filter(question_set=qset).filter(text_filter_for(search))
                       .exclude(id=question.id)
                       .select_related('category', 'packet')
                       .order_by('packet__packet_name', 'question_number')[:200])
@@ -5866,7 +5888,8 @@ def swap_candidates(request):
     } for q in candidates]
 
     return HttpResponse(json.dumps({'candidates': data, 'source_category': source_label,
-                                    'source_answer': html.unescape(preview(question))}))
+                                    'fill_mode': fill_mode,
+                                    'source_answer': html.unescape(preview(question)) if question else ''}))
 
 
 @login_required
