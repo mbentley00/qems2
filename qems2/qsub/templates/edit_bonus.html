@@ -290,19 +290,12 @@ $(function () {
             {% endif %}
         {% endautoescape %}
 
-        {% get_comment_form for bonus as cform %}
-        <form action="{% comment_form_target %}" method="POST">
-            {% csrf_token %}
+        <div class="add-comment-form" data-target-type="bonus" data-target-id="{{ bonus.id }}" data-qset-id="{{ qset.id }}">
             <label>Comment
-                <textarea rows="5" id="{{ cform.comment.id_for_label }}" name="{{ cform.comment.html_name }}"></textarea>
+                <textarea rows="5" class="new-comment-text expanding"></textarea>
             </label>
-            {{ cform.content_type }}
-            {{ cform.object_pk }}
-            {{ cform.timestamp }}
-            {{ cform.security_hash }}
-            <input type="submit" name="submit" value="Post" class="button primary right">
-            <input type="hidden" name="next" value="/edit_bonus/{{ bonus.id }}/">
-        </form>
+            <button class="button primary right comment-submit">Post Comment</button>
+        </div>
     </div>
 </div>
 {% endif %}

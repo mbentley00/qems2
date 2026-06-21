@@ -1,0 +1,54 @@
+{% comment %}
+Reusable threaded comments for a target object (currently used for packets).
+Required context: target, target_type ('packet'), qset, role, read_only.
+Delete/resolve/reply controls reuse the global delegated handlers in
+paste_convert.js / qsub.js; the new-comment form posts via /post_comment/.
+{% endcomment %}
+{% load comments %}
+{% load filters %}
+<div class="comments" data-target-type="{{ target_type }}" data-target-id="{{ target.id }}">
+    {% autoescape off %}
+        {% get_threaded_comments target as thread_data %}
+        {% for comment in thread_data.top_level %}
+        <div class="comment-item{% if comment.id in thread_data.resolved %} comment-resolved{% endif %}{% if comment.is_discord %} comment-discord{% endif %}" data-comment-id="{{ comment.id }}">
+            {% if comment.id in thread_data.resolved %}<span class="label success comment-resolved-badge">Resolved</span>{% endif %}
+            <strong>{% if comment.is_discord %}<span class="discord-badge">Discord</span>{{ comment.user_name }}{% else %}{{ comment.user }}{% endif %}:</strong> {{ comment.comment|safe|comment_html|linebreaks }} ({{ comment.submit_date }})
+            <div class="comment-actions">
+                {% if role == "editor" %}
+                    <a href="/delete_comment/{{ comment.id }}" class="delete_comment" value="{{ comment.id }}" qset="{{ qset.id }}">Delete</a>
+                {% endif %}
+                <a href="#" class="resolve-toggle" data-comment-id="{{ comment.id }}">{% if comment.id in thread_data.resolved %}Unresolve{% else %}Resolve{% endif %}</a>
+                <a href="#" class="reply-toggle" data-comment-id="{{ comment.id }}">Reply</a>
+            </div>
+            <div class="reply-form" id="reply-form-{{ comment.id }}" style="display:none;">
+                <textarea rows="3" class="reply-text" placeholder="Write a reply..."></textarea>
+                <button class="button small primary post-reply" data-parent-id="{{ comment.id }}" data-qset-id="{{ qset.id }}">Post Reply</button>
+                <button class="button small secondary cancel-reply">Cancel</button>
+            </div>
+            <div class="comment-replies">
+                {% for reply in thread_data.replies|get_replies:comment.id %}
+                    <div class="comment-item" data-comment-id="{{ reply.id }}">
+                        <strong>{{ reply.user }}:</strong> {{ reply.comment|safe|comment_html|linebreaks }} ({{ reply.submit_date }})
+                        {% if role == "editor" %}
+                        <div class="comment-actions">
+                            <a href="/delete_comment/{{ reply.id }}" class="delete_comment" value="{{ reply.id }}" qset="{{ qset.id }}">Delete</a>
+                        </div>
+                        {% endif %}
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% empty %}
+        <p class="no-comments" style="color:#888;">No packet-level comments yet.</p>
+        {% endfor %}
+    {% endautoescape %}
+
+    {% if not read_only %}
+    <div class="add-comment-form" data-target-type="{{ target_type }}" data-target-id="{{ target.id }}" data-qset-id="{{ qset.id }}" style="margin-top:0.5rem;">
+        <label>Comment
+            <textarea rows="4" class="new-comment-text"></textarea>
+        </label>
+        <button class="button primary right comment-submit">Post Comment</button>
+    </div>
+    {% endif %}
+</div>

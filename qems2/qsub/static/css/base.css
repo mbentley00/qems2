@@ -197,6 +197,16 @@
     padding-top: 0.35em;
 }
 
+/* Keep a long question answer in the top breadcrumb from overflowing the bar. */
+.top-bar .breadcrumbs { overflow: hidden; max-width: 100%; }
+.top-bar .breadcrumbs > li {
+    max-width: 32ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: bottom;
+}
+
 .rich-editor {
     border: 1px solid #ccc;
     border-radius: 0 0 3px 3px;
@@ -204,9 +214,12 @@
     padding: 0.5em;
     min-height: 4.5em;
     font-family: inherit;
-    font-size: 0.875em;
+    font-size: 1em;
     line-height: 1.5;
     box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.1);
+    /* The editor sits inside a <label> (cursor: pointer in Foundation); force
+       a text caret so it reads as an editable text box, not a clickable thing. */
+    cursor: text;
 }
 
 /* Long question-stem / leadin / part-text fields start taller so a full-length

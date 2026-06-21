@@ -1936,6 +1936,25 @@ class UnpacketizedAssignmentTests(TestCase):
         self.assertTrue(cands[free.id]['unpacketized'])
         self.assertEqual(cands[free.id]['packet_name'], '(unpacketized)')
 
+    def test_packet_revision_changes_on_edit_and_move(self):
+        # The document-view staleness token changes when a question in the
+        # packet is edited or moved out.
+        from qems2.qsub.views import _packet_revision
+        from datetime import datetime
+        tu = self._tu('rev', packet=self.p1, number=2)
+        rev1 = _packet_revision(self.p1)
+        # Endpoint returns the same token.
+        resp = self.client.get('/packet_revision/{0}/'.format(self.p1.id))
+        self.assertEqual(json.loads(resp.content)['revision'], rev1)
+        # Editing a question's timestamp changes it.
+        tu.last_changed_date = datetime(2030, 1, 1, 12, 0, 0)
+        tu.save()
+        rev2 = _packet_revision(self.p1)
+        self.assertNotEqual(rev1, rev2)
+        # Moving a question out of the packet changes it again.
+        tu.packet = None; tu.question_number = None; tu.save()
+        self.assertNotEqual(rev2, _packet_revision(self.p1))
+
 
 class ImportEntityStorageTests(TestCase):
     """YAPP import stores literal punctuation (apostrophes/ampersands), not
@@ -1986,3 +2005,71 @@ class ImportEntityStorageTests(TestCase):
         self.assertEqual(tu.tossup_text, "Bach's fugue & chorale &lt;kept&gt;.")
         # Angle brackets left escaped so they can't inject a tag.
         self.assertIn('&lt;kept&gt;', tu.tossup_text)
+
+
+class PacketCommentAndPostTests(TestCase):
+    """Packet-level comments via the generic post_comment endpoint, and the
+    careful-notes moderator heads-up in the doc view."""
+
+    def setUp(self):
+        from django.contrib.contenttypes.models import ContentType
+        from django_comments.models import Comment
+        from datetime import datetime
+        self.Comment = Comment
+        self.ContentType = ContentType
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('pc_owner', password='pw', email='pc@test.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='pc dist')
+        self.qset = QuestionSet.objects.create(
+            name='PC Set', date=timezone.now(), host='', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.owner.question_set_editor.add(self.qset)
+        self.packet = Packet.objects.create(question_set=self.qset, packet_name='Packet 01', created_by=self.owner)
+        self.tu = Tossup.objects.create(
+            author=self.owner, question_set=self.qset, packet=self.packet, question_type=self.acf,
+            tossup_text='Stem (*) end.', tossup_answer='_Tricky Answer_', read_carefully=True,
+            created_date=datetime.now(), last_changed_date=datetime.now(), question_number=1)
+        self.client.login(username='pc_owner', password='pw')
+
+    def test_post_packet_comment(self):
+        resp = self.client.post('/post_comment/', {
+            'target_type': 'packet', 'target_id': self.packet.id,
+            'qset_id': self.qset.id, 'comment_text': 'Packet-wide note'})
+        self.assertTrue(json.loads(resp.content)['success'])
+        ct = self.ContentType.objects.get_for_model(Packet)
+        self.assertTrue(self.Comment.objects.filter(
+            content_type=ct, object_pk=str(self.packet.id), comment='Packet-wide note').exists())
+
+    def test_post_tossup_comment_no_security_form(self):
+        # No django_comments timestamp/security_hash needed (the stale-tab fix).
+        resp = self.client.post('/post_comment/', {
+            'target_type': 'tossup', 'target_id': self.tu.id,
+            'qset_id': self.qset.id, 'comment_text': 'looks good'})
+        self.assertTrue(json.loads(resp.content)['success'])
+        ct = self.ContentType.objects.get_for_model(Tossup)
+        self.assertTrue(self.Comment.objects.filter(
+            content_type=ct, object_pk=str(self.tu.id)).exists())
+
+    def test_post_comment_rejects_non_member(self):
+        other = User.objects.create_user('pc_outsider', password='pw', email='o3@test.com')
+        Writer.objects.get(user=other)
+        self.client.logout(); self.client.login(username='pc_outsider', password='pw')
+        resp = self.client.post('/post_comment/', {
+            'target_type': 'packet', 'target_id': self.packet.id,
+            'qset_id': self.qset.id, 'comment_text': 'nope'})
+        self.assertFalse(json.loads(resp.content)['success'])
+
+    def test_doc_view_shows_packet_comments_and_careful_notes(self):
+        self.client.post('/post_comment/', {
+            'target_type': 'packet', 'target_id': self.packet.id,
+            'qset_id': self.qset.id, 'comment_text': 'Packet-wide note'})
+        resp = self.client.get('/view_packet/{0}/'.format(self.packet.id))
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode()
+        self.assertIn('packet-comments-panel', body)
+        self.assertIn('Packet-wide note', body)
+        # Careful-notes heads-up for the read_carefully tossup.
+        self.assertIn('read these answer lines carefully', body)
+        self.assertIn('Tricky Answer', body)

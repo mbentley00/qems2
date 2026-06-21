@@ -12,6 +12,39 @@
 {% block content %}
 {% if qset %}<script>window.QEMS_QSET_ID = {{ qset.id }};</script>{% endif %}
 
+<div id="packet-changed-banner" class="alert-box warning" style="display:none; position:sticky; top:0; z-index:50;">
+    This packet has changed since you opened it (someone edited a question or its order).
+    <a href="#" id="packet-changed-reload" class="button tiny" style="margin:0 0 0 0.5rem;">Reload</a>
+    <a href="#" id="packet-changed-dismiss" class="right" style="margin:0;">Dismiss</a>
+</div>
+<script>
+(function () {
+    var packetId = {{ packet.id }};
+    var current = "{{ packet_revision }}";
+    var banner = document.getElementById('packet-changed-banner');
+    var dismissed = false;
+    function check() {
+        fetch('/packet_revision/' + packetId + '/', { credentials: 'same-origin' })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (j) {
+                if (j && j.revision && j.revision !== current && !dismissed) {
+                    banner.style.display = 'block';
+                }
+            })
+            .catch(function () { /* ignore transient errors */ });
+    }
+    document.addEventListener('DOMContentLoaded', function () {
+        document.getElementById('packet-changed-reload').addEventListener('click', function (e) {
+            e.preventDefault(); location.reload();
+        });
+        document.getElementById('packet-changed-dismiss').addEventListener('click', function (e) {
+            e.preventDefault(); dismissed = true; banner.style.display = 'none';
+        });
+        setInterval(check, 30000);  // poll every 30s
+    });
+})();
+</script>
+
 <ul class="breadcrumbs">
     <li><a href="/edit_question_set/{{ qset.id }}/">{{ qset.name }}</a></li>
     <li><a href="/packet_grid/{{ qset.id }}/">Packet Grid</a></li>
@@ -64,6 +97,41 @@
     <span id="doc-mode-hint" style="margin-left:12px;"></span>
 </div>
 {% endif %}
+
+{% if careful_notes %}
+<div class="callout-careful">
+    <strong><i class="fa fa-triangle-exclamation"></i> Moderator — read these answer lines carefully:</strong>
+    <ul>
+        {% for note in careful_notes %}
+        <li><strong>{{ note.label }} {{ note.number }}:</strong> {% autoescape off %}{{ note.answer }}{% endautoescape %}</li>
+        {% endfor %}
+    </ul>
+</div>
+<style>
+.callout-careful { border:1px solid #e0a800; background:#fff8e1; border-radius:3px;
+    padding:0.6rem 0.9rem; margin-bottom:1rem; font-size:0.95em; }
+.callout-careful ul { margin:0.4rem 0 0; }
+.callout-careful li { margin-bottom:0.2rem; }
+</style>
+{% endif %}
+
+<div class="panel radius" id="packet-comments-panel">
+    <strong>Packet comments</strong>
+    <a href="#" id="toggle-packet-comments" class="button tiny secondary right" style="margin:0;">Show / hide</a>
+    <div id="packet-comments-body" style="margin-top:0.5rem;">
+        {% include "_comment_thread.html" with target=packet target_type="packet" %}
+    </div>
+</div>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    var t = document.getElementById('toggle-packet-comments');
+    if (t) t.addEventListener('click', function (e) {
+        e.preventDefault();
+        var b = document.getElementById('packet-comments-body');
+        b.style.display = (b.style.display === 'none') ? '' : 'none';
+    });
+});
+</script>
 
 <div class="doc-flex">
 <div class="doc-page">

@@ -781,6 +781,28 @@ $(function () {
     // 7. Comment Reply UI
     // ========================================================================
 
+    // Post a new top-level comment (tossup/bonus/packet) via AJAX. Avoids the
+    // django_comments security form, whose timestamp expires on a long-open tab
+    // (which produced a "bad request" when adding a comment).
+    $(document).on('click', '.comment-submit', function (e) {
+        e.preventDefault();
+        var $form = $(this).closest('.add-comment-form');
+        var text = $.trim($form.find('.new-comment-text').val());
+        if (!text) { return; }
+        var $btn = $(this);
+        $btn.prop('disabled', true);
+        $.post('/post_comment/', {
+            target_type: $form.data('target-type'),
+            target_id: $form.data('target-id'),
+            qset_id: $form.data('qset-id'),
+            comment_text: text
+        }, function (response) {
+            var json = $.parseJSON(response);
+            if (json.success) { location.reload(); }
+            else { alert(json.message || 'Could not post comment.'); $btn.prop('disabled', false); }
+        }).fail(function () { $btn.prop('disabled', false); });
+    });
+
     // Toggle a comment's resolved status
     $(document).on('click', '.resolve-toggle', function (e) {
         e.preventDefault();

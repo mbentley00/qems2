@@ -1093,6 +1093,7 @@ def edit_packet(request, packet_id):
          'bonuses': bonuses,
          'tossup_status': tossup_status,
          'bonus_status': bonus_status,
+         'role': get_role_no_owner(user, qset),
          'read_only': read_only,
          'user': user})
 
@@ -1770,6 +1771,41 @@ def delete_comment(request):
                 message_class = 'alert-box warning'
 
     return HttpResponse(json.dumps({'message': message, 'message_class': message_class}))
+
+@login_required
+def post_comment(request):
+    """Create a top-level comment on a tossup, bonus, or packet via AJAX.
+
+    Bypasses django_comments' security form (whose timestamp expires after a
+    couple of hours, producing a 400 on a tab left open too long). The Comment
+    post_save signals still fire, so @mentions and notification emails work.
+    """
+    if request.method != 'POST':
+        return HttpResponse(json.dumps({'success': False, 'message': 'Invalid request'}))
+    target_type = request.POST.get('target_type')
+    target_id = request.POST.get('target_id')
+    text = (request.POST.get('comment_text') or '').strip()
+    models_by_type = {'tossup': Tossup, 'bonus': Bonus, 'packet': Packet}
+    if target_type not in models_by_type or not target_id or not text:
+        return HttpResponse(json.dumps({'success': False, 'message': 'Missing or invalid fields.'}))
+    try:
+        obj = models_by_type[target_type].objects.select_related('question_set').get(id=target_id)
+    except (Tossup.DoesNotExist, Bonus.DoesNotExist, Packet.DoesNotExist):
+        return HttpResponse(json.dumps({'success': False, 'message': 'Target not found.'}))
+
+    qset = obj.question_set
+    user = request.user.writer
+    if user not in qset.writer.all() and user not in qset.editor.all() and not qset.is_owner(user):
+        return HttpResponse(json.dumps({'success': False, 'message': 'You are not authorized to comment on this set.'}))
+
+    from django.contrib.sites.models import Site
+    Comment.objects.create(
+        content_type=ContentType.objects.get_for_model(obj),
+        object_pk=str(obj.id), site=Site.objects.get_current(),
+        user=request.user, comment=text, is_public=True, is_removed=False)
+    cache.clear()
+    return HttpResponse(json.dumps({'success': True, 'message': 'Comment posted.'}))
+
 
 @login_required
 def reply_to_comment(request):
@@ -3734,19 +3770,43 @@ def export_question_set(request, qset_id, output_format):
                         p.add_run(meta)
                     attach_open_comments(document, p, bonus, bs_comment_ct)
 
+                def add_careful_notes_to_doc(document, tossup_qs, bonus_qs):
+                    """At the top of a packet, list the answer lines flagged
+                    "read answer carefully" so the moderator is warned."""
+                    flagged = []
+                    for t in tossup_qs:
+                        if getattr(t, 'read_carefully', False):
+                            flagged.append(('Tossup', t.question_number, t.tossup_answer))
+                    for b in bonus_qs:
+                        if getattr(b, 'read_carefully', False):
+                            ans = ' / '.join(filter(None, [b.part1_answer, b.part2_answer, b.part3_answer]))
+                            flagged.append(('Bonus', b.question_number, ans))
+                    if not flagged:
+                        return
+                    head = document.add_paragraph()
+                    head.paragraph_format.space_after = Pt(2)
+                    head.add_run('Moderator — read these answer lines carefully:').bold = True
+                    for label, num, answer in flagged:
+                        line = document.add_paragraph()
+                        line.paragraph_format.space_after = Pt(0)
+                        line.add_run('{0} {1}: '.format(label, num or '?')).bold = True
+                        add_qems_formatted_runs(line, safe_text(answer), is_answer=True)
+                    document.add_paragraph().paragraph_format.space_after = Pt(8)
+
                 def save_docx_bytes(document):
                     buf = io.BytesIO()
                     document.save(buf)
                     return buf.getvalue()
 
                 def write_all_questions_to_doc(document, tossup_qs, bonus_qs):
-                    """Write tossups then bonuses to a document."""
-                    if tossup_qs.exists():
+                    """Write tossups then bonuses to a document. Accepts a
+                    queryset or a list."""
+                    if tossup_qs:
                         document.add_heading('Tossups', level=2)
                         for i, tossup in enumerate(tossup_qs, 1):
                             num = tossup.question_number if tossup.question_number else i
                             add_tossup_to_doc(document, tossup, num)
-                    if bonus_qs.exists():
+                    if bonus_qs:
                         document.add_heading('Bonuses', level=2)
                         for i, bonus in enumerate(bonus_qs, 1):
                             num = bonus.question_number if bonus.question_number else i
@@ -3760,12 +3820,13 @@ def export_question_set(request, qset_id, output_format):
                         if pkt_i > 0:
                             document.add_page_break()
                         document.add_heading('{0} {1}'.format(qset.name, packet.packet_name), level=1)
-                        tossups = Tossup.objects.filter(
+                        tossups = list(Tossup.objects.filter(
                             packet=packet, question_set=qset
-                        ).order_by('question_number')
-                        bonuses = Bonus.objects.filter(
+                        ).order_by('question_number'))
+                        bonuses = list(Bonus.objects.filter(
                             packet=packet, question_set=qset
-                        ).order_by('question_number')
+                        ).order_by('question_number'))
+                        add_careful_notes_to_doc(document, tossups, bonuses)
                         write_all_questions_to_doc(document, tossups, bonuses)
 
                     # Unpacketed questions
@@ -3936,6 +3997,7 @@ def export_question_set(request, qset_id, output_format):
                             document = new_docx()
                             document.add_heading(
                                 '{0} {1}'.format(qset.name, packet.packet_name), level=1)
+                            add_careful_notes_to_doc(document, tus, bos)
                             if tus:
                                 document.add_heading('Tossups', level=2)
                                 for i, tossup in enumerate(tus, 1):
@@ -5368,6 +5430,38 @@ def assign_unpacketized(request):
     return HttpResponse(json.dumps({'success': success, 'message': message}))
 
 
+def _packet_revision(packet):
+    """A short token that changes whenever the packet's composition or any of
+    its questions change — used by the document view to detect that someone else
+    edited the packet (membership, order, or question text) so it can warn the
+    viewer to reload. Cheap: two lightweight queries, no new DB columns."""
+    import hashlib
+    parts = []
+    for qtype, qs in (
+        ('t', packet.tossup_set.order_by('question_number')
+              .values_list('id', 'question_number', 'last_changed_date')),
+        ('b', packet.bonus_set.order_by('question_number')
+              .values_list('id', 'question_number', 'last_changed_date'))):
+        for qid, num, changed in qs:
+            parts.append('{0}{1}:{2}:{3}'.format(qtype, qid, num, changed.isoformat() if changed else ''))
+    return hashlib.md5('|'.join(parts).encode('utf-8')).hexdigest()[:16]
+
+
+@login_required
+def packet_revision(request, packet_id):
+    """JSON {revision} for the given packet, polled by the document view to
+    detect concurrent changes."""
+    try:
+        packet = Packet.objects.select_related('question_set').get(id=packet_id)
+    except Packet.DoesNotExist:
+        return HttpResponse(json.dumps({'error': 'not found'}), status=404)
+    user = request.user.writer
+    qset = packet.question_set
+    if not qset.is_owner(user) and user not in qset.editor.all() and user not in qset.writer.all():
+        return HttpResponse(json.dumps({'error': 'forbidden'}), status=403)
+    return HttpResponse(json.dumps({'revision': _packet_revision(packet)}))
+
+
 @login_required
 def view_packet(request, packet_id):
     user = request.user.writer
@@ -5432,6 +5526,23 @@ def view_packet(request, packet_id):
                     bonus_changers)
                for b in packet_bonuses]
 
+    # Heads-up for the moderator: answer lines flagged "read answer carefully".
+    def _careful_answer(q, qtype):
+        if qtype == 'tossup':
+            return get_formatted_question_html(q.tossup_answer, True, True, False, False)
+        parts = [p for p in (q.part1_answer, q.part2_answer, q.part3_answer) if p]
+        return ' / '.join(get_formatted_question_html(p, True, True, False, False) for p in parts)
+
+    careful_notes = []
+    for t in packet_tossups:
+        if t.read_carefully:
+            careful_notes.append({'label': 'Tossup', 'number': t.question_number,
+                                  'answer': _careful_answer(t, 'tossup')})
+    for b in packet_bonuses:
+        if b.read_carefully:
+            careful_notes.append({'label': 'Bonus', 'number': b.question_number,
+                                  'answer': _careful_answer(b, 'bonus')})
+
     # Raw question data for the client-side Discord copy formatters
     discord_payload = {}
     for t, row in zip(packet_tossups, tossups):
@@ -5495,6 +5606,9 @@ def view_packet(request, packet_id):
                               'comment_count': comment_count,
                               'discord_payload': discord_payload,
                               'mp3_voices': VOICE_CHOICES,
+                              'packet_revision': _packet_revision(packet),
+                              'careful_notes': careful_notes,
+                              'role': get_role_no_owner(user, qset),
                               'read_only': read_only,
                               'user': user})
 

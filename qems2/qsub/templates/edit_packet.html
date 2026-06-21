@@ -86,25 +86,10 @@
             {% endfor %}
             </tbody>
         </table>
-        <div class="panel header radius text-center"><strong>Comments</strong></div>
+        <div class="panel header radius text-center"><strong>Packet Comments</strong></div>
         <div class="row">
-            <div class="small-6 columns end comments">
-                {% render_comment_list for packet %}
-                {% get_comment_form for packet as cform %}
-                <form action="{% comment_form_target %}" method="POST">
-                    {% csrf_token %}
-                    <label>Comment
-                        <textarea rows="5" id="{{ cform.comment.id_for_label }}" name="{{ cform.comment.html_name }}"></textarea>
-                    </label>
-                    {{ cform.honeypot }}
-                    {{ cform.content_type }}
-                    {{ cform.object_pk }}
-                    {{ cform.timestamp }}
-                    {{ cform.security_hash }}
-                    <input type="submit" name="submit" value="Post" class="button primary right">
-                    <!--<input type="submit" name="preview" value="Preview" class="btn btn-primary">-->
-                    <input type="hidden" name="next" value="/edit_packet/{{ packet.id }}/">
-                </form>
+            <div class="small-8 columns end">
+                {% include "_comment_thread.html" with target=packet target_type="packet" %}
             </div>
         </div>
     </div>
