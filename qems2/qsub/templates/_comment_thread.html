@@ -12,7 +12,7 @@ paste_convert.js / qsub.js; the new-comment form posts via /post_comment/.
         {% for comment in thread_data.top_level %}
         <div class="comment-item{% if comment.id in thread_data.resolved %} comment-resolved{% endif %}{% if comment.is_discord %} comment-discord{% endif %}" data-comment-id="{{ comment.id }}">
             {% if comment.id in thread_data.resolved %}<span class="label success comment-resolved-badge">Resolved</span>{% endif %}
-            <strong>{% if comment.is_discord %}<span class="discord-badge">Discord</span>{{ comment.user_name }}{% else %}{{ comment.user }}{% endif %}:</strong> {{ comment.comment|safe|comment_html|linebreaks }} ({{ comment.submit_date }})
+            <strong>{% if comment.is_discord %}<span class="discord-badge">Discord</span>{{ comment.user_name }}{% else %}{{ comment|commenter_name }}{% endif %}:</strong> {{ comment.comment|safe|comment_html|linebreaks }} ({{ comment.submit_date }})
             <div class="comment-actions">
                 {% if role == "editor" %}
                     <a href="/delete_comment/{{ comment.id }}" class="delete_comment" value="{{ comment.id }}" qset="{{ qset.id }}">Delete</a>
@@ -28,7 +28,7 @@ paste_convert.js / qsub.js; the new-comment form posts via /post_comment/.
             <div class="comment-replies">
                 {% for reply in thread_data.replies|get_replies:comment.id %}
                     <div class="comment-item" data-comment-id="{{ reply.id }}">
-                        <strong>{{ reply.user }}:</strong> {{ reply.comment|safe|comment_html|linebreaks }} ({{ reply.submit_date }})
+                        <strong>{{ reply|commenter_name }}:</strong> {{ reply.comment|safe|comment_html|linebreaks }} ({{ reply.submit_date }})
                         {% if role == "editor" %}
                         <div class="comment-actions">
                             <a href="/delete_comment/{{ reply.id }}" class="delete_comment" value="{{ reply.id }}" qset="{{ qset.id }}">Delete</a>

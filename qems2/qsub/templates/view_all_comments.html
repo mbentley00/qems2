@@ -33,7 +33,7 @@
         {% autoescape off %}
             {% for comment in comment_tab_list %}
                 <tr{% if comment.comment.is_discord %} class="comment-discord"{% endif %}>
-                    <td>{% if comment.comment.is_discord %}<span class="discord-badge">Discord</span>{{ comment.comment.user_name }}{% else %}{{ comment.comment.user }}{% endif %}</td>
+                    <td>{% if comment.comment.is_discord %}<span class="discord-badge">Discord</span>{{ comment.comment.user_name }}{% else %}{{ comment.comment|commenter_name }}{% endif %}</td>
                     <td>{{ comment.comment.comment|comment_html }}{% if comment.comment.is_discord and comment.comment.discord_thread_url %}<br /><a href="{{ comment.comment.discord_thread_url }}" target="_blank" rel="noopener" class="discord-thread-link">Open Discord thread</a>{% endif %}</td>
                     <td><a href="/edit_{{ comment.question_type }}/{{ comment.question_id }}">{{ comment.question_text }}</a></td>
                     <td>{{ comment.comment.submit_date|to_short_datetime }}</td>

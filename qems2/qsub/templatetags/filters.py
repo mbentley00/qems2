@@ -207,6 +207,17 @@ def answer_html(line):
 def answer_no_formatting(line):
     return get_answer_no_formatting(line)
 
+
+@register.filter(name='commenter_name')
+def commenter_name(comment):
+    """Display a comment author as their real name with username in quotes
+    (e.g. Will Alston ("walston")), or just the username, or a bot's name."""
+    user = getattr(comment, 'user', None)
+    if user is None:
+        return getattr(comment, 'user_name', '') or 'Anonymous'
+    real = '{0} {1}'.format(user.first_name or '', user.last_name or '').strip()
+    return '{0} ("{1}")'.format(real, user.username) if real else user.username
+
 @register.filter(name='comment_html')
 def comment_html(comment):
     return get_formatted_question_html(comment, False, False, True, False)

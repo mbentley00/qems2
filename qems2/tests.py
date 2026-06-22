@@ -2342,3 +2342,49 @@ class PublicSetAndJoinRequestTests(TestCase):
         self.client.login(username='ps_owner', password='pw')
         resp = self.client.post('/request_to_join/', {'qset_id': self.public_set.id})
         self.assertFalse(json.loads(resp.content)['success'])
+
+
+class CommenterNameAndLayoutTests(TestCase):
+    """Comment author shows real name (username in quotes); edit pages put
+    comments in a right-hand column."""
+
+    def setUp(self):
+        from django.contrib.contenttypes.models import ContentType
+        from django.contrib.sites.models import Site
+        from django_comments.models import Comment
+        from datetime import datetime
+        self.Comment = Comment; self.site = Site.objects.get_current()
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('cn_owner', password='pw', email='c@test.com',
+                                           first_name='Will', last_name='Alston')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.owner.question_set_editor.add  # noop
+        self.dist = Distribution.objects.create(name='cn dist')
+        self.qset = QuestionSet.objects.create(
+            name='CN Set', date=timezone.now(), host='', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.owner.question_set_editor.add(self.qset)
+        self.tu = Tossup.objects.create(author=self.owner, question_set=self.qset,
+            question_type=self.acf, tossup_text='Stem (*) e.', tossup_answer='_Ans_',
+            created_date=datetime.now(), last_changed_date=datetime.now(), question_number=1)
+        self.ct = ContentType.objects.get_for_model(Tossup)
+        self.client.login(username='cn_owner', password='pw')
+
+    def test_commenter_name_filter(self):
+        from qems2.qsub.templatetags.filters import commenter_name
+        c = self.Comment.objects.create(content_type=self.ct, object_pk=str(self.tu.id),
+            site=self.site, user=self.ou, comment='hi', is_public=True, is_removed=False)
+        self.assertEqual(commenter_name(c), 'Will Alston ("cn_owner")')
+        c2 = self.Comment.objects.create(content_type=self.ct, object_pk=str(self.tu.id),
+            site=self.site, user=None, user_name='Cliff', comment='bot', is_public=True, is_removed=False)
+        self.assertEqual(commenter_name(c2), 'Cliff')
+
+    def test_edit_tossup_has_comments_column_and_real_name(self):
+        self.Comment.objects.create(content_type=self.ct, object_pk=str(self.tu.id),
+            site=self.site, user=self.ou, comment='a note', is_public=True, is_removed=False)
+        resp = self.client.get('/edit_tossup/{0}/'.format(self.tu.id))
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        self.assertIn('edit-comments', html)
+        self.assertIn('Will Alston ("cn_owner")', html)

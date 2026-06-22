@@ -88,13 +88,18 @@ $(function () {
             '  <span class="rich-editor-hint">Rich text &mdash; pasting from Google Docs/Word keeps formatting</span>' +
             '</div>');
         var $editor = $('<div class="rich-editor" contenteditable="true" spellcheck="true"></div>');
-        if (multiline) { $editor.addClass('rich-editor-multiline'); }
-        // Give the long "stem"/leadin/part-text fields a taller default so a
-        // long question fits without scrolling (answer fields stay compact).
+        // Only the big bulk "type questions" box gets the extra-tall sizing.
+        // (Edit-page fields are also multiline so Enter works, but size by role.)
+        if (textarea.id === 'id_questions') { $editor.addClass('rich-editor-multiline'); }
+        // Long stem/leadin/part-text fields start taller; answer lines stay short.
         var TALL_FIELDS = ['id_tossup_text', 'id_leadin',
                            'id_part1_text', 'id_part2_text', 'id_part3_text'];
+        var SHORT_FIELDS = ['id_tossup_answer', 'id_part1_answer',
+                            'id_part2_answer', 'id_part3_answer'];
         if (textarea.id && TALL_FIELDS.indexOf(textarea.id) !== -1) {
             $editor.addClass('rich-editor-tall');
+        } else if (textarea.id && SHORT_FIELDS.indexOf(textarea.id) !== -1) {
+            $editor.addClass('rich-editor-short');
         }
         $editor.html(qemsToHtml($ta.val(), multiline));
 

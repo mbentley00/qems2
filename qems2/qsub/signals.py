@@ -38,24 +38,36 @@ def record_comment_mentions(sender, instance, created, **kwargs):
         print("Error recording comment mentions:", sys.exc_info()[0], sys.exc_info()[1])
 
 
-def _send_mail_async(subject, body, recipients):
+def _send_mail_async(subject, body, recipients, html=None):
     """Send notification mail off the request thread so posting a comment or
-    question never blocks on SMTP."""
+    question never blocks on SMTP. Sends an HTML alternative when provided."""
     def _send():
         try:
+            from django.core.mail import EmailMultiAlternatives
             # Send from DEFAULT_FROM_EMAIL: transactional providers require the
             # From to be a verified sender, which the SMTP username (e.g.
             # "apikey"/"resend") is not.
-            send_mail(subject, body, settings.DEFAULT_FROM_EMAIL, list(recipients), fail_silently=True)
+            msg = EmailMultiAlternatives(subject, body, settings.DEFAULT_FROM_EMAIL, list(recipients))
+            if html:
+                msg.attach_alternative(html, 'text/html')
+            msg.send(fail_silently=True)
         except Exception:
             print("Error sending notification mail:", sys.exc_info()[0], sys.exc_info()[1])
     threading.Thread(target=_send, daemon=True).start()
 
 
 def _question_url(question):
-    domain = Site.objects.get_current().domain
     page = 'edit_tossup' if isinstance(question, Tossup) else 'edit_bonus'
-    return 'http://{0}/{1}/{2}'.format(domain, page, question.id)
+    return '{0}/{1}/{2}'.format(settings.BASE_URL, page, question.id)
+
+
+def _commenter_display(user, user_name=''):
+    """Friendly name for a comment's author: real name with username in quotes,
+    just the username, or a bot's posted name."""
+    if user is None:
+        return (user_name or 'Someone').strip()
+    real = '{0} {1}'.format(user.first_name or '', user.last_name or '').strip()
+    return '{0} ("{1}")'.format(real, user.username) if real else user.username
 
 
 @receiver(post_save, sender=Comment)
@@ -105,15 +117,76 @@ def email_on_comments(sender, instance, created, **kwargs):
         if not mail_set:
             return
 
-        commenter = (instance.user_name or '').strip() or (
-            str(instance.user) if instance.user else 'someone')
+        from django.utils.html import escape
+        commenter = _commenter_display(instance.user, instance.user_name)
         qset = str(target.question_set)
-        subject = "New QEMS2 comment for " + str(target) + " in set " + qset
-        body = ('The question on "{0!s}" for the set "{1!s}" has a new comment by {2!s}:\n\n{3!s}\n\n'
-                'View the question at {4!s}.\n\n'
-                'To opt out of these e-mails, change the settings in your profile.').format(
-            str(target), qset, commenter, instance.comment, _question_url(target))
-        _send_mail_async(subject, body, mail_set)
+        kind = 'tossup' if isinstance(target, Tossup) else 'bonus'
+        answer_label = str(target).replace('_', '').replace('~', '').strip()
+        url = _question_url(target)
+        try:
+            question_text = target.to_plain_text()
+        except Exception:
+            question_text = ''
+
+        # Full discussion (chronological), so the email carries the context.
+        thread = list(Comment.objects.filter(
+            object_pk=str(target.id), content_type_id=instance.content_type_id,
+            is_removed=False).select_related('user').order_by('submit_date'))
+
+        # ---- plain-text body ----
+        lines = ['{0} commented on a {1} ("{2}") in the set "{3}":'.format(
+            commenter, kind, answer_label, qset), '', instance.comment or '']
+        if question_text:
+            lines += ['', 'The question:', question_text]
+        if len(thread) > 1:
+            lines += ['', 'Full discussion:']
+            for c in thread:
+                lines.append('- {0}: {1}'.format(
+                    _commenter_display(c.user, c.user_name), c.comment or ''))
+        lines += ['', 'View and reply: ' + url,
+                  '', 'To opt out of these e-mails, change the settings in your profile.']
+        body = '\n'.join(lines)
+
+        # ---- HTML body ----
+        def esc(s):
+            return escape(s or '')
+        html = [
+            '<div style="font-family:Arial,Helvetica,sans-serif;color:#222;max-width:640px;line-height:1.5;">',
+            '<p><strong>{0}</strong> commented on a {1} in <strong>{2}</strong>:</p>'.format(
+                esc(commenter), kind, esc(qset)),
+            '<blockquote style="border-left:3px solid #008CBA;background:#f5f9ff;'
+            'margin:0 0 18px;padding:8px 14px;">{0}</blockquote>'.format(esc(instance.comment)),
+        ]
+        if question_text:
+            html.append('<h3 style="margin:0 0 6px;font-size:15px;color:#444;">The question</h3>'
+                        '<div style="background:#fafafa;border:1px solid #eee;border-radius:4px;'
+                        'padding:10px 12px;margin-bottom:18px;white-space:pre-wrap;">{0}</div>'.format(
+                            esc(question_text)))
+        if len(thread) > 1:
+            html.append('<h3 style="margin:0 0 6px;font-size:15px;color:#444;">'
+                        'Discussion ({0} comments)</h3>'.format(len(thread)))
+            html.append('<div style="border:1px solid #eee;border-radius:4px;">')
+            for i, c in enumerate(thread):
+                bg = '#ffffff' if i % 2 == 0 else '#f7f7f7'
+                html.append(
+                    '<div style="padding:8px 12px;background:{0};border-bottom:1px solid #eee;">'
+                    '<div style="color:#555;font-size:13px;"><strong>{1}</strong> '
+                    '<span style="color:#999;">{2}</span></div>'
+                    '<div>{3}</div></div>'.format(
+                        bg, esc(_commenter_display(c.user, c.user_name)),
+                        c.submit_date.strftime('%b %d, %Y %I:%M %p') if c.submit_date else '',
+                        esc(c.comment)))
+            html.append('</div>')
+        html.append('<p style="margin:18px 0;"><a href="{0}" style="display:inline-block;'
+                    'background:#008CBA;color:#fff;padding:9px 16px;border-radius:4px;'
+                    'text-decoration:none;">View &amp; reply</a></p>'.format(esc(url)))
+        html.append('<p style="color:#999;font-size:12px;">You\'re receiving this because you '
+                    'wrote or follow this question or set. To opt out, change the settings in '
+                    'your profile.</p></div>')
+        html_body = '\n'.join(html)
+
+        subject = 'New QEMS3 comment on "{0}" in {1}'.format(answer_label, qset)
+        _send_mail_async(subject, body, mail_set, html=html_body)
     except Exception:
         print("Error sending mail for comments:", sys.exc_info()[0], sys.exc_info()[1])
 
@@ -143,7 +216,7 @@ def _email_on_new_question(instance):
             return
 
         qset = str(qset_obj)
-        subject = "New QEMS2 question for " + str(instance) + " in set " + qset
+        subject = "New QEMS3 question for " + str(instance) + " in set " + qset
         body = ('{0!s} has written a new question for the set {1!s}:\n\n{2!s}\n\n'
                 'View the question at {3!s}.\n\n'
                 'To opt out of these e-mails, change the settings in your profile.').format(
