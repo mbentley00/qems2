@@ -1528,6 +1528,155 @@ def add_bonuses(request, qset_id, bonus_type, packet_id=None):
             {'message': 'The request cannot be completed as specified',
              'message_class': 'alert-box alert'})
 
+
+#########################################################################
+# Suggested edits (track-changes style proposals on questions)
+#########################################################################
+
+SUGGESTABLE_FIELDS = {
+    'tossup': [('tossup_text', 'Tossup Text'), ('tossup_answer', 'Answer')],
+    'bonus': [('leadin', 'Leadin'),
+              ('part1_text', 'Part 1'), ('part1_answer', 'Part 1 Answer'),
+              ('part2_text', 'Part 2'), ('part2_answer', 'Part 2 Answer'),
+              ('part3_text', 'Part 3'), ('part3_answer', 'Part 3 Answer')],
+}
+
+
+def _is_set_member(user, qset):
+    return qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()
+
+
+def _can_review_suggestions(user, question, qset):
+    """The question's author, or any editor/owner, may accept/reject suggestions."""
+    return (getattr(question, 'author_id', None) == user.id
+            or qset.is_owner(user) or user in qset.editor.all())
+
+
+def _pending_suggestions(question, qtype):
+    if question is None:
+        return []
+    return list(SuggestedEdit.objects.filter(
+        question_type=qtype, question_id=question.id, status='pending')
+        .select_related('suggested_by__user'))
+
+
+def _suggestion_render_ctx(user, question, qtype, qset):
+    if question is None:
+        return {'pending_suggestions': [], 'can_review_suggestions': False,
+                'suggest_fields': [], 'can_suggest': False}
+    return {
+        'pending_suggestions': _pending_suggestions(question, qtype),
+        'can_review_suggestions': _can_review_suggestions(user, question, qset),
+        'suggest_fields': [{'name': f, 'label': lbl, 'value': getattr(question, f, '') or ''}
+                           for f, lbl in SUGGESTABLE_FIELDS.get(qtype, [])],
+        'can_suggest': _is_set_member(user, qset),
+    }
+
+
+def _apply_suggestion(question, suggestion, user):
+    setattr(question, suggestion.field, suggestion.new_value)
+    question.save_question(edit_type=QUESTION_CHANGE, changer=user)
+    suggestion.status = 'accepted'
+    suggestion.resolved_by = user
+    suggestion.resolved_date = timezone.now()
+    suggestion.save()
+    # Other pending suggestions for the same field were diffed against the old
+    # text, so they no longer apply cleanly — mark them superseded.
+    SuggestedEdit.objects.filter(
+        question_type=suggestion.question_type, question_id=suggestion.question_id,
+        field=suggestion.field, status='pending').exclude(id=suggestion.id).update(
+        status='superseded', resolved_by=user, resolved_date=timezone.now())
+
+
+@login_required
+def suggest_edit(request):
+    """Any set member proposes changes to a question's fields (track-changes)."""
+    user = request.user.writer
+    if request.method != 'POST':
+        return HttpResponseRedirect('/')
+    qtype = request.POST.get('question_type', '')
+    question = _style_question(qtype, request.POST.get('question_id', ''))
+    if question is None:
+        return render(request, 'failure.html',
+                      {'message': 'No such question.', 'message_class': 'alert-box alert'})
+    qset = question.question_set
+    if not _is_set_member(user, qset):
+        return render(request, 'failure.html',
+                      {'message': 'You must be a member of this set to suggest changes.',
+                       'message_class': 'alert-box alert'})
+    note = (request.POST.get('note') or '').strip()[:255]
+    created = 0
+    for f, lbl in SUGGESTABLE_FIELDS.get(qtype, []):
+        key = 'field_' + f
+        if key not in request.POST:
+            continue
+        new_val = strip_markup(request.POST.get(key, ''))
+        old_val = getattr(question, f, '') or ''
+        if (new_val or '').strip() != (old_val or '').strip():
+            SuggestedEdit.objects.create(
+                question_set=qset, question_type=qtype, question_id=question.id,
+                field=f, field_label=lbl, old_value=old_val, new_value=new_val,
+                note=note, suggested_by=user)
+            created += 1
+    return HttpResponseRedirect('/edit_{0}/{1}/?suggested={2}#suggested-changes'.format(
+        qtype, question.id, created))
+
+
+@login_required
+def resolve_suggestion(request):
+    """The question's author or an editor accepts/rejects a single suggestion."""
+    user = request.user.writer
+    if request.method != 'POST':
+        return HttpResponse(json.dumps({'ok': False, 'error': 'POST required'}))
+    try:
+        s = SuggestedEdit.objects.get(id=int(request.POST['suggestion_id']))
+    except (KeyError, ValueError, SuggestedEdit.DoesNotExist):
+        return HttpResponse(json.dumps({'ok': False, 'error': 'Not found'}))
+    question = _style_question(s.question_type, s.question_id)
+    if question is None or not _can_review_suggestions(user, question, s.question_set):
+        return HttpResponse(json.dumps({'ok': False, 'error': 'Not authorized'}))
+    if s.status != 'pending':
+        return HttpResponse(json.dumps({'ok': False, 'error': 'Already resolved'}))
+    action = request.POST.get('action', '')
+    if action == 'accept':
+        _apply_suggestion(question, s, user)
+    elif action == 'reject':
+        s.status = 'rejected'
+        s.resolved_by = user
+        s.resolved_date = timezone.now()
+        s.save()
+    else:
+        return HttpResponse(json.dumps({'ok': False, 'error': 'Bad action'}))
+    cache.clear()
+    return HttpResponse(json.dumps({'ok': True}))
+
+
+@login_required
+def resolve_all_suggestions(request):
+    """Accept or reject every pending suggestion on a question at once."""
+    user = request.user.writer
+    if request.method != 'POST':
+        return HttpResponse(json.dumps({'ok': False, 'error': 'POST required'}))
+    qtype = request.POST.get('question_type', '')
+    question = _style_question(qtype, request.POST.get('question_id', ''))
+    if question is None or not _can_review_suggestions(user, question, question.question_set):
+        return HttpResponse(json.dumps({'ok': False, 'error': 'Not authorized'}))
+    action = request.POST.get('action', '')
+    pending = SuggestedEdit.objects.filter(
+        question_type=qtype, question_id=question.id, status='pending')
+    if action == 'accept':
+        for s in list(pending):
+            s.refresh_from_db()
+            if s.status == 'pending':
+                _apply_suggestion(question, s, user)
+    elif action == 'reject':
+        pending.update(status='rejected', resolved_by=user, resolved_date=timezone.now())
+    else:
+        return HttpResponse(json.dumps({'ok': False, 'error': 'Bad action'}))
+    cache.clear()
+    return HttpResponse(json.dumps({'ok': True}))
+
+
 @login_required
 def edit_tossup(request, tossup_id):
     user = request.user.writer
@@ -1574,7 +1723,8 @@ def edit_tossup(request, tossup_id):
              'role': role,
              'playtest': _question_buzz_data(tossup, 'tossup'),
              'discord_threads': tossup.discord_threads.order_by('created_date'),
-             'user': user})
+             'user': user,
+             **_suggestion_render_ctx(user, tossup, 'tossup', qset)})
 
     elif request.method == 'POST':
         print("start post for edit tossup")
@@ -1662,7 +1812,8 @@ def edit_tossup(request, tossup_id):
              'read_only': read_only,
              'playtest': _question_buzz_data(tossup, 'tossup'),
              'discord_threads': tossup.discord_threads.order_by('created_date'),
-             'user': user})
+             'user': user,
+             **_suggestion_render_ctx(user, tossup, 'tossup', qset)})
 
 @login_required
 def edit_bonus(request, bonus_id):
@@ -1715,7 +1866,8 @@ def edit_bonus(request, bonus_id):
              'role': role,
              'playtest': _question_buzz_data(bonus, 'bonus'),
              'discord_threads': bonus.discord_threads.order_by('created_date'),
-             'user': user})
+             'user': user,
+             **_suggestion_render_ctx(user, bonus, 'bonus', qset)})
 
     elif request.method == 'POST':
         if user == bonus.author or qset.is_owner(user) or user in qset.editor.all():
@@ -1810,7 +1962,8 @@ def edit_bonus(request, bonus_id):
              'role': role,
              'playtest': _question_buzz_data(bonus, 'bonus'),
              'discord_threads': bonus.discord_threads.order_by('created_date'),
-             'user': user})
+             'user': user,
+             **_suggestion_render_ctx(user, bonus, 'bonus', qset)})
 
 @login_required
 def delete_tossup(request):

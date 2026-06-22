@@ -1,0 +1,102 @@
+{% comment %}
+Suggested edits (track-changes) panel for a question.
+Context: question_type ('tossup'|'bonus'), q_id, qset, pending_suggestions,
+can_review_suggestions, can_suggest, suggest_fields.
+{% endcomment %}
+{% load filters %}
+<div id="suggested-changes" class="panel radius suggested-changes"
+     data-qtype="{{ question_type }}" data-qid="{{ q_id }}">
+    <h5 style="margin-top:0;">Suggested changes
+        {% if pending_suggestions %}<span class="label">{{ pending_suggestions|length }} pending</span>{% endif %}
+    </h5>
+
+    {% if pending_suggestions %}
+        {% if can_review_suggestions %}
+        <p style="margin-bottom:8px;">
+            <button type="button" class="button tiny success resolve-all-suggestions" data-action="accept">Accept all</button>
+            <button type="button" class="button tiny alert resolve-all-suggestions" data-action="reject">Reject all</button>
+        </p>
+        {% endif %}
+        {% for s in pending_suggestions %}
+        <div class="suggestion-item" data-suggestion-id="{{ s.id }}">
+            <div class="suggestion-meta">
+                <strong>{{ s.field_label }}</strong> &mdash; suggested by
+                {% if s.suggested_by %}{{ s.suggested_by.user.first_name }} {{ s.suggested_by.user.last_name }} "{{ s.suggested_by.user.username }}"{% else %}someone{% endif %}
+                on {{ s.created_date }}
+            </div>
+            {% if s.note %}<div class="suggestion-note">&ldquo;{{ s.note }}&rdquo;</div>{% endif %}
+            <div class="suggestion-diff">{{ s.old_value|track_changes_diff:s.new_value }}</div>
+            {% if can_review_suggestions %}
+            <div class="suggestion-actions">
+                <button type="button" class="button tiny success resolve-suggestion" data-action="accept" data-id="{{ s.id }}">Accept</button>
+                <button type="button" class="button tiny alert resolve-suggestion" data-action="reject" data-id="{{ s.id }}">Reject</button>
+            </div>
+            {% else %}
+            <div class="suggestion-actions"><small style="color:#888;">Awaiting review by the question's author or an editor.</small></div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    {% else %}
+        <p style="color:#888;">No pending suggestions.</p>
+    {% endif %}
+
+    {% if can_suggest %}
+    <p style="margin-top:10px;">
+        <button type="button" id="toggle-suggest-form" class="button small secondary">Suggest a change</button>
+    </p>
+    <form method="post" action="/suggest_edit/" id="suggest-form" style="display:none;">
+        {% csrf_token %}
+        <input type="hidden" name="question_type" value="{{ question_type }}">
+        <input type="hidden" name="question_id" value="{{ q_id }}">
+        <p style="color:#555;">Propose changes below; only fields you change are submitted.
+        QEMS markup is supported (<code>_x_</code> bold+underline, <code>~x~</code> italic, <code>(*)</code> power).
+        The author or an editor reviews each change.</p>
+        {% for f in suggest_fields %}
+        <label>{{ f.label }}
+            <textarea name="field_{{ f.name }}" rows="{% if 'answer' in f.name %}2{% else %}4{% endif %}">{{ f.value }}</textarea>
+        </label>
+        {% endfor %}
+        <label>Note (optional)
+            <input type="text" name="note" maxlength="255" placeholder="Why you're suggesting this">
+        </label>
+        <button type="submit" class="button small primary">Submit suggestion</button>
+        <button type="button" id="cancel-suggest-form" class="button small secondary">Cancel</button>
+    </form>
+    {% endif %}
+</div>
+
+<style>
+.suggested-changes .suggestion-item { border:1px solid #e0e0e0; border-radius:4px; padding:8px 10px; margin-bottom:8px; background:#fafafa; }
+.suggested-changes .suggestion-meta { font-size:0.85em; color:#555; }
+.suggested-changes .suggestion-note { font-style:italic; color:#666; margin:2px 0; }
+.suggested-changes .suggestion-diff { margin:6px 0; white-space:pre-wrap; line-height:1.5; }
+.suggested-changes .suggestion-diff del { background:#ffe0e0; color:#a00; text-decoration:line-through; }
+.suggested-changes .suggestion-diff ins { background:#dcffe0; color:#070; text-decoration:none; }
+.suggested-changes .suggestion-actions { margin-top:4px; }
+.suggested-changes .button.tiny { margin:0 4px 0 0; }
+</style>
+
+<script>
+$(function () {
+    $('#toggle-suggest-form, #cancel-suggest-form').on('click', function () {
+        $('#suggest-form').toggle();
+    });
+    function post(url, data, btn) {
+        $(btn).prop('disabled', true);
+        $.post(url, data).done(function (resp) {
+            if (typeof resp === 'string') { try { resp = JSON.parse(resp); } catch (e) {} }
+            if (resp && resp.ok) { location.reload(); }
+            else { alert((resp && resp.error) || 'Action failed.'); $(btn).prop('disabled', false); }
+        }).fail(function () { alert('Action failed.'); $(btn).prop('disabled', false); });
+    }
+    $('.resolve-suggestion').on('click', function () {
+        post('/resolve_suggestion/', { suggestion_id: $(this).data('id'), action: $(this).data('action') }, this);
+    });
+    $('.resolve-all-suggestions').on('click', function () {
+        var action = $(this).data('action');
+        if (action === 'accept' && !confirm('Accept all pending suggestions on this question?')) { return; }
+        var $p = $('#suggested-changes');
+        post('/resolve_all_suggestions/', { question_type: $p.data('qtype'), question_id: $p.data('qid'), action: action }, this);
+    });
+});
+</script>

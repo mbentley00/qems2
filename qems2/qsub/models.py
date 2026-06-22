@@ -302,6 +302,36 @@ class GroupRoleGrant(models.Model):
             self.role, self.writer_id, self.question_set_id)
 
 
+class SuggestedEdit(models.Model):
+    """A proposed change to one field of a question (track-changes style). Any
+    set member can suggest, even on questions they didn't write; the question's
+    author or an editor accepts or rejects each one."""
+    STATUS_CHOICES = (('pending', 'Pending'), ('accepted', 'Accepted'),
+                      ('rejected', 'Rejected'), ('superseded', 'Superseded'))
+    question_set = models.ForeignKey(QuestionSet, on_delete=models.CASCADE)
+    question_type = models.CharField(max_length=10)  # 'tossup' | 'bonus'
+    question_id = models.PositiveIntegerField()
+    field = models.CharField(max_length=40)          # e.g. 'tossup_text'
+    field_label = models.CharField(max_length=60)
+    old_value = models.TextField(blank=True, default='')
+    new_value = models.TextField(blank=True, default='')
+    note = models.CharField(max_length=255, blank=True, default='')
+    suggested_by = models.ForeignKey(Writer, on_delete=models.SET_NULL, null=True,
+                                     related_name='suggested_edits')
+    created_date = models.DateTimeField(auto_now_add=True)
+    status = models.CharField(max_length=10, default='pending', choices=STATUS_CHOICES)
+    resolved_by = models.ForeignKey(Writer, on_delete=models.SET_NULL, null=True, blank=True,
+                                    related_name='resolved_suggestions')
+    resolved_date = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['created_date']
+
+    def __str__(self):
+        return 'suggested {0} on {1} {2} ({3})'.format(
+            self.field, self.question_type, self.question_id, self.status)
+
+
 class DistributionPerPacket(models.Model):
 
     #packet = models.ManyToManyField(Packet)

@@ -248,6 +248,7 @@ $(function () {
 
 {% include "_discord_threads.html" %}
 {% include "_playtest_results.html" %}
+{% if bonus %}{% include "_suggested_changes.html" with question_type="bonus" q_id=bonus.id %}{% endif %}
 </div>{# .edit-main #}
 <div class="edit-comments">
 {% if bonus %}

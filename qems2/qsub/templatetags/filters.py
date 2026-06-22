@@ -208,6 +208,29 @@ def answer_no_formatting(line):
     return get_answer_no_formatting(line)
 
 
+@register.filter(name='track_changes_diff')
+def track_changes_diff(old, new):
+    """Word-level track-changes HTML between two strings: removed text in <del>,
+    added text in <ins>."""
+    import difflib
+    from html import escape
+    old_tokens = (old or '').split(' ')
+    new_tokens = (new or '').split(' ')
+    out = []
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, old_tokens, new_tokens).get_opcodes():
+        old_chunk = escape(' '.join(old_tokens[i1:i2]))
+        new_chunk = escape(' '.join(new_tokens[j1:j2]))
+        if tag == 'equal':
+            out.append(old_chunk)
+        elif tag == 'delete':
+            out.append('<del>' + old_chunk + '</del>')
+        elif tag == 'insert':
+            out.append('<ins>' + new_chunk + '</ins>')
+        elif tag == 'replace':
+            out.append('<del>' + old_chunk + '</del> <ins>' + new_chunk + '</ins>')
+    return mark_safe(' '.join(p for p in out if p))
+
+
 @register.filter(name='commenter_name')
 def commenter_name(comment):
     """Display a comment author as their real name with username in quotes

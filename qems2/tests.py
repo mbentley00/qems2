@@ -2532,3 +2532,86 @@ class RoleGroupMemberListTests(TestCase):
         # ...and her id is flagged as group-granted (so "Manage via role group" shows).
         self.assertIn(self.alice.id, resp.context['group_granted_ids'])
         self.assertIn('Manage via role group', html)
+
+
+class SuggestedEditTests(TestCase):
+    """Writers (incl. non-authors) and editors can suggest changes; the author
+    or an editor accepts/rejects them; track-changes diff renders."""
+
+    def setUp(self):
+        from datetime import datetime
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('se_owner', password='pw', email='o@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.wu = User.objects.create_user('se_writer', password='pw', email='w@t.com')
+        self.writer = Writer.objects.get(user=self.wu)
+        self.au = User.objects.create_user('se_author', password='pw', email='a@t.com')
+        self.author = Writer.objects.get(user=self.au)
+        self.dist = Distribution.objects.create(name='se dist')
+        self.qset = QuestionSet.objects.create(
+            name='SE Set', date=timezone.now(), host='', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.owner.question_set_editor.add(self.qset)
+        self.qset.writer.add(self.writer)
+        self.qset.writer.add(self.author)
+        self.tu = Tossup.objects.create(author=self.author, question_set=self.qset,
+            question_type=self.acf, tossup_text='This old stem here.', tossup_answer='Ans',
+            created_date=datetime.now(), last_changed_date=datetime.now(), question_number=1)
+
+    def test_non_author_writer_can_suggest(self):
+        self.client.login(username='se_writer', password='pw')  # not the author
+        resp = self.client.post('/suggest_edit/', {
+            'question_type': 'tossup', 'question_id': self.tu.id,
+            'field_tossup_text': 'This new stem here.', 'note': 'tweak'})
+        self.assertEqual(resp.status_code, 302)
+        s = SuggestedEdit.objects.get(question_id=self.tu.id, field='tossup_text')
+        self.assertEqual(s.status, 'pending')
+        self.assertEqual(s.new_value, 'This new stem here.')
+        self.assertEqual(s.suggested_by, self.writer)
+
+    def test_unchanged_field_creates_no_suggestion(self):
+        self.client.login(username='se_writer', password='pw')
+        self.client.post('/suggest_edit/', {
+            'question_type': 'tossup', 'question_id': self.tu.id,
+            'field_tossup_text': 'This old stem here.'})  # identical
+        self.assertEqual(SuggestedEdit.objects.filter(question_id=self.tu.id).count(), 0)
+
+    def test_author_can_accept_applies_change(self):
+        s = SuggestedEdit.objects.create(question_set=self.qset, question_type='tossup',
+            question_id=self.tu.id, field='tossup_text', field_label='Tossup Text',
+            old_value='This old stem here.', new_value='This new stem here.',
+            suggested_by=self.writer)
+        self.client.login(username='se_author', password='pw')
+        resp = self.client.post('/resolve_suggestion/', {'suggestion_id': s.id, 'action': 'accept'})
+        self.assertTrue(json.loads(resp.content)['ok'])
+        self.tu.refresh_from_db()
+        self.assertEqual(self.tu.tossup_text, 'This new stem here.')
+        s.refresh_from_db(); self.assertEqual(s.status, 'accepted')
+
+    def test_plain_writer_cannot_review(self):
+        s = SuggestedEdit.objects.create(question_set=self.qset, question_type='tossup',
+            question_id=self.tu.id, field='tossup_text', field_label='Tossup Text',
+            old_value='a', new_value='b', suggested_by=self.author)
+        self.client.login(username='se_writer', password='pw')  # not author, not editor
+        resp = self.client.post('/resolve_suggestion/', {'suggestion_id': s.id, 'action': 'accept'})
+        self.assertFalse(json.loads(resp.content)['ok'])
+
+    def test_editor_reject_all(self):
+        for fld, nv in (('tossup_text', 'x'), ('tossup_answer', 'y')):
+            SuggestedEdit.objects.create(question_set=self.qset, question_type='tossup',
+                question_id=self.tu.id, field=fld, field_label=fld,
+                old_value='o', new_value=nv, suggested_by=self.writer)
+        self.client.login(username='se_owner', password='pw')  # editor/owner
+        resp = self.client.post('/resolve_all_suggestions/', {
+            'question_type': 'tossup', 'question_id': self.tu.id, 'action': 'reject'})
+        self.assertTrue(json.loads(resp.content)['ok'])
+        self.assertEqual(SuggestedEdit.objects.filter(question_id=self.tu.id, status='pending').count(), 0)
+        self.assertEqual(SuggestedEdit.objects.filter(question_id=self.tu.id, status='rejected').count(), 2)
+
+    def test_diff_filter(self):
+        from qems2.qsub.templatetags.filters import track_changes_diff
+        out = track_changes_diff('the quick brown fox', 'the slow brown fox')
+        self.assertIn('<del>quick</del>', out)
+        self.assertIn('<ins>slow</ins>', out)
+        self.assertIn('brown fox', out)

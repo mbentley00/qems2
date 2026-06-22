@@ -143,6 +143,7 @@
 
 {% include "_discord_threads.html" %}
 {% include "_playtest_results.html" %}
+{% if tossup %}{% include "_suggested_changes.html" with question_type="tossup" q_id=tossup.id %}{% endif %}
 </div>{# .edit-main #}
 <div class="edit-comments">
 {% if tossup %}
