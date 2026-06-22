@@ -67,6 +67,7 @@
                 {% else %}
                     {% if i.fixable %}<a class="style-action button tiny" data-action="apply" title="Automatically apply this fix">Apply fix</a>{% endif %}
                     <a class="style-action" data-action="dismiss" title="Hide this issue from future checks">dismiss</a>
+                    <a class="style-action" data-action="dismiss-all" title="Hide this suggestion for every question in the set">dismiss all</a>
                 {% endif %}
             </span>
         </li>
@@ -80,15 +81,17 @@
 $(function () {
     var GUIDE = "{{ guide|escapejs }}";
 
-    function post(url, li, action, done) {
+    function post(url, li, action, done, scope) {
         $.post(url, {
             question_type: li.data('qtype'),
             question_id: li.data('qid'),
             code: li.data('code'),
             token: li.data('token'),
             action: action || '',
+            scope: scope || '',
             guide: GUIDE
         }).done(function (resp) {
+            if (typeof resp === 'string') { try { resp = JSON.parse(resp); } catch (e) {} }
             if (resp && resp.ok) { done(); }
             else { alert((resp && resp.error) || 'Action failed.'); }
         }).fail(function (xhr) {
@@ -105,6 +108,11 @@ $(function () {
             post('/apply_style_fix/', li, '', function () { location.reload(); });
         } else if (action === 'dismiss') {
             post('/dismiss_style_issue/', li, '', function () { location.reload(); });
+        } else if (action === 'dismiss-all') {
+            if (!confirm('Hide this suggestion for every question in the set?')) {
+                btn.css('pointer-events', ''); return;
+            }
+            post('/dismiss_style_issue/', li, '', function () { location.reload(); }, 'all');
         } else if (action === 'restore') {
             post('/dismiss_style_issue/', li, 'restore', function () { location.reload(); });
         }

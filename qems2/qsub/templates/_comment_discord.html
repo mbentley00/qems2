@@ -9,7 +9,7 @@ tr.comment-discord { background: #f5f6ff; }
 .discord-badge { display:inline-block; background:#5865F2; color:#fff; font-size:0.7rem;
     font-weight:bold; padding:0 0.35rem; border-radius:3px; vertical-align:middle; margin-right:0.25rem; }
 .discord-thread-link { font-size:0.85rem; margin-left:0.4rem; white-space:nowrap; }
-.discord-filter { display:inline-block; font-weight:normal; font-size:0.9rem; margin:0.25rem 0 0.5rem; }
+.discord-filter { display:none; font-weight:normal; font-size:0.9rem; margin:0.25rem 0 0.5rem; }
 body.comments-hide-discord .comment-discord { display:none; }
 </style>
 <label class="discord-filter"><input type="checkbox" class="toggle-discord-comments"> Hide Discord (bot) comments</label>
@@ -18,6 +18,9 @@ body.comments-hide-discord .comment-discord { display:none; }
     var KEY = 'qemsHideDiscordComments';
     function apply(on){ document.body.classList.toggle('comments-hide-discord', on); }
     document.addEventListener('DOMContentLoaded', function(){
+        // Only show the filter if there are actually Discord comments on the page.
+        if (!document.querySelector('.comment-discord')) { return; }
+        document.querySelectorAll('.discord-filter').forEach(function(l){ l.style.display = 'inline-block'; });
         var on = localStorage.getItem(KEY) === '1';
         var boxes = document.querySelectorAll('.toggle-discord-comments');
         boxes.forEach(function(cb){ cb.checked = on; });

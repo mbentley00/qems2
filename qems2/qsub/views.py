@@ -6238,6 +6238,9 @@ def style_check(request, qset_id):
     dismissed = set()
     for d in StyleIssueDismissal.objects.filter(question_set=qset):
         dismissed.add((d.question_type, d.question_id, d.code, d.token))
+    # Set-wide dismissals hide a suggestion (code, token) on every question.
+    rule_dismissed = set(StyleRuleDismissal.objects.filter(question_set=qset)
+                         .values_list('code', 'token'))
 
     results = []
     counts = {'error': 0, 'warning': 0, 'info': 0}
@@ -6251,7 +6254,8 @@ def style_check(request, qset_id):
         for i in issues:
             i = dict(i, fixable=('fix' in i))
             i.pop('fix', None)  # keep the transform server-side
-            if (qtype, q.id, i['code'], i.get('token', '')) in dismissed:
+            if ((qtype, q.id, i['code'], i.get('token', '')) in dismissed
+                    or (i['code'], i.get('token', '')) in rule_dismissed):
                 dismissed_count += 1
                 if show_dismissed:
                     i['dismissed'] = True
@@ -6402,7 +6406,18 @@ def dismiss_style_issue(request):
     if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
         return HttpResponse(json.dumps({'ok': False, 'error': 'Not authorized'}), status=403)
 
-    if restore:
+    scope_all = request.POST.get('scope', '') == 'all'
+
+    if scope_all:
+        # Set-wide: hide every example of this suggestion across the set.
+        if restore:
+            StyleRuleDismissal.objects.filter(
+                question_set=qset, code=code, token=token).delete()
+        else:
+            StyleRuleDismissal.objects.get_or_create(
+                question_set=qset, code=code, token=token,
+                defaults={'dismissed_by': user})
+    elif restore:
         StyleIssueDismissal.objects.filter(
             question_type=qtype, question_id=question.id, code=code, token=token).delete()
     else:
@@ -6410,6 +6425,27 @@ def dismiss_style_issue(request):
             question_type=qtype, question_id=question.id, code=code, token=token,
             defaults={'question_set': qset, 'dismissed_by': user})
     return HttpResponse(json.dumps({'ok': True}))
+
+
+@login_required
+def live_char_count(request):
+    """Character count for in-progress edit text, using the set's counting
+    rules (pronunciation guides / moderator instructions excluded as configured).
+    Body: qset_id and one or more text[] fields (summed, like the model does)."""
+    from .utils import get_character_count
+    if request.method != 'POST':
+        return HttpResponse(json.dumps({'count': 0}))
+    ignore = True
+    try:
+        qset = QuestionSet.objects.get(id=int(request.POST['qset_id']))
+        ignore = qset.char_count_ignores_pronunciation_guides
+    except (KeyError, ValueError, QuestionSet.DoesNotExist):
+        pass
+    texts = request.POST.getlist('text[]')
+    if not texts:
+        texts = [request.POST.get('text', '')]
+    total = sum(get_character_count(t, ignore) for t in texts)
+    return HttpResponse(json.dumps({'count': total}))
 
 
 #########################################################################

@@ -2388,3 +2388,48 @@ class CommenterNameAndLayoutTests(TestCase):
         html = resp.content.decode()
         self.assertIn('edit-comments', html)
         self.assertIn('Will Alston ("cn_owner")', html)
+
+
+class StyleDismissAllAndLiveCountTests(TestCase):
+    """Set-wide style dismissal and the live character-count endpoint."""
+
+    def setUp(self):
+        from datetime import datetime
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.u = User.objects.create_user('sd_u', password='pw', email='s@test.com')
+        self.w = Writer.objects.get(user=self.u)
+        self.dist = Distribution.objects.create(name='sd dist')
+        self.qset = QuestionSet.objects.create(
+            name='SD Set', date=timezone.now(), host='', address='', owner=self.w,
+            num_packets=1, distribution=self.dist, max_acf_tossup_length=850)
+        self.w.question_set_editor.add(self.qset)
+        self.tu = Tossup.objects.create(author=self.w, question_set=self.qset,
+            question_type=self.acf, tossup_text='Stem text here.', tossup_answer='Ans',
+            created_date=datetime.now(), last_changed_date=datetime.now(), question_number=1)
+        self.client.login(username='sd_u', password='pw')
+
+    def test_dismiss_all_creates_set_wide_record(self):
+        resp = self.client.post('/dismiss_style_issue/', {
+            'question_type': 'tossup', 'question_id': self.tu.id,
+            'code': 'pg_missing', 'token': 'Goethe', 'scope': 'all'})
+        self.assertTrue(json.loads(resp.content)['ok'])
+        self.assertTrue(StyleRuleDismissal.objects.filter(
+            question_set=self.qset, code='pg_missing', token='Goethe').exists())
+        # Restore (set-wide) removes it.
+        self.client.post('/dismiss_style_issue/', {
+            'question_type': 'tossup', 'question_id': self.tu.id,
+            'code': 'pg_missing', 'token': 'Goethe', 'scope': 'all', 'action': 'restore'})
+        self.assertFalse(StyleRuleDismissal.objects.filter(question_set=self.qset).exists())
+
+    def test_live_char_count_endpoint(self):
+        resp = self.client.post('/live_char_count/', {
+            'qset_id': self.qset.id, 'text': 'Hello world.'})
+        data = json.loads(resp.content)
+        self.assertIn('count', data)
+        self.assertEqual(data['count'], len('Hello world.'))
+
+    def test_live_char_count_sums_multiple_fields(self):
+        resp = self.client.post('/live_char_count/', {
+            'qset_id': self.qset.id, 'text[]': ['abc', 'de']})
+        self.assertEqual(json.loads(resp.content)['count'], 5)

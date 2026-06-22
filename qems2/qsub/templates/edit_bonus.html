@@ -9,6 +9,7 @@
 {% load filters %}
 
 {% block title %}{% if bonus %}{{ bonus.part1_answer|answer_no_formatting|short_preview }}{% else %}Edit Bonus{% endif %} - QEMS3{% endblock %}
+{% block body_class %}edit-page-wide{% endblock %}
 
 {% block content %}
 {% if qset %}<script>window.QEMS_QSET_ID = {{ qset.id }};</script>{% endif %}
@@ -118,10 +119,8 @@
         </div>
         {% if bonus %}
         <p class="char-count-note">
-            Character count: <strong>{{ bonus.character_count }}</strong> / {{ qset.max_acf_bonus_length }}
-            {% with ex=bonus.character_count_exclusions %}{% if ex %}
-            <br><small class="char-count-excluded">Not counted: {% for e in ex %}&ldquo;{{ e }}&rdquo;{% if not forloop.last %}, {% endif %}{% endfor %}</small>
-            {% endif %}{% endwith %}
+            Live character count: <strong id="live-char-count" data-qset-id="{{ qset.id }}" data-max="{{ qset.max_acf_bonus_length }}">{{ bonus.character_count }}</strong> / {{ qset.max_acf_bonus_length }}
+            <small style="color:#888;">(updates as you type; saved count shown with the question above)</small>
         </p>
         {% endif %}
         <div class="row">
@@ -155,7 +154,7 @@
                     {% if form.question_type.errors %}{{ form.question_type.errors }}{% endif %}
                 </div>
             </div>-->
-            <div class="small-4 columns end">
+            <div class="small-5 columns">
                 {{ form.packet.as_hidden }}
                 <div class="packet-assignment">
                     <span class="prefix text-left">Packet</span>
@@ -167,22 +166,16 @@
                     <a href="/packet_grid/{{ qset.id }}/" class="packet-grid-link">Packet grid</a>
                 </div>
             </div>
-            <div class="small-8 columns">
-                {% if role == "editor" %}
-                    {{ form.locked }}
-                    <label>Locked</label>
-                    {% if form.locked.errors %}{{ form.locked.errors }}{% endif %}
-                    {{ form.edited }}
-                    <label>Edited</label>
-                    {% if form.edited.errors %}{{ form.edited.errors }}{% endif %}
-                {% endif %}
-                {{ form.proofread }}
-                <label>Proofread</label>
-                {% if form.proofread.errors %}{{ form.proofread.errors }}{% endif %}
-                {{ form.read_carefully }}
-                <label>Read Answer Carefully</label>
-                {% if form.read_carefully.errors %}{{ form.read_carefully.errors }}{% endif %}
-            </div>            
+            <div class="small-7 columns">
+                <ul class="question-flags">
+                    {% if role == "editor" %}
+                    <li><label>{{ form.locked }} Locked</label></li>
+                    <li><label>{{ form.edited }} Edited</label></li>
+                    {% endif %}
+                    <li><label>{{ form.proofread }} Proofread</label></li>
+                    <li><label>{{ form.read_carefully }} Read Answer Carefully</label></li>
+                </ul>
+            </div>
         </div>
 
         {% include "question_tags.html" %}
@@ -319,5 +312,31 @@ $(function () {
 {% include "dialog.html" %}
 
 <script src="{% static 'js/anchored_comments.js' %}?v=2"></script>
+<script>
+// Live character count for the bonus (leadin + parts) as it's edited.
+$(function () {
+    var $out = $('#live-char-count');
+    if (!$out.length) { return; }
+    var max = parseInt($out.data('max'), 10) || 0;
+    var qsetId = $out.data('qset-id');
+    var ids = ['#id_leadin', '#id_part1_text', '#id_part2_text', '#id_part3_text'];
+    var timer = null;
+    function update() {
+        var data = { qset_id: qsetId, 'text[]': [] };
+        ids.forEach(function (id) {
+            var $f = $(id);
+            if ($f.length) { data['text[]'].push($f.val() || ''); }
+        });
+        $.post('/live_char_count/', data, function (resp) {
+            if (typeof resp === 'string') { try { resp = JSON.parse(resp); } catch (e) { return; } }
+            $out.text(resp.count);
+            $out.css('color', (max && resp.count > max) ? '#c60f13' : '');
+        });
+    }
+    $(document).on('input', '.rich-editor, #id_leadin, #id_part1_text, #id_part2_text, #id_part3_text', function () {
+        clearTimeout(timer); timer = setTimeout(update, 350);
+    });
+});
+</script>
 
 {% endblock %}

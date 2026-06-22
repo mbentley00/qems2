@@ -231,6 +231,25 @@ class StyleIssueDismissal(models.Model):
         return 'dismissed {0} {1}/{2} [{3}]'.format(
             self.question_type, self.question_id, self.code, self.token)
 
+
+class StyleRuleDismissal(models.Model):
+    """A set-wide style dismissal: hides every example of one style suggestion
+    (rule code + token, e.g. a pronunciation guide for a given term) across the
+    whole question set, including questions written later."""
+    question_set = models.ForeignKey(QuestionSet, on_delete=models.CASCADE)
+    code = models.CharField(max_length=40)
+    token = models.CharField(max_length=255, blank=True, default='')
+    dismissed_by = models.ForeignKey(Writer, on_delete=models.SET_NULL, null=True)
+    dismissed_date = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('question_set', 'code', 'token')
+
+    def __str__(self):
+        return 'set-wide dismissed {0}/{1} [{2}]'.format(
+            self.question_set_id, self.code, self.token)
+
+
 class DistributionPerPacket(models.Model):
 
     #packet = models.ManyToManyField(Packet)

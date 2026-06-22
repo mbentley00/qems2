@@ -256,6 +256,15 @@
         border-left: none; padding-left: 0; }
 }
 
+/* Tidy flag checkboxes (Locked / Edited / Proofread / Read Answer Carefully). */
+.edit-meta-row { margin-top: 8px; }
+ul.question-flags { list-style: none; margin: 0; }
+ul.question-flags li { display: inline-block; margin: 0 16px 4px 0; }
+ul.question-flags label { display: inline; font-weight: normal; white-space: nowrap; }
+ul.question-flags input[type="checkbox"] { margin: 0 4px 0 0; vertical-align: middle; }
+/* Edit pages use more horizontal space than the default centered column. */
+body.edit-page-wide > .row { max-width: 1400px; }
+
 .rich-editor:focus {
     outline: none;
     border-color: #999;

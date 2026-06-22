@@ -60,6 +60,7 @@ urlpatterns = [
     re_path(r'^packet_issues/(?P<packet_id>[0-9]+)/$', packet_issues),
     re_path(r'^style_check/(?P<qset_id>[0-9]+)/$', style_check),
     re_path(r'^packet_style_issues/(?P<packet_id>[0-9]+)/$', packet_style_issues),
+    re_path(r'^live_char_count/$', live_char_count),
     re_path(r'^apply_style_fix/$', apply_style_fix),
     re_path(r'^dismiss_style_issue/$', dismiss_style_issue),
     re_path(r'^swap_candidates/$', swap_candidates),

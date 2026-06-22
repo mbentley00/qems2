@@ -9,6 +9,7 @@
 {% load filters %}
 
 {% block title %}{% if tossup %}{{ tossup.tossup_answer|answer_no_formatting|short_preview }} - QEMS3{% else %}Edit Tossup - QEMS3{% endif %}{% endblock %}
+{% block body_class %}edit-page-wide{% endblock %}
 
 {% block content %}
 {% if qset %}<script>window.QEMS_QSET_ID = {{ qset.id }};</script>{% endif %}
@@ -70,10 +71,8 @@
         {% if form.tossup_answer.errors %}{{ form.tossup_answer.errors }}{% endif %}
         {% if tossup %}
         <p class="char-count-note">
-            Character count: <strong>{{ tossup.character_count }}</strong> / {{ qset.max_acf_tossup_length }}
-            {% with ex=tossup.character_count_exclusions %}{% if ex %}
-            <br><small class="char-count-excluded">Not counted: {% for e in ex %}&ldquo;{{ e }}&rdquo;{% if not forloop.last %}, {% endif %}{% endfor %}</small>
-            {% endif %}{% endwith %}
+            Live character count: <strong id="live-char-count" data-qset-id="{{ qset.id }}" data-max="{{ qset.max_acf_tossup_length }}">{{ tossup.character_count }}</strong> / {{ qset.max_acf_tossup_length }}
+            <small style="color:#888;">(updates as you type; saved count shown with the question above)</small>
         </p>
         {% endif %}
         <div class="row">
@@ -95,20 +94,9 @@
             {% endif %}
         {% endfor %}
         </div>
-        <div class="row">
-            <!--<div class="small-6 columns">
-                <div class="row collapse">
-                    <div class="small-4 columns">
-                        <span class="prefix text-left" for="{{ form.question_type.id_for_label }}">Question Type</span>
-                    </div>
-                    <div class="small-8 columns">
-                        {{ form.question_type }}
-                    </div>
-                    {% if form.question_type.errors %}{{ form.question_type.errors }}{% endif %}
-                </div>
-            </div>-->
-            <div class="small-4 columns">
-                {{ form.packet.as_hidden }}
+        {{ form.packet.as_hidden }}
+        <div class="row edit-meta-row">
+            <div class="small-5 columns">
                 <div class="packet-assignment">
                     <span class="prefix text-left">Packet</span>
                     {% if tossup.packet %}
@@ -119,22 +107,16 @@
                     <a href="/packet_grid/{{ qset.id }}/" class="packet-grid-link">Packet grid</a>
                 </div>
             </div>
-            <div class="small-8 columns">
-                {% if role == "editor" %}
-                    {{ form.locked }}
-                    <label>Locked</label>
-                    {% if form.locked.errors %}{{ form.locked.errors }}{% endif %}
-                    {{ form.edited }}
-                    <label>Edited</label>
-                    {% if form.edited.errors %}{{ form.edited.errors }}{% endif %}
-                {% endif %}
-                {{ form.proofread }}
-                <label>Proofread</label>
-                {% if form.proofread.errors %}{{ form.proofread.errors }}{% endif %}  
-                {{ form.read_carefully }}
-                <label>Read Answer Carefully</label>
-                {% if form.read_carefully.errors %}{{ form.read_carefully.errors }}{% endif %}
-            </div>          
+            <div class="small-7 columns">
+                <ul class="question-flags">
+                    {% if role == "editor" %}
+                    <li><label>{{ form.locked }} Locked</label></li>
+                    <li><label>{{ form.edited }} Edited</label></li>
+                    {% endif %}
+                    <li><label>{{ form.proofread }} Proofread</label></li>
+                    <li><label>{{ form.read_carefully }} Read Answer Carefully</label></li>
+                </ul>
+            </div>
         </div>
 
 
@@ -225,5 +207,26 @@
 {% include "dialog.html" %}
 
 <script src="{% static 'js/anchored_comments.js' %}?v=2"></script>
+<script>
+// Live character count for the tossup stem as it's edited.
+$(function () {
+    var $out = $('#live-char-count');
+    if (!$out.length) { return; }
+    var max = parseInt($out.data('max'), 10) || 0;
+    var qsetId = $out.data('qset-id');
+    var timer = null;
+    function update() {
+        var text = $('#id_tossup_text').val() || '';
+        $.post('/live_char_count/', { qset_id: qsetId, text: text }, function (resp) {
+            if (typeof resp === 'string') { try { resp = JSON.parse(resp); } catch (e) { return; } }
+            $out.text(resp.count);
+            $out.css('color', (max && resp.count > max) ? '#c60f13' : '');
+        });
+    }
+    $(document).on('input', '.rich-editor, #id_tossup_text', function () {
+        clearTimeout(timer); timer = setTimeout(update, 350);
+    });
+});
+</script>
 
 {% endblock %}
