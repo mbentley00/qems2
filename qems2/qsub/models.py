@@ -250,6 +250,58 @@ class StyleRuleDismissal(models.Model):
             self.question_set_id, self.code, self.token)
 
 
+class RoleGroup(models.Model):
+    """A named group of writers (e.g. 'PACE Editor'). A group can be attached to
+    a question set with a role; every member then holds that role on the set.
+    Membership is live: members added later gain the role on all sets the group
+    is attached to, and members removed lose it."""
+    name = models.CharField(max_length=120, unique=True)
+    members = models.ManyToManyField('Writer', related_name='role_groups', blank=True)
+    created_by = models.ForeignKey('Writer', on_delete=models.SET_NULL, null=True,
+                                   related_name='created_role_groups')
+    created_date = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.name
+
+    def can_manage(self, writer):
+        return (writer is not None and
+                (self.created_by_id == writer.id or
+                 (writer.user and writer.user.is_superuser)))
+
+
+class SetRoleGroupAssignment(models.Model):
+    """Attaches a RoleGroup to a QuestionSet with a role (editor or writer)."""
+    ROLE_CHOICES = (('editor', 'Editor'), ('writer', 'Writer'))
+    question_set = models.ForeignKey(QuestionSet, on_delete=models.CASCADE,
+                                     related_name='role_group_assignments')
+    role_group = models.ForeignKey(RoleGroup, on_delete=models.CASCADE,
+                                   related_name='set_assignments')
+    role = models.CharField(max_length=10, choices=ROLE_CHOICES)
+
+    class Meta:
+        unique_together = ('question_set', 'role_group')
+
+    def __str__(self):
+        return '{0} -> set {1} as {2}'.format(self.role_group_id, self.question_set_id, self.role)
+
+
+class GroupRoleGrant(models.Model):
+    """Provenance marker: a (writer, set, role) membership that exists because of
+    a role group, so reconciliation can revoke it without touching members who
+    were assigned directly."""
+    question_set = models.ForeignKey(QuestionSet, on_delete=models.CASCADE)
+    writer = models.ForeignKey('Writer', on_delete=models.CASCADE)
+    role = models.CharField(max_length=10)
+
+    class Meta:
+        unique_together = ('question_set', 'writer', 'role')
+
+    def __str__(self):
+        return 'group-granted {0} to writer {1} on set {2}'.format(
+            self.role, self.writer_id, self.question_set_id)
+
+
 class DistributionPerPacket(models.Model):
 
     #packet = models.ManyToManyField(Packet)

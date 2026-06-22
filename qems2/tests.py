@@ -2433,3 +2433,68 @@ class StyleDismissAllAndLiveCountTests(TestCase):
         resp = self.client.post('/live_char_count/', {
             'qset_id': self.qset.id, 'text[]': ['abc', 'de']})
         self.assertEqual(json.loads(resp.content)['count'], 5)
+
+
+class RoleGroupTests(TestCase):
+    """Role groups grant a role to all members; membership is live (added later
+    => gains access on existing sets; removed => loses it)."""
+
+    def setUp(self):
+        self.ou = User.objects.create_user('rg_owner', password='pw', email='o@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.au = User.objects.create_user('rg_alice', password='pw', email='a@t.com')
+        self.alice = Writer.objects.get(user=self.au)
+        self.bu = User.objects.create_user('rg_bob', password='pw', email='b@t.com')
+        self.bob = Writer.objects.get(user=self.bu)
+        self.dist = Distribution.objects.create(name='rg dist')
+        self.qset = QuestionSet.objects.create(
+            name='RG Set', date=timezone.now(), host='', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.owner.question_set_editor.add(self.qset)
+        self.group = RoleGroup.objects.create(name='PACE Editor', created_by=self.owner)
+        self.group.members.add(self.alice)
+
+    def _attach(self, role='editor'):
+        SetRoleGroupAssignment.objects.create(question_set=self.qset, role_group=self.group, role=role)
+        reconcile_group_roles(self.qset)
+
+    def test_attach_grants_role_to_members(self):
+        self._attach('editor')
+        self.assertIn(self.alice, self.qset.editor.all())
+        self.assertEqual(get_role(self.alice, self.qset), 'editor')
+
+    def test_adding_member_later_grants_existing_set(self):
+        self._attach('editor')
+        self.assertNotIn(self.bob, self.qset.editor.all())
+        self.group.members.add(self.bob)
+        reconcile_group(self.group)
+        self.assertIn(self.bob, self.qset.editor.all())
+
+    def test_removing_member_revokes_access(self):
+        self._attach('editor')
+        self.group.members.remove(self.alice)
+        reconcile_group(self.group)
+        self.assertNotIn(self.alice, self.qset.editor.all())
+
+    def test_detach_group_revokes_all_members(self):
+        self._attach('editor')
+        self.assertIn(self.alice, self.qset.editor.all())
+        SetRoleGroupAssignment.objects.filter(question_set=self.qset, role_group=self.group).delete()
+        reconcile_group_roles(self.qset)
+        self.assertNotIn(self.alice, self.qset.editor.all())
+
+    def test_direct_member_survives_group_removal(self):
+        # Bob added directly; then via group; removing from group keeps direct access.
+        self.qset.editor.add(self.bob)
+        GroupRoleGrant.objects.filter(question_set=self.qset, writer=self.bob, role='editor').delete()
+        self.group.members.add(self.bob)
+        self._attach('editor')  # reconcile; bob is direct so not turned into a grant
+        self.group.members.remove(self.bob)
+        reconcile_group(self.group)
+        self.assertIn(self.bob, self.qset.editor.all())  # still there (direct)
+
+    def test_attach_endpoint_requires_owner(self):
+        self.client.login(username='rg_alice', password='pw')  # not owner
+        self.client.post('/attach_role_group/{0}/'.format(self.qset.id),
+                         {'role_group_id': self.group.id, 'role': 'editor'})
+        self.assertFalse(SetRoleGroupAssignment.objects.filter(question_set=self.qset).exists())

@@ -506,6 +506,9 @@ def edit_question_set(request, qset_id):
                                'role': role,
                                'new_activity': new_activity,
                                'read_only': read_only,
+                               'all_role_groups': RoleGroup.objects.all().order_by('name'),
+                               'attached_role_groups': list(
+                                   qset.role_group_assignments.select_related('role_group')),
                                'message': message})
 
 @login_required
@@ -925,6 +928,10 @@ def add_editor(request, qset_id):
                 for editor_id in editors_to_add:
                     editor = Writer.objects.get(id=editor_id)
                     qset.editor.add(editor)
+                    # A direct add takes ownership of the membership (so it
+                    # survives role-group changes).
+                    GroupRoleGrant.objects.filter(
+                        question_set=qset, writer=editor, role='editor').delete()
 
                     # Don't have someone be both a writer and editor--delete them
                     try:
@@ -1060,6 +1067,8 @@ def add_writer(request, qset_id):
                 for writer_id in writers_to_add:
                     writer = Writer.objects.get(id=writer_id)
                     qset.writer.add(writer)
+                    GroupRoleGrant.objects.filter(
+                        question_set=qset, writer=writer, role='writer').delete()
                 qset.save()
                 cache.clear()
                 set_writers = Writer.objects.filter(Q(question_set_writer=qset) | Q(question_set_editor=qset)).distinct().order_by('user__last_name', 'user__first_name', 'user__username')
@@ -1082,6 +1091,99 @@ def add_writer(request, qset_id):
                                   'message': message,
                                   'message_class': message_class,
                                   'user': user})
+
+
+@login_required
+def role_groups(request):
+    """Create and manage role groups (named groups of writers). Members added
+    here propagate to every set the group is attached to."""
+    user = request.user.writer
+    message = message_class = ''
+
+    if request.method == 'POST':
+        action = request.POST.get('action', '')
+        if action == 'create':
+            name = (request.POST.get('name') or '').strip()
+            if not name:
+                message, message_class = 'Enter a group name.', 'alert-box warning'
+            elif RoleGroup.objects.filter(name__iexact=name).exists():
+                message, message_class = 'A group with that name already exists.', 'alert-box warning'
+            else:
+                RoleGroup.objects.create(name=name, created_by=user)
+                message, message_class = 'Group "{0}" created.'.format(name), 'alert-box success'
+        else:
+            try:
+                group = RoleGroup.objects.get(id=int(request.POST.get('group_id', 0)))
+            except (ValueError, RoleGroup.DoesNotExist):
+                group = None
+            if group is None or not group.can_manage(user):
+                message, message_class = 'You can only manage groups you created.', 'alert-box alert'
+            elif action == 'delete':
+                sets = [a.question_set for a in group.set_assignments.all()]
+                group.delete()
+                for qs in sets:
+                    reconcile_group_roles(qs)
+                message, message_class = 'Group deleted.', 'alert-box success'
+            elif action == 'add_member':
+                uname = (request.POST.get('username') or '').strip()
+                try:
+                    w = Writer.objects.get(user__username__iexact=uname)
+                    group.members.add(w)
+                    reconcile_group(group)
+                    message, message_class = 'Added {0}.'.format(uname), 'alert-box success'
+                except Writer.DoesNotExist:
+                    message, message_class = 'No user named "{0}".'.format(uname), 'alert-box warning'
+            elif action == 'remove_member':
+                try:
+                    w = Writer.objects.get(id=int(request.POST.get('writer_id', 0)))
+                    group.members.remove(w)
+                    reconcile_group(group)
+                    message, message_class = 'Member removed.', 'alert-box success'
+                except (ValueError, Writer.DoesNotExist):
+                    pass
+
+    groups = []
+    for g in RoleGroup.objects.all().order_by('name').prefetch_related('members__user', 'set_assignments__question_set'):
+        groups.append({'group': g, 'members': list(g.members.all().order_by('user__username')),
+                       'assignments': list(g.set_assignments.all()),
+                       'can_manage': g.can_manage(user)})
+    return render(request, 'role_groups.html',
+                  {'groups': groups, 'message': message, 'message_class': message_class, 'user': user})
+
+
+@login_required
+def attach_role_group(request, qset_id):
+    """Attach a role group to a set with a role (owner only); members gain the role."""
+    user = request.user.writer
+    qset = QuestionSet.objects.get(id=qset_id)
+    if request.method == 'POST' and qset.is_owner(user):
+        role = request.POST.get('role', 'writer')
+        role = role if role in ('editor', 'writer') else 'writer'
+        try:
+            group = RoleGroup.objects.get(id=int(request.POST.get('role_group_id', 0)))
+            SetRoleGroupAssignment.objects.update_or_create(
+                question_set=qset, role_group=group, defaults={'role': role})
+            reconcile_group_roles(qset)
+            cache.clear()
+        except (ValueError, RoleGroup.DoesNotExist):
+            pass
+    return HttpResponseRedirect('/edit_question_set/{0}/#editors'.format(qset_id))
+
+
+@login_required
+def detach_role_group(request, qset_id):
+    """Remove a role group from a set (owner only); group-granted members lose the role."""
+    user = request.user.writer
+    qset = QuestionSet.objects.get(id=qset_id)
+    if request.method == 'POST' and qset.is_owner(user):
+        try:
+            SetRoleGroupAssignment.objects.filter(
+                question_set=qset, role_group_id=int(request.POST.get('role_group_id', 0))).delete()
+            reconcile_group_roles(qset)
+            cache.clear()
+        except ValueError:
+            pass
+    return HttpResponseRedirect('/edit_question_set/{0}/#editors'.format(qset_id))
 
 
 @login_required
@@ -1756,6 +1858,9 @@ def delete_writer(request):
         role = get_role_no_owner(user, qset)
         if role == "editor":
             qset.writer.remove(writer)
+            # If they're still in a role group attached as writer, the group
+            # re-grants access; otherwise they're fully removed.
+            reconcile_group_roles(qset)
             cache.clear()
             message = 'Writer removed'
             message_class = 'alert-box success'
@@ -1780,6 +1885,7 @@ def delete_editor(request):
         role = get_role_no_owner(user, qset)
         if role == "editor":
             qset.editor.remove(editor)
+            reconcile_group_roles(qset)
             cache.clear()
             message = 'Editor removed'
             message_class = 'alert-box success'

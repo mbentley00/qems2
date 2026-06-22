@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% block title %}Role Groups - QEMS3{% endblock %}
+
+{% block content %}
+<h3 class="page-header">Role Groups</h3>
+<p style="color:#555;">A role group is a named set of people (for example, <em>PACE Editor</em>).
+Attach a group to a question set as editor or writer (from that set's page), and every member
+gets that role. Add someone to the group later and they gain the role on all those sets; remove
+them and they lose it.</p>
+
+{% if message %}<div class="{{ message_class }}">{{ message }}</div>{% endif %}
+
+<div class="panel radius">
+    <form method="post" action="/role_groups/" class="form-inline">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="create">
+        <label style="display:inline-block;">New group name
+            <input type="text" name="name" placeholder="e.g. PACE Editor" style="display:inline-block; width:280px;">
+        </label>
+        <button type="submit" class="button small primary">Create group</button>
+    </form>
+</div>
+
+{% for g in groups %}
+<div class="panel radius">
+    <h5 style="margin-top:0;">{{ g.group.name }}
+        <small style="color:#888;">({{ g.members|length }} member{{ g.members|length|pluralize }})</small>
+    </h5>
+
+    {% if g.assignments %}
+    <p style="color:#555; margin-bottom:6px;">Attached to:
+        {% for a in g.assignments %}<strong>{{ a.question_set.name }}</strong> ({{ a.role }}){% if not forloop.last %}, {% endif %}{% endfor %}
+    </p>
+    {% else %}
+    <p style="color:#888; margin-bottom:6px;">Not attached to any set yet.</p>
+    {% endif %}
+
+    <table class="table-striped" style="margin-bottom:8px;">
+        <tbody>
+        {% for m in g.members %}
+            <tr>
+                <td>{{ m.user.first_name }} {{ m.user.last_name }} <span style="color:#888;">"{{ m.user.username }}"</span></td>
+                <td style="text-align:right;">
+                    {% if g.can_manage %}
+                    <form method="post" action="/role_groups/" style="display:inline;">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="remove_member">
+                        <input type="hidden" name="group_id" value="{{ g.group.id }}">
+                        <input type="hidden" name="writer_id" value="{{ m.id }}">
+                        <button type="submit" class="button tiny alert" style="margin:0;">Remove</button>
+                    </form>
+                    {% endif %}
+                </td>
+            </tr>
+        {% empty %}
+            <tr><td style="color:#888;">No members yet.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+
+    {% if g.can_manage %}
+    <form method="post" action="/role_groups/" class="form-inline" style="display:inline;">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="add_member">
+        <input type="hidden" name="group_id" value="{{ g.group.id }}">
+        <input type="text" name="username" placeholder="username to add" style="display:inline-block; width:200px; margin:0 6px 0 0;">
+        <button type="submit" class="button tiny primary" style="margin:0;">Add member</button>
+    </form>
+    <form method="post" action="/role_groups/" style="display:inline; float:right;"
+          onsubmit="return confirm('Delete this group? Members will lose any role it granted.');">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="delete">
+        <input type="hidden" name="group_id" value="{{ g.group.id }}">
+        <button type="submit" class="button tiny secondary" style="margin:0;">Delete group</button>
+    </form>
+    {% else %}
+    <p style="color:#999; font-size:0.85em;">Only the group's creator can manage its members.</p>
+    {% endif %}
+</div>
+{% empty %}
+<p style="color:#888;">No role groups yet. Create one above.</p>
+{% endfor %}
+
+{% endblock %}

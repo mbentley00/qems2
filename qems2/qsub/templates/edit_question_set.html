@@ -302,6 +302,48 @@
                 <li><a href="/add_editor/{{ qset.id }}" class="button primary" id="btn-add-editor"><i class="fa fa-plus-circle"></i> Add an Editor</a></li>
                 <li><a href="/add_writer/{{ qset.id }}" class="button primary"><i class="fa fa-plus-circle"></i> Add a Writer</a></li>
             </ul>
+
+            <div class="panel radius">
+                <h5 style="margin-top:0;">Role groups
+                    <a href="/role_groups/" class="button tiny secondary right" style="margin:0;">Manage role groups</a>
+                </h5>
+                <p style="color:#555; margin-bottom:6px;">Attach a group (e.g. <em>PACE Editor</em>) so all its
+                members get a role here. Membership changes to the group take effect on this set automatically.</p>
+                {% if attached_role_groups %}
+                <ul class="no-bullet" style="margin-left:0;">
+                    {% for a in attached_role_groups %}
+                    <li style="margin-bottom:4px;">
+                        <strong>{{ a.role_group.name }}</strong> &mdash; {{ a.role }}
+                        ({{ a.role_group.members.count }} member{{ a.role_group.members.count|pluralize }})
+                        <form method="post" action="/detach_role_group/{{ qset.id }}/" style="display:inline;"
+                              onsubmit="return confirm('Detach this group? Its members lose the role on this set (unless added directly).');">
+                            {% csrf_token %}
+                            <input type="hidden" name="role_group_id" value="{{ a.role_group.id }}">
+                            <button type="submit" class="button tiny alert" style="margin:0 0 0 6px;">Detach</button>
+                        </form>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p style="color:#888;">No role groups attached.</p>
+                {% endif %}
+                {% if all_role_groups %}
+                <form method="post" action="/attach_role_group/{{ qset.id }}/" class="form-inline">
+                    {% csrf_token %}
+                    <select name="role_group_id" style="display:inline-block; width:auto; margin:0 6px 0 0;">
+                        {% for g in all_role_groups %}<option value="{{ g.id }}">{{ g.name }}</option>{% endfor %}
+                    </select>
+                    as
+                    <select name="role" style="display:inline-block; width:auto; margin:0 6px;">
+                        <option value="editor">Editor</option>
+                        <option value="writer">Writer</option>
+                    </select>
+                    <button type="submit" class="button tiny primary" style="margin:0;">Attach</button>
+                </form>
+                {% else %}
+                <p style="color:#888;">No role groups exist yet. <a href="/role_groups/">Create one</a>.</p>
+                {% endif %}
+            </div>
         {% endif %}
 
         <table class="tablesorter table-striped table-hover" id="writers-table">

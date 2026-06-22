@@ -113,6 +113,37 @@ def reset_tiebreak_distro(qset):
         tiebreak_entry.dist_entry = entry
         tiebreak_entry.save()
 
+def reconcile_group_roles(qset):
+    """Sync qset.editor / qset.writer so they hold every directly-assigned member
+    plus the current members of any role group attached to the set, without
+    disturbing direct assignments. Safe to call repeatedly (idempotent)."""
+    from .models import GroupRoleGrant, SetRoleGroupAssignment
+    for role, manager in (('editor', qset.editor), ('writer', qset.writer)):
+        group_member_ids = set()
+        for a in (SetRoleGroupAssignment.objects
+                  .filter(question_set=qset, role=role).select_related('role_group')):
+            group_member_ids.update(a.role_group.members.values_list('id', flat=True))
+        current_grant_ids = set(GroupRoleGrant.objects
+                                .filter(question_set=qset, role=role)
+                                .values_list('writer_id', flat=True))
+        m2m_ids = set(manager.values_list('id', flat=True))
+        # Members in the m2m that aren't group grants were assigned directly.
+        direct_ids = m2m_ids - current_grant_ids
+        desired_grant_ids = group_member_ids - direct_ids
+        for wid in current_grant_ids - desired_grant_ids:
+            GroupRoleGrant.objects.filter(question_set=qset, role=role, writer_id=wid).delete()
+            manager.remove(wid)
+        for wid in desired_grant_ids - current_grant_ids:
+            GroupRoleGrant.objects.get_or_create(question_set=qset, role=role, writer_id=wid)
+            manager.add(wid)
+
+
+def reconcile_group(role_group):
+    """Re-sync every set this group is attached to (after its membership changes)."""
+    for a in role_group.set_assignments.select_related('question_set'):
+        reconcile_group_roles(a.question_set)
+
+
 def get_role(user, qset):
 
     role = 'none'
