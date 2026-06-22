@@ -2498,3 +2498,37 @@ class RoleGroupTests(TestCase):
         self.client.post('/attach_role_group/{0}/'.format(self.qset.id),
                          {'role_group_id': self.group.id, 'role': 'editor'})
         self.assertFalse(SetRoleGroupAssignment.objects.filter(question_set=self.qset).exists())
+
+
+class RoleGroupMemberListTests(TestCase):
+    """The set's writers/editors list shows members added via a role group,
+    labelled with the group name."""
+
+    def setUp(self):
+        self.ou = User.objects.create_user('ml_owner', password='pw', email='o@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.au = User.objects.create_user('ml_alice', password='pw', email='a@t.com',
+                                           first_name='Alice', last_name='Ng')
+        self.alice = Writer.objects.get(user=self.au)
+        self.dist = Distribution.objects.create(name='ml dist')
+        self.qset = QuestionSet.objects.create(
+            name='ML Set', date=timezone.now(), host='', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.owner.question_set_editor.add(self.qset)
+        self.group = RoleGroup.objects.create(name='PACE Editor', created_by=self.owner)
+        self.group.members.add(self.alice)
+        SetRoleGroupAssignment.objects.create(question_set=self.qset, role_group=self.group, role='editor')
+        reconcile_group_roles(self.qset)
+        self.client.login(username='ml_owner', password='pw')
+
+    def test_group_member_listed_with_group_label(self):
+        resp = self.client.get('/edit_question_set/{0}/'.format(self.qset.id))
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        # Alice (added only via the group) appears in the member list...
+        self.assertIn('ml_alice', html)
+        # ...labelled with the group she came through...
+        self.assertIn('via PACE Editor', html)
+        # ...and her id is flagged as group-granted (so "Manage via role group" shows).
+        self.assertIn(self.alice.id, resp.context['group_granted_ids'])
+        self.assertIn('Manage via role group', html)

@@ -377,6 +377,16 @@ def edit_question_set(request, qset_id):
     qset_editors = qset.editor.all()
     qset_writers = qset.writer.all()
     user = request.user.writer
+    # Membership provenance: which members come from a role group (and which
+    # groups), so the writers/editors list can show it. group_granted_ids are
+    # those present ONLY via a group (no direct assignment) — they can't be
+    # removed here; you remove them from the group instead.
+    member_groups = {}
+    for _a in qset.role_group_assignments.select_related('role_group'):
+        for _w_id in _a.role_group.members.values_list('id', flat=True):
+            member_groups.setdefault(_w_id, []).append(_a.role_group.name)
+    group_granted_ids = set(GroupRoleGrant.objects.filter(question_set=qset)
+                            .values_list('writer_id', flat=True))
     set_status = {}
     set_distro_formset = None
     tiebreak_formset = None
@@ -447,6 +457,8 @@ def edit_question_set(request, qset_id):
                                            'comment_list': comment_tab_list,
                                            'role': role,
                                            'new_activity': new_activity,
+                                           'member_groups': member_groups,
+                                           'group_granted_ids': group_granted_ids,
                                            'message': 'Your changes have been successfully saved.',
                                            'message_class': 'alert-success'})
             else:
@@ -509,6 +521,8 @@ def edit_question_set(request, qset_id):
                                'all_role_groups': RoleGroup.objects.all().order_by('name'),
                                'attached_role_groups': list(
                                    qset.role_group_assignments.select_related('role_group')),
+                               'member_groups': member_groups,
+                               'group_granted_ids': group_granted_ids,
                                'message': message})
 
 @login_required

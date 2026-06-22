@@ -265,6 +265,9 @@ ul.question-flags input[type="checkbox"] { margin: 0 4px 0 0; vertical-align: mi
 /* Edit pages use more horizontal space than the default centered column. */
 body.edit-page-wide > .row { max-width: 1400px; }
 
+/* Members who hold a role via a role group (rather than a direct assignment). */
+.member-via-group { color: #777; font-style: italic; }
+
 .rich-editor:focus {
     outline: none;
     border-color: #999;
