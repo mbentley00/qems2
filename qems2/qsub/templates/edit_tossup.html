@@ -8,7 +8,7 @@
 {% load comments %}
 {% load filters %}
 
-{% block title %}{% if tossup %}{{ tossup.tossup_answer|answer_no_formatting|short_preview }} - QEMS2{% else %}Edit Tossup - QEMS2{% endif %}{% endblock %}
+{% block title %}{% if tossup %}{{ tossup.tossup_answer|answer_no_formatting|short_preview }} - QEMS3{% else %}Edit Tossup - QEMS3{% endif %}{% endblock %}
 
 {% block content %}
 {% if qset %}<script>window.QEMS_QSET_ID = {{ qset.id }};</script>{% endif %}

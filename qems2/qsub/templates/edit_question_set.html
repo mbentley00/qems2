@@ -5,7 +5,7 @@
 {% include "header.html" %}
 {% endblock %}
 
-{% block title %}{% if qset %}{{ qset.name }} - QEMS2{% else %}View Set - QEMS2{% endif %}{% endblock %}
+{% block title %}{% if qset %}{{ qset.name }} - QEMS3{% else %}View Set - QEMS3{% endif %}{% endblock %}
 
 {% block content %}
 {% load static %}
@@ -213,6 +213,12 @@
                         {{ form.tossups_only }}
                     </label>
                     <small style="color:#888;">Hides bonus requirements; existing bonuses are never deleted.</small>
+                </li>
+                <li>
+                    <label>Public (listed for everyone)
+                        {{ form.public }}
+                    </label>
+                    <small style="color:#888;">Anyone can see this set is being written and request to join (which emails you). It grants no access by itself.</small>
                 </li>
             </ul>
             {% if role == "editor" %}

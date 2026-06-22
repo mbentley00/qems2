@@ -2219,3 +2219,126 @@ class GridUnassignTests(TestCase):
         self.assertTrue(json.loads(r.content)['success'])
         self.tu.refresh_from_db()
         self.assertIsNone(self.tu.packet_id)
+
+
+class AccountAgeAndDistributionPermissionTests(TestCase):
+    """New accounts can't create sets/distributions for 2 days; distributions
+    are only visible/editable for sets the user belongs to."""
+
+    def setUp(self):
+        from datetime import timedelta
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        QuestionType.objects.get_or_create(question_type=VHSL_BONUS)
+        # Old-enough member who owns a set.
+        self.old_user = User.objects.create_user('old_u', password='pw', email='o@test.com')
+        self.old_user.date_joined = timezone.now() - timedelta(days=5)
+        self.old_user.save()
+        self.old = Writer.objects.get(user=self.old_user)
+        self.my_dist = Distribution.objects.create(name='Mine')
+        self.qset = QuestionSet.objects.create(
+            name='Mine Set', date=timezone.now(), host='', address='', owner=self.old,
+            num_packets=1, distribution=self.my_dist)
+        self.old.question_set_editor.add(self.qset)
+        # Someone else's distribution the old user has no part in.
+        self.other_dist = Distribution.objects.create(name='Theirs')
+        other_user = User.objects.create_user('other_u', password='pw', email='x@test.com')
+        other = Writer.objects.get(user=other_user)
+        QuestionSet.objects.create(
+            name='Other Set', date=timezone.now(), host='', address='', owner=other,
+            num_packets=1, distribution=self.other_dist)
+        # Brand-new account.
+        self.new_user = User.objects.create_user('new_u', password='pw', email='n@test.com')
+        self.new_user.date_joined = timezone.now()
+        self.new_user.save()
+        Writer.objects.get(user=self.new_user)
+
+    def test_new_account_cannot_create_question_set(self):
+        self.client.login(username='new_u', password='pw')
+        resp = self.client.get('/create_question_set/')
+        self.assertContains(resp, '2 days after sign-up')
+
+    def test_old_account_can_reach_create_question_set(self):
+        self.client.login(username='old_u', password='pw')
+        resp = self.client.get('/create_question_set/')
+        self.assertNotContains(resp, '2 days after sign-up')
+
+    def test_new_account_cannot_create_distribution(self):
+        self.client.login(username='new_u', password='pw')
+        resp = self.client.get('/edit_distribution/')  # no id = new dist
+        self.assertContains(resp, '2 days after sign-up')
+
+    def test_distributions_list_only_shows_own(self):
+        self.client.login(username='old_u', password='pw')
+        resp = self.client.get('/distributions/')
+        self.assertEqual(resp.status_code, 200)
+        dist_ids = {d.id for d in resp.context['dists']}
+        self.assertIn(self.my_dist.id, dist_ids)
+        self.assertNotIn(self.other_dist.id, dist_ids)
+
+    def test_cannot_edit_other_distribution(self):
+        self.client.login(username='old_u', password='pw')
+        resp = self.client.get('/edit_distribution/{0}/'.format(self.other_dist.id))
+        self.assertContains(resp, 'only view or edit distributions for your own sets')
+
+    def test_can_edit_own_distribution(self):
+        self.client.login(username='old_u', password='pw')
+        resp = self.client.get('/edit_distribution/{0}/'.format(self.my_dist.id))
+        self.assertNotContains(resp, 'only view or edit distributions for your own sets')
+
+
+class PublicSetAndJoinRequestTests(TestCase):
+    """Public sets are listed for non-members, who can request to join (email)."""
+
+    def setUp(self):
+        from django.core import mail
+        self.mail = mail
+        self.ou = User.objects.create_user('ps_owner', password='pw', email='owner@test.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='ps dist')
+        self.public_set = QuestionSet.objects.create(
+            name='Public Set', date=timezone.now(), host='', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist, public=True)
+        self.private_set = QuestionSet.objects.create(
+            name='Private Set', date=timezone.now(), host='', address='', owner=self.owner,
+            num_packets=1, distribution=Distribution.objects.create(name='pd'), public=False)
+        self.outsider_u = User.objects.create_user('ps_out', password='pw', email='out@test.com')
+        self.outsider_u.first_name = 'Out'; self.outsider_u.save()
+        Writer.objects.get(user=self.outsider_u)
+
+    def test_public_set_listed_for_non_member(self):
+        self.client.login(username='ps_out', password='pw')
+        resp = self.client.get('/')
+        self.assertEqual(resp.status_code, 200)
+        ids = {qs.id for qs in resp.context['public_sets']}
+        self.assertIn(self.public_set.id, ids)
+        self.assertNotIn(self.private_set.id, ids)
+
+    def test_public_set_not_listed_for_owner(self):
+        self.client.login(username='ps_owner', password='pw')
+        resp = self.client.get('/')
+        ids = {qs.id for qs in resp.context['public_sets']}
+        self.assertNotIn(self.public_set.id, ids)  # already a member
+
+    def test_request_to_join_emails_owner(self):
+        self.client.login(username='ps_out', password='pw')
+        self.mail.outbox = []
+        resp = self.client.post('/request_to_join/', {
+            'qset_id': self.public_set.id, 'message': 'I would love to help write science.'})
+        self.assertTrue(json.loads(resp.content)['success'])
+        self.assertEqual(len(self.mail.outbox), 1)
+        msg = self.mail.outbox[0]
+        self.assertIn('owner@test.com', msg.to)
+        self.assertIn('Public Set', msg.subject)
+        self.assertIn('love to help write science', msg.body)
+        self.assertEqual(msg.reply_to, ['out@test.com'])
+
+    def test_request_to_join_rejected_for_private(self):
+        self.client.login(username='ps_out', password='pw')
+        resp = self.client.post('/request_to_join/', {'qset_id': self.private_set.id})
+        self.assertFalse(json.loads(resp.content)['success'])
+
+    def test_member_cannot_request_to_join(self):
+        self.client.login(username='ps_owner', password='pw')
+        resp = self.client.post('/request_to_join/', {'qset_id': self.public_set.id})
+        self.assertFalse(json.loads(resp.content)['success'])

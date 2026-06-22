@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}QEMS3 — Quizbowl Question Management{% endblock %}
+
+{% block header %}
+<div class="fixed">
+    <nav class="top-bar">
+        <section class="top-bar-section">
+            <ul class="left">
+                <li class="name"><h1 style="margin:0;"><a href="/" style="font-size:1rem;">QEMS3</a></h1></li>
+            </ul>
+            <ul class="right">
+                <li><a href="/accounts/login/">Log in</a></li>
+                <li><a href="/accounts/signup/">Sign up</a></li>
+                <li><a href="/help/">Help</a></li>
+                <li><a href="/about/">About</a></li>
+            </ul>
+        </section>
+    </nav>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="splash-hero">
+    <h1>QEMS3</h1>
+    <p class="splash-tagline">A quizbowl question management system &mdash; write, edit, and
+    packetize tournament question sets, all in one place.</p>
+    <p class="splash-cta">
+        <a href="/accounts/login/" class="button">Log in</a>
+        <a href="/accounts/signup/" class="button secondary">Create an account</a>
+    </p>
+    <p class="splash-lineage">An evolution of <strong>QEMS2</strong>, originally developed by
+    Jerry Vinokurov.</p>
+</div>
+
+<div class="row">
+    <div class="large-6 columns">
+        <h4 class="page-header">What it does</h4>
+        <ul class="square">
+            <li><strong>Write questions</strong> &mdash; compose ACF-style tossups and bonuses
+                with a rich-text editor that produces standard quizbowl markup (paste straight
+                from Word or Google Docs).</li>
+            <li><strong>Edit &amp; review</strong> &mdash; comment on questions and answer lines,
+                resolve discussions, lock finished questions, and follow an activity feed.</li>
+            <li><strong>Manage distributions</strong> &mdash; set per-category and per-subcategory
+                quotas and watch them fill as questions come in.</li>
+            <li><strong>Packetize</strong> &mdash; auto-distribute questions into packets, then
+                fine-tune with a drag-and-drop packet grid and a document view.</li>
+            <li><strong>Check quality</strong> &mdash; run a duplicate checker and a style checker
+                before export.</li>
+            <li><strong>Import &amp; export</strong> &mdash; bring in material from TSV, JSON
+                (YAPP/MODAQ), <code>.docx</code>, or PDF, and export polished packets to Word.</li>
+        </ul>
+    </div>
+    <div class="large-6 columns">
+        <h4 class="page-header">New in QEMS3</h4>
+        <ul class="square">
+            <li><strong>Smarter packetization</strong> &mdash; an unpacketized pool, drag-to-place
+                and swap, natural and custom packet ordering, and per-slot tools on the grid.</li>
+            <li><strong>Polished Word export</strong> &mdash; packets in proper reading format,
+                with open comments carried through as Word comments.</li>
+            <li><strong>Packet → MP3</strong> &mdash; generate an audio reading of a packet.</li>
+            <li><strong>Playtesting</strong> &mdash; record buzzes and bonus conversion, including
+                imports from a Discord playtest bot, linked to the exact question version played.</li>
+            <li><strong>Better editing</strong> &mdash; moderator heads-ups for tricky answer
+                lines, packet-level comments, and a cleaner document view.</li>
+        </ul>
+    </div>
+</div>
+
+<div class="panel radius">
+    <h4 class="page-header" style="margin-top:0;">About quizbowl</h4>
+    <p>New to quizbowl, or looking for the broader community and events?</p>
+    <ul class="square">
+        <li><a href="https://hsquizbowl.org/" target="_blank" rel="noopener">hsquizbowl.org</a>
+            &mdash; the Quizbowl Resource Center forums and community.</li>
+        <li><a href="https://pace-nsc.org/" target="_blank" rel="noopener">pace-nsc.org</a>
+            &mdash; the Partnership for Academic Competition Excellence and the National
+            Scholastic Championship.</li>
+    </ul>
+</div>
+
+<style>
+.splash-hero { text-align: center; padding: 40px 20px 28px; }
+.splash-hero h1 { font-size: 3rem; margin: 0 0 0.25rem; }
+.splash-tagline { font-size: 1.2rem; color: #555; max-width: 640px; margin: 0 auto 1rem; }
+.splash-cta { margin-bottom: 0.5rem; }
+.splash-cta .button { margin: 0 4px; }
+.splash-lineage { color: #888; font-size: 0.9rem; }
+</style>
+{% endblock %}

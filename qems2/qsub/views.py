@@ -55,8 +55,11 @@ def fulltext_filter(queryset, query):
 from django.contrib.contenttypes.models import ContentType
 
 
-@login_required
 def main (request):
+    # Logged-out visitors get the public splash page; members get their
+    # question-set dashboard.
+    if not request.user.is_authenticated:
+        return render(request, 'splash.html', {})
     return question_sets(request)
 
 @login_required
@@ -124,8 +127,56 @@ def question_sets (request):
     all_sets  = [{'header': 'Upcoming question sets', 'qsets': upcoming_sets, 'id': 'qsets-write'},
                  {'header': 'Completed question sets', 'qsets': completed_sets, 'id': 'qsets-complete'}]
 
-    print(all_sets)
-    return render(request, 'question_sets.html', {'question_set_list': all_sets, 'user': writer})
+    # Public sets the user isn't already part of — they can request to join.
+    my_set_ids = {qset.id for qset in all_sets[0]['qsets']} | {qset.id for qset in all_sets[1]['qsets']}
+    public_sets = [qs for qs in QuestionSet.objects.filter(public=True).order_by('-date')
+                   if qs.id not in my_set_ids]
+
+    return render(request, 'question_sets.html',
+                  {'question_set_list': all_sets, 'public_sets': public_sets, 'user': writer})
+
+@login_required
+def request_to_join(request):
+    """A logged-in user asks to join a public question set; emails the owner(s)."""
+    user = request.user.writer
+    if request.method != 'POST':
+        return HttpResponse(json.dumps({'success': False, 'message': 'Invalid request'}))
+    try:
+        qset = QuestionSet.objects.get(id=int(request.POST['qset_id']))
+    except (KeyError, ValueError, QuestionSet.DoesNotExist):
+        return HttpResponse(json.dumps({'success': False, 'message': 'Set not found.'}))
+    if not qset.public:
+        return HttpResponse(json.dumps({'success': False, 'message': 'This set is not public.'}))
+    if qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all():
+        return HttpResponse(json.dumps({'success': False, 'message': 'You are already part of this set.'}))
+
+    note = (request.POST.get('message') or '').strip()[:1000]
+    requester_name = user.get_real_name().strip() or user.user.username
+    requester_email = user.user.email
+    recipients = [o.user.email for o in qset.all_owners() if o.user and o.user.email]
+    if not recipients:
+        return HttpResponse(json.dumps({'success': False,
+            'message': 'The set owner has no email on file, so the request could not be sent.'}))
+
+    from django.core.mail import EmailMessage
+    from django.conf import settings
+    subject = 'QEMS3: {0} requests to join "{1}"'.format(requester_name, qset.name)
+    body = ('{0} (@{1}{2}) has requested to join your question set "{3}" on QEMS3.\n\n'
+            '{4}\n\n'
+            'If you want to add them, open the set on QEMS3 and use "Add Writer" or '
+            '"Add Editor".').format(
+        requester_name, user.user.username,
+        ', ' + requester_email if requester_email else '', qset.name,
+        ('Their message: ' + note) if note else '(No message included.)')
+    try:
+        EmailMessage(subject, body, settings.DEFAULT_FROM_EMAIL, recipients,
+                     reply_to=[requester_email] if requester_email else None).send(fail_silently=False)
+    except Exception as ex:
+        return HttpResponse(json.dumps({'success': False,
+            'message': 'Could not send the request email ({0}).'.format(ex)}))
+    return HttpResponse(json.dumps({'success': True,
+        'message': 'Your request has been emailed to the set owner.'}))
+
 
 @login_required
 def import_set(request):
@@ -243,6 +294,10 @@ def packet(request):
 def create_question_set (request):
     user = request.user.writer
 
+    if not _account_can_create(request.user):
+        return render(request, 'failure.html',
+                      {'message': _ACCOUNT_TOO_NEW_MSG, 'message_class': 'alert-box alert'})
+
     if request.method == 'POST':
         form = QuestionSetForm(data=request.POST)
         if form.is_valid():
@@ -355,6 +410,7 @@ def edit_question_set(request, qset_id):
                 qset.num_packets = form.cleaned_data['num_packets']
                 qset.char_count_ignores_pronunciation_guides = form.cleaned_data['char_count_ignores_pronunciation_guides']
                 qset.tossups_only = form.cleaned_data['tossups_only']
+                qset.public = form.cleaned_data['public']
                 qset.max_acf_tossup_length = form.cleaned_data['max_acf_tossup_length']
                 qset.max_acf_bonus_length = form.cleaned_data['max_acf_bonus_length']
                 qset.save()
@@ -2355,20 +2411,50 @@ def change_question_order(request):
 #             question.question_number += direction
 #             question.save()
 
+def _account_can_create(user):
+    """Anti-spam: a new account can't create question sets or distributions
+    until 2 days after it was created."""
+    from datetime import timedelta
+    return (timezone.now() - user.date_joined) >= timedelta(days=2)
+
+
+_ACCOUNT_TOO_NEW_MSG = ('New accounts can\'t create question sets or distributions '
+                        'until 2 days after sign-up. Please try again later.')
+
+
+def _writer_distribution_ids(writer):
+    """Distribution ids for the sets a writer belongs to (owner, co-owner,
+    editor or writer) — the distributions they're allowed to see and edit."""
+    sets = (QuestionSet.objects.filter(owner=writer)
+            | writer.question_set_editor.all()
+            | writer.question_set_writer.all()
+            | writer.co_owned_sets.all())
+    return set(sets.values_list('distribution_id', flat=True))
+
+
 @login_required
 def distributions (request):
-
-    data = []
-    all_dists = Distribution.objects.all()
+    # Only show distributions for sets this user is part of.
+    user = request.user.writer
+    dists = Distribution.objects.filter(id__in=_writer_distribution_ids(user))
 
     return render(request, 'distributions.html',
-                             {'dists': all_dists,
-                              'user': request.user.writer})
+                             {'dists': dists,
+                              'user': user})
 
 @login_required
 def clone_distribution(request, dist_id):
     if request.method != 'POST':
         return HttpResponseRedirect('/distributions/')
+
+    user = request.user.writer
+    if int(dist_id) not in _writer_distribution_ids(user):
+        return render(request, 'failure.html',
+                      {'message': 'You can only clone distributions for your own sets.',
+                       'message_class': 'alert-box alert'})
+    if not _account_can_create(request.user):
+        return render(request, 'failure.html',
+                      {'message': _ACCOUNT_TOO_NEW_MSG, 'message_class': 'alert-box alert'})
 
     source = Distribution.objects.get(id=dist_id)
     new_dist = Distribution()
@@ -2397,6 +2483,17 @@ def edit_distribution(request, dist_id=None):
     data = []
     message = ''
     message_class = ''
+
+    user = request.user.writer
+    if dist_id is None:
+        # Creating a brand-new distribution: gate by account age.
+        if not _account_can_create(request.user):
+            return render(request, 'failure.html',
+                          {'message': _ACCOUNT_TOO_NEW_MSG, 'message_class': 'alert-box alert'})
+    elif int(dist_id) not in _writer_distribution_ids(user):
+        return render(request, 'failure.html',
+                      {'message': 'You can only view or edit distributions for your own sets.',
+                       'message_class': 'alert-box alert'})
 
     if request.user.is_authenticated:
         DistributionEntryFormset = formset_factory(DistributionEntryForm, can_delete=True)

@@ -138,7 +138,9 @@ class QuestionSet (models.Model):
     address = models.TextField(max_length=200)
     owner = models.ForeignKey('Writer', on_delete=models.CASCADE, related_name='owner')
     co_owners = models.ManyToManyField('Writer', related_name='co_owned_sets', blank=True)
-    #public = models.BooleanField()
+    # When public, the set is listed for all logged-in users, who can request to
+    # join it (which emails the owner). It does not grant any access by itself.
+    public = models.BooleanField(default=False)
     num_packets = models.PositiveIntegerField()
     distribution = models.ForeignKey('Distribution', on_delete=models.CASCADE) # TODO: This needs to be deleted eventually
     #teams = models.ForeignKey('Team')

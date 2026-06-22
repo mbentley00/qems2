@@ -4,7 +4,7 @@
 {% include "header.html" %}
 {% endblock %}
 
-{% block title %}Question Sets - QEMS2{% endblock %}
+{% block title %}Question Sets - QEMS3{% endblock %}
 
 {% block content %}
 {% load static %}
@@ -48,5 +48,42 @@
     </li>
     {% endfor %}
 </ul>
+
+{% if public_sets %}
+<h4 class="page-header">Public question sets</h4>
+<p style="color:#888;">Sets others have made public. Request to join and the owner will be emailed.</p>
+<table class="tablesorter table-striped table-hover" id="public-sets-table">
+    <thead>
+        <tr><th>Question Set</th><th>Date</th><th>Host</th><th></th></tr>
+    </thead>
+    <tbody>
+    {% for qset in public_sets %}
+    <tr>
+        <td>{{ qset.name }}</td>
+        <td>{{ qset.date }}</td>
+        <td>{{ qset.host }}</td>
+        <td><a href="#" class="button tiny secondary request-join-btn" data-qset-id="{{ qset.id }}" data-qset-name="{{ qset.name }}">Request to join</a></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+<script>
+$(function () {
+    $('.request-join-btn').on('click', function (e) {
+        e.preventDefault();
+        var $btn = $(this);
+        var msg = prompt('Request to join "' + $btn.data('qset-name') + '". Add an optional message for the owner:', '');
+        if (msg === null) { return; }  // cancelled
+        $btn.prop('disabled', true);
+        $.post('/request_to_join/', { qset_id: $btn.data('qset-id'), message: msg }, function (response) {
+            var json = $.parseJSON(response);
+            alert(json.message);
+            if (json.success) { $btn.text('Request sent').addClass('disabled'); }
+            else { $btn.prop('disabled', false); }
+        }).fail(function () { alert('Could not send the request.'); $btn.prop('disabled', false); });
+    });
+});
+</script>
+{% endif %}
 
 {% endblock %}
