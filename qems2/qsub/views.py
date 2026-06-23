@@ -1588,9 +1588,29 @@ def _apply_suggestion(question, suggestion, user):
         status='superseded', resolved_by=user, resolved_date=timezone.now())
 
 
+def _record_suggestions(qset, question, qtype, user, proposed, note=''):
+    """Create a pending SuggestedEdit for each content field whose proposed value
+    differs from the current one. `proposed` maps field name -> raw new value."""
+    created = 0
+    for f, lbl in SUGGESTABLE_FIELDS.get(qtype, []):
+        if f not in proposed:
+            continue
+        new_val = strip_markup(proposed.get(f, '') or '')
+        old_val = getattr(question, f, '') or ''
+        if (new_val or '').strip() != (old_val or '').strip():
+            SuggestedEdit.objects.create(
+                question_set=qset, question_type=qtype, question_id=question.id,
+                field=f, field_label=lbl, old_value=old_val, new_value=new_val,
+                note=note, suggested_by=user)
+            created += 1
+    return created
+
+
 @login_required
 def suggest_edit(request):
-    """Any set member proposes changes to a question's fields (track-changes)."""
+    """Any set member proposes changes to a question's fields (track-changes).
+    Used by the standalone suggest form; the edit pages now post the main form
+    with save_as_suggestion instead."""
     user = request.user.writer
     if request.method != 'POST':
         return HttpResponseRedirect('/')
@@ -1605,19 +1625,9 @@ def suggest_edit(request):
                       {'message': 'You must be a member of this set to suggest changes.',
                        'message_class': 'alert-box alert'})
     note = (request.POST.get('note') or '').strip()[:255]
-    created = 0
-    for f, lbl in SUGGESTABLE_FIELDS.get(qtype, []):
-        key = 'field_' + f
-        if key not in request.POST:
-            continue
-        new_val = strip_markup(request.POST.get(key, ''))
-        old_val = getattr(question, f, '') or ''
-        if (new_val or '').strip() != (old_val or '').strip():
-            SuggestedEdit.objects.create(
-                question_set=qset, question_type=qtype, question_id=question.id,
-                field=f, field_label=lbl, old_value=old_val, new_value=new_val,
-                note=note, suggested_by=user)
-            created += 1
+    proposed = {f: request.POST.get('field_' + f, '')
+                for f, _ in SUGGESTABLE_FIELDS.get(qtype, []) if ('field_' + f) in request.POST}
+    created = _record_suggestions(qset, question, qtype, user, proposed, note)
     return HttpResponseRedirect('/edit_{0}/{1}/?suggested={2}#suggested-changes'.format(
         qtype, question.id, created))
 
@@ -1700,15 +1710,25 @@ def edit_tossup(request, tossup_id):
             else:
                 read_only = False
 
-        elif user in qset.writer.all():
+        elif _is_set_member(user, qset):
+            # Members who can't edit directly can still propose suggested changes,
+            # so render the form (the template hides the direct Save button).
             read_only = True
-            form = None
+            form = TossupForm(instance=tossup, qset_id=qset.id, role=role)
         else:
             read_only = True
             tossup = None
             form = None
             message = 'You are not authorized to view or edit this question!'
             message_class = 'alert-box alert'
+
+        if request.GET.get('suggested') is not None and tossup is not None:
+            if request.GET.get('suggested') != '0':
+                message = '{0} change(s) saved as suggestions for the author/editors to review.'.format(request.GET.get('suggested'))
+                message_class = 'alert-box success'
+            else:
+                message = 'No changes were detected, so nothing was suggested.'
+                message_class = 'alert-box warning'
 
         return render(request, 'edit_tossup.html',
             {'tossup': tossup,
@@ -1728,6 +1748,17 @@ def edit_tossup(request, tossup_id):
 
     elif request.method == 'POST':
         print("start post for edit tossup")
+        if 'save_as_suggestion' in request.POST:
+            if not _is_set_member(user, qset):
+                return render(request, 'failure.html',
+                              {'message': 'You must be a member of this set to suggest changes.',
+                               'message_class': 'alert-box alert'})
+            proposed = {f: request.POST.get(f, '') for f, _ in SUGGESTABLE_FIELDS['tossup']}
+            note = (request.POST.get('suggestion_note') or '').strip()[:255]
+            created = _record_suggestions(qset, tossup, 'tossup', user, proposed, note)
+            return HttpResponseRedirect(
+                '/edit_tossup/{0}/?suggested={1}#suggested-changes'.format(tossup.id, created))
+
         if user == tossup.author or qset.is_owner(user) or user in qset.editor.all():
             form = TossupForm(request.POST, qset_id=qset.id, role=role)
             can_change = True
@@ -1842,15 +1873,24 @@ def edit_bonus(request, bonus_id):
             else:
                 read_only = False
 
-        elif user in qset.writer.all():
+        elif _is_set_member(user, qset):
+            # Members who can't edit directly can still propose suggested changes.
             read_only = True
-            form = None
+            form = BonusForm(instance=bonus, qset_id=qset.id, role=role, question_type=question_type)
         else:
             read_only = True
             bonus = None
             form = None
             message = 'You are not authorized to view or edit this question!'
             message_class = 'alert-box alert'
+
+        if request.GET.get('suggested') is not None and bonus is not None:
+            if request.GET.get('suggested') != '0':
+                message = '{0} change(s) saved as suggestions for the author/editors to review.'.format(request.GET.get('suggested'))
+                message_class = 'alert-box success'
+            else:
+                message = 'No changes were detected, so nothing was suggested.'
+                message_class = 'alert-box warning'
 
         return render(request, 'edit_bonus.html',
             {'bonus': bonus,
@@ -1870,9 +1910,20 @@ def edit_bonus(request, bonus_id):
              **_suggestion_render_ctx(user, bonus, 'bonus', qset)})
 
     elif request.method == 'POST':
+        if 'save_as_suggestion' in request.POST:
+            if not _is_set_member(user, qset):
+                return render(request, 'failure.html',
+                              {'message': 'You must be a member of this set to suggest changes.',
+                               'message_class': 'alert-box alert'})
+            proposed = {f: request.POST.get(f, '') for f, _ in SUGGESTABLE_FIELDS['bonus']}
+            note = (request.POST.get('suggestion_note') or '').strip()[:255]
+            created = _record_suggestions(qset, bonus, 'bonus', user, proposed, note)
+            return HttpResponseRedirect(
+                '/edit_bonus/{0}/?suggested={1}#suggested-changes'.format(bonus.id, created))
+
         if user == bonus.author or qset.is_owner(user) or user in qset.editor.all():
             form = BonusForm(request.POST, qset_id=qset.id, role=role, question_type=question_type)
-            
+
             can_change = True
             if bonus.locked and not (qset.is_owner(user) or user in qset.editor.all()):
                 can_change = False

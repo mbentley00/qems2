@@ -2615,3 +2615,60 @@ class SuggestedEditTests(TestCase):
         self.assertIn('<del>quick</del>', out)
         self.assertIn('<ins>slow</ins>', out)
         self.assertIn('brown fox', out)
+
+
+class SaveAsSuggestionFlowTests(TestCase):
+    """The edit page itself saves proposed changes via save_as_suggestion, and
+    renders the edit form to non-author members so they can propose changes."""
+
+    def setUp(self):
+        from datetime import datetime
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('sf_owner', password='pw', email='o@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.wu = User.objects.create_user('sf_writer', password='pw', email='w@t.com')
+        self.writer = Writer.objects.get(user=self.wu)
+        self.dist = Distribution.objects.create(name='sf dist')
+        self.qset = QuestionSet.objects.create(
+            name='SF Set', date=timezone.now(), host='', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist, max_acf_tossup_length=850)
+        self.owner.question_set_editor.add(self.qset)
+        self.qset.writer.add(self.writer)  # member, not author
+        self.tu = Tossup.objects.create(author=self.owner, question_set=self.qset,
+            question_type=self.acf, tossup_text='Old stem.', tossup_answer='_Ans_',
+            created_date=datetime.now(), last_changed_date=datetime.now(), question_number=1)
+
+    def test_non_author_member_sees_edit_form_and_suggest_button(self):
+        self.client.login(username='sf_writer', password='pw')
+        resp = self.client.get('/edit_tossup/{0}/'.format(self.tu.id))
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        self.assertIn('id="edit-tossup"', html)
+        self.assertIn('id_tossup_text', html)          # editable field rendered
+        self.assertIn('save_as_suggestion', html)       # suggest button
+        self.assertNotIn('value="Save"', html)          # no direct Save for non-editor
+
+    def test_save_as_suggestion_creates_pending(self):
+        self.client.login(username='sf_writer', password='pw')
+        resp = self.client.post('/edit_tossup/{0}/'.format(self.tu.id), {
+            'save_as_suggestion': '1', 'tossup_text': 'New stem.', 'tossup_answer': '_Ans_',
+            'suggestion_note': 'better'})
+        self.assertEqual(resp.status_code, 302)
+        s = SuggestedEdit.objects.get(question_id=self.tu.id, field='tossup_text')
+        self.assertEqual(s.new_value, 'New stem.')
+        self.assertEqual(s.status, 'pending')
+        self.assertEqual(s.suggested_by, self.writer)
+        # The tossup itself is unchanged until accepted.
+        self.tu.refresh_from_db()
+        self.assertEqual(self.tu.tossup_text, 'Old stem.')
+
+    def test_direct_save_still_works_for_editor(self):
+        self.client.login(username='sf_owner', password='pw')
+        resp = self.client.post('/edit_tossup/{0}/'.format(self.tu.id), {
+            'tossup_text': 'Edited directly.', 'tossup_answer': '_Ans_',
+            'category': self.tu.category_id or '', 'author': self.owner.id,
+            'question_type': self.acf.id, 'packet': ''})
+        self.tu.refresh_from_db()
+        # Either saved or form error, but no suggestion should be created.
+        self.assertEqual(SuggestedEdit.objects.filter(question_id=self.tu.id).count(), 0)

@@ -55,7 +55,11 @@
     {% csrf_token %}
     {{ form.non_field_errors }}
 
-    {% if not read_only %}
+    {% if form %}
+        {% if read_only and can_suggest %}
+        <div class="alert-box info" style="margin-bottom:8px;">You can't edit this question directly, but you can
+        edit the text below and <strong>Save as Suggested Changes</strong> for the author or an editor to review.</div>
+        {% endif %}
         <a href="#" id="paste-full-tossup" class="button small secondary">Paste Full Tossup</a>
         <a href="#" id="copy-for-discord-tossup" class="button small secondary">Copy for Discord</a>
         <a href="#" id="copy-for-discord-plain-tossup" class="button small secondary">Copy for Discord (no spoilers)</a>
@@ -75,6 +79,8 @@
             <small style="color:#888;">(updates as you type; saved count shown with the question above)</small>
         </p>
         {% endif %}
+    {% endif %}
+    {% if not read_only %}
         <div class="row">
         {% for field in form %}
             {% if field.html_name == "category" or field.html_name == "author" %}
@@ -128,6 +134,18 @@
         </div>
 
         <input type="submit" id="submit-bonus" value="Save" class="button primary right" />
+    {% endif %}
+    {% if form and can_suggest %}
+        <div class="suggest-save panel radius" style="clear:both; margin-top:8px;">
+            <label>Suggestion note (optional)
+                <input type="text" name="suggestion_note" maxlength="255" placeholder="Why you're proposing this change">
+            </label>
+            <button type="submit" name="save_as_suggestion" value="1" class="button small secondary" style="margin:0;">
+                Save as Suggested Changes
+            </button>
+            <small style="color:#888; display:block; margin-top:4px;">Saves your edits to the text fields above as
+            proposed changes (track-changes) for the author or an editor to accept or reject &mdash; the question itself isn't changed yet.</small>
+        </div>
     {% endif %}
 </form>
 

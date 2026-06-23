@@ -41,27 +41,8 @@ can_review_suggestions, can_suggest, suggest_fields.
     {% endif %}
 
     {% if can_suggest %}
-    <p style="margin-top:10px;">
-        <button type="button" id="toggle-suggest-form" class="button small secondary">Suggest a change</button>
-    </p>
-    <form method="post" action="/suggest_edit/" id="suggest-form" style="display:none;">
-        {% csrf_token %}
-        <input type="hidden" name="question_type" value="{{ question_type }}">
-        <input type="hidden" name="question_id" value="{{ q_id }}">
-        <p style="color:#555;">Propose changes below; only fields you change are submitted.
-        QEMS markup is supported (<code>_x_</code> bold+underline, <code>~x~</code> italic, <code>(*)</code> power).
-        The author or an editor reviews each change.</p>
-        {% for f in suggest_fields %}
-        <label>{{ f.label }}
-            <textarea name="field_{{ f.name }}" rows="{% if 'answer' in f.name %}2{% else %}4{% endif %}">{{ f.value }}</textarea>
-        </label>
-        {% endfor %}
-        <label>Note (optional)
-            <input type="text" name="note" maxlength="255" placeholder="Why you're suggesting this">
-        </label>
-        <button type="submit" class="button small primary">Submit suggestion</button>
-        <button type="button" id="cancel-suggest-form" class="button small secondary">Cancel</button>
-    </form>
+    <p style="margin-top:10px; color:#888;">To propose a change, edit the question text above and use
+    <strong>Save as Suggested Changes</strong>.</p>
     {% endif %}
 </div>
 
@@ -78,9 +59,6 @@ can_review_suggestions, can_suggest, suggest_fields.
 
 <script>
 $(function () {
-    $('#toggle-suggest-form, #cancel-suggest-form').on('click', function () {
-        $('#suggest-form').toggle();
-    });
     function post(url, data, btn) {
         $(btn).prop('disabled', true);
         $.post(url, data).done(function (resp) {
