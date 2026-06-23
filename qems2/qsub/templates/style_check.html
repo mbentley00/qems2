@@ -16,9 +16,9 @@
     <li class="current">Style Check</li>
 </ul>
 
-<form method="get" action="" class="row">
-    <div class="small-8 columns">
-        <label>Style guide
+<div class="sc-top">
+    <form method="get" action="" class="sc-guide-form">
+        <label class="sc-inline">Style guide
             <select name="guide" onchange="this.form.submit()">
                 {% for g in guides %}
                 <option value="{{ g.key }}"{% if g.key == guide %} selected{% endif %}>{{ g.name }}</option>
@@ -26,78 +26,70 @@
             </select>
         </label>
         {% if show_dismissed %}<input type="hidden" name="show_dismissed" value="1">{% endif %}
-        {% if guide_obj.url %}<p><small>Rules based on <a href="{{ guide_obj.url }}" target="_blank" rel="noopener">{{ guide_obj.name }}</a>.</small></p>{% endif %}
-    </div>
-</form>
+    </form>
 
-<div class="panel radius">
-    Checked <strong>{{ checked }}</strong> question{{ checked|pluralize }} &mdash;
-    <strong>{{ flagged }}</strong> with issues:
-    <span class="label alert">{{ counts.error }} error{{ counts.error|pluralize }}</span>
-    <span class="label warning">{{ counts.warning }} warning{{ counts.warning|pluralize }}</span>
-    <span class="label">{{ counts.info }} info</span>
-    {% if dismissed_count %}
-    &mdash; <small>{{ dismissed_count }} dismissed
-        {% if show_dismissed %}<a href="?guide={{ guide }}">(hide)</a>{% else %}<a href="?guide={{ guide }}&amp;show_dismissed=1">(show)</a>{% endif %}
-    </small>
-    {% endif %}
+    <div class="sc-counts">
+        Checked <strong>{{ checked }}</strong>, <strong>{{ flagged }}</strong> flagged
+        <span class="sc-pill err{% if not counts.error %} zero{% endif %}" title="errors">{{ counts.error }}</span>
+        <span class="sc-pill warn{% if not counts.warning %} zero{% endif %}" title="warnings">{{ counts.warning }}</span>
+        <span class="sc-pill info{% if not counts.info %} zero{% endif %}" title="info">{{ counts.info }}</span>
+        {% if dismissed_count %}
+        <span class="sc-guide-note">· {{ dismissed_count }} dismissed
+            {% if show_dismissed %}<a href="?guide={{ guide }}">hide</a>{% else %}<a href="?guide={{ guide }}&amp;show_dismissed=1">show</a>{% endif %}</span>
+        {% endif %}
+    </div>
+
+    {% if can_configure %}<a href="#" id="toggle-style-settings" class="sc-config-toggle">Configure rules&hellip;</a>{% endif %}
+    {% if guide_obj.url %}<span class="sc-guide-note">Rules: <a href="{{ guide_obj.url }}" target="_blank" rel="noopener">{{ guide_obj.name }}</a></span>{% endif %}
 </div>
 
 {% if can_configure %}
-<div class="panel radius">
-    <a href="#" id="toggle-style-settings" class="button tiny secondary" style="margin:0;">Configure rules for this set&hellip;</a>
-    <form method="post" action="" id="style-settings-form" style="display:none; margin-top:10px;">
-        {% csrf_token %}
-        <input type="hidden" name="action" value="save_rules">
-        <p style="color:#555; margin-bottom:6px;">Uncheck a rule to stop flagging it for this set (e.g. teams that allow contractions).</p>
-        <div class="row">
-        {% for r in rule_settings %}
-            <div class="small-6 medium-4 columns">
-                <label><input type="checkbox" name="rule_{{ r.code }}"{% if r.enabled %} checked{% endif %}> {{ r.label }}</label>
-            </div>
-        {% endfor %}
+<form method="post" action="" id="style-settings-form" class="sc-config" style="display:none;">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="save_rules">
+    <p class="sc-config-help">Uncheck a rule to stop flagging it for this set (e.g. teams that allow contractions).</p>
+    <div class="row">
+    {% for r in rule_settings %}
+        <div class="small-6 medium-4 columns">
+            <label class="sc-rule"><input type="checkbox" name="rule_{{ r.code }}"{% if r.enabled %} checked{% endif %}> {{ r.label }}</label>
         </div>
-        <button type="submit" class="button small primary" style="margin-top:8px;">Save rule settings</button>
-    </form>
-</div>
+    {% endfor %}
+    </div>
+    <button type="submit" class="button tiny primary" style="margin:0;">Save rule settings</button>
+</form>
 {% endif %}
 
 {% if not results %}
-<div class="alert-box success">No style issues found for this guide (with this set's rule settings). Nice work!</div>
+<div class="alert-box success">No style issues found for this guide. Nice work!</div>
 {% else %}
-<div class="panel radius bulk-bar" style="position:sticky; top:0; z-index:5;">
-    <label style="display:inline-block; margin:0 12px 0 0;"><input type="checkbox" id="select-all-issues" autocomplete="off"> Select all</label>
-    <span id="selected-count" style="color:#888; margin-right:12px;">0 selected</span>
-    With selected:
-    <button type="button" class="button tiny success bulk-action" data-action="apply" style="margin:0 2px;">Apply fixes</button>
-    <button type="button" class="button tiny bulk-action" data-action="dismiss" style="margin:0 2px;">Dismiss</button>
-    <button type="button" class="button tiny alert bulk-action" data-action="dismiss-all" style="margin:0 2px;">Dismiss for set</button>
+<div class="bulk-bar" style="position:sticky; top:0; z-index:5;">
+    <label class="sc-inline"><input type="checkbox" id="select-all-issues" autocomplete="off"> Select all</label>
+    <span id="selected-count" class="sc-guide-note">0 selected</span>
+    <span class="sc-bulk-label">With selected:</span>
+    <button type="button" class="button tiny success bulk-action" data-action="apply">Apply fixes</button>
+    <button type="button" class="button tiny secondary bulk-action" data-action="dismiss">Dismiss</button>
+    <button type="button" class="button tiny alert bulk-action" data-action="dismiss-all">Dismiss for set</button>
 </div>
 {% for r in results %}
-<div class="panel" style="margin-bottom: 0.75rem;">
-    <strong>
-        {% if r.type == 'tossup' %}<a href="{{ r.edit_url }}" target="_blank">Tossup</a>{% else %}<a href="{{ r.edit_url }}" target="_blank">Bonus</a>{% endif %}
-        {% if r.packet %}<small>({{ r.packet }} #{{ r.number }})</small>{% endif %}
-    </strong>
-    &mdash; {% autoescape off %}{{ r.label }}{% endautoescape %}
-    <ul class="no-bullet" style="margin: 0.4rem 0 0 0;">
+<div class="sc-q">
+    <div class="sc-q-head">
+        <a href="{{ r.edit_url }}" target="_blank" rel="noopener" class="sc-ans">{% autoescape off %}{{ r.label }}{% endautoescape %}</a>
+        <span class="sc-loc">{% if r.type == 'tossup' %}Tossup{% else %}Bonus{% endif %}{% if r.packet %} · {{ r.packet }} #{{ r.number }}{% endif %}</span>
+    </div>
+    <ul class="sc-issues">
         {% for i in r.issues %}
-        <li class="style-issue{% if i.dismissed %} style-issue-dismissed{% endif %}"
+        <li class="style-issue sev-{{ i.severity }}{% if i.dismissed %} style-issue-dismissed{% endif %}"
             data-qtype="{{ r.type }}" data-qid="{{ r.id }}" data-code="{{ i.code }}" data-token="{{ i.token }}"
             data-fixable="{% if i.fixable %}1{% else %}0{% endif %}">
             {% if not i.dismissed %}<input type="checkbox" class="issue-check" autocomplete="off" title="Select for a bulk action">{% endif %}
-            {% if i.severity == 'error' %}<span class="label alert">Error</span>
-            {% elif i.severity == 'warning' %}<span class="label warning">Warning</span>
-            {% else %}<span class="label">Info</span>{% endif %}
             <span class="style-issue-msg">{{ i.message }}</span>
             <span class="style-issue-actions">
                 {% if i.dismissed %}
-                    <a class="style-action" data-action="restore" title="Restore this issue">undo dismiss</a>
+                    <a class="style-action sc-link" data-action="restore" title="Restore this issue">undo</a>
                 {% else %}
-                    {% if i.fixable %}<a class="style-action button tiny" data-action="apply" title="Automatically apply this fix">Apply fix</a>
-                    <a class="style-action button tiny secondary" data-action="apply-open" title="Apply this fix and open the question">Apply &amp; open</a>{% endif %}
-                    <a class="style-action" data-action="dismiss" title="Hide this issue from future checks">dismiss</a>
-                    <a class="style-action" data-action="dismiss-all" title="Hide this suggestion for every question in the set">dismiss all</a>
+                    {% if i.fixable %}<a class="style-action sc-fix" data-action="apply" title="Apply this fix">Fix</a><a class="style-action sc-fix sc-fix-open" data-action="apply-open" title="Apply this fix and open the question">Fix&nbsp;&#8599;</a>{% endif %}
+                    <a class="style-action sc-link" data-action="dismiss" title="Hide this issue from future checks">dismiss</a>
+                    <a class="style-action sc-link" data-action="dismiss-all" title="Hide this suggestion for every question in the set">set</a>
                 {% endif %}
             </span>
         </li>
@@ -106,6 +98,55 @@
 </div>
 {% endfor %}
 {% endif %}
+
+<style>
+.sc-top { display:flex; flex-wrap:wrap; align-items:center; gap:0.4rem 1rem; margin:0.3rem 0 0.7rem; }
+.sc-top form { margin:0; }
+.sc-inline { display:inline-block; margin:0; }
+.sc-top select { margin:0; height:auto; padding:0.2rem 1.5rem 0.2rem 0.4rem; }
+.sc-counts { color:#555; }
+.sc-pill { display:inline-block; min-width:1.7em; text-align:center; padding:0 0.45em; margin-left:0.15em;
+           border-radius:10px; font-size:0.78rem; font-weight:bold; color:#fff; line-height:1.5; }
+.sc-pill.err { background:#c0392b; } .sc-pill.warn { background:#d4870c; } .sc-pill.info { background:#9aa0a6; }
+.sc-pill.zero { background:#e2e4e6; color:#9aa0a6; }
+.sc-guide-note { color:#999; font-size:0.8rem; }
+.sc-config-toggle { font-size:0.85rem; }
+
+.sc-config { background:#f7f7f7; border:1px solid #e6e6e6; border-radius:4px; padding:0.6rem 0.8rem; margin-bottom:0.7rem; }
+.sc-config-help { color:#666; font-size:0.85rem; margin-bottom:0.4rem; }
+.sc-rule { font-size:0.85rem; }
+
+.bulk-bar { background:#fff; border:1px solid #dcdcdc; border-radius:4px; padding:0.4rem 0.6rem;
+            margin-bottom:0.6rem; display:flex; align-items:center; flex-wrap:wrap; gap:0.4rem; }
+.bulk-bar .sc-bulk-label { color:#777; font-size:0.8rem; margin-left:0.3rem; }
+.bulk-bar .button { margin:0; }
+
+.sc-q { border:1px solid #e8e8e8; border-radius:4px; padding:0.35rem 0.6rem; margin-bottom:0.3rem; }
+.sc-q-head { font-size:0.9rem; line-height:1.3; }
+.sc-q-head .sc-ans { font-weight:bold; }
+.sc-q-head .sc-loc { color:#9aa0a6; font-size:0.78rem; margin-left:0.4em; }
+
+.sc-issues { list-style:none; margin:0.25rem 0 0; }
+.style-issue { display:flex; align-items:baseline; gap:0.45em; padding:0.1rem 0 0.1rem 0.55em; margin:0;
+               border-left:3px solid transparent; font-size:0.88rem; }
+.style-issue.sev-error { border-left-color:#c0392b; }
+.style-issue.sev-warning { border-left-color:#d4870c; }
+.style-issue.sev-info { border-left-color:#d3d6d9; }
+.style-issue .issue-check { margin:0; flex:0 0 auto; }
+.style-issue-msg { flex:1 1 auto; }
+.style-issue-actions { flex:0 0 auto; white-space:nowrap; }
+.style-action { cursor:pointer; }
+.sc-link { color:#bdc1c5; font-size:0.78rem; margin-left:0.55em; }
+.style-issue:hover .sc-link { color:#8a8f94; }
+.sc-link:hover { color:#c0392b; text-decoration:underline; }
+.sc-fix { display:inline-block; font-size:0.76rem; font-weight:bold; line-height:1.4;
+          padding:0 0.4rem; margin-left:0.4em; border-radius:3px; background:#dff3e6; color:#1c7c3e; }
+.sc-fix:hover { background:#cdebd8; }
+.sc-fix-open { background:#eaf1f8; color:#2b6cb0; }
+.sc-fix-open:hover { background:#dbe7f4; }
+.style-issue-dismissed { opacity:0.55; }
+.style-issue-dismissed .style-issue-msg { text-decoration:line-through; }
+</style>
 
 <script>
 $(function () {

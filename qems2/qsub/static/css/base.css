@@ -471,10 +471,5 @@ body.edit-page-wide > .row { max-width: 1400px; }
     white-space: nowrap;
 }
 
-/* Style-check issue actions (Apply fix / dismiss / undo) */
-.style-issue { margin-bottom: 0.25rem; }
-.style-issue-actions { margin-left: 0.5em; font-size: 0.85em; white-space: nowrap; }
-.style-action { cursor: pointer; }
-.style-action.button.tiny { margin: 0 0.3em 0 0; padding: 0.15rem 0.5rem; }
-.style-issue-dismissed { opacity: 0.5; }
-.style-issue-dismissed .style-issue-msg { text-decoration: line-through; }
+/* Style-check page styling lives in a scoped <style> block in
+   templates/style_check.html. */

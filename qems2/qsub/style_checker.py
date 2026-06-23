@@ -116,15 +116,15 @@ def _mechanical_issues(label, raw, field):
                              'comma_no_space', label,
                              {'field': field, 'op': 'regex', 'pattern': r',([A-Za-z])', 'repl': r', \1'}))
     if '...' in text:
-        issues.append(_issue(INFO, '{0}: use an ellipsis (…) instead of three periods'.format(label),
+        issues.append(_issue(INFO, '{0}: use ellipsis (…)'.format(label),
                              'ellipsis', label,
                              {'field': field, 'op': 'regex', 'pattern': r'\.{3,}', 'repl': '…'}))
     if '--' in text:
-        issues.append(_issue(INFO, '{0}: use an em dash (—) instead of double hyphens'.format(label),
+        issues.append(_issue(INFO, '{0}: use em dash (—)'.format(label),
                              'double_hyphen', label,
                              {'field': field, 'op': 'regex', 'pattern': r'-{2,}', 'repl': '—'}))
     if no_power.count('(') != no_power.count(')'):
-        issues.append(_issue(WARNING, '{0}: unbalanced parentheses (check pronunciation guides)'.format(label),
+        issues.append(_issue(WARNING, '{0}: unbalanced parentheses'.format(label),
                              'unbalanced_parens', label))
     return issues
 
@@ -148,7 +148,7 @@ def _prose_issues(label, raw, field):
         if key in seen:
             continue
         seen.add(key)
-        issues.append(_issue(WARNING, '{0}: avoid contractions ("{1}")'.format(label, m.group(0)),
+        issues.append(_issue(WARNING, '{0}: contraction "{1}"'.format(label, m.group(0)),
                              'contractions', '{0}|{1}'.format(label, key)))
 
     seen_rep = set()
@@ -168,16 +168,15 @@ def _prose_issues(label, raw, field):
             continue
         seen_from.add(place)
         issues.append(_issue(
-            INFO, '{0}: "from this {1}" is imprecise — prefer "born in this {1}" '
-                  '(or the precise relationship)'.format(label, place),
+            INFO, '{0}: "from this {1}" → prefer "born in this {1}"'.format(label, place),
             'imprecise_from', '{0}|{1}'.format(label, place)))
 
     if '&' in text:
-        issues.append(_issue(INFO, '{0}: spell out "and" instead of &'.format(label), 'ampersand', label,
+        issues.append(_issue(INFO, '{0}: spell out "and" (not &)'.format(label), 'ampersand', label,
                              {'field': field, 'op': 'regex', 'pattern': r'\s*&\s*', 'repl': ' and '}))
 
     if re.search(r'\d\s*-\s*\d', text):
-        issues.append(_issue(INFO, '{0}: use an en dash (–) for number ranges'.format(label),
+        issues.append(_issue(INFO, '{0}: use en dash (–) for ranges'.format(label),
                              'number_range', label,
                              {'field': field, 'op': 'regex', 'pattern': r'(\d)\s*-\s*(\d)', 'repl': r'\1–\2'}))
     return issues
@@ -189,7 +188,7 @@ def _pronunciation_issues(label, raw, field):
     issues = []
     for term, pron in suggest_guides(_plain(raw)):
         issues.append(_issue(
-            INFO, '{0}: consider a pronunciation guide for "{1}" — ("{2}")'.format(label, term, pron),
+            INFO, '{0}: PG for "{1}" ({2})'.format(label, term, pron),
             'pronunciation', '{0}|{1}'.format(label, term),
             {'field': field, 'op': 'guide', 'term': term, 'pron': pron}))
     return issues
@@ -209,26 +208,25 @@ def check_tossup(tu, guide=DEFAULT_GUIDE, disabled=None):
     issues += _prose_issues('Question', text, 'tossup_text')
 
     if re.search(r'\banswers?\s*:', plain, re.IGNORECASE):
-        issues.append(_issue(WARNING, 'Question text contains "ANSWER:"', 'answer_leak'))
+        issues.append(_issue(WARNING, '"ANSWER:" in question text', 'answer_leak'))
 
     if re.search(r'for ten points', plain, re.IGNORECASE):
-        issues.append(_issue(WARNING, 'Use numerals: "For 10 points", not "for ten points"',
+        issues.append(_issue(WARNING, 'use numerals: "For 10 points"',
                              'numerals', 'tossup_text',
                              {'field': 'tossup_text', 'op': 'regex',
                               'pattern': r'(?i)for ten points', 'repl': 'For 10 points'}))
 
     if not re.search(r'for \d+ points', plain, re.IGNORECASE):
-        issues.append(_issue(INFO, 'No "For 10 points" giveaway phrase found', 'fps'))
+        issues.append(_issue(INFO, 'no "For 10 points" phrase', 'fps'))
 
     if text.count('(*)') > 1:
-        issues.append(_issue(WARNING, 'More than one power mark (*)', 'power'))
+        issues.append(_issue(WARNING, 'more than one power mark (*)', 'power'))
 
     if plain.rstrip().endswith('?'):
-        issues.append(_issue(WARNING, 'Giveaway is interrogative; prefer an imperative ("name this…")',
-                             'imperative'))
+        issues.append(_issue(WARNING, 'interrogative giveaway; prefer imperative', 'imperative'))
 
     if not _has_underline(tu.tossup_answer):
-        issues.append(_issue(WARNING, 'Answer line has no underlined required portion', 'underline'))
+        issues.append(_issue(WARNING, 'answer not underlined', 'underline'))
 
     if 'pronunciation' in enabled:
         issues += _pronunciation_issues('Question', text, 'tossup_text')
@@ -257,16 +255,16 @@ def check_bonus(b, guide=DEFAULT_GUIDE, disabled=None):
                              {'field': 'leadin', 'op': 'regex',
                               'pattern': r'(?i)for ten points each', 'repl': 'For 10 points each'}))
     if not re.search(r'for \d+ points each', plain_leadin, re.IGNORECASE):
-        issues.append(_issue(INFO, 'Leadin has no "For 10 points each" phrase', 'fpe', 'leadin'))
+        issues.append(_issue(INFO, 'Leadin: no "For 10 points each"', 'fpe', 'leadin'))
 
     for label, raw, field in parts:
         if '(*)' in raw:
-            issues.append(_issue(WARNING, '{0}: bonuses should not have a power mark (*)'.format(label),
+            issues.append(_issue(WARNING, '{0}: power mark (*) not allowed in bonus'.format(label),
                                  'power', label))
 
     for label, ans in (('Answer 1', b.part1_answer), ('Answer 2', b.part2_answer), ('Answer 3', b.part3_answer)):
         if (ans or '').strip() and not _has_underline(ans):
-            issues.append(_issue(WARNING, '{0}: no underlined required portion'.format(label),
+            issues.append(_issue(WARNING, '{0}: not underlined'.format(label),
                                  'underline', label))
 
     if 'pronunciation' in enabled:
