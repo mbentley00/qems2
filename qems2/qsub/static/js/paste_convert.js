@@ -838,7 +838,7 @@ $(function () {
     (function () {
         var qsetId = window.QEMS_QSET_ID;
         if (!qsetId) { return; }
-        var SEL = 'textarea[name="comment"], textarea.reply-text, .doc-comment-box textarea';
+        var SEL = 'textarea[name="comment"], textarea.reply-text, textarea.new-comment-text, .doc-comment-box textarea';
         var members = null, loading = false;
         var $dd = $('<div class="mention-dropdown" style="display:none;"></div>').appendTo('body');
         var activeTa = null, matchStart = -1;

@@ -250,6 +250,10 @@
 }
 .edit-comments .comment-item { font-size: 0.9em; }
 .edit-comments .reply-form { margin: 4px 0 6px; }
+.comments-heading { margin: 0 0 8px; padding-bottom: 4px;
+    border-bottom: 2px solid #008CBA; font-size: 1.1em; }
+.edit-comments .add-comment-form label { font-weight: bold; font-size: 0.9em; }
+.edit-comments .add-comment-form textarea { margin-bottom: 6px; }
 @media (max-width: 980px) {
     .edit-layout { display: block; }
     .edit-comments { max-width: none; position: static; max-height: none;
