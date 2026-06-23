@@ -43,8 +43,27 @@
     {% endif %}
 </div>
 
+{% if can_configure %}
+<div class="panel radius">
+    <a href="#" id="toggle-style-settings" class="button tiny secondary" style="margin:0;">Configure rules for this set&hellip;</a>
+    <form method="post" action="" id="style-settings-form" style="display:none; margin-top:10px;">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="save_rules">
+        <p style="color:#555; margin-bottom:6px;">Uncheck a rule to stop flagging it for this set (e.g. teams that allow contractions).</p>
+        <div class="row">
+        {% for r in rule_settings %}
+            <div class="small-6 medium-4 columns">
+                <label><input type="checkbox" name="rule_{{ r.code }}"{% if r.enabled %} checked{% endif %}> {{ r.label }}</label>
+            </div>
+        {% endfor %}
+        </div>
+        <button type="submit" class="button small primary" style="margin-top:8px;">Save rule settings</button>
+    </form>
+</div>
+{% endif %}
+
 {% if not results %}
-<div class="alert-box success">No style issues found for this guide. Nice work!</div>
+<div class="alert-box success">No style issues found for this guide (with this set's rule settings). Nice work!</div>
 {% else %}
 <div class="panel radius bulk-bar" style="position:sticky; top:0; z-index:5;">
     <label style="display:inline-block; margin:0 12px 0 0;"><input type="checkbox" id="select-all-issues" autocomplete="off"> Select all</label>
@@ -91,6 +110,7 @@
 <script>
 $(function () {
     var GUIDE = "{{ guide|escapejs }}";
+    $('#toggle-style-settings').on('click', function (e) { e.preventDefault(); $('#style-settings-form').toggle(); });
 
     function post(url, li, action, done, scope) {
         $.post(url, {

@@ -33,15 +33,52 @@ STYLE_GUIDES = [
 ]
 DEFAULT_GUIDE = 'minkowski'
 
-_GUIDE_RULES = {
-    'minkowski': {'mechanical', 'numerals', 'fps', 'fpe', 'power', 'imperative',
-                  'underline', 'answer_leak', 'pronunciation'},
-    'generic': {'mechanical', 'underline'},
+# Friendly labels for every rule code (used by the per-set settings UI).
+RULE_LABELS = [
+    ('double_space', 'Double spaces'),
+    ('space_before_punct', 'Space before punctuation'),
+    ('comma_no_space', 'Missing space after a comma'),
+    ('ellipsis', 'Ellipsis (… instead of ...)'),
+    ('double_hyphen', 'Em dash (— instead of --)'),
+    ('number_range', 'En dash for number ranges (1990–1995)'),
+    ('ampersand', 'Spell out "and" instead of &'),
+    ('repeated_word', 'Repeated words ("the the")'),
+    ('contractions', 'Contractions (don\'t, it\'s, …)'),
+    ('unbalanced_parens', 'Unbalanced parentheses'),
+    ('answer_leak', 'ANSWER: leaked into question text'),
+    ('numerals', 'Numerals in "For 10 points"'),
+    ('fps', 'Missing "For 10 points" (tossup)'),
+    ('fpe', 'Missing "For 10 points each" (bonus)'),
+    ('power', 'Power-mark problems'),
+    ('imperative', 'Interrogative giveaway'),
+    ('underline', 'Answer line has no underline'),
+    ('pronunciation', 'Pronunciation-guide suggestions'),
+]
+RULE_LABEL_MAP = dict(RULE_LABELS)
+ALL_CODES = [c for c, _ in RULE_LABELS]
+
+# Which rule codes each guide turns on. A per-set "disabled" list can switch any
+# of these off (e.g. teams that allow contractions).
+GUIDE_CODES = {
+    'minkowski': set(ALL_CODES),
+    'generic': {'double_space', 'space_before_punct', 'comma_no_space', 'ellipsis',
+                'double_hyphen', 'unbalanced_parens', 'repeated_word', 'underline'},
 }
 
 
 def guide_keys():
     return {g['key'] for g in STYLE_GUIDES}
+
+
+def configurable_rules(guide=DEFAULT_GUIDE):
+    """(code, label) for the rules a given guide runs — what editors can toggle
+    per set, in display order."""
+    on = GUIDE_CODES.get(guide, GUIDE_CODES[DEFAULT_GUIDE])
+    return [(c, lbl) for c, lbl in RULE_LABELS if c in on]
+
+
+def _enabled_codes(guide, disabled):
+    return GUIDE_CODES.get(guide, GUIDE_CODES[DEFAULT_GUIDE]) - set(disabled or ())
 
 
 def _issue(severity, message, code, token='', fix=None):
@@ -91,6 +128,49 @@ def _mechanical_issues(label, raw, field):
     return issues
 
 
+_CONTRACTIONS = re.compile(
+    r"\b(can't|won't|don't|doesn't|didn't|isn't|aren't|wasn't|weren't|hasn't|haven't|"
+    r"hadn't|wouldn't|couldn't|shouldn't|mustn't|it's|that's|there's|here's|he's|she's|"
+    r"what's|who's|let's|they're|we're|you're|they've|we've|you've|i've|they'll|we'll|"
+    r"you'll|he'll|she'll|i'll|i'm|you'd|they'd|we'd|he'd|she'd|i'd)\b", re.IGNORECASE)
+
+
+def _prose_issues(label, raw, field):
+    """Prose-style rules from the Minkowski manual that apply to any text blob:
+    contractions, repeated words, ampersands, and number ranges."""
+    issues = []
+    text = _plain(raw)
+
+    seen = set()
+    for m in _CONTRACTIONS.finditer(text):
+        key = m.group(0).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        issues.append(_issue(WARNING, '{0}: avoid contractions ("{1}")'.format(label, m.group(0)),
+                             'contractions', '{0}|{1}'.format(label, key)))
+
+    seen_rep = set()
+    for m in re.finditer(r'\b(\w+)\s+\1\b', text, re.IGNORECASE):
+        word = m.group(1).lower()
+        if word in seen_rep:
+            continue
+        seen_rep.add(word)
+        issues.append(_issue(WARNING, '{0}: repeated word "{1} {1}"'.format(label, m.group(1)),
+                             'repeated_word', '{0}|{1}'.format(label, word),
+                             {'field': field, 'op': 'regex', 'pattern': r'\b(\w+)\s+\1\b', 'repl': r'\1'}))
+
+    if '&' in text:
+        issues.append(_issue(INFO, '{0}: spell out "and" instead of &'.format(label), 'ampersand', label,
+                             {'field': field, 'op': 'regex', 'pattern': r'\s*&\s*', 'repl': ' and '}))
+
+    if re.search(r'\d\s*-\s*\d', text):
+        issues.append(_issue(INFO, '{0}: use an en dash (–) for number ranges'.format(label),
+                             'number_range', label,
+                             {'field': field, 'op': 'regex', 'pattern': r'(\d)\s*-\s*(\d)', 'repl': r'\1–\2'}))
+    return issues
+
+
 def _pronunciation_issues(label, raw, field):
     """Suggest a verified-OL pronunciation guide for any dictionary term in the
     text that doesn't already have one (INFO, auto-applicable)."""
@@ -107,46 +187,45 @@ def _has_underline(raw):
     return '_' in (raw or '')
 
 
-def check_tossup(tu, guide=DEFAULT_GUIDE):
-    rules = _GUIDE_RULES.get(guide, _GUIDE_RULES[DEFAULT_GUIDE])
+def check_tossup(tu, guide=DEFAULT_GUIDE, disabled=None):
+    enabled = _enabled_codes(guide, disabled)
     issues = []
     text = tu.tossup_text or ''
     plain = _plain(text)
 
-    if 'mechanical' in rules:
-        issues += _mechanical_issues('Question', text, 'tossup_text')
+    issues += _mechanical_issues('Question', text, 'tossup_text')
+    issues += _prose_issues('Question', text, 'tossup_text')
 
-    if 'answer_leak' in rules and re.search(r'\banswers?\s*:', plain, re.IGNORECASE):
+    if re.search(r'\banswers?\s*:', plain, re.IGNORECASE):
         issues.append(_issue(WARNING, 'Question text contains "ANSWER:"', 'answer_leak'))
 
-    if 'numerals' in rules and re.search(r'for ten points', plain, re.IGNORECASE):
+    if re.search(r'for ten points', plain, re.IGNORECASE):
         issues.append(_issue(WARNING, 'Use numerals: "For 10 points", not "for ten points"',
                              'numerals', 'tossup_text',
                              {'field': 'tossup_text', 'op': 'regex',
                               'pattern': r'(?i)for ten points', 'repl': 'For 10 points'}))
 
-    if 'fps' in rules and not re.search(r'for \d+ points', plain, re.IGNORECASE):
+    if not re.search(r'for \d+ points', plain, re.IGNORECASE):
         issues.append(_issue(INFO, 'No "For 10 points" giveaway phrase found', 'fps'))
 
-    if 'power' in rules:
-        if text.count('(*)') > 1:
-            issues.append(_issue(WARNING, 'More than one power mark (*)', 'power'))
+    if text.count('(*)') > 1:
+        issues.append(_issue(WARNING, 'More than one power mark (*)', 'power'))
 
-    if 'imperative' in rules and plain.rstrip().endswith('?'):
+    if plain.rstrip().endswith('?'):
         issues.append(_issue(WARNING, 'Giveaway is interrogative; prefer an imperative ("name this…")',
                              'imperative'))
 
-    if 'underline' in rules and not _has_underline(tu.tossup_answer):
+    if not _has_underline(tu.tossup_answer):
         issues.append(_issue(WARNING, 'Answer line has no underlined required portion', 'underline'))
 
-    if 'pronunciation' in rules:
+    if 'pronunciation' in enabled:
         issues += _pronunciation_issues('Question', text, 'tossup_text')
 
-    return issues
+    return [i for i in issues if i['code'] in enabled]
 
 
-def check_bonus(b, guide=DEFAULT_GUIDE):
-    rules = _GUIDE_RULES.get(guide, _GUIDE_RULES[DEFAULT_GUIDE])
+def check_bonus(b, guide=DEFAULT_GUIDE, disabled=None):
+    enabled = _enabled_codes(guide, disabled)
     issues = []
     leadin = b.leadin or ''
     parts = [('Leadin', leadin, 'leadin'),
@@ -154,38 +233,36 @@ def check_bonus(b, guide=DEFAULT_GUIDE):
              ('Part 2', b.part2_text or '', 'part2_text'),
              ('Part 3', b.part3_text or '', 'part3_text')]
 
-    if 'mechanical' in rules:
-        for label, raw, field in parts:
-            if raw.strip():
-                issues += _mechanical_issues(label, raw, field)
+    for label, raw, field in parts:
+        if raw.strip():
+            issues += _mechanical_issues(label, raw, field)
+            issues += _prose_issues(label, raw, field)
 
     plain_leadin = _plain(leadin)
-    if 'numerals' in rules and re.search(r'for ten points each', plain_leadin, re.IGNORECASE):
+    if re.search(r'for ten points each', plain_leadin, re.IGNORECASE):
         issues.append(_issue(WARNING, 'Leadin: use numerals: "For 10 points each"',
                              'numerals', 'leadin',
                              {'field': 'leadin', 'op': 'regex',
                               'pattern': r'(?i)for ten points each', 'repl': 'For 10 points each'}))
-    if 'fpe' in rules and not re.search(r'for \d+ points each', plain_leadin, re.IGNORECASE):
+    if not re.search(r'for \d+ points each', plain_leadin, re.IGNORECASE):
         issues.append(_issue(INFO, 'Leadin has no "For 10 points each" phrase', 'fpe', 'leadin'))
 
-    if 'power' in rules:
-        for label, raw, field in parts:
-            if '(*)' in raw:
-                issues.append(_issue(WARNING, '{0}: bonuses should not have a power mark (*)'.format(label),
-                                     'power', label))
+    for label, raw, field in parts:
+        if '(*)' in raw:
+            issues.append(_issue(WARNING, '{0}: bonuses should not have a power mark (*)'.format(label),
+                                 'power', label))
 
-    if 'underline' in rules:
-        for label, ans in (('Answer 1', b.part1_answer), ('Answer 2', b.part2_answer), ('Answer 3', b.part3_answer)):
-            if (ans or '').strip() and not _has_underline(ans):
-                issues.append(_issue(WARNING, '{0}: no underlined required portion'.format(label),
-                                     'underline', label))
+    for label, ans in (('Answer 1', b.part1_answer), ('Answer 2', b.part2_answer), ('Answer 3', b.part3_answer)):
+        if (ans or '').strip() and not _has_underline(ans):
+            issues.append(_issue(WARNING, '{0}: no underlined required portion'.format(label),
+                                 'underline', label))
 
-    if 'pronunciation' in rules:
+    if 'pronunciation' in enabled:
         for label, raw, field in parts:
             if raw.strip():
                 issues += _pronunciation_issues(label, raw, field)
 
-    return issues
+    return [i for i in issues if i['code'] in enabled]
 
 
 # --- auto-apply ------------------------------------------------------------

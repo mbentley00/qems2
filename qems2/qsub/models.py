@@ -141,6 +141,9 @@ class QuestionSet (models.Model):
     # When public, the set is listed for all logged-in users, who can request to
     # join it (which emails the owner). It does not grant any access by itself.
     public = models.BooleanField(default=False)
+    # Comma-separated style-check rule codes turned off for this set (e.g. a team
+    # that allows contractions). Empty = run every rule the guide enables.
+    disabled_style_rules = models.TextField(blank=True, default='')
     num_packets = models.PositiveIntegerField()
     distribution = models.ForeignKey('Distribution', on_delete=models.CASCADE) # TODO: This needs to be deleted eventually
     #teams = models.ForeignKey('Team')
@@ -169,6 +172,10 @@ class QuestionSet (models.Model):
     def all_owners(self):
         """The primary owner followed by any co-owners."""
         return [self.owner] + list(self.co_owners.all())
+
+    def disabled_style_rule_set(self):
+        """Style-check rule codes turned off for this set."""
+        return set(c for c in (self.disabled_style_rules or '').split(',') if c)
 
     def __str__(self):
         return '{0!s}'.format(self.name)

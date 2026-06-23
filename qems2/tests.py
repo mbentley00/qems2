@@ -2718,3 +2718,60 @@ class CategoryDocumentTests(TestCase):
         self.client.logout(); self.client.login(username='cd_out', password='pw')
         resp = self.client.get('/category_doc/{0}/{1}/'.format(self.qset.id, self.am.id))
         self.assertContains(resp, 'not authorized')
+
+
+class StyleCheckerExpandedRulesTests(TestCase):
+    """New Minkowski rules and per-set rule configuration."""
+
+    def setUp(self):
+        from datetime import datetime
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('sx_owner', password='pw', email='o@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='sx dist')
+        self.qset = QuestionSet.objects.create(
+            name='SX Set', date=timezone.now(), host='', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.owner.question_set_editor.add(self.qset)
+        self.tu = Tossup.objects.create(author=self.owner, question_set=self.qset, question_type=self.acf,
+            tossup_text="It don't work & spans 1990-1995. For 10 points, name it.", tossup_answer='_Ans_',
+            created_date=datetime.now(), last_changed_date=datetime.now(), question_number=1)
+        self.client.login(username='sx_owner', password='pw')
+
+    def test_new_rules_flagged(self):
+        from qems2.qsub import style_checker as sc
+        codes = {i['code'] for i in sc.check_tossup(self.tu)}
+        for c in ('contractions', 'ampersand', 'number_range'):
+            self.assertIn(c, codes)
+
+    def test_apply_fix_number_range(self):
+        from qems2.qsub import style_checker as sc
+        fix = sc.find_fix(self.tu, 'tossup', 'number_range', 'Question')
+        self.assertTrue(sc.apply_fix(self.tu, fix))
+        self.assertIn('1990–1995', self.tu.tossup_text)  # en dash
+
+    def test_disabling_rule_persists_and_hides_issue(self):
+        # Save rule settings with contractions unchecked.
+        posted = {'action': 'save_rules', 'guide': 'minkowski'}
+        from qems2.qsub import style_checker as sc
+        for code, _ in sc.configurable_rules('minkowski'):
+            if code != 'contractions':
+                posted['rule_' + code] = 'on'
+        self.client.post('/style_check/{0}/'.format(self.qset.id), posted)
+        self.qset.refresh_from_db()
+        self.assertIn('contractions', self.qset.disabled_style_rule_set())
+        # The style page no longer reports contractions.
+        resp = self.client.get('/style_check/{0}/'.format(self.qset.id))
+        codes = set()
+        for r in resp.context['results']:
+            codes |= {i['code'] for i in r['issues']}
+        self.assertNotIn('contractions', codes)
+        self.assertIn('ampersand', codes)  # other rules still run
+
+    def test_only_editor_can_configure(self):
+        wu = User.objects.create_user('sx_writer', password='pw')
+        w = Writer.objects.get(user=wu); self.qset.writer.add(w)
+        self.client.logout(); self.client.login(username='sx_writer', password='pw')
+        resp = self.client.get('/style_check/{0}/'.format(self.qset.id))
+        self.assertFalse(resp.context['can_configure'])

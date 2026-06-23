@@ -6606,6 +6606,18 @@ def style_check(request, qset_id):
     guide = request.GET.get('guide', style_checker.DEFAULT_GUIDE)
     if guide not in style_checker.guide_keys():
         guide = style_checker.DEFAULT_GUIDE
+
+    # Editors can turn individual rules on/off for this set.
+    if request.method == 'POST' and request.POST.get('action') == 'save_rules':
+        if qset.is_owner(user) or user in qset.editor.all():
+            configurable = [c for c, _ in style_checker.configurable_rules(guide)]
+            disabled = [c for c in configurable if request.POST.get('rule_' + c) != 'on']
+            qset.disabled_style_rules = ','.join(disabled)
+            qset.save()
+            cache.clear()
+        return HttpResponseRedirect('/style_check/{0}/?guide={1}'.format(qset.id, guide))
+
+    disabled = qset.disabled_style_rule_set()
     show_dismissed = request.GET.get('show_dismissed') == '1'
 
     dismissed = set()
@@ -6645,13 +6657,13 @@ def style_check(request, qset_id):
 
     for tu in qset.tossup_set.select_related('packet').order_by('packet__packet_name', 'question_number'):
         checked += 1
-        collect('tossup', tu, style_checker.check_tossup(tu, guide),
+        collect('tossup', tu, style_checker.check_tossup(tu, guide, disabled),
                 _grid_answer_preview(tu.tossup_answer),
                 tu.packet.packet_name if tu.packet else '', tu.question_number,
                 '/edit_tossup/{0}/'.format(tu.id))
     for b in qset.bonus_set.select_related('packet').order_by('packet__packet_name', 'question_number'):
         checked += 1
-        collect('bonus', b, style_checker.check_bonus(b, guide),
+        collect('bonus', b, style_checker.check_bonus(b, guide, disabled),
                 _grid_answer_preview(b.part1_answer, 30),
                 b.packet.packet_name if b.packet else '', b.question_number,
                 '/edit_bonus/{0}/'.format(b.id))
@@ -6661,7 +6673,10 @@ def style_check(request, qset_id):
                    'checked': checked, 'flagged': flagged, 'guide': guide,
                    'dismissed_count': dismissed_count, 'show_dismissed': show_dismissed,
                    'guides': style_checker.STYLE_GUIDES,
-                   'guide_obj': next((g for g in style_checker.STYLE_GUIDES if g['key'] == guide), None)})
+                   'guide_obj': next((g for g in style_checker.STYLE_GUIDES if g['key'] == guide), None),
+                   'can_configure': qset.is_owner(user) or user in qset.editor.all(),
+                   'rule_settings': [{'code': c, 'label': lbl, 'enabled': c not in disabled}
+                                     for c, lbl in style_checker.configurable_rules(guide)]})
 
 
 @login_required
@@ -6696,13 +6711,14 @@ def packet_style_issues(request, packet_id):
     guide = request.GET.get('guide', style_checker.DEFAULT_GUIDE)
     if guide not in style_checker.guide_keys():
         guide = style_checker.DEFAULT_GUIDE
+    disabled = qset.disabled_style_rule_set()
     issues = {}
     for tu in packet.tossup_set.all():
-        found = style_checker.check_tossup(tu, guide)
+        found = style_checker.check_tossup(tu, guide, disabled)
         if found:
             issues['tossup-{0}'.format(tu.id)] = found
     for b in packet.bonus_set.all():
-        found = style_checker.check_bonus(b, guide)
+        found = style_checker.check_bonus(b, guide, disabled)
         if found:
             issues['bonus-{0}'.format(b.id)] = found
     return HttpResponse(json.dumps({'issues': issues, 'guide': guide}))
