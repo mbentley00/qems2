@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% block title %}{{ title }} - Document - QEMS3{% endblock %}
+{% block body_class %}edit-page-wide{% endblock %}
+
+{% block content %}
+<h3 class="page-header">{{ title }} &mdash; Document</h3>
+<ul class="breadcrumbs">
+    <li><a href="/edit_question_set/{{ qset.id }}/">{{ qset.name }}</a></li>
+    <li><a href="/category_overview/{{ qset.id }}/">Category Overview</a></li>
+    <li class="current">{{ title }}</li>
+</ul>
+
+<div class="panel radius">
+    <strong>{{ count }}</strong> question{{ count|pluralize }} in {{ title }}
+    (<span>{{ tossups|length }}</span> tossup{{ tossups|length|pluralize }},
+    <span>{{ bonuses|length }}</span> bonus{{ bonuses|length|pluralize }}).
+    <span class="right"><a href="javascript:window.print()" class="button tiny secondary">Print</a></span>
+</div>
+
+<div class="cat-doc-page">
+    {% if tossups %}
+    <h4>Tossups</h4>
+    {% for q in tossups %}
+    <div class="cat-doc-question">
+        <div class="cat-doc-meta">
+            <a href="{{ q.edit_url }}">{{ q.packet }}{% if q.number %} #{{ q.number }}{% endif %}</a>
+            <span class="cat-doc-cat">{{ q.category }}</span>
+            {% if q.author %}<span class="cat-doc-author">{{ q.author }}</span>{% endif %}
+        </div>
+        {% autoescape off %}<div class="cat-doc-text">{{ q.html }}</div>{% endautoescape %}
+    </div>
+    {% endfor %}
+    {% endif %}
+
+    {% if bonuses %}
+    <h4>Bonuses</h4>
+    {% for q in bonuses %}
+    <div class="cat-doc-question">
+        <div class="cat-doc-meta">
+            <a href="{{ q.edit_url }}">{{ q.packet }}{% if q.number %} #{{ q.number }}{% endif %}</a>
+            <span class="cat-doc-cat">{{ q.category }}</span>
+            {% if q.author %}<span class="cat-doc-author">{{ q.author }}</span>{% endif %}
+        </div>
+        {% autoescape off %}<div class="cat-doc-text">{{ q.html }}</div>{% endautoescape %}
+    </div>
+    {% endfor %}
+    {% endif %}
+
+    {% if not tossups and not bonuses %}
+    <div class="alert-box info">No questions in this category yet.</div>
+    {% endif %}
+</div>
+
+<style>
+.cat-doc-page { max-width: 900px; margin: 0 auto; font-size: 1.05em; line-height: 1.55; }
+.cat-doc-question { padding: 10px 0 14px; border-bottom: 1px solid #eee; }
+.cat-doc-meta { font-size: 0.8em; color: #888; margin-bottom: 3px; }
+.cat-doc-meta a { font-weight: bold; }
+.cat-doc-cat { margin-left: 10px; }
+.cat-doc-author { margin-left: 10px; font-style: italic; }
+.cat-doc-text p { margin-bottom: 0.4em; }
+.cat-doc-text .pronunciation-guide { color: #888; }
+@media print {
+    .top-bar, .breadcrumbs, .panel, .button { display: none !important; }
+    .cat-doc-meta a { color: #000; text-decoration: none; }
+}
+</style>
+{% endblock %}

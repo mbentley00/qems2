@@ -15,7 +15,9 @@
 
     {% block content %}
 
-    <h3 class="page-header">{{ category }}</h3>
+    <h3 class="page-header">{{ category }}
+        {% if category %}<a href="/category_doc/{{ qset.id }}/{{ category.id }}/" class="button tiny secondary right" style="margin:0;"><i class="fa fa-file-lines"></i> Document view</a>{% endif %}
+    </h3>
     {% if category %}
     <ul class="breadcrumbs">
         <li><a href="/edit_question_set/{{ qset.id }}/">{{ qset.name }}</a></li>

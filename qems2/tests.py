@@ -2672,3 +2672,49 @@ class SaveAsSuggestionFlowTests(TestCase):
         self.tu.refresh_from_db()
         # Either saved or form error, but no suggestion should be created.
         self.assertEqual(SuggestedEdit.objects.filter(question_id=self.tu.id).count(), 0)
+
+
+class CategoryDocumentTests(TestCase):
+    """Document view of all questions in a category / subcategory."""
+
+    def setUp(self):
+        from datetime import datetime
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('cd_owner', password='pw', email='o@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='cd dist')
+        self.am = DistributionEntry.objects.create(distribution=self.dist, category='History', subcategory='American')
+        self.eu = DistributionEntry.objects.create(distribution=self.dist, category='History', subcategory='European')
+        self.qset = QuestionSet.objects.create(
+            name='CD Set', date=timezone.now(), host='', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.owner.question_set_editor.add(self.qset)
+        def tu(ans, cat):
+            return Tossup.objects.create(author=self.owner, question_set=self.qset, question_type=self.acf,
+                tossup_text='Stem about it.', tossup_answer=ans, category=cat,
+                created_date=datetime.now(), last_changed_date=datetime.now(), question_number=1)
+        self.t_am = tu('_Lincoln_', self.am)
+        self.t_eu = tu('_Napoleon_', self.eu)
+        self.client.login(username='cd_owner', password='pw')
+
+    def test_subcategory_document_shows_only_that_subcategory(self):
+        resp = self.client.get('/category_doc/{0}/{1}/'.format(self.qset.id, self.am.id))
+        self.assertEqual(resp.status_code, 200)
+        ids = {t['id'] for t in resp.context['tossups']}
+        self.assertIn(self.t_am.id, ids)
+        self.assertNotIn(self.t_eu.id, ids)
+
+    def test_top_category_document_shows_all_subcategories(self):
+        resp = self.client.get('/category_doc_top/{0}/History/'.format(self.qset.id))
+        self.assertEqual(resp.status_code, 200)
+        ids = {t['id'] for t in resp.context['tossups']}
+        self.assertIn(self.t_am.id, ids)
+        self.assertIn(self.t_eu.id, ids)
+        self.assertEqual(resp.context['count'], 2)
+
+    def test_non_member_denied(self):
+        User.objects.create_user('cd_out', password='pw')
+        self.client.logout(); self.client.login(username='cd_out', password='pw')
+        resp = self.client.get('/category_doc/{0}/{1}/'.format(self.qset.id, self.am.id))
+        self.assertContains(resp, 'not authorized')

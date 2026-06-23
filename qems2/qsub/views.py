@@ -607,6 +607,55 @@ def top_category(request, qset_id, category_name):
         'role': role,
     })
 
+@login_required
+def category_document(request, qset_id, category_id=None, category_name=None):
+    """Read-only document view of every question in a category or subcategory
+    (e.g. all of History - American, or all of History)."""
+    user = request.user.writer
+    qset = QuestionSet.objects.get(id=qset_id)
+    if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+        return render(request, 'failure.html',
+                      {'message': 'You are not authorized to view this set',
+                       'message_class': 'alert-box alert'})
+
+    if category_id is not None:
+        cat = DistributionEntry.objects.get(id=category_id)
+        title = str(cat)
+        tu_qs = Tossup.objects.filter(question_set=qset, category=cat)
+        bs_qs = Bonus.objects.filter(question_set=qset, category=cat)
+    else:
+        title = category_name
+        tu_qs = Tossup.objects.filter(question_set=qset, category__category=category_name)
+        bs_qs = Bonus.objects.filter(question_set=qset, category__category=category_name)
+
+    related = ('category', 'author__user', 'packet')
+    order = ('packet__sort_order', 'packet__id', 'question_number', 'id')
+    tu_qs = tu_qs.select_related(*related).order_by(*order)
+    bs_qs = bs_qs.select_related(*related).order_by(*order)
+
+    def label(writer):
+        if writer is None:
+            return ''
+        return '{0} {1}'.format(writer.user.first_name, writer.user.last_name).strip() or writer.user.username
+
+    def item(q, qtype):
+        return {
+            'id': q.id, 'qtype': qtype, 'html': q.to_html(),
+            'category': str(q.category) if q.category else '',
+            'packet': q.packet.packet_name if q.packet else 'Unpacketized',
+            'number': q.question_number or '',
+            'author': label(q.author),
+            'edit_url': '/edit_{0}/{1}/'.format(qtype, q.id),
+        }
+
+    tossups = [item(t, 'tossup') for t in tu_qs]
+    bonuses = [item(b, 'bonus') for b in bs_qs]
+    return render(request, 'category_document.html', {
+        'qset': qset, 'title': title, 'tossups': tossups, 'bonuses': bonuses,
+        'count': len(tossups) + len(bonuses), 'user': user,
+        'category_id': category_id, 'category_name': category_name})
+
+
 def _dup_fingerprint(qset):
     """A cheap signature of the set's question state; changes whenever a
     question is added, removed, or edited, so the cached report auto-refreshes."""

@@ -100,6 +100,8 @@ urlpatterns = [
     re_path(r'^logout/$', logout_view),
     re_path(r'^categories/(?P<qset_id>[0-9]+)/(?P<category_id>[0-9]+)/$', categories),
     re_path(r'^top_category/(?P<qset_id>[0-9]+)/(?P<category_name>[^/]+)/$', top_category),
+    re_path(r'^category_doc/(?P<qset_id>[0-9]+)/(?P<category_id>[0-9]+)/$', category_document),
+    re_path(r'^category_doc_top/(?P<qset_id>[0-9]+)/(?P<category_name>[^/]+)/$', category_document),
     re_path(r'^export_question_set/(?P<qset_id>[0-9]+)/(?P<output_format>.+)/$', export_question_set),
     re_path(r'^delete_writer/$', delete_writer),
     re_path(r'^delete_editor/$', delete_editor),
