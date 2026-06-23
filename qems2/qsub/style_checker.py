@@ -44,6 +44,7 @@ RULE_LABELS = [
     ('ampersand', 'Spell out "and" instead of &'),
     ('repeated_word', 'Repeated words ("the the")'),
     ('contractions', 'Contractions (don\'t, it\'s, …)'),
+    ('imprecise_from', 'Imprecise "from this country" (prefer "born in")'),
     ('unbalanced_parens', 'Unbalanced parentheses'),
     ('answer_leak', 'ANSWER: leaked into question text'),
     ('numerals', 'Numerals in "For 10 points"'),
@@ -160,6 +161,17 @@ def _prose_issues(label, raw, field):
                              'repeated_word', '{0}|{1}'.format(label, word),
                              {'field': field, 'op': 'regex', 'pattern': r'\b(\w+)\s+\1\b', 'repl': r'\1'}))
 
+    seen_from = set()
+    for m in re.finditer(r'\bfrom this (country|nation|empire|kingdom|city|state)\b', text, re.IGNORECASE):
+        place = m.group(1).lower()
+        if place in seen_from:
+            continue
+        seen_from.add(place)
+        issues.append(_issue(
+            INFO, '{0}: "from this {1}" is imprecise — prefer "born in this {1}" '
+                  '(or the precise relationship)'.format(label, place),
+            'imprecise_from', '{0}|{1}'.format(label, place)))
+
     if '&' in text:
         issues.append(_issue(INFO, '{0}: spell out "and" instead of &'.format(label), 'ampersand', label,
                              {'field': field, 'op': 'regex', 'pattern': r'\s*&\s*', 'repl': ' and '}))
@@ -267,15 +279,44 @@ def check_bonus(b, guide=DEFAULT_GUIDE, disabled=None):
 
 # --- auto-apply ------------------------------------------------------------
 
+# QEMS inline markup that interleaves with words: underline/italic chars and the
+# backslash escape tokens. We ignore these when locating a term so a clued term
+# wrapped in markup (e.g. "_Goethe_") still matches and the guide lands after it.
+_MARKUP_TOKENS = ('\\S', '\\s', '\\B')
+
+
+def _strip_markup_indexed(text):
+    """Return (clean, idx_map): `clean` is `text` with QEMS inline markup removed,
+    and idx_map[i] is the index in `text` of clean[i] (with a final sentinel
+    mapping len(clean) -> len(text)), so a match in `clean` maps back to `text`."""
+    clean, idx_map = [], []
+    i, n = 0, len(text)
+    while i < n:
+        if text[i:i + 2] in _MARKUP_TOKENS:
+            i += 2
+        elif text[i] in ('_', '~'):
+            i += 1
+        else:
+            clean.append(text[i])
+            idx_map.append(i)
+            i += 1
+    idx_map.append(n)
+    return ''.join(clean), idx_map
+
+
 def _insert_guide(text, term, pron):
     """Insert ``("RESPELLING")`` after the first occurrence of `term` that isn't
-    already followed by a guide. Returns the text unchanged if none is found."""
+    already followed by a guide. Matching ignores QEMS inline markup so an
+    underlined/italicized term still matches, and the guide is placed after any
+    closing markup. Returns the text unchanged if no occurrence is found."""
     guide = ' ("{0}")'.format(pron)
+    clean, idx_map = _strip_markup_indexed(text)
     pat = re.compile(r'(?<!\w)' + re.escape(term) + r'(?!\w)', re.IGNORECASE)
-    for m in pat.finditer(text):
-        if guide_opener_at(text, m.end()):
+    for m in pat.finditer(clean):
+        pos = idx_map[m.end()]  # raw index after the term (past any closing markup)
+        if guide_opener_at(text, pos):
             continue
-        return text[:m.end()] + guide + text[m.end():]
+        return text[:pos] + guide + text[pos:]
     return text
 
 

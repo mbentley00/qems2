@@ -65,7 +65,7 @@
             <div class="unp-list" id="unp-tu-list" data-qtype="tossup">
                 {% for q in unpacketized_tu %}
                 <span class="unp-item" data-qtype="tossup" data-qid="{{ q.id }}" data-search="{{ q.answer|lower }} {{ q.category|lower }}">
-                    <a href="{{ q.edit_url }}" class="unp-answer">{{ q.answer }}</a>
+                    <a href="{{ q.edit_url }}" class="unp-answer" target="_blank" rel="noopener">{{ q.answer }}</a>
                     <span class="unp-category">{{ q.category }}</span>
                 </span>
                 {% empty %}
@@ -78,7 +78,7 @@
             <div class="unp-list" id="unp-bs-list" data-qtype="bonus">
                 {% for q in unpacketized_bs %}
                 <span class="unp-item" data-qtype="bonus" data-qid="{{ q.id }}" data-search="{{ q.answer|lower }} {{ q.category|lower }}">
-                    <a href="{{ q.edit_url }}" class="unp-answer">{{ q.answer }}</a>
+                    <a href="{{ q.edit_url }}" class="unp-answer" target="_blank" rel="noopener">{{ q.answer }}</a>
                     <span class="unp-category">{{ q.category }}</span>
                 </span>
                 {% empty %}
@@ -111,7 +111,7 @@
                 {% for cell in row.cells %}
                 <td class="grid-cell{% if cell.empty %} grid-cell-empty{% endif %}" data-qtype="tossup" data-num="{{ row.num }}">
                     {% if cell.id %}
-                        <a href="{{ cell.edit_url }}" class="cell-answer" data-qid="{{ cell.id }}">{{ cell.answer }}</a>
+                        <a href="{{ cell.edit_url }}" class="cell-answer" data-qid="{{ cell.id }}" target="_blank" rel="noopener">{{ cell.answer }}</a>
                         <div class="cell-category">{{ cell.category }}</div>
                         {% if not read_only %}<a href="#" class="swap-btn" title="Swap with a question from another packet">&#8644;</a><a href="#" class="unassign-btn" title="Remove from packet (unassign)">&#10005;</a>{% endif %}
                     {% elif not read_only %}
@@ -143,7 +143,7 @@
                 {% for cell in row.cells %}
                 <td class="grid-cell{% if cell.empty %} grid-cell-empty{% endif %}" data-qtype="bonus" data-num="{{ row.num }}">
                     {% if cell.id %}
-                        <a href="{{ cell.edit_url }}" class="cell-answer" data-qid="{{ cell.id }}">{{ cell.answer }}</a>
+                        <a href="{{ cell.edit_url }}" class="cell-answer" data-qid="{{ cell.id }}" target="_blank" rel="noopener">{{ cell.answer }}</a>
                         <div class="cell-category">{{ cell.category }}</div>
                         {% if not read_only %}<a href="#" class="swap-btn" title="Swap with a question from another packet">&#8644;</a><a href="#" class="unassign-btn" title="Remove from packet (unassign)">&#10005;</a>{% endif %}
                     {% elif not read_only %}
@@ -283,6 +283,26 @@
 <script>
 $(function() {
     var readOnly = {% if read_only %}true{% else %}false{% endif %};
+
+    // Preserve each grid's horizontal scroll across reloads (e.g. after a swap or
+    // move), which would otherwise jump back to the far left.
+    var SCROLL_KEY = 'pg-scroll-{{ qset.id }}';
+    function saveGridScroll() {
+        var pos = $('.grid-scroll').map(function() { return this.scrollLeft; }).get();
+        try { sessionStorage.setItem(SCROLL_KEY, JSON.stringify(pos)); } catch (e) {}
+    }
+    function restoreGridScroll() {
+        var raw;
+        try { raw = sessionStorage.getItem(SCROLL_KEY); } catch (e) { return; }
+        if (!raw) { return; }
+        var pos;
+        try { pos = JSON.parse(raw); } catch (e) { return; }
+        $('.grid-scroll').each(function(i) {
+            if (pos[i] != null) { this.scrollLeft = pos[i]; }
+        });
+    }
+    $(window).on('beforeunload', saveGridScroll);
+    restoreGridScroll();
 
     // --- Unpacketized panel: filter + collapse (available read-only too) ---
     function updateUnpShownCounts() {

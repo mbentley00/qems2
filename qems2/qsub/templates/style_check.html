@@ -112,6 +112,14 @@ $(function () {
     var GUIDE = "{{ guide|escapejs }}";
     $('#toggle-style-settings').on('click', function (e) { e.preventDefault(); $('#style-settings-form').toggle(); });
 
+    // The top nav is position:fixed and wraps to a variable height, so pin the
+    // sticky bulk-action bar just below it instead of under it (top:0 hid it).
+    function syncBulkBarTop() {
+        $('.bulk-bar').css('top', ($('.top-bar').outerHeight() || 0) + 'px');
+    }
+    syncBulkBarTop();
+    $(window).on('resize', syncBulkBarTop);
+
     function post(url, li, action, done, scope) {
         $.post(url, {
             question_type: li.data('qtype'),
@@ -138,9 +146,15 @@ $(function () {
         if (action === 'apply') {
             post('/apply_style_fix/', li, '', function () { location.reload(); });
         } else if (action === 'apply-open') {
-            // Open the question now (user gesture, popup-safe), then apply the fix.
-            window.open('/edit_' + li.data('qtype') + '/' + li.data('qid') + '/', '_blank');
-            post('/apply_style_fix/', li, '', function () { location.reload(); });
+            // Open a blank tab now (a user gesture, so it isn't popup-blocked),
+            // apply the fix, then point the tab at the question so it loads the
+            // already-fixed version instead of stale text. Close it if the fix fails.
+            var url = '/edit_' + li.data('qtype') + '/' + li.data('qid') + '/';
+            var w = window.open('', '_blank');
+            post('/apply_style_fix/', li, '', function () {
+                if (w) { w.location = url; }
+                location.reload();
+            }).fail(function () { if (w) { w.close(); } });
         } else if (action === 'dismiss') {
             post('/dismiss_style_issue/', li, '', function () { location.reload(); });
         } else if (action === 'dismiss-all') {
@@ -167,6 +181,11 @@ $(function () {
             if (typeof resp === 'string') { try { resp = JSON.parse(resp); } catch (e) {} }
             if (!(resp && resp.ok)) { return $.Deferred().reject((resp && resp.error) || 'failed').promise(); }
             return resp;
+        }, function (xhr) {
+            // Surface the server's error message instead of a raw jqXHR object.
+            var msg = 'failed';
+            try { msg = JSON.parse(xhr.responseText).error || msg; } catch (e) {}
+            return $.Deferred().reject(msg).promise();
         });
     }
     function updateCount() {

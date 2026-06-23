@@ -1331,6 +1331,19 @@ class StyleCheckFixTests(TestCase):
         self.tu.refresh_from_db()
         self.assertIn('GUR-tuh', self.tu.tossup_text)
 
+    def test_apply_fix_for_underlined_term(self):
+        # A clued term wrapped in QEMS underline markup must still get a guide,
+        # placed after the closing markup (regression: underscore is a \w char,
+        # so naive word-boundary matching failed and the fix silently no-op'd).
+        self.tu.tossup_text = 'The poet _Goethe_ wrote this famous work.'
+        self.tu.save()
+        resp = self.client.post('/apply_style_fix/', {
+            'question_type': 'tossup', 'question_id': self.tu.id,
+            'code': 'pronunciation', 'token': 'Question|Goethe', 'guide': 'minkowski'})
+        self.assertEqual(resp.status_code, 200)
+        self.tu.refresh_from_db()
+        self.assertIn('_Goethe_ ("GUR-tuh")', self.tu.tossup_text)
+
     def test_apply_is_idempotent_after_guide_present(self):
         self.client.post('/apply_style_fix/', {
             'question_type': 'tossup', 'question_id': self.tu.id,
@@ -2744,6 +2757,17 @@ class StyleCheckerExpandedRulesTests(TestCase):
         codes = {i['code'] for i in sc.check_tossup(self.tu)}
         for c in ('contractions', 'ampersand', 'number_range'):
             self.assertIn(c, codes)
+
+    def test_imprecise_from_this_country_flagged(self):
+        from qems2.qsub import style_checker as sc
+        self.tu.tossup_text = "This composer was from this country. For 10 points, name them."
+        issues = [i for i in sc.check_tossup(self.tu) if i['code'] == 'imprecise_from']
+        self.assertEqual(len(issues), 1)
+        self.assertIn('born in this country', issues[0]['message'])
+        # No false positive when the precise phrasing is used.
+        self.tu.tossup_text = "This composer was born in this country. For 10 points, name them."
+        codes = {i['code'] for i in sc.check_tossup(self.tu)}
+        self.assertNotIn('imprecise_from', codes)
 
     def test_apply_fix_number_range(self):
         from qems2.qsub import style_checker as sc
