@@ -25,10 +25,13 @@
                 <li><a href="https://github.com/grapesmoker/qems2/issues">Report Bug</a></li>
                 {% if qset %}
                     <li><a href="/search/{{ qset.id }}">Search</a></li>
+                    <li><a href="/quick_search/{{ qset.id }}/">Quick Search</a></li>
                 {% elif passed_q_set %}
                     <li><a href="/search/{{ passed_q_set.id }}">Search</a></li>
+                    <li><a href="/quick_search/{{ passed_q_set.id }}/">Quick Search</a></li>
                 {% else %}
                     <li><a href="/search/">Search</a></li>
+                    <li><a href="/quick_search/">Quick Search</a></li>
                 {% endif %}
                 <!--<li><a href="/settings/">Settings</a></li>-->
                 <li><a href="/help/">Help</a></li>

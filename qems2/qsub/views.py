@@ -3534,6 +3534,158 @@ def search(request, passed_qset_id=None):
                                        'message': message,
                                        'message_class': message_class})
 
+def _quick_search_scope(user, qset_param):
+    """(scope_ids, selected_value) for quick search. `scope_ids` is the set of
+    QuestionSet ids the user may search; `selected_value` is 'all' or the chosen
+    id as a string. Only sets the user can access are ever included."""
+    accessible = list(QuestionSet.objects.filter(
+        Q(writer=user) | Q(editor=user) | Q(owner=user) | Q(co_owners=user)
+    ).distinct().values_list('id', flat=True))
+    if qset_param and qset_param != 'all':
+        try:
+            sid = int(qset_param)
+        except (TypeError, ValueError):
+            sid = None
+        if sid in set(accessible):
+            return [sid], str(sid)
+    return accessible, 'all'
+
+
+@login_required
+def quick_search(request, passed_qset_id=None):
+    """Fast type-ahead search over answer lines, filterable by category, packet,
+    and writer. This view only renders the page shell and the filter facets for
+    the chosen scope; results stream in from quick_search_results as the user
+    types."""
+    user = request.user.writer
+    qset_param = request.GET.get('qset') or (str(passed_qset_id) if passed_qset_id else 'all')
+    scope_ids, selected = _quick_search_scope(user, qset_param)
+    multi = len(scope_ids) != 1  # spanning multiple sets: qualify facets by set
+
+    accessible = QuestionSet.objects.filter(
+        Q(writer=user) | Q(editor=user) | Q(owner=user) | Q(co_owners=user)
+    ).distinct().order_by('-date', 'name')
+
+    packets = (Packet.objects.filter(question_set_id__in=scope_ids)
+               .select_related('question_set')
+               .order_by('question_set__name', 'sort_order', 'packet_name'))
+    packet_facets = [{
+        'id': p.id,
+        'name': '{0} — {1}'.format(p.question_set.name, p.packet_name) if multi else p.packet_name,
+    } for p in packets]
+
+    writers = (Writer.objects.filter(
+        Q(tossup__question_set_id__in=scope_ids) | Q(bonus__question_set_id__in=scope_ids))
+        .select_related('user').distinct())
+    writer_facets = sorted(
+        ({'id': w.id, 'name': w.get_real_name().strip() or w.user.username} for w in writers),
+        key=lambda w: w['name'].lower())
+
+    dist_ids = list(QuestionSet.objects.filter(id__in=scope_ids).values_list('distribution_id', flat=True))
+    seen, category_facets = set(), []
+    for cat, sub in DistributionEntry.objects.filter(
+            distribution_id__in=dist_ids).values_list('category', 'subcategory'):
+        label = '{0} - {1}'.format(cat, sub)
+        if label not in seen:
+            seen.add(label)
+            category_facets.append(label)
+    category_facets.sort()
+
+    passed_q_set = QuestionSet.objects.filter(id__in=scope_ids).first() if len(scope_ids) == 1 else None
+
+    return render(request, 'quick_search.html', {
+        'user': user,
+        'q_sets': accessible,
+        'selected_qset': selected,
+        'passed_q_set': passed_q_set,
+        'packet_facets': packet_facets,
+        'writer_facets': writer_facets,
+        'category_facets': category_facets,
+        'multi_set': multi,
+    })
+
+
+@login_required
+def quick_search_results(request):
+    """JSON answer-line search for the quick-search page. Matches the maintained
+    (markup-stripped) search_question_answers field with optional category /
+    packet / writer filters, and returns each hit's rendered content for inline
+    preview plus an edit URL to open it in a new tab."""
+    user = request.user.writer
+    scope_ids, _ = _quick_search_scope(user, request.GET.get('qset', 'all'))
+    if not scope_ids:
+        return JsonResponse({'results': [], 'truncated': False})
+
+    norm_q = strip_special_chars((request.GET.get('q') or '').strip())
+    category = (request.GET.get('category') or '').strip()
+    packet_id = request.GET.get('packet') or ''
+    writer_id = request.GET.get('writer') or ''
+    types = request.GET.getlist('types') or ['tossup', 'bonus']
+
+    # Don't dump the whole scope when nothing is specified.
+    if not (norm_q or category or packet_id or writer_id):
+        return JsonResponse({'results': [], 'truncated': False, 'empty': True})
+
+    cat_ids = None
+    if category:
+        dist_ids = list(QuestionSet.objects.filter(id__in=scope_ids).values_list('distribution_id', flat=True))
+        cat_ids = [d.id for d in DistributionEntry.objects.filter(distribution_id__in=dist_ids)
+                   if str(d) == category]
+        if not cat_ids:
+            return JsonResponse({'results': [], 'truncated': False})
+
+    LIMIT = 50
+    multi = len(scope_ids) != 1
+
+    def scoped(qs):
+        qs = qs.filter(question_set_id__in=scope_ids)
+        if norm_q:
+            qs = qs.filter(search_question_answers__icontains=norm_q)
+        if cat_ids is not None:
+            qs = qs.filter(category_id__in=cat_ids)
+        if packet_id:
+            qs = qs.filter(packet_id=packet_id)
+        if writer_id:
+            qs = qs.filter(author_id=writer_id)
+        return (qs.select_related('packet', 'category', 'author', 'author__user', 'question_set')
+                  .order_by('question_set__name', 'packet__sort_order', 'packet__packet_name', 'question_number'))
+
+    rows = []
+    if 'tossup' in types:
+        rows += [('tossup', t) for t in scoped(Tossup.objects.all())[:LIMIT + 1]]
+    if 'bonus' in types:
+        rows += [('bonus', b) for b in scoped(Bonus.objects.all())[:LIMIT + 1]]
+    truncated = len(rows) > LIMIT
+    rows = rows[:LIMIT]
+
+    def answer_preview(qtype, q):
+        if qtype == 'tossup':
+            return _grid_answer_preview(q.tossup_answer, 90)
+        return ' / '.join(filter(None, [
+            _grid_answer_preview(q.part1_answer, 30),
+            _grid_answer_preview(q.part2_answer, 30),
+            _grid_answer_preview(q.part3_answer, 30)]))
+
+    data = []
+    for qtype, q in rows:
+        pkt = q.packet.packet_name if q.packet_id else '(unpacketized)'
+        loc = '{0} #{1}'.format(pkt, q.question_number) if q.question_number else pkt
+        if multi:
+            loc = '{0} · {1}'.format(q.question_set.name, loc)
+        data.append({
+            'type': qtype,
+            'id': q.id,
+            'answer': answer_preview(qtype, q),
+            'category': str(q.category) if q.category_id else '',
+            'location': loc,
+            'author': (q.author.get_real_name().strip() or q.author.user.username) if q.author_id else '',
+            'edit_url': '/edit_{0}/{1}/'.format(qtype, q.id),
+            'content': q.to_html(),
+        })
+
+    return JsonResponse({'results': data, 'truncated': truncated})
+
+
 @login_required
 def logout_view(request):
     logout(request)

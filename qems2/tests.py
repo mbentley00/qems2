@@ -2799,3 +2799,91 @@ class StyleCheckerExpandedRulesTests(TestCase):
         self.client.logout(); self.client.login(username='sx_writer', password='pw')
         resp = self.client.get('/style_check/{0}/'.format(self.qset.id))
         self.assertFalse(resp.context['can_configure'])
+
+
+class QuickSearchTests(TestCase):
+    """Fast type-ahead answer-line search page + JSON endpoint."""
+
+    def setUp(self):
+        import json as _json
+        self._json = _json
+        self.ou = User.objects.create_user('qs_owner', password='pw', email='o@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.other_u = User.objects.create_user('qs_other', password='pw')
+        self.other = Writer.objects.get(user=self.other_u)
+        self.dist = Distribution.objects.create(name='qs dist')
+        self.entry = DistributionEntry.objects.create(
+            distribution=self.dist, category='Literature', subcategory='European')
+        self.qset = QuestionSet.objects.create(
+            name='QS Set', date=timezone.now(), host='', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.packet = Packet.objects.create(
+            packet_name='Round 01', question_set=self.qset, created_by=self.owner)
+        self.tu = Tossup.objects.create(
+            author=self.owner, question_set=self.qset, packet=self.packet, question_number=1,
+            tossup_text='This sculptor made the bronze David.', tossup_answer='_Donatello_',
+            category=self.entry, created_date=datetime.now(), last_changed_date=datetime.now())
+        self.bs = Bonus.objects.create(
+            author=self.other, question_set=self.qset, packet=self.packet, question_number=1,
+            leadin='Answer these about sculpture.',
+            part1_text='p1', part1_answer='_Michelangelo_', part2_text='p2', part2_answer='_a2_',
+            part3_text='p3', part3_answer='_a3_', category=self.entry,
+            created_date=datetime.now(), last_changed_date=datetime.now())
+        # A set the owner cannot access (must never appear in results).
+        self.foreign_set = QuestionSet.objects.create(
+            name='Foreign', date=timezone.now(), host='', address='', owner=self.other,
+            num_packets=1, distribution=self.dist)
+        Tossup.objects.create(
+            author=self.other, question_set=self.foreign_set, question_number=1,
+            tossup_text='secret', tossup_answer='_Donatello_', category=self.entry,
+            created_date=datetime.now(), last_changed_date=datetime.now())
+        self.client.login(username='qs_owner', password='pw')
+
+    def _results(self, **params):
+        resp = self.client.get('/quick_search_results/', params)
+        self.assertEqual(resp.status_code, 200)
+        return self._json.loads(resp.content)
+
+    def test_page_loads_with_facets(self):
+        resp = self.client.get('/quick_search/{0}/'.format(self.qset.id))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'id="qs-input"')
+        self.assertContains(resp, 'Round 01')
+        self.assertContains(resp, 'Literature - European')
+
+    def test_answer_search_matches_and_includes_content(self):
+        data = self._results(qset=self.qset.id, q='donatello')
+        answers = [r['answer'] for r in data['results']]
+        self.assertTrue(any('Donatello' in a for a in answers))
+        tu_row = next(r for r in data['results'] if r['type'] == 'tossup')
+        self.assertEqual(tu_row['edit_url'], '/edit_tossup/{0}/'.format(self.tu.id))
+        self.assertIn('bronze David', tu_row['content'])  # full content for inline preview
+
+    def test_does_not_match_question_text(self):
+        # Answer-line search only: a word that's in the text but not the answer.
+        data = self._results(qset=self.qset.id, q='sculptor')
+        self.assertEqual(data['results'], [])
+
+    def test_writer_filter(self):
+        data = self._results(qset=self.qset.id, writer=self.other.id)
+        types = {r['type'] for r in data['results']}
+        self.assertEqual(types, {'bonus'})  # only the bonus was authored by `other`
+
+    def test_type_filter_excludes_bonuses(self):
+        data = self._results(qset=self.qset.id, q='michelangelo', types=['tossup'])
+        self.assertEqual(data['results'], [])
+
+    def test_empty_query_returns_nothing(self):
+        data = self._results(qset=self.qset.id)
+        self.assertTrue(data.get('empty'))
+        self.assertEqual(data['results'], [])
+
+    def test_inaccessible_set_excluded(self):
+        # Even searching "all my sets", the foreign set's question must not leak.
+        data = self._results(qset='all', q='donatello')
+        for r in data['results']:
+            self.assertEqual(r['type'], 'tossup')
+            self.assertEqual(r['id'], self.tu.id)
+        # And explicitly requesting the foreign set falls back to all-accessible.
+        data2 = self._results(qset=self.foreign_set.id, q='donatello')
+        self.assertTrue(all(r['id'] == self.tu.id for r in data2['results'] if r['type'] == 'tossup'))

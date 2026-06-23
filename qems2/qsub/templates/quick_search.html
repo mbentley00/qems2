@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% block title %}Quick Search - QEMS3{% endblock %}
+
+{% block content %}
+{% load static %}
+
+<h3 class="page-header">Quick Search</h3>
+<ul class="breadcrumbs">
+    {% if passed_q_set %}<li><a href="/edit_question_set/{{ passed_q_set.id }}/">{{ passed_q_set.name }}</a></li>{% endif %}
+    <li class="current">Quick Search</li>
+</ul>
+
+<p style="color:#777; margin-bottom:0.5em;">
+    Type to search <strong>answer lines</strong>. Click a result to preview the
+    full question; the <i class="fa fa-up-right-from-square"></i> link opens it in a new tab.
+</p>
+
+<div class="panel radius" style="padding:0.75rem;">
+    <div class="row collapse">
+        <div class="small-12 columns">
+            <input type="search" id="qs-input" autocomplete="off" autofocus
+                   placeholder="Search answer lines…" style="font-size:1.25rem; margin-bottom:0.5rem;">
+        </div>
+    </div>
+    <div class="row">
+        <div class="small-3 columns">
+            <label style="font-size:0.8rem; color:#777; margin:0;">Set</label>
+            <select id="qs-set">
+                <option value="all"{% if selected_qset == 'all' %} selected{% endif %}>All my sets</option>
+                {% for s in q_sets %}
+                <option value="{{ s.id }}"{% if selected_qset == s.id|stringformat:'s' %} selected{% endif %}>{{ s.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="small-3 columns">
+            <label style="font-size:0.8rem; color:#777; margin:0;">Category</label>
+            <select id="qs-category">
+                <option value="">All categories</option>
+                {% for c in category_facets %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+            </select>
+        </div>
+        <div class="small-3 columns">
+            <label style="font-size:0.8rem; color:#777; margin:0;">Packet</label>
+            <select id="qs-packet">
+                <option value="">All packets</option>
+                {% for p in packet_facets %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+            </select>
+        </div>
+        <div class="small-3 columns">
+            <label style="font-size:0.8rem; color:#777; margin:0;">Writer</label>
+            <select id="qs-writer">
+                <option value="">All writers</option>
+                {% for w in writer_facets %}<option value="{{ w.id }}">{{ w.name }}</option>{% endfor %}
+            </select>
+        </div>
+    </div>
+    <div class="row">
+        <div class="small-12 columns" style="padding-top:0.4rem;">
+            <label style="display:inline-block; margin-right:1em;"><input type="checkbox" class="qs-type" value="tossup" checked autocomplete="off"> Tossups</label>
+            <label style="display:inline-block;"><input type="checkbox" class="qs-type" value="bonus" checked autocomplete="off"> Bonuses</label>
+        </div>
+    </div>
+</div>
+
+<div id="qs-status" style="color:#888; margin:0.25rem 0 0.5rem;"></div>
+<div id="qs-results"></div>
+
+<script>
+$(function () {
+    var SELECTED_SET = "{{ selected_qset|escapejs }}";
+
+    var $input = $('#qs-input'), $status = $('#qs-status'), $results = $('#qs-results');
+    var debounceTimer = null, reqSeq = 0, lastInFlight = null;
+
+    // Reloading the page is the simplest way to refresh the (set-scoped) facet
+    // dropdowns when the set changes.
+    $('#qs-set').on('change', function () {
+        window.location = '/quick_search/?qset=' + encodeURIComponent($(this).val());
+    });
+
+    function currentParams() {
+        var types = $('.qs-type:checked').map(function () { return this.value; }).get();
+        return {
+            qset: SELECTED_SET,
+            q: $input.val().trim(),
+            category: $('#qs-category').val(),
+            packet: $('#qs-packet').val(),
+            writer: $('#qs-writer').val(),
+            types: types
+        };
+    }
+
+    function esc(s) {
+        return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+    function highlight(text, term) {
+        var safe = esc(text);
+        term = (term || '').replace(/[_~]/g, '').trim();
+        if (term.length < 2) { return safe; }
+        var re = new RegExp('(' + term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi');
+        return safe.replace(re, '<mark>$1</mark>');
+    }
+
+    function run() {
+        var p = currentParams();
+        if (!p.types.length) {
+            $results.empty(); $status.text('Select at least one of Tossups / Bonuses.'); return;
+        }
+        var seq = ++reqSeq;
+        if (lastInFlight) { lastInFlight.abort(); }
+        $status.text('Searching…');
+        lastInFlight = $.getJSON('/quick_search_results/', $.param(p, true), function (resp) {
+            if (seq !== reqSeq) { return; }  // a newer request superseded this one
+            render(resp, p.q);
+        }).fail(function (xhr, textStatus) {
+            if (textStatus === 'abort' || seq !== reqSeq) { return; }
+            $status.text('Search failed.');
+        });
+    }
+
+    function render(resp, term) {
+        $results.empty();
+        if (resp.empty) { $status.text('Type a search term or pick a filter to begin.'); return; }
+        var rows = resp.results || [];
+        if (!rows.length) { $status.text('No matching answer lines.'); return; }
+        $status.text(rows.length + ' result' + (rows.length === 1 ? '' : 's')
+            + (resp.truncated ? ' (showing first ' + rows.length + ' — narrow your search)' : ''));
+
+        rows.forEach(function (r) {
+            var $row = $('<div class="qs-result panel">');
+            var badge = '<span class="label ' + (r.type === 'tossup' ? 'secondary' : 'info')
+                + '" style="text-transform:capitalize;">' + r.type + '</span>';
+            var meta = '<span class="qs-meta">' + esc(r.location)
+                + (r.category ? ' · ' + esc(r.category) : '')
+                + (r.author ? ' · ' + esc(r.author) : '') + '</span>';
+            var $head = $(
+                '<div class="qs-head">'
+                + '<span class="qs-caret">▸</span> ' + badge
+                + ' <span class="qs-answer">' + highlight(r.answer, term) + '</span> '
+                + '<a class="qs-open" href="' + r.edit_url + '" target="_blank" rel="noopener" '
+                + 'title="Open in a new tab"><i class="fa fa-up-right-from-square"></i></a>'
+                + '<div>' + meta + '</div>'
+                + '</div>');
+            var $body = $('<div class="qs-body" style="display:none;">').html(r.content);
+            $head.on('click', function (e) {
+                if ($(e.target).closest('a.qs-open').length) { return; }  // let the link open
+                var open = $body.is(':visible');
+                $body.slideToggle(90);
+                $head.find('.qs-caret').text(open ? '▸' : '▾');
+            });
+            $row.append($head).append($body);
+            $results.append($row);
+        });
+    }
+
+    $input.on('input', function () {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(run, 180);
+    });
+    $('#qs-category, #qs-packet, #qs-writer').on('change', run);
+    $('.qs-type').on('change', run);
+    // Enter opens the first result in a new tab — quick keyboard flow.
+    $input.on('keydown', function (e) {
+        if (e.key === 'Enter') {
+            var $first = $results.find('.qs-result:first a.qs-open');
+            if ($first.length) { window.open($first.attr('href'), '_blank'); }
+        }
+    });
+});
+</script>
+
+<style>
+.qs-result { padding: 0.5rem 0.7rem; margin-bottom: 0.4rem; }
+.qs-head { cursor: pointer; }
+.qs-caret { color: #999; display: inline-block; width: 1em; }
+.qs-answer { font-weight: bold; font-size: 1.05rem; }
+.qs-open { margin-left: 0.4em; color: #008CBA; }
+.qs-meta { color: #888; font-size: 0.8rem; }
+.qs-body { margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #eee; }
+#qs-results mark { background: #fff2a8; padding: 0 1px; }
+</style>
+
+{% endblock %}

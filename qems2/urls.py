@@ -147,4 +147,9 @@ urlpatterns = [
     # search
     re_path(r'^search/$', search),
     re_path(r'^search/(?P<passed_qset_id>[0-9]+)/$', search),
+
+    # quick search (fast type-ahead over answer lines)
+    re_path(r'^quick_search/$', quick_search),
+    re_path(r'^quick_search/(?P<passed_qset_id>[0-9]+)/$', quick_search),
+    re_path(r'^quick_search_results/$', quick_search_results),
 ]
