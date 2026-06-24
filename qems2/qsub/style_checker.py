@@ -54,6 +54,7 @@ RULE_LABELS = [
     ('imperative', 'Interrogative giveaway'),
     ('underline', 'Answer line has no underline'),
     ('pronunciation', 'Pronunciation-guide suggestions'),
+    ('answer_alts', 'Answer line missing standard alternates'),
 ]
 RULE_LABEL_MAP = dict(RULE_LABELS)
 ALL_CODES = [c for c, _ in RULE_LABELS]
@@ -198,6 +199,20 @@ def _has_underline(raw):
     return '_' in (raw or '')
 
 
+def _answer_alt_issues(label, raw_answer):
+    """Suggest standard acceptable alternates the answer line is missing, looked
+    up by primary answer in the bundled answer database (INFO, not auto-fixed —
+    the editor decides which alternates apply)."""
+    from .answer_db import missing_alternates
+    head_key, missing = missing_alternates(raw_answer)
+    if not missing:
+        return []
+    shown = missing[:6]
+    suffix = '' if len(missing) <= len(shown) else ' …'
+    return [_issue(INFO, '{0}: also accept {1}{2}'.format(label, ' / '.join(shown), suffix),
+                   'answer_alts', '{0}|{1}'.format(label, head_key))]
+
+
 def check_tossup(tu, guide=DEFAULT_GUIDE, disabled=None):
     enabled = _enabled_codes(guide, disabled)
     issues = []
@@ -227,6 +242,9 @@ def check_tossup(tu, guide=DEFAULT_GUIDE, disabled=None):
 
     if not _has_underline(tu.tossup_answer):
         issues.append(_issue(WARNING, 'answer not underlined', 'underline'))
+
+    if 'answer_alts' in enabled:
+        issues += _answer_alt_issues('Answer', tu.tossup_answer)
 
     if 'pronunciation' in enabled:
         issues += _pronunciation_issues('Question', text, 'tossup_text')
@@ -266,6 +284,11 @@ def check_bonus(b, guide=DEFAULT_GUIDE, disabled=None):
         if (ans or '').strip() and not _has_underline(ans):
             issues.append(_issue(WARNING, '{0}: not underlined'.format(label),
                                  'underline', label))
+
+    if 'answer_alts' in enabled:
+        for label, ans in (('Answer 1', b.part1_answer), ('Answer 2', b.part2_answer), ('Answer 3', b.part3_answer)):
+            if (ans or '').strip():
+                issues += _answer_alt_issues(label, ans)
 
     if 'pronunciation' in enabled:
         for label, raw, field in parts:

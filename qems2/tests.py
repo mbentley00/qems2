@@ -2887,3 +2887,79 @@ class QuickSearchTests(TestCase):
         # And explicitly requesting the foreign set falls back to all-accessible.
         data2 = self._results(qset=self.foreign_set.id, q='donatello')
         self.assertTrue(all(r['id'] == self.tu.id for r in data2['results'] if r['type'] == 'tossup'))
+
+
+class AnswerAltsTests(TestCase):
+    """Standard answer-line alternate suggestions (qsub.answer_db + style checker).
+    These rely on the bundled data/answer_alternates.jsonl."""
+
+    def setUp(self):
+        from qems2.qsub import answer_db
+        answer_db.reset_cache()
+
+    def test_missing_alternates_for_bare_answer(self):
+        from qems2.qsub import answer_db
+        head_key, missing = answer_db.missing_alternates('_France_')
+        self.assertEqual(head_key, 'france')
+        self.assertIn('french republic', ' '.join(missing).lower())
+
+    def test_no_suggestion_when_complete(self):
+        from qems2.qsub import answer_db
+        line = ('_France_ [or the French Republic or République française or the Kingdom of '
+                'France or Royaume de France or Française or the First French Republic or '
+                'the French Fifth Republic or First French Empire]')
+        _hk, missing = answer_db.missing_alternates(line)
+        self.assertEqual(missing, [])
+
+    def test_already_present_alternate_filtered(self):
+        from qems2.qsub import answer_db
+        _hk, missing = answer_db.missing_alternates('_France_ [or French Republic]')
+        keys = {answer_db.norm_key(m) for m in missing}
+        self.assertNotIn('french republic', keys)      # already present, not re-suggested
+        self.assertIn('royaume de france', keys)        # still missing
+
+    def test_matches_on_underlined_portion(self):
+        from qems2.qsub import answer_db
+        head_key, missing = answer_db.missing_alternates('_Michelangelo_ Buonarroti')
+        self.assertEqual(head_key, 'michelangelo')
+        # The fuller required name is present, so "Michelangelo" itself isn't suggested.
+        self.assertNotIn('michelangelo]', ' '.join(missing).lower())
+
+    def test_unknown_answer_no_match(self):
+        from qems2.qsub import answer_db
+        self.assertEqual(answer_db.missing_alternates('_Zxqwv Notanswer_'), ('', []))
+
+
+class AnswerAltsStyleCheckTests(TestCase):
+    """The answer_alts rule firing inside the tossup/bonus style checks."""
+
+    def setUp(self):
+        from qems2.qsub import answer_db
+        answer_db.reset_cache()
+        self.ou = User.objects.create_user('aa_owner', password='pw', email='o@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='aa dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='History', subcategory='European')
+        self.qset = QuestionSet.objects.create(
+            name='AA Set', date=timezone.now(), host='', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.tu = Tossup.objects.create(
+            author=self.owner, question_set=self.qset,
+            tossup_text='This country did things. For 10 points, name this country.',
+            tossup_answer='_France_', category=self.de,
+            created_date=datetime.now(), last_changed_date=datetime.now(), question_number=1)
+
+    def test_answer_alts_flagged_in_tossup(self):
+        from qems2.qsub import style_checker as sc
+        issues = [i for i in sc.check_tossup(self.tu) if i['code'] == 'answer_alts']
+        self.assertEqual(len(issues), 1)
+        self.assertIn('also accept', issues[0]['message'])
+        self.assertIn('French Republic', issues[0]['message'])
+
+    def test_answer_alts_off_in_generic_guide(self):
+        from qems2.qsub import style_checker as sc
+        codes = {i['code'] for i in sc.check_tossup(self.tu, guide='generic')}
+        self.assertNotIn('answer_alts', codes)
+
+
