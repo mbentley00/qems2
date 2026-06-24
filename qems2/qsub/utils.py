@@ -114,8 +114,10 @@ def html_to_latex(html, replacement_dict):
 def get_answer_no_formatting(line):
     output = line
     output = strip_markup(output)
-    output = output.replace('_', '')
-    output = output.replace('~', '')
+    # Strip unescaped markup, then turn "\_"/"\~" back into literal characters.
+    output = re.sub(r'(?<!\\)_', '', output)
+    output = re.sub(r'(?<!\\)~', '', output)
+    output = output.replace('\\_', '_').replace('\\~', '~')
     return output
 
 # Figure out if there's an "["
@@ -180,13 +182,16 @@ def get_formatted_question_html(line, allowUnderlines, allowParens, allowNewLine
             index += 3 # Skip over the rest of what's in the power mark
             continue
         
-        if (c == u"~"):
+        if (c == u"~" and previousChar != u"\\"):
             if (not italicsFlag):
                 output += u"<i>"
                 italicsFlag = True
             else:
                 output += u"</i>"
                 italicsFlag = False
+        elif (c == u"~" and previousChar == u"\\" and secondPreviousChar != u"\\"):
+            output = output[:-1] # Get rid of the escape character
+            output += c
         elif (c == u"(" and allowParens and previousChar != u"\\"):
             if (italicsFlag):
                 needToRestoreItalicsFlag = True
@@ -241,7 +246,11 @@ def get_formatted_question_html(line, allowUnderlines, allowParens, allowNewLine
                 boldFlag = True
                 output += u"<b>"
         else:
-            if (c == u"_" and allowUnderlines):
+            if (c == u"_" and previousChar == u"\\" and secondPreviousChar != u"\\"):
+                # Escaped underscore: render a literal "_", not markup.
+                output = output[:-1] # Get rid of the escape character
+                output += c
+            elif (c == u"_" and allowUnderlines):
                 if (nextChar == u"_"):
                     # This is a prompt
                     if (not promptFlag):
@@ -250,7 +259,7 @@ def get_formatted_question_html(line, allowUnderlines, allowParens, allowNewLine
                     else:
                         output += u"</u>"
                         promptFlag = False
-                    
+
                     index += 1 # Skip ahead so we don't re-process this character
                 else:
                     # This is a regular answer line
@@ -371,12 +380,12 @@ def are_special_characters_balanced(line):
     parensFlag = False
     previousChar = ""
     for c in line:
-        if (c == '_'):
+        if (c == '_' and previousChar != "\\"):
             if (underlineFlag):
                 underlineFlag = False
             else:
                 underlineFlag = True
-        elif (c == '~'):
+        elif (c == '~' and previousChar != "\\"):
             if (italicsFlag):
                 italicsFlag = False
             else:
@@ -404,10 +413,11 @@ def does_answerline_have_underlines(line):
     if (line == ""):
         return True # Ignore completely blank lines
 
-    if (line.find("_") == -1):
-        return False
-    else:
+    # An escaped "\_" is a literal underscore, not an underlined required portion.
+    if re.search(r'(?<!\\)_', line):
         return True
+    else:
+        return False
 
 def convert_smart_quotes(line):
     return smart_str(line).translate(DOUBLE_QUOTE_MAP).translate(SINGLE_QUOTE_MAP)

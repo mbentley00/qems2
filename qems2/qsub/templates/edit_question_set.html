@@ -11,41 +11,13 @@
 {% load static %}
 {% load filters %}
 {% load comments %}
-{% if active_tab == 'qset_info' %} {{ 'active' }} {% endif %}
-
-<h3 class="page-header">Question Set Management</h3>
-
-
 <dl class="tabs" data-tab>
     <dd class="active"><a href="#qset-info">Home</a></dd>
     <dd><a href="#questions">Recent Questions</a></dd>
-    <dd><a href="#comments">Recent Comments</a></dd> 
+    <dd><a href="#comments">Recent Comments</a></dd>
     <dd><a href="#editors">Writers</a></dd>
     <dd><a href="#packets">Packets</a></dd>
 </dl>
-
-{% block tab_group_2 %}
-    {% include "tab_group_2.html" %}
-{% endblock %}
-
-<ul class="button-group even set-tools">
-    <li><a href="/duplicate_check/{{ qset.id }}/" class="button secondary"><i class="fa fa-clone"></i> Duplicate Checker</a></li>
-    <li><a href="/packet_grid/{{ qset.id }}/" class="button secondary"><i class="fa fa-table"></i> Packet Grid</a></li>
-    {% with packets|dictsort:"packet_name"|first as first_packet %}
-    {% if first_packet %}
-    <li><a href="/view_packet/{{ first_packet.id }}/" class="button secondary"><i class="fa fa-file-lines"></i> Document View</a></li>
-    {% endif %}
-    {% endwith %}
-    <li><a href="/category_tags/{{ qset.id }}/" class="button secondary"><i class="fa fa-tags"></i> Category Tags</a></li>
-    <li><a href="/category_overview/{{ qset.id }}/" class="button secondary"><i class="fa fa-list-ul"></i> Category Overview</a></li>
-    <li><a href="/activity/{{ qset.id }}/" class="button secondary"><i class="fa fa-bell"></i> My Activity{% if new_activity %} <span class="activity-badge">{{ new_activity }}</span>{% endif %}</a></li>
-    <li><a href="/recap/{{ qset.id }}/" class="button secondary"><i class="fa fa-clock-rotate-left"></i> Recent Changes</a></li>
-    <li><a href="/play/{{ qset.id }}/" class="button secondary"><i class="fa fa-play"></i> Play</a></li>
-    <li><a href="/style_check/{{ qset.id }}/" class="button secondary"><i class="fa fa-spell-check"></i> Style Check</a></li>
-</ul>
-<style>
-.set-tools { margin-top: -8px; margin-bottom: 18px; }
-</style>
 
 <div class="tabs-content" data-tab="">
 
@@ -64,46 +36,6 @@
                 {% endfor %}
             {% endif %}
         {% endautoescape %}
-
-        {% get_comment_count for qset as comment_count %}
-        {% if comment_count > 0 or role == "editor" %}
-            <div class="panel header radius text-center"><strong>Set-Wide Messages</strong></div>
-            <div class="row">
-                <div class="small-6 columns end comments">
-                    {% autoescape off %}
-                        {% get_comment_list for qset as comment_list %}
-                        {% for comment in comment_list %}
-                            {% if not comment.is_removed %}
-                                <strong>{{comment.user}}:</strong> {{ comment.comment|safe|comment_html|linebreaks }}<br>
-                                {% if role == "editor" %}
-                                    <a href="/delete_comment/{{ comment.id }}" class="delete_comment" value="{{ comment.id }}" qset="{{ qset.id }}">Delete Comment</a><br />
-                                {% endif %}
-                            {% endif %}
-                        {% endfor %}
-                    {% endautoescape %}
-
-                    {% if role == "editor" and comment_count == 0 %}
-                    <div>Note: This section will be hidden for writers until a comment is added.</div>
-                    {% endif %}
-
-                    {% if role == "editor" %}
-                        {% get_comment_form for qset as cform %}
-                        <form action="{% comment_form_target %}" method="POST">
-                            {% csrf_token %}
-                            <label>Comment
-                                <textarea rows="2" id="{{ cform.comment.id_for_label }}" name="{{ cform.comment.html_name }}"></textarea>
-                            </label>
-                            {{ cform.content_type }}
-                            {{ cform.object_pk }}
-                            {{ cform.timestamp }}
-                            {{ cform.security_hash }}
-                            <input type="submit" name="submit" value="Post" class="button primary right">
-                            <input type="hidden" name="next" value="/edit_question_set/{{ qset.id }}/">
-                        </form>
-                    {% endif %}
-                </div>
-            </div>
-        {% endif %}
 
         <div class="panel header radius text-center">
             <div class="small-7 small-centered columns">
@@ -518,6 +450,46 @@
             </div>        
             <p><a href="#tossups">Jump to tossups</a></p>
             <p><a href="#bonuses">Jump to bonuses</a></p>
+
+            {% get_comment_count for qset as comment_count %}
+            {% if comment_count > 0 or role == "editor" %}
+                <div class="panel header radius text-center"><strong>Set-Wide Messages</strong></div>
+                <div class="row">
+                    <div class="small-6 columns end comments">
+                        {% autoescape off %}
+                            {% get_comment_list for qset as comment_list %}
+                            {% for comment in comment_list %}
+                                {% if not comment.is_removed %}
+                                    <strong>{{comment.user}}:</strong> {{ comment.comment|safe|comment_html|linebreaks }}<br>
+                                    {% if role == "editor" %}
+                                        <a href="/delete_comment/{{ comment.id }}" class="delete_comment" value="{{ comment.id }}" qset="{{ qset.id }}">Delete Comment</a><br />
+                                    {% endif %}
+                                {% endif %}
+                            {% endfor %}
+                        {% endautoescape %}
+
+                        {% if role == "editor" and comment_count == 0 %}
+                        <div>Note: This section will be hidden for writers until a comment is added.</div>
+                        {% endif %}
+
+                        {% if role == "editor" %}
+                            {% get_comment_form for qset as cform %}
+                            <form action="{% comment_form_target %}" method="POST">
+                                {% csrf_token %}
+                                <label>Comment
+                                    <textarea rows="2" id="{{ cform.comment.id_for_label }}" name="{{ cform.comment.html_name }}"></textarea>
+                                </label>
+                                {{ cform.content_type }}
+                                {{ cform.object_pk }}
+                                {{ cform.timestamp }}
+                                {{ cform.security_hash }}
+                                <input type="submit" name="submit" value="Post" class="button primary right">
+                                <input type="hidden" name="next" value="/edit_question_set/{{ qset.id }}/">
+                            </form>
+                        {% endif %}
+                    </div>
+                </div>
+            {% endif %}
     </div>
     <div class="content" id="packets">
         <ul class="button-group even">

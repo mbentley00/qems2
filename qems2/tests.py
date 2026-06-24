@@ -1957,7 +1957,11 @@ class UnpacketizedAssignmentTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         html = resp.content.decode()
         self.assertIn('grid-fill', html)
-        self.assertNotIn('/add_tossups/', html)
+        # Scope to the grid itself (the app shell's sidebar/top bar now carry
+        # their own "+ Tossup" links): an empty cell opens the fill dialog
+        # rather than linking to add-a-tossup.
+        grid = html[html.find('grid-scroll'):]
+        self.assertNotIn('/add_tossups/', grid)
 
     def test_swap_candidates_fill_mode_lists_unpacketized(self):
         free = self._tu('freebie')  # unpacketized
@@ -2963,3 +2967,44 @@ class AnswerAltsStyleCheckTests(TestCase):
         self.assertNotIn('answer_alts', codes)
 
 
+
+
+class EscapedUnderscoreTests(TestCase):
+    """Backslash escapes for literal underscores / tildes in answer markup."""
+
+    def _u(self):
+        from qems2.qsub import utils
+        return utils
+
+    def test_render_escaped_underscore_is_literal(self):
+        u = self._u()
+        out = u.get_formatted_question_html(r'C\_2', True, True, False, False)
+        self.assertIn('C_2', out)
+        self.assertNotIn('<u>', out)
+
+    def test_render_escaped_tilde_is_literal(self):
+        u = self._u()
+        out = u.get_formatted_question_html(r'a \~ b', True, True, False, False)
+        self.assertIn('~', out)
+        self.assertNotIn('<i>', out)
+
+    def test_normal_underline_still_renders(self):
+        u = self._u()
+        out = u.get_formatted_question_html('_France_', True, True, False, False)
+        self.assertIn('<u><b>France</b></u>', out)
+
+    def test_escaped_underscore_is_balanced(self):
+        u = self._u()
+        self.assertTrue(u.are_special_characters_balanced(r'C\_2'))
+        self.assertTrue(u.are_special_characters_balanced('_France_'))
+        self.assertFalse(u.are_special_characters_balanced('C_2'))  # lone underscore
+
+    def test_escaped_underscore_not_an_answer_underline(self):
+        u = self._u()
+        self.assertFalse(u.does_answerline_have_underlines(r'C\_2 plus things'))
+        self.assertTrue(u.does_answerline_have_underlines('_France_'))
+
+    def test_answer_no_formatting_keeps_escaped_underscore(self):
+        u = self._u()
+        self.assertEqual(u.get_answer_no_formatting('_France_'), 'France')
+        self.assertEqual(u.get_answer_no_formatting(r'C\_2'), 'C_2')

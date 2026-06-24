@@ -1,0 +1,88 @@
+{% load static %}
+<aside class="app-sidebar" id="app-sidebar">
+    <a href="/main/" class="app-brand">
+        <span class="app-brand-mark">Q</span>
+        <span class="app-brand-name">QEMS3</span>
+    </a>
+
+    {% if nav_active %}
+    <div class="app-setpicker">
+        <a class="app-setpicker-main" href="/edit_question_set/{{ nav_active.id }}/" title="Go to this set's dashboard">
+            <span class="app-setpicker-label">Active set</span>
+            <span class="app-setpicker-name">{{ nav_active.name }}</span>
+        </a>
+        <button type="button" class="app-setpicker-toggle" aria-label="Switch set"><i class="fa fa-chevron-down"></i></button>
+        <div class="app-setpicker-menu">
+            {% for s in nav_sets %}
+            <a href="/edit_question_set/{{ s.id }}/"{% if s.id == nav_active.id %} class="is-active"{% endif %}>{{ s.name }}</a>
+            {% endfor %}
+            <a href="/question_sets/" class="app-setpicker-all">All my sets</a>
+            <a href="/create_question_set/" class="app-setpicker-new"><i class="fa fa-plus"></i> New set</a>
+        </div>
+    </div>
+
+    <div class="app-newbtns">
+        <a class="app-btn app-btn-primary" href="/add_tossups/{{ nav_active.id }}/"><i class="fa fa-plus"></i> Tossup</a>
+        <a class="app-btn app-btn-ghost" href="/add_bonuses/{{ nav_active.id }}/ACF-style bonus"><i class="fa fa-plus"></i> Bonus</a>
+    </div>
+
+    <a class="app-nav-item{% if '/type_questions/' in request.path %} active{% endif %}" href="/type_questions/{{ nav_active.id }}/">
+        <i class="fa fa-keyboard"></i> New Question (Type)</a>
+
+    <div class="app-nav-section">Workspace</div>
+    <a class="app-nav-item{% if '/edit_question_set/' in request.path %} active{% endif %}" href="/edit_question_set/{{ nav_active.id }}/">
+        <i class="fa fa-table-cells-large"></i> Dashboard</a>
+    <a class="app-nav-item{% if '/category_overview/' in request.path %} active{% endif %}" href="/category_overview/{{ nav_active.id }}/">
+        <i class="fa fa-chart-pie"></i> Category Overview</a>
+    <a class="app-nav-item{% if '/packet_grid/' in request.path %} active{% endif %}" href="/packet_grid/{{ nav_active.id }}/">
+        <i class="fa fa-table-cells"></i> Packet Grid</a>
+    {% if nav_first_packet %}
+    <a class="app-nav-item{% if '/view_packet/' in request.path %} active{% endif %}" href="/view_packet/{{ nav_first_packet }}/">
+        <i class="fa fa-file-lines"></i> Document View</a>
+    {% endif %}
+    <a class="app-nav-item{% if '/recap/' in request.path %} active{% endif %}" href="/recap/{{ nav_active.id }}/">
+        <i class="fa fa-clock-rotate-left"></i> Recent Changes</a>
+    <a class="app-nav-item{% if '/activity/' in request.path %} active{% endif %}" href="/activity/{{ nav_active.id }}/">
+        <i class="fa fa-bell"></i> My Activity{% if nav_new_activity %}<span class="app-nav-count app-nav-badge">{{ nav_new_activity }}</span>{% endif %}</a>
+
+    <div class="app-nav-section">Tools</div>
+    <a class="app-nav-item{% if '/view_all_questions/' in request.path %} active{% endif %}" href="/view_all_questions/{{ nav_active.id }}/">
+        <i class="fa fa-list"></i> All Questions</a>
+    <a class="app-nav-item{% if '/view_all_comments/' in request.path %} active{% endif %}" href="/view_all_comments/{{ nav_active.id }}/">
+        <i class="fa fa-comment"></i> All Comments</a>
+    <a class="app-nav-item{% if '/contributor/' in request.path %} active{% endif %}" href="/edit_question_set/{{ nav_active.id }}/#editors">
+        <i class="fa fa-users"></i> Writers</a>
+    <a class="app-nav-item{% if '/duplicate_check/' in request.path %} active{% endif %}" href="/duplicate_check/{{ nav_active.id }}/">
+        <i class="fa fa-clone"></i> Duplicate Checker</a>
+    <a class="app-nav-item{% if '/style_check/' in request.path %} active{% endif %}" href="/style_check/{{ nav_active.id }}/">
+        <i class="fa fa-wand-magic-sparkles"></i> Style Check</a>
+    <a class="app-nav-item{% if '/category_tags/' in request.path %} active{% endif %}" href="/category_tags/{{ nav_active.id }}/">
+        <i class="fa fa-tag"></i> Category Tags</a>
+    <a class="app-nav-item{% if '/packetize_set/' in request.path or '/add_packets/' in request.path %} active{% endif %}" href="/packetize_set/{{ nav_active.id }}/">
+        <i class="fa fa-layer-group"></i> Packets</a>
+
+    <div class="app-nav-section">Play</div>
+    <a class="app-nav-item{% if '/play/' in request.path %} active{% endif %}" href="/play/{{ nav_active.id }}/">
+        <i class="fa fa-play"></i> Play / Buzz</a>
+    {% else %}
+    <div class="app-newbtns">
+        <a class="app-btn app-btn-primary" href="/create_question_set/"><i class="fa fa-plus"></i> New set</a>
+    </div>
+    <a class="app-nav-item{% if '/question_sets/' in request.path %} active{% endif %}" href="/question_sets/">
+        <i class="fa fa-table-cells-large"></i> My Sets</a>
+    {% endif %}
+
+    <div class="app-sidebar-foot">
+        <div class="app-usercard">
+            <a class="app-usercard-main" href="/profile/" title="Your profile">
+                <span class="app-avatar">{{ nav_initials }}</span>
+                <span class="app-user-meta">
+                    <span class="app-user-name">{{ nav_display_name }}</span>
+                    <span class="app-user-sub">{% if nav_role %}{{ nav_role }} · {% endif %}{{ nav_username }}</span>
+                </span>
+            </a>
+            {% if nav_active %}<a class="app-usercard-icon" href="/writer_question_set_settings/{{ nav_active.id }}/" title="Your settings for this set"><i class="fa fa-gear"></i></a>{% endif %}
+            <a class="app-usercard-icon app-logout" href="/logout/" title="Log out"><i class="fa fa-arrow-right-from-bracket"></i></a>
+        </div>
+    </div>
+</aside>

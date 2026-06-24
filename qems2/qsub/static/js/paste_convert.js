@@ -803,6 +803,21 @@ $(function () {
         }).fail(function () { $btn.prop('disabled', false); });
     });
 
+    // Ctrl/Cmd+Enter in any comment box submits it (finds the nearby Post button).
+    $(document).on('keydown',
+        'textarea[name="comment"], textarea.reply-text, textarea.new-comment-text, .doc-comment-box textarea',
+        function (e) {
+            if (!(e.ctrlKey || e.metaKey)) { return; }
+            if (e.key !== 'Enter' && e.keyCode !== 13) { return; }
+            e.preventDefault();
+            var $ta = $(this), $btn = $();
+            if ($ta.closest('.add-comment-form').length) { $btn = $ta.closest('.add-comment-form').find('.comment-submit'); }
+            else if ($ta.closest('.reply-form').length) { $btn = $ta.closest('.reply-form').find('.post-reply'); }
+            else if ($ta.closest('.doc-comment-box').length) { $btn = $ta.closest('.doc-comment-box').find('.doc-comment-post'); }
+            else { $btn = $ta.closest('form').find('input[type=submit], button[type=submit]'); }
+            $btn.first().trigger('click');
+        });
+
     // Toggle a comment's resolved status
     $(document).on('click', '.resolve-toggle', function (e) {
         e.preventDefault();

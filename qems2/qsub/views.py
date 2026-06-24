@@ -5771,6 +5771,9 @@ def packet_grid(request, qset_id):
     packets = sorted_packets(qset)
 
     def build_rows(question_model, preview_func, edit_url):
+        qtype = 'tossup' if question_model is Tossup else 'bonus'
+        vacancies = {(v.packet_id, v.question_number): v.category
+                     for v in PacketSlotVacancy.objects.filter(question_set=qset, question_type=qtype)}
         cells_by_packet = {}
         max_num = 0
         for question in question_model.objects.filter(question_set=qset, packet__in=packets).select_related('category', 'packet'):
@@ -5790,8 +5793,11 @@ def packet_grid(request, qset_id):
             for p in packets:
                 cell = cells_by_packet.get(p.id, {}).get(number)
                 # Empty slot: carry the packet id so the grid can offer an
-                # "add a question here" link (handy for tiebreaker rows).
-                cells.append(cell if cell is not None else {'empty': True, 'packet_id': p.id})
+                # "add a question here" link (handy for tiebreaker rows), plus
+                # the category of whatever was last removed from this slot.
+                cells.append(cell if cell is not None else
+                             {'empty': True, 'packet_id': p.id,
+                              'removed_category': vacancies.get((p.id, number), '')})
             rows.append({'num': number, 'cells': cells})
         return rows
 
@@ -5963,6 +5969,14 @@ def unassign_packet_question(request):
                           'packet_id': question.packet_id, 'number': question.question_number}]
                 src_name = question.packet.packet_name
                 src_num = question.question_number
+                # Remember the category that used to fill this slot so the empty
+                # grid cell can hint what belongs there.
+                if src_num:
+                    PacketSlotVacancy.objects.update_or_create(
+                        packet_id=question.packet_id, question_number=src_num,
+                        question_type=question_type,
+                        defaults={'question_set': qset,
+                                  'category': str(question.category) if question.category_id else ''})
                 question.packet = None
                 question.question_number = None
                 question.save()
@@ -6239,19 +6253,42 @@ def view_packet(request, packet_id):
     # Comments for the Google-Docs-style margin
     def attach_comments(items, model):
         ct = ContentType.objects.get_for_model(model)
-        by_id = {}
-        comments = Comment.objects.filter(
+        comments = list(Comment.objects.filter(
             content_type=ct, object_pk__in=[str(q['id']) for q in items],
-            is_removed=False).order_by('submit_date').select_related('user')
-        for c in comments:
+            is_removed=False).order_by('submit_date').select_related('user'))
+        comment_ids = [c.id for c in comments]
+        # Which comments are anchored to a text selection, and which are replies.
+        anchored = {a.comment_id: a.selected_text
+                    for a in CommentAnchor.objects.filter(comment_id__in=comment_ids)}
+        parent_of = {r.comment_id: r.parent_id
+                     for r in CommentReply.objects.filter(comment_id__in=comment_ids)}
+
+        def render_comment(c):
             label = ''
             if c.user is not None:
                 label = '{0} {1}'.format(c.user.first_name, c.user.last_name).strip()
             if not label:
                 label = c.user_name or (c.user.username if c.user else 'unknown')
-            by_id.setdefault(int(c.object_pk), []).append({'user': label, 'text': c.comment, 'date': c.submit_date})
+            return {'id': c.id, 'user': label, 'text': c.comment, 'date': c.submit_date,
+                    'anchored': c.id in anchored, 'selection': anchored.get(c.id, ''),
+                    'replies': []}
+
+        rendered = {c.id: render_comment(c) for c in comments}
+        by_q = {}
+        for c in comments:
+            by_q.setdefault(int(c.object_pk), []).append(c)
         for q in items:
-            q['comments'] = by_id.get(q['id'], [])
+            qcs = by_q.get(q['id'], [])
+            present = {c.id for c in qcs}
+            threads = []
+            for c in qcs:
+                pid = parent_of.get(c.id)
+                if pid in present:
+                    continue  # nested under its parent below
+                node = rendered[c.id]
+                node['replies'] = [rendered[r.id] for r in qcs if parent_of.get(r.id) == c.id]
+                threads.append(node)
+            q['comments'] = threads
 
     attach_comments(tossups, Tossup)
     attach_comments(bonuses, Bonus)

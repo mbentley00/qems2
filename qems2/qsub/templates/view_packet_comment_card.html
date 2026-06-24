@@ -2,9 +2,22 @@
 <div class="doc-comment-card" data-for="q-{{ q.qtype }}-{{ q.id }}">
     <div class="doc-comment-target">{% if q.qtype == 'tossup' %}Tossup{% else %}Bonus{% endif %} {{ q.number }}</div>
     {% for c in q.comments %}
-    <div class="doc-comment">
+    <div class="doc-comment doc-comment-top{% if c.anchored %} doc-comment-anchored{% endif %}">
+        {% if c.anchored %}
+        <div class="doc-comment-selection" title="This comment is anchored to a selection in the question">
+            <i class="fa fa-quote-left"></i> {{ c.selection|truncatechars:120 }}
+        </div>
+        {% else %}
+        <div class="doc-comment-kind">On the whole question</div>
+        {% endif %}
         <div class="doc-comment-author">{{ c.user }} <span class="doc-comment-date">{{ c.date|date:"m/d/y H:i" }}</span></div>
         {% autoescape off %}<div class="doc-comment-text">{{ c.text|safe|comment_html|linebreaks }}</div>{% endautoescape %}
+        {% for r in c.replies %}
+        <div class="doc-comment doc-comment-reply">
+            <div class="doc-comment-author"><i class="fa fa-reply"></i> {{ r.user }} <span class="doc-comment-date">{{ r.date|date:"m/d/y H:i" }}</span></div>
+            {% autoescape off %}<div class="doc-comment-text">{{ r.text|safe|comment_html|linebreaks }}</div>{% endautoescape %}
+        </div>
+        {% endfor %}
     </div>
     {% endfor %}
 </div>

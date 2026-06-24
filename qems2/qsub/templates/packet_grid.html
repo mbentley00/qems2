@@ -4,6 +4,8 @@
 {% include "header.html" %}
 {% endblock %}
 
+{% block body_class %}grid-page{% endblock %}
+
 {% load static %}
 {% load filters %}
 
@@ -116,6 +118,7 @@
                         {% if not read_only %}<a href="#" class="swap-btn" title="Swap with a question from another packet">&#8644;</a><a href="#" class="unassign-btn" title="Remove from packet (unassign)">&#10005;</a>{% endif %}
                     {% elif not read_only %}
                         <a href="#" class="grid-add grid-fill" title="Find a question for this empty slot">+ place&hellip;</a>
+                        {% if cell.removed_category %}<div class="cell-removed-cat" title="Category of the question last removed from this slot">was: {{ cell.removed_category }}</div>{% endif %}
                     {% endif %}
                 </td>
                 {% endfor %}
@@ -148,6 +151,7 @@
                         {% if not read_only %}<a href="#" class="swap-btn" title="Swap with a question from another packet">&#8644;</a><a href="#" class="unassign-btn" title="Remove from packet (unassign)">&#10005;</a>{% endif %}
                     {% elif not read_only %}
                         <a href="#" class="grid-add grid-fill" title="Find a question for this empty slot">+ place&hellip;</a>
+                        {% if cell.removed_category %}<div class="cell-removed-cat" title="Category of the question last removed from this slot">was: {{ cell.removed_category }}</div>{% endif %}
                     {% endif %}
                 </td>
                 {% endfor %}
@@ -173,14 +177,13 @@
 </div>
 
 <style>
-/* Break out of the centered page column so the grid can use the full screen
-   width (helpful when zoomed out / on a wide monitor); it still scrolls
-   horizontally when the packets are wider than the viewport. */
+/* The grid fills the content area and scrolls horizontally when the packets
+   are wider than it. (The page also drops the content max-width so it can use
+   the full width next to the sidebar — see body.grid-page in base.css.) */
 .grid-scroll {
     overflow-x: auto;
     margin-bottom: 30px;
-    width: 96vw;
-    margin-left: calc(-48vw + 50%);
+    width: 100%;
 }
 .swap-btn {
     position: absolute;
@@ -245,6 +248,7 @@
 .cell-category { color: #777; font-size: 0.9em; }
 .grid-cell.drag-over { background-color: #d9edf7 !important; outline: 2px dashed #008CBA; }
 .grid-add { display: block; color: #bbb; font-weight: bold; text-align: center; padding: 2px 0; }
+.cell-removed-cat { color: #999; font-size: 0.92em; font-style: italic; text-align: center; padding: 1px 4px 3px; }
 .grid-cell-empty:hover { background-color: #eef7ee !important; }
 .grid-cell-empty:hover .grid-add { color: #43AC6A; }
 .grid-cell.ui-draggable-dragging-source { opacity: 0.4; }

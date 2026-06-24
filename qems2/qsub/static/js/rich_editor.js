@@ -30,12 +30,15 @@ $(function () {
     // (mirrors get_formatted_question_html)
     function qemsLineToHtml(line) {
         var html = escapeHtml(line || '');
+        // Protect escaped literals (\_ and \~) so they don't become markup.
+        html = html.replace(/\\_/g, '@@QXUS@@').replace(/\\~/g, '@@QXTI@@');
         html = html.replace(/__([^_]+)__/g, '<u>$1</u>');
         html = html.replace(/_([^_]+)_/g, '<u><b>$1</b></u>');
         html = html.replace(/~([^~]+)~/g, '<i>$1</i>');
         html = html.replace(/\\B([\s\S]+?)\\B/g, '<b>$1</b>');
         html = html.replace(/\\S([\s\S]+?)\\S/g, '<sup>$1</sup>');
         html = html.replace(/\\s([\s\S]+?)\\s/g, '<sub>$1</sub>');
+        html = html.replace(/@@QXUS@@/g, '\\_').replace(/@@QXTI@@/g, '\\~');
         return html;
     }
 

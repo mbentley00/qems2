@@ -64,6 +64,11 @@
     margin-bottom: 0.5em;
 }
 
+/* Comment input boxes (packet/question/reply threads) should be compact, not
+   the very tall default; they stay resizable for longer comments. */
+.app-content .new-comment-text { min-height: 3.4em; height: 4.5em; resize: vertical; }
+.app-content .reply-text { min-height: 3em; height: 3.5em; resize: vertical; }
+
 .reply-form .button {
     margin-right: 0.5em;
 }
@@ -228,10 +233,10 @@
     cursor: text;
 }
 
-/* Long question-stem / leadin / part-text fields start taller so a full-length
-   tossup fits without scrolling; it still grows with content. */
+/* Stem / leadin / part-text fields start a bit taller than answer lines; they
+   still grow with content as you type, so the empty box stays compact. */
 .rich-editor.rich-editor-tall {
-    min-height: 10em;
+    min-height: 5em;
 }
 
 .rich-editor.rich-editor-short {
@@ -241,9 +246,9 @@
 /* Edit-tossup / edit-bonus two-column layout: editing on the left, comments
    in a sticky panel on the right (mirrors the document view). */
 .edit-layout { display: flex; gap: 20px; align-items: flex-start; }
-.edit-main { flex: 1 1 auto; min-width: 0; }
+.edit-main { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .edit-comments {
-    flex: 0 0 360px; max-width: 360px;
+    flex: 0 0 330px; max-width: 330px;
     position: sticky; top: 8px;
     max-height: calc(100vh - 24px); overflow-y: auto;
     border-left: 1px solid #eee; padding-left: 14px;
@@ -254,10 +259,12 @@
     border-bottom: 2px solid #008CBA; font-size: 1.1em; }
 .edit-comments .add-comment-form label { font-weight: bold; font-size: 0.9em; }
 .edit-comments .add-comment-form textarea { margin-bottom: 6px; }
-@media (max-width: 980px) {
+/* The fixed sidebar eats ~250px, so stack the comments below the editor well
+   before the viewport itself gets narrow — otherwise the columns overlap. */
+@media (max-width: 1200px) {
     .edit-layout { display: block; }
     .edit-comments { max-width: none; position: static; max-height: none;
-        border-left: none; padding-left: 0; }
+        border-left: none; padding-left: 0; margin-top: 18px; }
 }
 
 /* Tidy flag checkboxes (Locked / Edited / Proofread / Read Answer Carefully). */
@@ -473,3 +480,227 @@ body.edit-page-wide > .row { max-width: 1400px; }
 
 /* Style-check page styling lives in a scoped <style> block in
    templates/style_check.html. */
+
+
+/* ==========================================================================
+   Redesign shell (v16): left sidebar + top bar, layered over Foundation.
+   Scoped to body.app-authed so logged-out/login pages are unaffected.
+   ========================================================================== */
+
+:root {
+    --qx-primary: #6d28d9;
+    --qx-primary-dark: #5b21b6;
+    --qx-bg: #f7f7fa;
+    --qx-card: #ffffff;
+    --qx-border: #e9e9ef;
+    --qx-ink: #20232e;
+    --qx-muted: #8a8f9c;
+    --qx-sidebar-w: 250px;
+    --qx-serif: Georgia, "Times New Roman", Cambria, serif;
+    --qx-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+body.app-authed {
+    margin: 0;
+    background: var(--qx-bg);
+    color: var(--qx-ink);
+    font-family: var(--qx-sans);
+}
+body.app-authed a { color: var(--qx-primary); }
+
+/* ---- Sidebar ---- */
+.app-sidebar {
+    position: fixed; top: 0; left: 0; bottom: 0; width: var(--qx-sidebar-w);
+    background: var(--qx-card); border-right: 1px solid var(--qx-border);
+    display: flex; flex-direction: column; overflow-y: auto; z-index: 60;
+    padding: 14px 12px 0; transition: transform .2s ease;
+}
+.app-brand { display: flex; align-items: center; gap: 10px; padding: 6px 6px 14px; }
+.app-brand:hover { text-decoration: none; }
+.app-brand-mark {
+    width: 30px; height: 30px; border-radius: 8px; background: var(--qx-primary);
+    color: #fff; font-weight: 700; display: flex; align-items: center; justify-content: center;
+    font-family: var(--qx-sans);
+}
+.app-brand-name { font-weight: 700; font-size: 1.15rem; color: var(--qx-ink); letter-spacing: .2px; }
+
+.app-setpicker { position: relative; display: flex; align-items: stretch; border: 1px solid var(--qx-border);
+    border-radius: 10px; margin-bottom: 12px; }
+.app-setpicker-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; padding: 8px 12px;
+    border-radius: 10px 0 0 10px; }
+.app-setpicker-main:hover { background: #f6f6fb; text-decoration: none; }
+.app-setpicker-label { font-size: .62rem; letter-spacing: .12em; text-transform: uppercase; color: var(--qx-muted); }
+.app-setpicker-name { font-weight: 700; color: var(--qx-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+body.app-authed .app-setpicker-toggle { flex: 0 0 auto; display: flex; align-items: center; background: none;
+    border: none; border-left: 1px solid var(--qx-border); color: var(--qx-muted); cursor: pointer;
+    padding: 0 12px; margin: 0; border-radius: 0 10px 10px 0; box-shadow: none; font-size: .8rem; }
+body.app-authed .app-setpicker-toggle:hover { background: #f1f1f5; color: var(--qx-ink); }
+.app-setpicker-menu { display: none; position: absolute; left: 0; right: 0; top: calc(100% + 4px);
+    background: #fff; border: 1px solid var(--qx-border); border-radius: 10px; box-shadow: 0 10px 28px rgba(20,20,40,.12);
+    padding: 6px; z-index: 70; max-height: 320px; overflow-y: auto; }
+.app-setpicker.open .app-setpicker-menu { display: block; }
+.app-setpicker-menu a { display: block; padding: 7px 10px; border-radius: 7px; color: var(--qx-ink); font-size: .9rem; }
+.app-setpicker-menu a:hover { background: #f3edfd; text-decoration: none; }
+.app-setpicker-menu a.is-active { color: var(--qx-primary); font-weight: 700; }
+.app-setpicker-all, .app-setpicker-new { border-top: 1px solid var(--qx-border); margin-top: 4px; }
+
+.app-newbtns { display: flex; gap: 8px; margin-bottom: 10px; }
+.app-newbtns .app-btn { flex: 1; justify-content: center; }
+
+.app-btn { display: inline-flex; align-items: center; gap: 6px; border-radius: 9px; padding: 8px 14px;
+    font-weight: 600; font-size: .9rem; line-height: 1; cursor: pointer; border: 1px solid transparent;
+    text-decoration: none; transition: background .12s, border-color .12s; }
+.app-btn:hover { text-decoration: none; }
+.app-btn-primary { background: var(--qx-primary); color: #fff; }
+.app-btn-primary:hover { background: var(--qx-primary-dark); color: #fff; }
+.app-btn-ghost { background: #fff; color: var(--qx-ink); border-color: var(--qx-border); }
+.app-btn-ghost:hover { background: #f6f6fb; color: var(--qx-ink); }
+
+.app-nav-section { font-size: .62rem; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--qx-muted); padding: 16px 10px 6px; }
+.app-nav-item { display: flex; align-items: center; gap: 11px; padding: 9px 10px; border-radius: 9px;
+    color: #3b3f4a; font-size: .92rem; font-weight: 500; margin-bottom: 1px; }
+.app-nav-item:hover { background: #f3f3f7; color: var(--qx-ink); text-decoration: none; }
+.app-nav-item.active { background: #f1e9fd; color: var(--qx-primary); font-weight: 700; }
+.app-nav-item .fa { width: 18px; text-align: center; font-size: .95rem; color: var(--qx-muted); }
+.app-nav-item.active .fa { color: var(--qx-primary); }
+.app-nav-count { margin-left: auto; background: #ececed; color: #6b7280; font-size: .72rem;
+    font-weight: 700; border-radius: 10px; padding: 1px 8px; }
+.app-nav-item.active .app-nav-count { background: #e2d4fb; color: var(--qx-primary); }
+
+.app-sidebar-foot { margin-top: auto; padding: 12px 4px 14px; position: sticky; bottom: 0;
+    background: var(--qx-card); border-top: 1px solid var(--qx-border); }
+.app-role { display: flex; background: #f1f1f5; border-radius: 9px; padding: 3px; margin-bottom: 10px; }
+.app-role-opt { flex: 1; text-align: center; font-size: .82rem; font-weight: 600; color: var(--qx-muted);
+    padding: 5px 0; border-radius: 7px; }
+.app-role-opt.is-active { background: #fff; color: var(--qx-ink); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.app-usercard { display: flex; align-items: center; gap: 4px; }
+.app-usercard-main { display: flex; align-items: center; gap: 10px; flex: 1 1 auto; min-width: 0;
+    padding: 4px 6px; border-radius: 9px; }
+.app-usercard-main:hover { background: #f3f3f7; text-decoration: none; }
+.app-avatar { width: 34px; height: 34px; border-radius: 50%; background: #e6d8fb; color: var(--qx-primary);
+    font-weight: 700; font-size: .8rem; display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+.app-user-meta { display: flex; flex-direction: column; min-width: 0; }
+.app-user-name { font-weight: 700; font-size: .86rem; color: var(--qx-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.app-user-sub { font-size: .74rem; color: var(--qx-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.app-usercard-icon { flex: 0 0 auto; color: var(--qx-muted); padding: 7px; border-radius: 7px; }
+.app-usercard-icon:hover { color: var(--qx-primary); background: #f1f1f5; }
+
+/* ---- Main area + top bar ---- */
+.app-main { margin-left: var(--qx-sidebar-w); min-height: 100vh; display: flex; flex-direction: column; transition: margin-left .2s ease; }
+.app-topbar { position: sticky; top: 0; z-index: 50; background: rgba(255,255,255,.92);
+    backdrop-filter: blur(6px); border-bottom: 1px solid var(--qx-border); height: 60px;
+    display: flex; align-items: center; gap: 16px; padding: 0 22px; }
+/* Foundation styles bare <button> with its blue fill/margins; fully reset the
+   burger so it's a plain, vertically-centered icon button. */
+body.app-authed .app-sidebar-burger { display: inline-flex; align-items: center; justify-content: center;
+    background: none; border: none; box-shadow: none; color: var(--qx-muted); font-size: 1.1rem;
+    cursor: pointer; padding: 0 10px; margin: 0; border-radius: 8px; height: 38px; flex: 0 0 auto; }
+body.app-authed .app-sidebar-burger:hover { background: #f1f1f5; color: var(--qx-ink); }
+body.app-authed .app-sidebar-burger:focus { outline: none; }
+.app-crumbs { display: flex; align-items: center; gap: 8px; font-size: .9rem; min-width: 0; }
+.app-crumb-muted { color: var(--qx-muted); }
+a.app-crumb-muted:hover { color: var(--qx-ink); }
+.app-crumb-sep { color: #c8ccd4; }
+.app-crumb-current { color: var(--qx-ink); font-weight: 600; }
+.app-search { position: relative; flex: 1 1 auto; max-width: 760px; margin: 0 0 0 16px; }
+.app-search .fa-magnifying-glass { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); color: var(--qx-muted); font-size: .85rem; }
+.app-search input { width: 100%; height: 38px; border: 1px solid var(--qx-border); border-radius: 10px;
+    background: #f6f6f9; padding: 0 56px 0 36px; font-size: .9rem; margin: 0; box-shadow: none; }
+.app-search input:focus { background: #fff; border-color: var(--qx-primary); outline: none; }
+.app-search-kbd { position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+    font-size: .68rem; color: var(--qx-muted); border: 1px solid var(--qx-border); border-radius: 6px; padding: 2px 6px; background: #fff; }
+/* Live answer-line preview dropdown under the top search box. */
+.app-search-results { display: none; position: absolute; top: calc(100% + 6px); left: 0; right: 0;
+    background: #fff; border: 1px solid var(--qx-border); border-radius: 10px;
+    box-shadow: 0 12px 30px rgba(20,20,40,.14); z-index: 80; max-height: 380px; overflow-y: auto; padding: 5px; }
+.app-search-item { display: flex; flex-direction: column; padding: 7px 10px; border-radius: 7px; }
+.app-search-item:hover { background: #f3edfd; text-decoration: none; }
+.app-search-item .ass-ans { font-weight: 600; color: var(--qx-ink); }
+.app-search-item .ass-loc { font-size: .74rem; color: var(--qx-muted); }
+.app-search-empty { padding: 9px 10px; color: var(--qx-muted); font-size: .82rem; }
+
+.app-nav-badge { background: #e05260; color: #fff; }
+
+.app-topbar-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+/* Uniform control height so the burger, search, and action buttons line up. */
+.app-topbar .app-btn { height: 38px; padding-top: 0; padding-bottom: 0; }
+.app-topbar .app-crumbs { flex: 0 1 auto; }
+
+.app-content { padding: 26px 32px 60px; max-width: 1500px; width: 100%; }
+/* The packet grid uses the full width beside the sidebar. */
+body.grid-page .app-content { max-width: none; }
+.app-messages { margin-bottom: 14px; }
+
+/* ---- Foundation primitives, reskinned inside the shell ---- */
+.app-content .page-header,
+.app-content h1, .app-content h2 { font-family: var(--qx-serif); color: var(--qx-ink); }
+.app-content h1 { font-size: 2.4rem; font-weight: 700; margin: 0 0 .35rem; }
+.app-content .page-header { font-weight: 700; }
+.app-content h3.page-header { font-size: 1.8rem; }
+
+.app-content .panel { background: var(--qx-card); border: 1px solid var(--qx-border); border-radius: 12px;
+    box-shadow: 0 1px 2px rgba(20,20,40,.04); padding: 18px 20px; }
+.app-content .panel.callout { background: #f7f7ff; }
+
+.app-content .button { border-radius: 9px; font-weight: 600; background: var(--qx-primary); border: none; }
+.app-content .button:hover { background: var(--qx-primary-dark); }
+.app-content .button.secondary { background: #eef0f4; color: var(--qx-ink); }
+.app-content .button.secondary:hover { background: #e3e6ec; }
+.app-content .button.alert { background: #e05260; }
+.app-content .button.success { background: #2fa860; }
+.app-content .button.tiny { border-radius: 7px; }
+
+.app-content .breadcrumbs { background: none; border: none; padding: 0; margin-bottom: 14px; }
+.app-content .breadcrumbs > * { font-size: .8rem; }
+
+/* Reskin ordinary tables, but leave purpose-built grids (e.g. the packet grid,
+   which has its own sticky-column / horizontal-scroll layout) alone. */
+.app-content table:not(.packet-grid) { border: 1px solid var(--qx-border); border-radius: 12px;
+    border-collapse: separate; border-spacing: 0; overflow: hidden; background: #fff; }
+.app-content table:not(.packet-grid) thead th { background: #fafafc; color: var(--qx-muted);
+    text-transform: uppercase; font-size: .68rem; letter-spacing: .06em; border-bottom: 1px solid var(--qx-border); }
+.app-content table:not(.packet-grid) td, .app-content table:not(.packet-grid) th { border: none; border-bottom: 1px solid #f1f1f4; }
+.app-content table:not(.packet-grid) tr:last-child td { border-bottom: none; }
+
+.app-content input[type=text], .app-content input[type=search], .app-content input[type=email],
+.app-content input[type=password], .app-content input[type=number], .app-content textarea,
+.app-content select { border-radius: 9px; border: 1px solid var(--qx-border); box-shadow: none; }
+.app-content input:focus, .app-content textarea:focus, .app-content select:focus { border-color: var(--qx-primary); box-shadow: none; }
+
+.app-content .alert-box { border-radius: 10px; border: 1px solid var(--qx-border); }
+
+/* ---- Responsive: collapse the sidebar ---- */
+.app-sidebar-scrim { display: none; position: fixed; inset: 0; background: rgba(20,20,40,.4); z-index: 55; }
+/* Desktop: the burger collapses the sidebar (content reflows full-width). */
+@media (min-width: 901px) {
+    body.app-sidebar-collapsed .app-sidebar { transform: translateX(-100%); }
+    body.app-sidebar-collapsed .app-main { margin-left: 0; }
+}
+
+/* Mobile: the sidebar is off-canvas and the burger opens it over a scrim. */
+@media (max-width: 900px) {
+    .app-sidebar { transform: translateX(-100%); }
+    .app-main { margin-left: 0; }
+    body.app-sidebar-open .app-sidebar { transform: translateX(0); }
+    body.app-sidebar-open .app-sidebar-scrim { display: block; }
+    .app-search-kbd { display: none; }
+    .app-content { padding: 18px 16px 50px; }
+}
+
+/* The generic `body.app-authed a` link color above outranks .button / .app-btn
+   on specificity, which would paint button text purple-on-purple (invisible).
+   Force legible button text with higher-specificity rules. */
+body.app-authed .app-btn-primary,
+body.app-authed .app-content .button,
+body.app-authed .app-content .button.primary,
+body.app-authed .app-content .button.alert,
+body.app-authed .app-content .button.success,
+body.app-authed .app-content a.button { color: #fff; }
+body.app-authed .app-btn-ghost,
+body.app-authed .app-content .button.secondary,
+body.app-authed .app-content a.button.secondary { color: var(--qx-ink); }
+/* Keep the sidebar nav links their intended ink/active colors, not link-purple. */
+body.app-authed a.app-nav-item { color: #3b3f4a; }
+body.app-authed a.app-nav-item.active { color: var(--qx-primary); }
+body.app-authed a.app-nav-item:hover { color: var(--qx-ink); }

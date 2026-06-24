@@ -218,6 +218,20 @@ class PacketGridLog(models.Model):
     def __str__(self):
         return '{0!s}: {1!s}'.format(self.change_date, self.description)
 
+class PacketSlotVacancy(models.Model):
+    """The category of the question most recently removed from a packet slot, so
+    the now-empty grid cell can hint what used to fill it. One row per
+    (packet, number, type); overwritten on each removal and ignored while the
+    slot is filled."""
+    question_set = models.ForeignKey(QuestionSet, on_delete=models.CASCADE)
+    packet = models.ForeignKey(Packet, on_delete=models.CASCADE)
+    question_number = models.PositiveIntegerField()
+    question_type = models.CharField(max_length=10)  # 'tossup' or 'bonus'
+    category = models.TextField(blank=True, default='')
+
+    class Meta:
+        unique_together = ('packet', 'question_number', 'question_type')
+
 class StyleIssueDismissal(models.Model):
     """Records that a style-check issue was dismissed for a question, so it is
     hidden on future runs. Identified by (question, rule code, token) where the

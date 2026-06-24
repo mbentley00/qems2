@@ -10,7 +10,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
 
     <link rel="stylesheet" href="{% static 'css/app.min.css' %}">
-    <link rel="stylesheet" href="{% static 'css/base.css' %}?v=15">
+    <link rel="stylesheet" href="{% static 'css/base.css' %}?v=27">
     <link rel="stylesheet" href="{% static 'fontawesome/css/all.min.css' %}">
 
     {% if DEBUG %}
@@ -22,6 +22,8 @@
 
     <link href='https://fonts.googleapis.com/css?family=Montserrat:400,700' rel='stylesheet' type='text/css'>
     <link href='https://fonts.googleapis.com/css?family=Karla:400,400italic,700,700italic' rel='stylesheet' type='text/css'>
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href='https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap' rel='stylesheet'>
 
     <script src="{% static 'foundation/js/vendor/jquery.js' %}"></script>
     <script src="{% static 'foundation/js/vendor/jquery.cookie.js' %}"></script>
@@ -34,17 +36,130 @@
     <script src="{% static 'js/qsub.js' %}"></script>
 </head>
 
-<body class="{% block body_class %}{% endblock %}">
+<body class="{% block body_class %}{% endblock %}{% if request.user.is_authenticated %} app-authed{% endif %}">
 
+{% if request.user.is_authenticated %}
+    <script>try{if(window.innerWidth>900&&localStorage.getItem('qx_sidebar_collapsed')==='1'){document.body.classList.add('app-sidebar-collapsed');}}catch(e){}</script>
+    {% include "_sidebar.html" %}
+    <div class="app-sidebar-scrim" id="app-sidebar-scrim"></div>
+    <div class="app-main">
+        <header class="app-topbar">
+            <button type="button" class="app-sidebar-burger" id="app-sidebar-toggle" aria-label="Menu"><i class="fa fa-bars"></i></button>
+            <nav class="app-crumbs">
+                {% if nav_active %}<a href="/edit_question_set/{{ nav_active.id }}/" class="app-crumb-muted">{{ nav_active.name }}</a>{% endif %}
+                {% block page_crumb %}{% endblock %}
+            </nav>
+            {% if nav_active %}
+            <form class="app-search" id="app-search-form" method="get" action="/search/">
+                <i class="fa fa-magnifying-glass"></i>
+                <input type="search" name="q" id="app-search-input" placeholder="Search answer lines, press enter for full text search" autocomplete="off">
+                <span class="app-search-kbd">Ctrl K</span>
+                <input type="hidden" name="qset" value="{{ nav_active.id }}">
+                <input type="hidden" name="models" value="qsub.tossup">
+                <input type="hidden" name="models" value="qsub.bonus">
+                <div class="app-search-results" id="app-search-results"></div>
+            </form>
+            {% endif %}
+            <div class="app-topbar-actions">
+                {% block topbar_actions %}{% endblock %}
+            </div>
+        </header>
+        <div class="app-content">
+{% else %}
     {% block header %}{% endblock %}
     <div class="row">
         <div class="small-11 small-centered columns">
-            {% block content %}{% endblock %}
-        </div>
-    </div>
+{% endif %}
 
-    <script src="{% static 'js/paste_convert.js' %}?v=11"></script>
-    <script src="{% static 'js/rich_editor.js' %}?v=8"></script>
+            {% block content %}{% endblock %}
+
+{% if request.user.is_authenticated %}
+        </div>{# /app-content #}
+    </div>{# /app-main #}
+    <script>
+    (function () {
+        var scrim = document.getElementById('app-sidebar-scrim'),
+            btn = document.getElementById('app-sidebar-toggle');
+        if (btn) {
+            btn.addEventListener('click', function () {
+                if (window.matchMedia('(max-width: 900px)').matches) {
+                    document.body.classList.toggle('app-sidebar-open');  // mobile: off-canvas
+                } else {
+                    var collapsed = document.body.classList.toggle('app-sidebar-collapsed');  // desktop: collapse
+                    try { localStorage.setItem('qx_sidebar_collapsed', collapsed ? '1' : '0'); } catch (e) {}
+                }
+            });
+        }
+        if (scrim) { scrim.addEventListener('click', function () { document.body.classList.remove('app-sidebar-open'); }); }
+
+        var picker = document.querySelector('.app-setpicker');
+        var pickerToggle = picker && picker.querySelector('.app-setpicker-toggle');
+        if (pickerToggle) {
+            pickerToggle.addEventListener('click', function (e) {
+                e.preventDefault(); e.stopPropagation();
+                picker.classList.toggle('open');
+            });
+            document.addEventListener('click', function (e) {
+                if (!picker.contains(e.target)) { picker.classList.remove('open'); }
+            });
+        }
+
+        document.addEventListener('keydown', function (e) {
+            if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+                var inp = document.getElementById('app-search-input');
+                if (inp) { e.preventDefault(); inp.focus(); }
+            }
+        });
+
+        // Top search: live answer-line preview as you type; Enter submits the
+        // full text search (question text) via the form's normal GET to /search/.
+        var sForm = document.getElementById('app-search-form'),
+            sInput = document.getElementById('app-search-input'),
+            sRes = document.getElementById('app-search-results');
+        if (sForm && sInput && sRes) {
+            var sQset = (sForm.querySelector('input[name=qset]') || {}).value || 'all';
+            var sT = null, sSeq = 0, sXhr = null;
+            function sEsc(s) { return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+            function sHide() { sRes.style.display = 'none'; }
+            function sRender(list) {
+                if (!list || !list.length) {
+                    sRes.innerHTML = '<div class="app-search-empty">No answer-line match — press Enter to search question text.</div>';
+                    sRes.style.display = 'block'; return;
+                }
+                sRes.innerHTML = list.slice(0, 8).map(function (r) {
+                    return '<a class="app-search-item" href="' + r.edit_url + '" target="_blank" rel="noopener">'
+                        + '<span class="ass-ans">' + sEsc(r.answer) + '</span>'
+                        + '<span class="ass-loc">' + sEsc(r.location || '') + '</span></a>';
+                }).join('');
+                sRes.style.display = 'block';
+            }
+            sInput.addEventListener('input', function () {
+                var q = sInput.value.trim();
+                clearTimeout(sT);
+                if (q.length < 2) { sHide(); sRes.innerHTML = ''; return; }
+                sT = setTimeout(function () {
+                    var mySeq = ++sSeq;
+                    if (sXhr) { sXhr.abort(); }
+                    sXhr = new XMLHttpRequest();
+                    sXhr.open('GET', '/quick_search_results/?qset=' + encodeURIComponent(sQset)
+                        + '&q=' + encodeURIComponent(q) + '&types=tossup&types=bonus');
+                    sXhr.onload = function () { if (mySeq === sSeq) { try { sRender(JSON.parse(sXhr.responseText).results); } catch (e) { sHide(); } } };
+                    sXhr.onerror = function () { if (mySeq === sSeq) { sHide(); } };
+                    sXhr.send();
+                }, 160);
+            });
+            sInput.addEventListener('keydown', function (e) { if (e.key === 'Escape') { sHide(); } });
+            document.addEventListener('click', function (e) { if (!sForm.contains(e.target)) { sHide(); } });
+        }
+    })();
+    </script>
+{% else %}
+        </div>{# /columns #}
+    </div>{# /row #}
+{% endif %}
+
+    <script src="{% static 'js/paste_convert.js' %}?v=12"></script>
+    <script src="{% static 'js/rich_editor.js' %}?v=9"></script>
     <script src="{% static 'foundation/js/foundation.min.js' %}"></script>
     <script>
         $(document).foundation({
@@ -56,4 +171,3 @@
     </script>
 </body>
 </html>
-

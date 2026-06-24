@@ -154,6 +154,7 @@ TEMPLATES = [
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
                 'qems2.qsub.context_processors.debug_flag',
+                'qems2.qsub.context_processors.nav',
             ],
         },
     },

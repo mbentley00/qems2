@@ -55,6 +55,26 @@
 </table>
 {% endif %}
 
+<div class="panel callout radius" style="margin-top:1.5rem;"><strong>Recent comments</strong></div>
+{% if not comment_items %}
+<p>No comments have been left in this window.</p>
+{% else %}
+<table class="table-striped table-hover recap-table">
+    <thead><tr><th>When</th><th>From</th><th>Comment</th><th>On</th><th></th></tr></thead>
+    <tbody>
+    {% for c in comment_items %}
+        <tr>
+            <td>{{ c.date|to_short_datetime }}</td>
+            <td>{{ c.by }}</td>
+            <td>{{ c.text }}</td>
+            <td>{{ c.qtype }}</td>
+            <td><a href="{{ c.edit_url }}" class="button tiny secondary recap-view">View</a></td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
 <div class="panel callout radius" style="margin-top:1.5rem;"><strong>Recent edits</strong></div>
 {% if not edit_items %}
 <p>No questions have been edited in this window.</p>
@@ -70,26 +90,6 @@
             <td>{{ e.by }}</td>
             <td>{{ e.location }}</td>
             <td><a href="{{ e.edit_url }}" class="button tiny secondary recap-view">View</a></td>
-        </tr>
-    {% endfor %}
-    </tbody>
-</table>
-{% endif %}
-
-<div class="panel callout radius" style="margin-top:1.5rem;"><strong>Recent comments</strong></div>
-{% if not comment_items %}
-<p>No comments have been left in this window.</p>
-{% else %}
-<table class="table-striped table-hover recap-table">
-    <thead><tr><th>When</th><th>From</th><th>Comment</th><th>On</th><th></th></tr></thead>
-    <tbody>
-    {% for c in comment_items %}
-        <tr>
-            <td>{{ c.date|to_short_datetime }}</td>
-            <td>{{ c.by }}</td>
-            <td>{{ c.text }}</td>
-            <td>{{ c.qtype }}</td>
-            <td><a href="{{ c.edit_url }}" class="button tiny secondary recap-view">View</a></td>
         </tr>
     {% endfor %}
     </tbody>
