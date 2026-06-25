@@ -63,6 +63,13 @@
         <a href="#" id="paste-full-tossup" class="button small secondary">Paste Full Tossup</a>
         <a href="#" id="copy-for-discord-tossup" class="button small secondary">Copy for Discord</a>
         <a href="#" id="copy-for-discord-plain-tossup" class="button small secondary">Copy for Discord (no spoilers)</a>
+        {% if tossup %}
+        <a href="/move_tossup/{{ qset.id }}/{{ tossup.id }}" class="button small secondary">Move set</a>
+        <a href="/tossup_history/{{ tossup.id }}" class="button small secondary">History</a>
+        <a href="/convert_tossup/{{ tossup.id }}" class="button small secondary convert_tossup" value="{{ tossup.id }}" qset-id="{{ qset.id }}" target-type="ACF-style bonus">Convert to ACF bonus</a>
+        <a href="/categories/{{ qset.id }}/{{ tossup.category.id }}" class="button small secondary">All in category</a>
+        <a href="/delete_tossup/{{ tossup.id }}" class="button small alert delete_tossup" value="{{ tossup.id }}" qset-id="{{ qset.id }}">Delete</a>
+        {% endif %}
         <label>
             Tossup Text
             {{ form.tossup_text }}
@@ -81,48 +88,30 @@
         {% endif %}
     {% endif %}
     {% if not read_only %}
-        <div class="row">
+        <div class="qmeta-fields">
         {% for field in form %}
-            {% if field.html_name == "category" or field.html_name == "author" %}
-                <div class="small-6 columns">
-                    <div class="row collapse">
-                        <div class="small-4 columns">
-                            <span class="prefix text-left" for="{{ field.id_for_label }}">{% if field.html_name == "category" %}Category{% else %}Author{% endif %}</span>
-                        </div>
-                        <div class="small-8 columns">
-                            {{ field }} 
-                        </div>
-                    </div>
-                </div>
-                {% if field.errors %}
-                    {{ field.errors }}
-                {% endif %}
+            {% if field.html_name == "category" %}
+            <div class="qmeta-field"><label for="{{ field.id_for_label }}">Category</label>{{ field }}{{ field.errors }}</div>
+            {% elif field.html_name == "author" %}
+            <div class="qmeta-field"><label for="{{ field.id_for_label }}">Author</label>{{ field }}{{ field.errors }}</div>
             {% endif %}
         {% endfor %}
         </div>
         {{ form.packet.as_hidden }}
-        <div class="row edit-meta-row">
-            <div class="small-5 columns">
-                <div class="packet-assignment">
-                    <span class="prefix text-left">Packet</span>
-                    {% if tossup.packet %}
-                        <strong>{{ tossup.packet.packet_name }}</strong>{% if tossup.question_number %} &mdash; #{{ tossup.question_number }}{% endif %}
-                    {% else %}
-                        <em>Unpacketized</em>
-                    {% endif %}
-                    <a href="/packet_grid/{{ qset.id }}/" class="packet-grid-link">Packet grid</a>
-                </div>
+        <div class="qmeta-row">
+            <div class="qmeta-packet">
+                <span class="qmeta-label">Packet</span>
+                {% if tossup.packet %}<strong>{{ tossup.packet.packet_name }}</strong>{% if tossup.question_number %} &mdash; #{{ tossup.question_number }}{% endif %}{% else %}<em>Unpacketized</em>{% endif %}
+                <a href="/packet_grid/{{ qset.id }}/" class="qmeta-gridlink">Packet grid</a>
             </div>
-            <div class="small-7 columns">
-                <ul class="question-flags">
-                    {% if role == "editor" %}
-                    <li><label>{{ form.locked }} Locked</label></li>
-                    <li><label>{{ form.edited }} Edited</label></li>
-                    {% endif %}
-                    <li><label>{{ form.proofread }} Proofread</label></li>
-                    <li><label>{{ form.read_carefully }} Read Answer Carefully</label></li>
-                </ul>
-            </div>
+            <ul class="qmeta-flags">
+                {% if role == "editor" %}
+                <li><label>{{ form.locked }} Locked</label></li>
+                <li><label>{{ form.edited }} Edited</label></li>
+                {% endif %}
+                <li><label>{{ form.proofread }} Proofread</label></li>
+                <li><label>{{ form.read_carefully }} Read Answer Carefully</label></li>
+            </ul>
         </div>
 
 
@@ -148,16 +137,6 @@
         </div>
     {% endif %}
 </form>
-
-{% if tossup %}
-    <ul class="button-group even">        
-        <li><a href="/move_tossup/{{ qset.id }}/{{ tossup.id }}" class="button primary">Move set</a></li>
-        <li><a href="/tossup_history/{{ tossup.id }}" class="button primary">History</a></li>
-        <li><a href="/delete_tossup/{{ tossup.id }}" class="button primary delete_tossup" value="{{ tossup.id }}" qset-id="{{ qset.id }}">Delete</a></li>
-        <li><a href="/convert_tossup/{{ tossup.id }}" class="button primary convert_tossup" value="{{ tossup.id }}" qset-id="{{ qset.id }}" target-type="ACF-style bonus">Convert to ACF bonus</a></li>
-        <li><a href="/categories/{{ qset.id }}/{{ tossup.category.id }}" class="button primary">All in category</a></li>
-    </ul>
-{% endif %}
 
 {% include "_discord_threads.html" %}
 {% include "_playtest_results.html" %}

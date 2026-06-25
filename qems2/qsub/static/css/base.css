@@ -267,14 +267,36 @@
         border-left: none; padding-left: 0; margin-top: 18px; }
 }
 
-/* Tidy flag checkboxes (Locked / Edited / Proofread / Read Answer Carefully). */
+/* Edit-page meta: Category/Author dropdowns as clean labeled fields, plus a
+   compact packet + status-flags bar (replaces the old prefix-box layout). */
+.app-content .qmeta-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 22px;
+    margin: 6px 0 16px; max-width: 860px; }
+.app-content .qmeta-field { display: flex; flex-direction: column; gap: 5px; }
+.app-content .qmeta-field > label { font-weight: 600; font-size: 0.82rem; color: #565b66; margin: 0; }
+.app-content .qmeta-field select,
+.app-content .qmeta-field input { margin: 0; height: 40px; width: 100%; }
+.app-content .qmeta-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 26px;
+    margin-bottom: 16px; padding: 12px 16px; background: #f6f6fb;
+    border: 1px solid #ececf0; border-radius: 10px; }
+.qmeta-packet { font-size: 0.95rem; }
+.qmeta-packet .qmeta-label { font-weight: 700; color: #565b66; margin-right: 6px; }
+.qmeta-gridlink { margin-left: 10px; font-size: 0.85rem; }
+.qmeta-flags { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 0; list-style: none; }
+.qmeta-flags li { margin: 0; }
+.qmeta-flags label { display: inline-flex; align-items: center; gap: 6px; font-weight: 500;
+    white-space: nowrap; margin: 0; cursor: pointer; }
+.qmeta-flags input[type="checkbox"] { margin: 0; }
+@media (max-width: 760px) { .app-content .qmeta-fields { grid-template-columns: 1fr; } }
+
+/* Tidy flag checkboxes (legacy markup elsewhere). */
 .edit-meta-row { margin-top: 8px; }
 ul.question-flags { list-style: none; margin: 0; }
 ul.question-flags li { display: inline-block; margin: 0 16px 4px 0; }
 ul.question-flags label { display: inline; font-weight: normal; white-space: nowrap; }
 ul.question-flags input[type="checkbox"] { margin: 0 4px 0 0; vertical-align: middle; }
-/* Edit pages use more horizontal space than the default centered column. */
-body.edit-page-wide > .row { max-width: 1400px; }
+/* Edit pages use the full width available (so they widen when the sidebar
+   is collapsed) instead of the default content cap. */
+body.edit-page-wide .app-content { max-width: none; }
 
 /* Members who hold a role via a role group (rather than a direct assignment). */
 .member-via-group { color: #777; font-style: italic; }
