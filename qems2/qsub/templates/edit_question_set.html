@@ -83,6 +83,7 @@
                 {% endfor %}
             </tbody>
         </table>
+        <div class="set-info-card">
         <h4 class="set-info-heading">Set Information</h4>
         <form action="" method="post" class="clearfix set-info-form">
             {% csrf_token %}
@@ -98,31 +99,38 @@
                     <div class="set-info-field"><label for="{{ field.id_for_label }}">Distribution</label>{{ field }}{{ field.errors }}</div>
                     {% endif %}
                 {% endfor %}
-                <div class="set-info-field"><label>Max ACF Tossup Length</label>{{ form.max_acf_tossup_length }}</div>
-                <div class="set-info-field"><label>Max ACF Bonus Length</label>{{ form.max_acf_bonus_length }}</div>
+                <div class="set-info-field"><label for="{{ form.max_acf_tossup_length.id_for_label }}">Max ACF Tossup Length</label>{{ form.max_acf_tossup_length }}</div>
+                <div class="set-info-field"><label for="{{ form.max_acf_bonus_length.id_for_label }}">Max ACF Bonus Length</label>{{ form.max_acf_bonus_length }}</div>
             </div>
             <div class="set-info-checks">
-                <label class="set-info-check">{{ form.char_count_ignores_pronunciation_guides }} Character counts ignore pronunciation guides</label>
-                <label class="set-info-check">{{ form.tossups_only }} Tossup-only tournament (no bonuses)
-                    <small>Hides bonus requirements; existing bonuses are never deleted.</small></label>
-                <label class="set-info-check">{{ form.public }} Public (listed for everyone)
-                    <small>Anyone can see this set is being written and request to join (which emails you). It grants no access by itself.</small></label>
+                <label class="set-info-check">{{ form.char_count_ignores_pronunciation_guides }}
+                    <span>Character counts ignore pronunciation guides</span></label>
+                <label class="set-info-check">{{ form.tossups_only }}
+                    <span>Tossup-only tournament (no bonuses)
+                        <small>Hides bonus requirements; existing bonuses are never deleted.</small></span></label>
+                <label class="set-info-check">{{ form.public }}
+                    <span>Public (listed for everyone)
+                        <small>Anyone can see this set is being written and request to join (which emails you). It grants no access by itself.</small></span></label>
             </div>
             {% if role == "editor" %}
                 <button type="submit" class="button primary">Submit Changes</button>
             {% endif %}
         </form>
+        </div>
         <style>
-        .set-info-heading { font-family: Georgia, "Times New Roman", serif; margin: 1.5rem 0 0.8rem; }
-        .set-info-form { max-width: 940px; }
-        .set-info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 22px; margin-bottom: 18px; }
-        .set-info-field { display: flex; flex-direction: column; gap: 5px; }
+        .set-info-card { background: #fff; border: 1px solid #e9e9ef; border-radius: 12px;
+            padding: 22px 26px; margin: 1.25rem 0; box-shadow: 0 1px 2px rgba(20,20,40,.04); max-width: 960px; }
+        .set-info-heading { font-family: Georgia, "Times New Roman", serif; margin: 0 0 1.1rem; font-size: 1.45rem; }
+        .set-info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 24px; margin-bottom: 20px; }
+        .set-info-field { display: flex; flex-direction: column; gap: 6px; }
         .set-info-field > label { font-weight: 600; font-size: 0.82rem; color: #565b66; margin: 0; }
-        .set-info-field input, .set-info-field select { margin: 0; height: 40px; }
-        .set-info-checks { display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px; }
-        .set-info-check { font-weight: 600; color: #2b2f3a; display: block; cursor: pointer; }
-        .set-info-check input { margin: 0 8px 0 0; vertical-align: middle; }
-        .set-info-check small { display: block; font-weight: 400; color: #8a8f9c; margin: 3px 0 0 26px; }
+        .set-info-field input, .set-info-field select { margin: 0; height: 42px; width: 100%; }
+        .set-info-checks { display: flex; flex-direction: column; gap: 14px;
+            margin-bottom: 20px; padding-top: 16px; border-top: 1px solid #f0f0f3; }
+        .set-info-check { display: flex; align-items: flex-start; gap: 10px;
+            font-weight: 600; color: #2b2f3a; cursor: pointer; }
+        .set-info-check input { margin: 2px 0 0; flex: 0 0 auto; }
+        .set-info-check small { display: block; font-weight: 400; color: #8a8f9c; margin-top: 3px; }
         @media (max-width: 760px) { .set-info-grid { grid-template-columns: 1fr; } }
         </style>
         <script>

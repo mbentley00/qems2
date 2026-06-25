@@ -28,12 +28,12 @@
 </div>
 
 <div class="recap-summary">
-    <span class="recap-stat"><strong>{{ new_question_count }}</strong> new question{{ new_question_count|pluralize }}</span>
-    <span class="recap-stat"><strong>{{ edit_count }}</strong> edit{{ edit_count|pluralize }}</span>
-    <span class="recap-stat"><strong>{{ comment_count }}</strong> comment{{ comment_count|pluralize }}</span>
+    <a class="recap-stat" href="#recap-new"><strong>{{ new_question_count }}</strong> new question{{ new_question_count|pluralize }}</a>
+    <a class="recap-stat" href="#recap-comments"><strong>{{ comment_count }}</strong> comment{{ comment_count|pluralize }}</a>
+    <a class="recap-stat" href="#recap-edits"><strong>{{ edit_count }}</strong> edit{{ edit_count|pluralize }}</a>
 </div>
 
-<div class="panel callout radius"><strong>New questions</strong></div>
+<div class="panel callout radius" id="recap-new"><strong>New questions</strong></div>
 {% if not new_questions %}
 <p>No questions have been added in this window.</p>
 {% else %}
@@ -55,7 +55,7 @@
 </table>
 {% endif %}
 
-<div class="panel callout radius" style="margin-top:1.5rem;"><strong>Recent comments</strong></div>
+<div class="panel callout radius" id="recap-comments" style="margin-top:1.5rem;"><strong>Recent comments</strong></div>
 {% if not comment_items %}
 <p>No comments have been left in this window.</p>
 {% else %}
@@ -75,7 +75,7 @@
 </table>
 {% endif %}
 
-<div class="panel callout radius" style="margin-top:1.5rem;"><strong>Recent edits</strong></div>
+<div class="panel callout radius" id="recap-edits" style="margin-top:1.5rem;"><strong>Recent edits</strong></div>
 {% if not edit_items %}
 <p>No questions have been edited in this window.</p>
 {% else %}
