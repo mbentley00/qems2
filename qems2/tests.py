@@ -1345,6 +1345,19 @@ class StyleCheckFixTests(TestCase):
         self.tu.refresh_from_db()
         self.assertIn('_Goethe_ ("GUR-tuh")', self.tu.tossup_text)
 
+    def test_apply_fix_for_possessive(self):
+        # A possessive apostrophe must not be mistaken for a guide opener
+        # (regression: "Goethe's" blocked the auto-fix).
+        self.tu.tossup_text = "The poet Goethe's most famous work."
+        self.tu.save()
+        resp = self.client.post('/apply_style_fix/', {
+            'question_type': 'tossup', 'question_id': self.tu.id,
+            'code': 'pronunciation', 'token': 'Question|Goethe', 'guide': 'minkowski'})
+        self.assertEqual(resp.status_code, 200)
+        self.tu.refresh_from_db()
+        self.assertIn('Goethe ("GUR-tuh")', self.tu.tossup_text)
+        self.assertIn("(\"GUR-tuh\")'s", self.tu.tossup_text)  # inserted before the 's
+
     def test_apply_is_idempotent_after_guide_present(self):
         self.client.post('/apply_style_fix/', {
             'question_type': 'tossup', 'question_id': self.tu.id,

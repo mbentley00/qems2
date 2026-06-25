@@ -17,8 +17,10 @@ DATA_PATH = os.path.join(os.path.dirname(__file__), 'data', 'pronunciations.json
 # hyphens (so "d'Ivoire" and "Lévi-Strauss" stay single tokens).
 _WORD_RE = re.compile(r"[^\W\d_]+(?:['’\-][^\W\d_]+)*")
 
-# A pronunciation-guide opener right after a term: "(", "[", or a quote.
-_GUIDE_OPENER_RE = re.compile(r"""\s{0,2}[(\["“‘']""")
+# A pronunciation-guide opener right after a term: "(", "[", or a double quote.
+# NB: single quotes are deliberately excluded — an apostrophe in a possessive
+# ("Goethe's") would otherwise be read as an opener, blocking the auto-fix.
+_GUIDE_OPENER_RE = re.compile(r"""\s{0,2}[(\["“]""")
 
 # Cache: (by_first, max_phrase_len). Built once on first use.
 _MATCHER = None
