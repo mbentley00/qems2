@@ -213,6 +213,8 @@ INSTALLED_APPS = (
 
 # Account and registration settings
 ACCOUNT_EMAIL_VERIFICATION='none'
+# Allow signing in with either a username or an email address.
+ACCOUNT_LOGIN_METHODS = {'username', 'email'}
 ACCOUNT_SIGNUP_FIELDS = ['email*', 'username*', 'password1*', 'password2*']
 ACCOUNT_SIGNUP_FORM_CLASS = 'qems2.qsub.forms.RegistrationFormWithName'
 

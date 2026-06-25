@@ -1,4 +1,5 @@
-from django.test import TestCase
+from django.test import TestCase, override_settings
+from django.core import mail
 from django.contrib.auth.models import AnonymousUser, User
 from datetime import datetime
 from django.utils import timezone
@@ -3008,3 +3009,80 @@ class EscapedUnderscoreTests(TestCase):
         u = self._u()
         self.assertEqual(u.get_answer_no_formatting('_France_'), 'France')
         self.assertEqual(u.get_answer_no_formatting(r'C\_2'), 'C_2')
+
+
+@override_settings(EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend',
+                   BASE_URL='https://test.example')
+class RoleGroupJoinAndNotifyTests(TestCase):
+    """Private membership, request-to-join emails, add notifications, and the
+    new-account age gate on creating role groups."""
+
+    def setUp(self):
+        from datetime import timedelta
+        self.ou = User.objects.create_user('jn_owner', password='pw', email='owner@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.mu = User.objects.create_user('jn_member', password='pw', email='member@t.com')
+        self.member = Writer.objects.get(user=self.mu)
+        self.ru = User.objects.create_user('jn_req', password='pw', email='req@t.com')
+        self.req = Writer.objects.get(user=self.ru)
+        for u in (self.ou, self.mu, self.ru):
+            u.date_joined = timezone.now() - timedelta(days=3); u.save()
+        self.dist = Distribution.objects.create(name='jn dist')
+        self.qset = QuestionSet.objects.create(
+            name='JN Set', date=timezone.now(), host='', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.group = RoleGroup.objects.create(name='JN Group', created_by=self.owner)
+        self.group.members.add(self.member)
+
+    def _wait_mail(self, n=1, timeout=2.0):
+        import time
+        end = time.time() + timeout
+        while time.time() < end and len(mail.outbox) < n:
+            time.sleep(0.02)
+
+    def test_membership_hidden_from_non_member(self):
+        self.client.login(username='jn_req', password='pw')
+        body = self.client.get('/role_groups/').content.decode()
+        self.assertNotIn('jn_member', body)      # member's username is private
+        self.assertIn('Request to join', body)
+        self.client.logout(); self.client.login(username='jn_member', password='pw')
+        body2 = self.client.get('/role_groups/').content.decode()
+        self.assertIn('jn_member', body2)        # a member sees the roster
+
+    def test_request_join_emails_owner(self):
+        self.client.login(username='jn_req', password='pw')
+        mail.outbox = []
+        resp = self.client.post('/role_groups/', {'action': 'request_join', 'group_id': self.group.id})
+        self.assertEqual(resp.status_code, 200)
+        self._wait_mail(1)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn('owner@t.com', mail.outbox[0].to)
+        self.assertIn('JN Group', mail.outbox[0].subject)
+
+    def test_add_member_emails_new_member(self):
+        self.client.login(username='jn_owner', password='pw')
+        mail.outbox = []
+        self.client.post('/role_groups/', {'action': 'add_member',
+                                           'group_id': self.group.id, 'username': 'jn_req'})
+        self.assertIn(self.req, self.group.members.all())
+        self._wait_mail(1)
+        self.assertTrue(any('req@t.com' in m.to for m in mail.outbox))
+
+    def test_add_editor_emails_member(self):
+        self.client.login(username='jn_owner', password='pw')
+        mail.outbox = []
+        self.client.post('/add_editor/%d/' % self.qset.id, {'editors_to_add': [str(self.req.id)]})
+        self.assertIn(self.req, self.qset.editor.all())
+        self._wait_mail(1)
+        self.assertTrue(any('req@t.com' in m.to for m in mail.outbox))
+
+    def test_new_account_cannot_create_group(self):
+        User.objects.create_user('jn_new', password='pw', email='n@t.com')  # date_joined = now
+        self.client.login(username='jn_new', password='pw')
+        self.client.post('/role_groups/', {'action': 'create', 'name': 'Brand New Group'})
+        self.assertFalse(RoleGroup.objects.filter(name='Brand New Group').exists())
+
+    def test_old_account_can_create_group(self):
+        self.client.login(username='jn_owner', password='pw')
+        self.client.post('/role_groups/', {'action': 'create', 'name': 'Aged Group'})
+        self.assertTrue(RoleGroup.objects.filter(name='Aged Group').exists())

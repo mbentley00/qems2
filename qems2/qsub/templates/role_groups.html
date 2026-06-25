@@ -29,7 +29,7 @@ them and they lose it.</p>
 {% for g in groups %}
 <div class="panel radius">
     <h5 style="margin-top:0;">{{ g.group.name }}
-        <small style="color:#888;">({{ g.members|length }} member{{ g.members|length|pluralize }})</small>
+        <small style="color:#888;">({{ g.member_count }} member{{ g.member_count|pluralize }})</small>
     </h5>
 
     {% if g.assignments %}
@@ -40,6 +40,7 @@ them and they lose it.</p>
     <p style="color:#888; margin-bottom:6px;">Not attached to any set yet.</p>
     {% endif %}
 
+    {% if g.is_member or g.can_manage %}
     <table class="table-striped" style="margin-bottom:8px;">
         <tbody>
         {% for m in g.members %}
@@ -63,23 +64,32 @@ them and they lose it.</p>
         </tbody>
     </table>
 
-    {% if g.can_manage %}
-    <form method="post" action="/role_groups/" class="form-inline" style="display:inline;">
-        {% csrf_token %}
-        <input type="hidden" name="action" value="add_member">
-        <input type="hidden" name="group_id" value="{{ g.group.id }}">
-        <input type="text" name="username" placeholder="username to add" style="display:inline-block; width:200px; margin:0 6px 0 0;">
-        <button type="submit" class="button tiny primary" style="margin:0;">Add member</button>
-    </form>
-    <form method="post" action="/role_groups/" style="display:inline; float:right;"
-          onsubmit="return confirm('Delete this group? Members will lose any role it granted.');">
-        {% csrf_token %}
-        <input type="hidden" name="action" value="delete">
-        <input type="hidden" name="group_id" value="{{ g.group.id }}">
-        <button type="submit" class="button tiny secondary" style="margin:0;">Delete group</button>
-    </form>
+        {% if g.can_manage %}
+        <form method="post" action="/role_groups/" class="form-inline" style="display:inline;">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="add_member">
+            <input type="hidden" name="group_id" value="{{ g.group.id }}">
+            <input type="text" name="username" placeholder="username to add" style="display:inline-block; width:200px; margin:0 6px 0 0;">
+            <button type="submit" class="button tiny primary" style="margin:0;">Add member</button>
+        </form>
+        <form method="post" action="/role_groups/" style="display:inline; float:right;"
+              onsubmit="return confirm('Delete this group? Members will lose any role it granted.');">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="delete">
+            <input type="hidden" name="group_id" value="{{ g.group.id }}">
+            <button type="submit" class="button tiny secondary" style="margin:0;">Delete group</button>
+        </form>
+        {% else %}
+        <p style="color:#999; font-size:0.85em;">You're a member. Only the group's creator can manage members.</p>
+        {% endif %}
     {% else %}
-    <p style="color:#999; font-size:0.85em;">Only the group's creator can manage its members.</p>
+    <p style="color:#888; font-size:0.9em;">Membership is private. Ask to be added:</p>
+    <form method="post" action="/role_groups/" style="display:inline;">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="request_join">
+        <input type="hidden" name="group_id" value="{{ g.group.id }}">
+        <button type="submit" class="button tiny primary" style="margin:0;">Request to join</button>
+    </form>
     {% endif %}
 </div>
 {% empty %}

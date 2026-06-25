@@ -178,6 +178,64 @@ def request_to_join(request):
         'message': 'Your request has been emailed to the set owner.'}))
 
 
+def _writer_email(writer):
+    return writer.user.email if (writer and writer.user and writer.user.email) else ''
+
+
+def _actor_name(writer):
+    if writer is None:
+        return 'An organizer'
+    return writer.get_real_name().strip() or writer.user.username
+
+
+def _notify_added_to_set(writer, qset, role, by_writer):
+    """Email a writer that they were added to a set (editor/writer/co-owner)."""
+    email = _writer_email(writer)
+    if not email:
+        return
+    from .signals import _send_mail_async
+    from django.conf import settings as dj_settings
+    role_label = {'editor': 'an editor', 'writer': 'a writer', 'co-owner': 'a co-owner'}.get(role, role)
+    subject = 'QEMS3: you were added to "{0}"'.format(qset.name)
+    body = ('{0} added you as {1} on the QEMS3 question set "{2}".\n\n'
+            '{3}/edit_question_set/{4}/').format(
+        _actor_name(by_writer), role_label, qset.name, dj_settings.BASE_URL, qset.id)
+    _send_mail_async(subject, body, [email])
+
+
+def _notify_added_to_group(writer, group, by_writer):
+    """Email a writer that they were added to a role group."""
+    email = _writer_email(writer)
+    if not email:
+        return
+    from .signals import _send_mail_async
+    from django.conf import settings as dj_settings
+    subject = 'QEMS3: you were added to the role group "{0}"'.format(group.name)
+    body = ('{0} added you to the QEMS3 role group "{1}". Members of a role group '
+            'automatically get its role on every question set the group is attached to.\n\n'
+            '{2}/role_groups/').format(_actor_name(by_writer), group.name, dj_settings.BASE_URL)
+    _send_mail_async(subject, body, [email])
+
+
+def _notify_group_join_request(group, requester):
+    """Email the group owner that someone has requested to join. Returns False if
+    the owner has no email on file."""
+    email = _writer_email(group.created_by)
+    if not email:
+        return False
+    from .signals import _send_mail_async
+    from django.conf import settings as dj_settings
+    rname = _actor_name(requester)
+    remail = requester.user.email or ''
+    subject = 'QEMS3: {0} requests to join role group "{1}"'.format(rname, group.name)
+    body = ('{0} (@{1}{2}) has requested to join your QEMS3 role group "{3}".\n\n'
+            'To add them, open Role Groups and use "Add member":\n{4}/role_groups/').format(
+        rname, requester.user.username, ', ' + remail if remail else '',
+        group.name, dj_settings.BASE_URL)
+    _send_mail_async(subject, body, [email])
+    return True
+
+
 @login_required
 def import_set(request):
     """Admin-only: create a new question set from an uploaded TSV/CSV in the
@@ -991,6 +1049,7 @@ def add_editor(request, qset_id):
                 for editor_id in editors_to_add:
                     editor = Writer.objects.get(id=editor_id)
                     qset.editor.add(editor)
+                    _notify_added_to_set(editor, qset, 'editor', user)
                     # A direct add takes ownership of the membership (so it
                     # survives role-group changes).
                     GroupRoleGrant.objects.filter(
@@ -1050,6 +1109,7 @@ def add_co_owner(request, qset_id):
                 qset.co_owners.add(co_owner)
                 # Co-owners get full editor privileges as well
                 qset.editor.add(co_owner)
+                _notify_added_to_set(co_owner, qset, 'co-owner', user)
 
                 # Don't have someone be both a writer and a co-owner--remove them as writer
                 try:
@@ -1130,6 +1190,7 @@ def add_writer(request, qset_id):
                 for writer_id in writers_to_add:
                     writer = Writer.objects.get(id=writer_id)
                     qset.writer.add(writer)
+                    _notify_added_to_set(writer, qset, 'writer', user)
                     GroupRoleGrant.objects.filter(
                         question_set=qset, writer=writer, role='writer').delete()
                 qset.save()
@@ -1166,14 +1227,33 @@ def role_groups(request):
     if request.method == 'POST':
         action = request.POST.get('action', '')
         if action == 'create':
-            name = (request.POST.get('name') or '').strip()
-            if not name:
-                message, message_class = 'Enter a group name.', 'alert-box warning'
-            elif RoleGroup.objects.filter(name__iexact=name).exists():
-                message, message_class = 'A group with that name already exists.', 'alert-box warning'
+            if not _account_can_create(request.user):
+                message, message_class = ("New accounts can't create role groups until 2 days "
+                                          "after sign-up. Please try again later.", 'alert-box warning')
             else:
-                RoleGroup.objects.create(name=name, created_by=user)
-                message, message_class = 'Group "{0}" created.'.format(name), 'alert-box success'
+                name = (request.POST.get('name') or '').strip()
+                if not name:
+                    message, message_class = 'Enter a group name.', 'alert-box warning'
+                elif RoleGroup.objects.filter(name__iexact=name).exists():
+                    message, message_class = 'A group with that name already exists.', 'alert-box warning'
+                else:
+                    RoleGroup.objects.create(name=name, created_by=user)
+                    message, message_class = 'Group "{0}" created.'.format(name), 'alert-box success'
+        elif action == 'request_join':
+            try:
+                group = RoleGroup.objects.get(id=int(request.POST.get('group_id', 0)))
+            except (ValueError, RoleGroup.DoesNotExist):
+                group = None
+            if group is None:
+                message, message_class = 'Group not found.', 'alert-box warning'
+            elif group.can_manage(user) or group.members.filter(id=user.id).exists():
+                message, message_class = 'You are already part of this group.', 'alert-box warning'
+            elif _notify_group_join_request(group, user):
+                message, message_class = ('Your request to join "{0}" was emailed to the group '
+                                          'owner.'.format(group.name), 'alert-box success')
+            else:
+                message, message_class = ('The group owner has no email on file, so the request '
+                                          'could not be sent.', 'alert-box warning')
         else:
             try:
                 group = RoleGroup.objects.get(id=int(request.POST.get('group_id', 0)))
@@ -1191,9 +1271,13 @@ def role_groups(request):
                 uname = (request.POST.get('username') or '').strip()
                 try:
                     w = Writer.objects.get(user__username__iexact=uname)
-                    group.members.add(w)
-                    reconcile_group(group)
-                    message, message_class = 'Added {0}.'.format(uname), 'alert-box success'
+                    if group.members.filter(id=w.id).exists():
+                        message, message_class = '{0} is already a member.'.format(uname), 'alert-box warning'
+                    else:
+                        group.members.add(w)
+                        reconcile_group(group)
+                        _notify_added_to_group(w, group, user)
+                        message, message_class = 'Added {0}.'.format(uname), 'alert-box success'
                 except Writer.DoesNotExist:
                     message, message_class = 'No user named "{0}".'.format(uname), 'alert-box warning'
             elif action == 'remove_member':
@@ -1207,9 +1291,16 @@ def role_groups(request):
 
     groups = []
     for g in RoleGroup.objects.all().order_by('name').prefetch_related('members__user', 'set_assignments__question_set'):
-        groups.append({'group': g, 'members': list(g.members.all().order_by('user__username')),
+        member_list = list(g.members.all().order_by('user__username'))
+        is_member = any(m.id == user.id for m in member_list)
+        can_manage = g.can_manage(user)
+        # Membership is private: only members (and managers) see who's in a group.
+        groups.append({'group': g,
+                       'members': member_list if (is_member or can_manage) else None,
+                       'member_count': len(member_list),
                        'assignments': list(g.set_assignments.all()),
-                       'can_manage': g.can_manage(user)})
+                       'can_manage': can_manage,
+                       'is_member': is_member})
     return render(request, 'role_groups.html',
                   {'groups': groups, 'message': message, 'message_class': message_class, 'user': user})
 

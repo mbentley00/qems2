@@ -688,6 +688,27 @@ body.grid-page .app-content { max-width: none; }
     .app-content { padding: 18px 16px 50px; }
 }
 
+/* ---- Phone tier: minimal, viewing-first. Optimized for reading questions and
+   adding comments; editing tables are de-prioritized (they scroll). ---- */
+@media (max-width: 600px) {
+    .app-topbar { gap: 8px; padding: 0 12px; }
+    .app-crumbs { display: none; }                 /* free up the narrow bar for search */
+    .app-search { margin-left: 8px; max-width: none; }
+    .app-content { padding: 12px 13px 44px; }
+    .app-content h1 { font-size: 1.7rem; }
+    .app-content h2, .app-content h3.page-header { font-size: 1.35rem; }
+    /* Comfortable tap targets. */
+    .app-content .button, .app-btn, .app-sidebar-burger { min-height: 40px; }
+    .app-content input, .app-content select, .app-content textarea { font-size: 16px; } /* no iOS zoom */
+    /* Data tables (editing surfaces) scroll horizontally instead of squishing. */
+    .app-content table:not(.packet-grid) {
+        display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; white-space: nowrap;
+    }
+    /* Set-info redesign stacks to one column on phones (already handled inline);
+       keep the sidebar a touch wider so labels fit when opened. */
+    .app-sidebar { width: 84vw; max-width: 320px; }
+}
+
 /* The generic `body.app-authed a` link color above outranks .button / .app-btn
    on specificity, which would paint button text purple-on-purple (invisible).
    Force legible button text with higher-specificity rules. */

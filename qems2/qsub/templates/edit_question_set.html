@@ -83,80 +83,48 @@
                 {% endfor %}
             </tbody>
         </table>
-        <div class="panel header radius text-center"><strong>Set Information</strong></div>
-        <form action="" method="post" class="clearfix">
+        <h4 class="set-info-heading">Set Information</h4>
+        <form action="" method="post" class="clearfix set-info-form">
             {% csrf_token %}
-            <div class="row">
-            {% for field in form %}
-                {% if field.html_name == "name" or field.html_name == "date" %}
-                    <div class="small-6 columns">
-                        <div class="row collapse">
-                            <div class="small-4 columns">
-                                <span class="prefix text-left" for="{{ field.id_for_label }}">{{ field.label }}</span>
-                            </div>
-                            <div class="small-8 columns">
-                                {{ field }}
-                            </div>
-                        </div>
-                    </div>
-                    {% if field.errors %}
-                        {{ field.errors }}
+            <div class="set-info-grid">
+                {% for field in form %}
+                    {% if field.html_name == "name" %}
+                    <div class="set-info-field"><label for="{{ field.id_for_label }}">Name</label>{{ field }}{{ field.errors }}</div>
+                    {% elif field.html_name == "date" %}
+                    <div class="set-info-field"><label for="{{ field.id_for_label }}">Date</label>{{ field }}{{ field.errors }}</div>
+                    {% elif field.html_name == "num_packets" %}
+                    <div class="set-info-field"><label for="{{ field.id_for_label }}">Number of Packets</label>{{ field }}{{ field.errors }}</div>
+                    {% elif field.html_name == "distribution" %}
+                    <div class="set-info-field"><label for="{{ field.id_for_label }}">Distribution</label>{{ field }}{{ field.errors }}</div>
                     {% endif %}
-                {% endif %}
-            {% endfor %}
+                {% endfor %}
+                <div class="set-info-field"><label>Max ACF Tossup Length</label>{{ form.max_acf_tossup_length }}</div>
+                <div class="set-info-field"><label>Max ACF Bonus Length</label>{{ form.max_acf_bonus_length }}</div>
             </div>
-            <div class="row">
-            {% for field in form %}
-                {% if field.html_name == "num_packets" or field.html_name == "distribution" %}
-                    <div class="small-6 columns">
-                        <div class="row collapse">
-                            <div class="small-4 columns">
-                                <span class="prefix text-left" for="{{ field.id_for_label }}">{% if field.html_name == "num_packets" %}Number of Packets{% else %}Distribution{% endif %}</span>
-                            </div>
-                            <div class="small-8 columns">
-                                {{ field }}
-                            </div>
-                        </div>
-                    </div>
-                    {% if field.errors %}
-                        {{ field.errors }}
-                    {% endif %}
-                {% endif %}
-            {% endfor %}
+            <div class="set-info-checks">
+                <label class="set-info-check">{{ form.char_count_ignores_pronunciation_guides }} Character counts ignore pronunciation guides</label>
+                <label class="set-info-check">{{ form.tossups_only }} Tossup-only tournament (no bonuses)
+                    <small>Hides bonus requirements; existing bonuses are never deleted.</small></label>
+                <label class="set-info-check">{{ form.public }} Public (listed for everyone)
+                    <small>Anyone can see this set is being written and request to join (which emails you). It grants no access by itself.</small></label>
             </div>
-            <ul class="small-block-grid-3">
-                <li>
-                    <label>Max ACF Tossup Length
-                        {{ form.max_acf_tossup_length }}
-                    </label>
-                </li>
-                <li>
-                    <label>Max ACF Bonus Length
-                    {{ form.max_acf_bonus_length }}
-                    </label>
-                </li>
-                <li>
-                    <label>Character Counts Ignore Pronunciation Guides
-                        {{ form.char_count_ignores_pronunciation_guides }}
-                    </label>
-                </li>
-                <li>
-                    <label>Tossup-Only Tournament (no bonuses)
-                        {{ form.tossups_only }}
-                    </label>
-                    <small style="color:#888;">Hides bonus requirements; existing bonuses are never deleted.</small>
-                </li>
-                <li>
-                    <label>Public (listed for everyone)
-                        {{ form.public }}
-                    </label>
-                    <small style="color:#888;">Anyone can see this set is being written and request to join (which emails you). It grants no access by itself.</small>
-                </li>
-            </ul>
             {% if role == "editor" %}
-                <input type="submit" value="Submit Changes" class="button primary right" />
+                <button type="submit" class="button primary">Submit Changes</button>
             {% endif %}
         </form>
+        <style>
+        .set-info-heading { font-family: Georgia, "Times New Roman", serif; margin: 1.5rem 0 0.8rem; }
+        .set-info-form { max-width: 940px; }
+        .set-info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 22px; margin-bottom: 18px; }
+        .set-info-field { display: flex; flex-direction: column; gap: 5px; }
+        .set-info-field > label { font-weight: 600; font-size: 0.82rem; color: #565b66; margin: 0; }
+        .set-info-field input, .set-info-field select { margin: 0; height: 40px; }
+        .set-info-checks { display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px; }
+        .set-info-check { font-weight: 600; color: #2b2f3a; display: block; cursor: pointer; }
+        .set-info-check input { margin: 0 8px 0 0; vertical-align: middle; }
+        .set-info-check small { display: block; font-weight: 400; color: #8a8f9c; margin: 3px 0 0 26px; }
+        @media (max-width: 760px) { .set-info-grid { grid-template-columns: 1fr; } }
+        </style>
         <script>
         $(function () {
             var $setForm = $('form.clearfix').first();
@@ -203,6 +171,12 @@
     <div class="content" id="comments">
 
             <table class="tablesorter table-striped table-hover" id="comments-table">
+                <colgroup>
+                    <col style="width:12%;">
+                    <col style="width:48%;">
+                    <col style="width:28%;">
+                    <col style="width:12%;">
+                </colgroup>
                 <thead>
                     <tr>
                         <th>Commenter</th>
@@ -354,7 +328,6 @@
                             <th>Author</th>
                             <th>Preview</th>
                             <th>Answer</th>
-                            <th>Question Type</th>
                             <th>Category</th>
                             <th>Packet</th>
                             <th>Created</th>
@@ -372,7 +345,6 @@
                             <td>{{ tossup.author }}</td>
                             <td><a href="/edit_tossup/{{ tossup.id }}">{{ tossup.tossup_text|safe|preview|question_html }}</a></td>
                             <td><a href="/edit_tossup/{{ tossup.id }}">{{ tossup|tossup_answer }}</a></td>
-                            <td>Tossup</td>
                             <td><a href="/categories/{{ qset.id }}/{{ tossup.category.id }}">{{ tossup.category }}</a></td>
                             <td>{% if tossup.packet %} {{ tossup.packet }} {% else %} Not in packet {% endif %}</td>
                             <td>{{ tossup.created_date|to_short_datetime }}</td>
@@ -402,7 +374,6 @@
                             <th>Author</th>
                             <th>Preview</th>
                             <th>Answer</th>
-                            <th>Question Type</th>
                             <th>Category</th>
                             <th>Packet</th>
                             <th>Created</th>
@@ -428,7 +399,6 @@
                                 </a>
                             </td>
                             <td><a href="/edit_bonus/{{ bonus.id }}">{{ bonus|bonus_answers }}</a></td>
-                            <td>{{ bonus.question_type }}</td>
                             <td><a href="/categories/{{ qset.id }}/{{ bonus.category.id }}">{{ bonus.category }}</a></td>
                             <td>{% if bonus.packet %} {{ bonus.packet }} {% else %} Not in packet {% endif %}</td>
                             <td>{{ bonus.created_date|to_short_datetime }}</td>
