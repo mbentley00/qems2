@@ -781,6 +781,13 @@ $(function () {
     // 7. Comment Reply UI
     // ========================================================================
 
+    // Re-render the current page via a GET navigation rather than location.reload():
+    // on a page that was rendered by a POST (e.g. right after saving a question),
+    // reload() repeats the POST and triggers the browser's "resend information?" prompt.
+    function qemsGetReload() {
+        window.location.assign(window.location.pathname + window.location.search);
+    }
+
     // Post a new top-level comment (tossup/bonus/packet) via AJAX. Avoids the
     // django_comments security form, whose timestamp expires on a long-open tab
     // (which produced a "bad request" when adding a comment).
@@ -798,7 +805,7 @@ $(function () {
             comment_text: text
         }, function (response) {
             var json = $.parseJSON(response);
-            if (json.success) { location.reload(); }
+            if (json.success) { qemsGetReload(); }
             else { alert(json.message || 'Could not post comment.'); $btn.prop('disabled', false); }
         }).fail(function () { $btn.prop('disabled', false); });
     });
@@ -823,7 +830,7 @@ $(function () {
         e.preventDefault();
         var id = $(this).data('comment-id');
         $.post('/resolve_comment/', { comment_id: id }, function () {
-            location.reload();
+            qemsGetReload();
         });
     });
 
@@ -961,7 +968,7 @@ $(function () {
                 buttons: {
                     Ok: function () {
                         $(this).dialog('close');
-                        window.location.reload();
+                        qemsGetReload();
                     }
                 }
             });

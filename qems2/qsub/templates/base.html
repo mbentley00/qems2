@@ -10,8 +10,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
 
     <link rel="stylesheet" href="{% static 'css/app.min.css' %}">
-    <link rel="stylesheet" href="{% static 'css/base.css' %}?v=29">
+    <link rel="stylesheet" href="{% static 'css/base.css' %}?v=30">
     <link rel="stylesheet" href="{% static 'fontawesome/css/all.min.css' %}">
+
+    {# Apply the saved sidebar-collapsed preference before first paint (shared
+       across tabs via localStorage), so new tabs open in the same state with no flash. #}
+    <script>try{if(window.innerWidth>900&&localStorage.getItem('qx_sidebar_collapsed')==='1'){document.documentElement.classList.add('app-sidebar-collapsed');}}catch(e){}</script>
 
     {% if DEBUG %}
     {# Distinct favicon for local/dev so it's easy to tell apart from production tabs #}
@@ -39,7 +43,6 @@
 <body class="{% block body_class %}{% endblock %}{% if request.user.is_authenticated %} app-authed{% endif %}">
 
 {% if request.user.is_authenticated %}
-    <script>try{if(window.innerWidth>900&&localStorage.getItem('qx_sidebar_collapsed')==='1'){document.body.classList.add('app-sidebar-collapsed');}}catch(e){}</script>
     {% include "_sidebar.html" %}
     <div class="app-sidebar-scrim" id="app-sidebar-scrim"></div>
     <div class="app-main">
@@ -85,7 +88,7 @@
                 if (window.matchMedia('(max-width: 900px)').matches) {
                     document.body.classList.toggle('app-sidebar-open');  // mobile: off-canvas
                 } else {
-                    var collapsed = document.body.classList.toggle('app-sidebar-collapsed');  // desktop: collapse
+                    var collapsed = document.documentElement.classList.toggle('app-sidebar-collapsed');  // desktop: collapse
                     try { localStorage.setItem('qx_sidebar_collapsed', collapsed ? '1' : '0'); } catch (e) {}
                 }
             });
@@ -158,7 +161,7 @@
     </div>{# /row #}
 {% endif %}
 
-    <script src="{% static 'js/paste_convert.js' %}?v=12"></script>
+    <script src="{% static 'js/paste_convert.js' %}?v=13"></script>
     <script src="{% static 'js/rich_editor.js' %}?v=9"></script>
     <script src="{% static 'foundation/js/foundation.min.js' %}"></script>
     <script>

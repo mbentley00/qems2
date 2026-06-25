@@ -696,8 +696,8 @@ body.grid-page .app-content { max-width: none; }
 .app-sidebar-scrim { display: none; position: fixed; inset: 0; background: rgba(20,20,40,.4); z-index: 55; }
 /* Desktop: the burger collapses the sidebar (content reflows full-width). */
 @media (min-width: 901px) {
-    body.app-sidebar-collapsed .app-sidebar { transform: translateX(-100%); }
-    body.app-sidebar-collapsed .app-main { margin-left: 0; }
+    html.app-sidebar-collapsed .app-sidebar { transform: translateX(-100%); }
+    html.app-sidebar-collapsed .app-main { margin-left: 0; }
 }
 
 /* Mobile: the sidebar is off-canvas and the burger opens it over a scrim. */
