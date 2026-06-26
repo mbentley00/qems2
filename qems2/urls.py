@@ -19,6 +19,7 @@ urlpatterns = [
     re_path(r'^main/$', main),
     re_path(r'^$', main),
     re_path(r'^request_to_join/$', request_to_join),
+    re_path(r'^approve_join/(?P<qset_id>[0-9]+)/(?P<writer_id>[0-9]+)/$', approve_join),
     re_path(r'^about/$', about),
     re_path(r'^help/$', help_page),
     re_path(r'^profile/$', profile),

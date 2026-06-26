@@ -160,14 +160,17 @@ def request_to_join(request):
 
     from django.core.mail import EmailMessage
     from django.conf import settings
+    approve_url = '{0}/approve_join/{1}/{2}/'.format(
+        settings.BASE_URL.rstrip('/'), qset.id, user.id)
     subject = 'QEMS3: {0} requests to join "{1}"'.format(requester_name, qset.name)
     body = ('{0} (@{1}{2}) has requested to join your question set "{3}" on QEMS3.\n\n'
             '{4}\n\n'
-            'If you want to add them, open the set on QEMS3 and use "Add Writer" or '
-            '"Add Editor".').format(
+            'Approve this request (add them as a writer or editor):\n{5}\n\n'
+            'You can also open the set on QEMS3 and use "Add Writer" or "Add Editor".').format(
         requester_name, user.user.username,
         ', ' + requester_email if requester_email else '', qset.name,
-        ('Their message: ' + note) if note else '(No message included.)')
+        ('Their message: ' + note) if note else '(No message included.)',
+        approve_url)
     try:
         EmailMessage(subject, body, settings.DEFAULT_FROM_EMAIL, recipients,
                      reply_to=[requester_email] if requester_email else None).send(fail_silently=False)
@@ -176,6 +179,50 @@ def request_to_join(request):
             'message': 'Could not send the request email ({0}).'.format(ex)}))
     return HttpResponse(json.dumps({'success': True,
         'message': 'Your request has been emailed to the set owner.'}))
+
+
+@login_required
+def approve_join(request, qset_id, writer_id):
+    """Owner-facing approval of a join request, linked directly from the request
+    email. Shows a small confirmation page; on POST adds the requester to the
+    set as a writer (default) or editor and emails them that they were added."""
+    user = request.user.writer
+    try:
+        qset = QuestionSet.objects.get(id=int(qset_id))
+        requester = Writer.objects.get(id=int(writer_id))
+    except (ValueError, QuestionSet.DoesNotExist, Writer.DoesNotExist):
+        return render(request, 'failure.html',
+                      {'message': 'That set or user no longer exists.',
+                       'message_class': 'alert-box alert'})
+
+    if not qset.is_owner(user):
+        return render(request, 'failure.html',
+                      {'message': 'Only an owner of this set can approve join requests.',
+                       'message_class': 'alert-box alert'})
+
+    already = (qset.is_owner(requester) or requester in qset.editor.all()
+               or requester in qset.writer.all())
+
+    if request.method == 'POST' and not already:
+        role = 'editor' if request.POST.get('role') == 'editor' else 'writer'
+        if role == 'editor':
+            qset.editor.add(requester)
+            GroupRoleGrant.objects.filter(
+                question_set=qset, writer=requester, role='editor').delete()
+            if qset.writer.filter(id=requester.id).exists():
+                qset.writer.remove(requester)
+        else:
+            qset.writer.add(requester)
+            GroupRoleGrant.objects.filter(
+                question_set=qset, writer=requester, role='writer').delete()
+        qset.save()
+        _notify_added_to_set(requester, qset, role, user)
+        cache.clear()
+        return render(request, 'approve_join.html',
+                      {'qset': qset, 'requester': requester, 'added_role': role, 'user': user})
+
+    return render(request, 'approve_join.html',
+                  {'qset': qset, 'requester': requester, 'already': already, 'user': user})
 
 
 def _writer_email(writer):
@@ -2893,7 +2940,12 @@ def _writer_distribution_ids(writer):
             | writer.question_set_editor.all()
             | writer.question_set_writer.all()
             | writer.co_owned_sets.all())
-    return set(sets.values_list('distribution_id', flat=True))
+    ids = set(sets.values_list('distribution_id', flat=True))
+    # Also include distributions this writer created but hasn't yet attached
+    # to one of their sets.
+    ids |= set(Distribution.objects.filter(created_by=writer).values_list('id', flat=True))
+    ids.discard(None)
+    return ids
 
 
 @login_required
@@ -2923,6 +2975,7 @@ def clone_distribution(request, dist_id):
     source = Distribution.objects.get(id=dist_id)
     new_dist = Distribution()
     new_dist.name = source.name + ' (Copy)'
+    new_dist.created_by = user
     new_dist.acf_tossup_per_period_count = source.acf_tossup_per_period_count
     new_dist.acf_bonus_per_period_count = source.acf_bonus_per_period_count
     new_dist.vhsl_bonus_per_period_count = source.vhsl_bonus_per_period_count
@@ -2969,6 +3022,7 @@ def edit_distribution(request, dist_id=None):
                 if dist_form.is_valid() and formset.is_valid():
                     new_dist = Distribution()
                     new_dist.name = dist_form.cleaned_data['name']
+                    new_dist.created_by = user
                     new_dist.save()
 
                     for form in formset:

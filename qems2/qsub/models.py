@@ -372,6 +372,12 @@ class Distribution(models.Model):
     acf_tossup_per_period_count = models.PositiveIntegerField(default=20)
     acf_bonus_per_period_count = models.PositiveIntegerField(default=20)
     vhsl_bonus_per_period_count = models.PositiveIntegerField(default=0)
+    # Who created this distribution. Lets the creator view/edit it before it's
+    # attached to any of their question sets (a brand-new distribution belongs
+    # to no set yet, so set-membership alone wouldn't grant access).
+    created_by = models.ForeignKey('Writer', null=True, blank=True,
+                                   on_delete=models.SET_NULL,
+                                   related_name='created_distributions')
 
     def __str__(self):
         return '{0!s}'.format(self.name)

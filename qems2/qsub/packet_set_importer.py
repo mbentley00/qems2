@@ -518,6 +518,24 @@ def _category_tag(cat, sub):
     return '{' + cat + ' - ' + sub + '}'
 
 
+def _inline_category(answer_line):
+    """Return (category, subcategory) from an inline ``{Category - Subcategory}``
+    tag already present in an answer line, or None if there is no such tag.
+
+    Some sets tag categories this way (right in the answer line) rather than
+    with a trailing ``<Author, Category - Subcategory>`` metadata line; without
+    harvesting these we'd create no distribution entries and every question
+    would fail category validation."""
+    m = re.search(r'\{(.+?)\}', answer_line)
+    if not m:
+        return None
+    inner = m.group(1).strip()
+    if ' - ' in inner:
+        cat, sub = inner.split(' - ', 1)
+        return (cat.strip(), sub.strip())
+    return (inner, '')
+
+
 def _normalize_lines(lines):
     """Back-compat: normalized lines only (used by diagnostics)."""
     return _normalize_docx_lines(lines)[0]
@@ -539,6 +557,11 @@ def _normalize_docx_lines(lines):
     categories = set()
     last_answer_idx = None
     started = False
+    # Numbered packets let us skip a tournament title by waiting for the first
+    # "1." question. An unnumbered set has no such marker, so that rule would
+    # drop its real first stem (leaving an orphan answer that shifts every
+    # stem/answer pair by one); start at the first content line instead.
+    has_numbers = any(_has_num_prefix((ln or '').strip()) for ln in lines)
     for ln in lines:
         s = (ln or '').strip()
         if not s or _NOISE_RE.match(s):
@@ -551,17 +574,32 @@ def _normalize_docx_lines(lines):
                     cleaned[last_answer_idx] += ' ' + _category_tag(*cat_sub)
             continue
         if not started:
-            # Skip the tournament title / front matter until the first question.
-            if not (_has_num_prefix(s) or is_answer(s) or is_bpart(s)):
+            # Skip the tournament title / front matter until the first question
+            # (only meaningful for numbered sets — see has_numbers above).
+            if has_numbers and not (_has_num_prefix(s) or is_answer(s) or is_bpart(s)):
                 continue
             started = True
         if is_answer(s):
             cleaned.append(_ensure_underline(s))
             last_answer_idx = len(cleaned) - 1
+            # Harvest a category tag already inline in the answer line so the
+            # distribution entry gets created even without a <...> meta line.
+            inline_cat = _inline_category(s)
+            if inline_cat:
+                categories.add(inline_cat)
         elif is_bpart(s):
             cleaned.append(s)
         else:
-            cleaned.append(_strip_num_prefix(s))
+            stem = _strip_num_prefix(s)
+            # Coalesce a stem split across several paragraphs back into one
+            # line: if the previous cleaned line is also a plain stem (not an
+            # answer or a bonus part), this paragraph continues the same
+            # question's text. A well-formed question always has an ANSWER
+            # between stems, so adjacent plain stems only arise from a split.
+            if cleaned and not is_answer(cleaned[-1]) and not is_bpart(cleaned[-1]):
+                cleaned[-1] = cleaned[-1] + ' ' + stem
+            else:
+                cleaned.append(stem)
     return cleaned, categories
 
 
