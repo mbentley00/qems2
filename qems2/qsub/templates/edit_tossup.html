@@ -31,6 +31,8 @@
     {% include "_dup_warning.html" %}
 {% endautoescape %}
 
+<div class="edit-layout">
+<div class="edit-main">
 {% if tossup %}
     {% autoescape off %}
         <div class="panel question radius">
@@ -48,9 +50,6 @@
         </div>
     {% endautoescape %}
 {% endif %}
-
-<div class="edit-layout">
-<div class="edit-main">
 <form action="" method="post" class="clearfix" id="edit-tossup">
     {% csrf_token %}
     {{ form.non_field_errors }}

@@ -29,7 +29,11 @@
         <div class="{{ message_class }}">{{ message }}</div>
     {% endif %}
     {% include "_dup_warning.html" %}
+{% endautoescape %}
 
+<div class="edit-layout">
+<div class="edit-main">
+{% autoescape off %}
     {% if bonus %}
         <div class="panel question radius">
         <div class="anchor-region" data-question-type="bonus" data-question-id="{{ bonus.id }}">
@@ -46,9 +50,6 @@
         </div>
     {% endif %}
 {% endautoescape %}
-
-<div class="edit-layout">
-<div class="edit-main">
 <form action="" method="post" class="clearfix" id="edit-bonus">
     {% csrf_token %}
     {{ form.non_field_errors }}
