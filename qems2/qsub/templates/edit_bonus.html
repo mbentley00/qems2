@@ -30,8 +30,6 @@
     {% endif %}
     {% include "_dup_warning.html" %}
 
-<div class="edit-layout">
-<div class="edit-main">
     {% if bonus %}
         <div class="panel question radius">
         <div class="anchor-region" data-question-type="bonus" data-question-id="{{ bonus.id }}">
@@ -44,12 +42,13 @@
             {% if bonus.proofread %}
                 <p><strong>Proofread by:</strong> {{ bonus.proofreader }} on {{ bonus.proofread_date }}</p>
             {% endif %}
-            
             <p><strong>Last modified:</strong> {{ bonus.last_changed_date }}</p>
         </div>
     {% endif %}
 {% endautoescape %}
 
+<div class="edit-layout">
+<div class="edit-main">
 <form action="" method="post" class="clearfix" id="edit-bonus">
     {% csrf_token %}
     {{ form.non_field_errors }}

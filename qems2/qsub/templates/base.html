@@ -13,15 +13,14 @@
     <link rel="stylesheet" href="{% static 'css/base.css' %}?v=30">
     <link rel="stylesheet" href="{% static 'fontawesome/css/all.min.css' %}">
 
-    {# Apply the saved sidebar-collapsed preference before first paint (shared
-       across tabs via localStorage), so new tabs open in the same state with no flash. #}
+    {# Apply the saved sidebar-collapsed preference before first paint (shared across tabs via localStorage). #}
     <script>try{if(window.innerWidth>900&&localStorage.getItem('qx_sidebar_collapsed')==='1'){document.documentElement.classList.add('app-sidebar-collapsed');}}catch(e){}</script>
 
     {% if DEBUG %}
     {# Distinct favicon for local/dev so it's easy to tell apart from production tabs #}
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='12' fill='%2316a34a'/><text x='32' y='47' font-size='42' font-weight='bold' fill='white' text-anchor='middle' font-family='Arial,sans-serif'>Q</text></svg>"/>
     {% else %}
-    <link rel="shortcut icon" type="image/png" href="{% static 'favicon.ico' %}"/>
+    <link rel="icon" type="image/png" href="{% static 'favicon.png' %}"/>
     {% endif %}
 
     <link href='https://fonts.googleapis.com/css?family=Montserrat:400,700' rel='stylesheet' type='text/css'>
