@@ -58,16 +58,27 @@ def nav(request):
             .distinct().order_by('-date', 'name'))
     ctx['nav_sets'] = sets
 
+    # Set-agnostic pages (the home/all-sets list, distribution editors) aren't
+    # scoped to any one set, so don't show the set-specific sidebar there — fall
+    # back to the minimal chrome instead of pinning a "remembered" active set.
+    rm = getattr(request, 'resolver_match', None)
+    view_name = rm.func.__name__ if rm and getattr(rm, 'func', None) else ''
+    SET_AGNOSTIC_VIEWS = {
+        'main', 'question_sets', 'distributions', 'edit_distribution',
+        'edit_tiebreak',
+    }
+
     active = None
-    active_id = _active_set_id(request)
-    if active_id:
-        active = sets.filter(id=active_id).first() or QuestionSet.objects.filter(id=active_id).first()
-    if active is None and request.session.get('nav_active_set'):
-        active = sets.filter(id=request.session['nav_active_set']).first()
-    if active is None:
-        active = sets.first()
-    if active is not None and request.session.get('nav_active_set') != active.id:
-        request.session['nav_active_set'] = active.id
+    if view_name not in SET_AGNOSTIC_VIEWS:
+        active_id = _active_set_id(request)
+        if active_id:
+            active = sets.filter(id=active_id).first() or QuestionSet.objects.filter(id=active_id).first()
+        if active is None and request.session.get('nav_active_set'):
+            active = sets.filter(id=request.session['nav_active_set']).first()
+        if active is None:
+            active = sets.first()
+        if active is not None and request.session.get('nav_active_set') != active.id:
+            request.session['nav_active_set'] = active.id
     ctx['nav_active'] = active
 
     if active is not None:

@@ -10,11 +10,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
 
     <link rel="stylesheet" href="{% static 'css/app.min.css' %}">
-    <link rel="stylesheet" href="{% static 'css/base.css' %}?v=30">
+    <link rel="stylesheet" href="{% static 'css/base.css' %}?v=31">
     <link rel="stylesheet" href="{% static 'fontawesome/css/all.min.css' %}">
 
-    {# Apply the saved sidebar-collapsed preference before first paint (shared across tabs via localStorage). #}
-    <script>try{if(window.innerWidth>900&&localStorage.getItem('qx_sidebar_collapsed')==='1'){document.documentElement.classList.add('app-sidebar-collapsed');}}catch(e){}</script>
+    {# Apply saved sidebar-collapsed + theme preferences before first paint (shared across tabs via localStorage). #}
+    <script>try{if(window.innerWidth>900&&localStorage.getItem('qx_sidebar_collapsed')==='1'){document.documentElement.classList.add('app-sidebar-collapsed');}}catch(e){}
+    try{if(localStorage.getItem('qx_theme')==='dark'){document.documentElement.setAttribute('data-theme','dark');}}catch(e){}</script>
 
     {% if DEBUG %}
     {# Distinct favicon for local/dev so it's easy to tell apart from production tabs #}
@@ -93,6 +94,28 @@
             });
         }
         if (scrim) { scrim.addEventListener('click', function () { document.body.classList.remove('app-sidebar-open'); }); }
+
+        // Dark-mode toggle: flip html[data-theme], persist in localStorage, and
+        // swap the moon/sun icon. The saved preference is applied pre-paint in
+        // the <head>, so this only handles live toggling.
+        var themeBtn = document.getElementById('app-theme-toggle');
+        function syncThemeIcon() {
+            if (!themeBtn) { return; }
+            var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+            var icon = themeBtn.querySelector('i');
+            if (icon) { icon.className = dark ? 'fa fa-sun' : 'fa fa-moon'; }
+            themeBtn.setAttribute('title', dark ? 'Switch to light mode' : 'Switch to dark mode');
+        }
+        syncThemeIcon();
+        if (themeBtn) {
+            themeBtn.addEventListener('click', function () {
+                var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+                if (dark) { document.documentElement.removeAttribute('data-theme'); }
+                else { document.documentElement.setAttribute('data-theme', 'dark'); }
+                try { localStorage.setItem('qx_theme', dark ? 'light' : 'dark'); } catch (e) {}
+                syncThemeIcon();
+            });
+        }
 
         var picker = document.querySelector('.app-setpicker');
         var pickerToggle = picker && picker.querySelector('.app-setpicker-toggle');

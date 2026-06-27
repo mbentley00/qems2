@@ -258,7 +258,10 @@
 .comments-heading { margin: 0 0 8px; padding-bottom: 4px;
     border-bottom: 2px solid #008CBA; font-size: 1.1em; }
 .edit-comments .add-comment-form label { font-weight: bold; font-size: 0.9em; }
-.edit-comments .add-comment-form textarea { margin-bottom: 6px; }
+/* The textarea sits inside the bold label, so reset its weight (and the reply
+   box) — typed comment text should be normal weight, not bold. */
+.edit-comments .add-comment-form textarea { margin-bottom: 6px; font-weight: normal; }
+.edit-comments .reply-form textarea { font-weight: normal; }
 /* The fixed sidebar eats ~250px, so stack the comments below the editor well
    before the viewport itself gets narrow — otherwise the columns overlap. */
 @media (max-width: 1200px) {
@@ -684,6 +687,10 @@ body.grid-page .app-content { max-width: none; }
     text-transform: uppercase; font-size: .68rem; letter-spacing: .06em; border-bottom: 1px solid var(--qx-border); }
 .app-content table:not(.packet-grid) td, .app-content table:not(.packet-grid) th { border: none; border-bottom: 1px solid #f1f1f4; }
 .app-content table:not(.packet-grid) tr:last-child td { border-bottom: none; }
+/* Dashboard tab tables (Recent Comments/Questions, Writers, Packets) should use
+   the full content width instead of shrinking to their contents — otherwise the
+   comment column wraps into tall, cramped rows that look cut off. */
+.app-content .tabs-content table:not(.packet-grid) { width: 100%; }
 
 .app-content input[type=text], .app-content input[type=search], .app-content input[type=email],
 .app-content input[type=password], .app-content input[type=number], .app-content textarea,
@@ -747,3 +754,125 @@ body.app-authed .app-content a.button.secondary { color: var(--qx-ink); }
 body.app-authed a.app-nav-item { color: #3b3f4a; }
 body.app-authed a.app-nav-item.active { color: var(--qx-primary); }
 body.app-authed a.app-nav-item:hover { color: var(--qx-ink); }
+
+/* ============================================================================
+   Dark theme. Opt-in via the sidebar toggle (persisted in localStorage and
+   applied as html[data-theme="dark"] before first paint). Most of the app
+   shell already paints from the --qx-* tokens, so redefining those does the
+   bulk of the work; the rules below cover the hardcoded light surfaces and the
+   Foundation defaults (panels, tables, inputs, buttons) that don't.
+   ============================================================================ */
+html[data-theme="dark"] {
+    --qx-primary: #8b5cf6;
+    --qx-primary-dark: #7c3aed;
+    --qx-bg: #15161b;
+    --qx-card: #1e2026;
+    --qx-border: #2f323c;
+    --qx-ink: #e6e7ea;
+    --qx-muted: #9aa0ad;
+    --qx-elevate: #262932;   /* table headers, subtle fills */
+    --qx-hover: #2a2d37;     /* hover backgrounds */
+}
+
+html[data-theme="dark"] body { background: var(--qx-bg); color: var(--qx-ink); }
+html[data-theme="dark"] body.app-authed a { color: #a78bfa; }
+
+/* App shell surfaces */
+html[data-theme="dark"] .app-sidebar,
+html[data-theme="dark"] .app-sidebar-foot,
+html[data-theme="dark"] .app-topbar { background: var(--qx-card); border-color: var(--qx-border); }
+html[data-theme="dark"] .app-brand-name,
+html[data-theme="dark"] .app-setpicker-name { color: var(--qx-ink); }
+html[data-theme="dark"] .app-setpicker { background: var(--qx-elevate); border-color: var(--qx-border); }
+html[data-theme="dark"] .app-setpicker-main:hover,
+html[data-theme="dark"] body.app-authed .app-setpicker-toggle:hover { background: var(--qx-hover); }
+html[data-theme="dark"] .app-setpicker-menu { background: var(--qx-card); border-color: var(--qx-border); }
+html[data-theme="dark"] .app-setpicker-menu a { color: var(--qx-ink); }
+html[data-theme="dark"] .app-setpicker-menu a:hover { background: var(--qx-hover); }
+html[data-theme="dark"] .app-btn-ghost { background: var(--qx-elevate); color: var(--qx-ink); }
+html[data-theme="dark"] .app-btn-ghost:hover { background: var(--qx-hover); }
+html[data-theme="dark"] .app-nav-item:hover { background: var(--qx-hover); color: var(--qx-ink); }
+html[data-theme="dark"] .app-nav-item.active { background: #2a2147; color: #c4b5fd; }
+html[data-theme="dark"] .app-nav-item.active .fa,
+html[data-theme="dark"] .app-nav-item.active .app-nav-count { color: #c4b5fd; }
+html[data-theme="dark"] .app-nav-count { background: #2f323c; color: #b7bcc7; }
+html[data-theme="dark"] .app-nav-item.active .app-nav-count { background: #3b2f63; }
+html[data-theme="dark"] body.app-authed a.app-nav-item { color: #c9ccd3; }
+html[data-theme="dark"] body.app-authed a.app-nav-item:hover { color: var(--qx-ink); }
+html[data-theme="dark"] body.app-authed a.app-nav-item.active { color: #c4b5fd; }
+html[data-theme="dark"] .app-role { background: var(--qx-elevate); }
+html[data-theme="dark"] .app-role-opt.is-active { background: var(--qx-card); color: var(--qx-ink); }
+html[data-theme="dark"] .app-usercard-main:hover,
+html[data-theme="dark"] .app-usercard-icon:hover,
+html[data-theme="dark"] body.app-authed .app-sidebar-burger:hover { background: var(--qx-hover); }
+html[data-theme="dark"] .app-avatar { background: #3b2f63; color: #c4b5fd; }
+
+/* Top search box */
+html[data-theme="dark"] .app-search input { background: var(--qx-elevate); color: var(--qx-ink); border-color: var(--qx-border); }
+html[data-theme="dark"] .app-search input:focus { background: var(--qx-card); }
+html[data-theme="dark"] .app-search input::placeholder { color: var(--qx-muted); }
+html[data-theme="dark"] .app-search-kbd { background: var(--qx-elevate); }
+html[data-theme="dark"] .app-search-results { background: var(--qx-card); border-color: var(--qx-border); }
+html[data-theme="dark"] .app-search-item:hover { background: var(--qx-hover); }
+
+/* Content: headings, cards, panels */
+html[data-theme="dark"] .app-content,
+html[data-theme="dark"] .app-content h1,
+html[data-theme="dark"] .app-content h2,
+html[data-theme="dark"] .app-content h3,
+html[data-theme="dark"] .app-content h4,
+html[data-theme="dark"] .app-content h5,
+html[data-theme="dark"] .app-content .page-header { color: var(--qx-ink); }
+html[data-theme="dark"] .app-content .panel,
+html[data-theme="dark"] .app-content .panel.question { background: var(--qx-card); border-color: var(--qx-border); color: var(--qx-ink); }
+html[data-theme="dark"] .app-content .panel.callout { background: #211d33; }
+html[data-theme="dark"] .app-content .qmeta-row { background: var(--qx-elevate); border-color: var(--qx-border); }
+
+/* Tables */
+html[data-theme="dark"] .app-content table:not(.packet-grid) { background: var(--qx-card); border-color: var(--qx-border); color: var(--qx-ink); }
+html[data-theme="dark"] .app-content table:not(.packet-grid) thead th { background: var(--qx-elevate); color: var(--qx-muted); border-color: var(--qx-border); }
+html[data-theme="dark"] .app-content table:not(.packet-grid) td,
+html[data-theme="dark"] .app-content table:not(.packet-grid) th { border-color: var(--qx-border); }
+html[data-theme="dark"] .app-content .table-striped tbody tr:nth-child(even),
+html[data-theme="dark"] .app-content table:not(.packet-grid) tbody tr:nth-child(even) { background: #23252d; }
+html[data-theme="dark"] .app-content .table-hover tbody tr:hover,
+html[data-theme="dark"] .app-content table:not(.packet-grid) tbody tr:hover { background: var(--qx-hover); }
+
+/* Inputs */
+html[data-theme="dark"] .app-content input[type=text],
+html[data-theme="dark"] .app-content input[type=search],
+html[data-theme="dark"] .app-content input[type=email],
+html[data-theme="dark"] .app-content input[type=password],
+html[data-theme="dark"] .app-content input[type=number],
+html[data-theme="dark"] .app-content textarea,
+html[data-theme="dark"] .app-content select,
+html[data-theme="dark"] .rich-editor { background: var(--qx-elevate); color: var(--qx-ink); border-color: var(--qx-border); }
+html[data-theme="dark"] .app-content input::placeholder,
+html[data-theme="dark"] .app-content textarea::placeholder { color: var(--qx-muted); }
+
+/* Foundation tabs */
+html[data-theme="dark"] .app-content .tabs dd > a,
+html[data-theme="dark"] .app-content .tabs .tab-title > a { background: var(--qx-elevate); color: var(--qx-ink); }
+html[data-theme="dark"] .app-content .tabs dd.active > a,
+html[data-theme="dark"] .app-content .tabs .tab-title.active > a { background: var(--qx-card); color: var(--qx-ink); }
+
+/* Foundation alert/info boxes keep their accent but go on a dark fill */
+html[data-theme="dark"] .app-content .alert-box { background: var(--qx-elevate); color: var(--qx-ink); border-color: var(--qx-border); }
+html[data-theme="dark"] .app-content .alert-box.success { background: #16301f; }
+html[data-theme="dark"] .app-content .alert-box.warning { background: #3a2e12; }
+html[data-theme="dark"] .app-content .alert-box.alert { background: #3a1d1d; }
+
+/* Secondary buttons on dark */
+html[data-theme="dark"] .app-content .button.secondary,
+html[data-theme="dark"] .app-content a.button.secondary,
+html[data-theme="dark"] body.app-authed .app-content .button.secondary { background: var(--qx-elevate); color: var(--qx-ink); }
+
+/* Comments sidebar */
+html[data-theme="dark"] .edit-comments { border-color: var(--qx-border); }
+html[data-theme="dark"] .comment-quote { background: var(--qx-elevate); }
+
+/* The theme toggle button in the sidebar footer */
+.app-theme-toggle { background: none; border: none; cursor: pointer; color: var(--qx-muted);
+    width: 30px; height: 30px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; }
+.app-theme-toggle:hover { color: var(--qx-primary); background: #f1f1f5; }
+html[data-theme="dark"] .app-theme-toggle:hover { background: var(--qx-hover); }

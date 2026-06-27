@@ -9,6 +9,16 @@ from qems2.qsub.utils import *
 from qems2.qsub.model_utils import sanitize_html
 from django.utils.html import escape
 
+
+def escape_question_text(s):
+    """Store parsed question text the way hand-written and YAPP-imported
+    questions are stored: keep literal apostrophes, quotes and ampersands (the
+    renderer treats the text as safe HTML) and escape only angle brackets so a
+    stray ``<...>`` can't inject a tag. QEMS markup chars (``_ ~``) are left
+    untouched. Using Django's escape() here instead would leave ``&#x27;`` and
+    ``&quot;`` visible in the editor and exports."""
+    return (s or '').replace('<', '&lt;').replace('>', '&gt;')
+
 ansregex = r'(?i)a..?wers?:\s*'
 bpart_regex = r'^\[\d+[emh]?\]'
 vhsl_bpart_regex = r'^\[V\d+\]'
@@ -225,8 +235,8 @@ def validate_bonus_category(bonus, category_text):
 
 def create_tossup(question='', answer='', category_text='', question_type_text='ACF-style tossup', question_set=''):
     
-    question = escape(question)
-    answer = escape(remove_answer_label(answer))
+    question = escape_question_text(question)
+    answer = escape_question_text(remove_answer_label(answer))
 
     categories = DistributionEntry.objects.filter(distribution=question_set.distribution)
     setCategory = None
@@ -250,10 +260,10 @@ def create_tossup(question='', answer='', category_text='', question_type_text='
 
 def create_bonus(leadin='', parts=[], answers=[], values=[], question_type_text=ACF_STYLE_BONUS, category_text='', question_set='', difficulties=[]):
 
-    leadin = escape(leadin)
+    leadin = escape_question_text(leadin)
     sanitizedParts = []
     for part in parts:
-        sanitizedParts.append(escape(part))
+        sanitizedParts.append(escape_question_text(part))
     parts = sanitizedParts
 
     # For VHSL bonuses, make sure that we have enough data to pass into the bonus form
@@ -284,7 +294,7 @@ def create_bonus(leadin='', parts=[], answers=[], values=[], question_type_text=
 
     modifiedAnswers = []
     for answer in answers:
-        formattedAnswer = escape(remove_answer_label(answer))
+        formattedAnswer = escape_question_text(remove_answer_label(answer))
         modifiedAnswers.append(formattedAnswer)
     answers = modifiedAnswers
 

@@ -81,6 +81,7 @@
                     <span class="app-user-sub">{% if nav_role %}{{ nav_role }} · {% endif %}{{ nav_username }}</span>
                 </span>
             </a>
+            <button type="button" class="app-theme-toggle" id="app-theme-toggle" title="Toggle dark mode" aria-label="Toggle dark mode"><i class="fa fa-moon"></i></button>
             {% if nav_active %}<a class="app-usercard-icon" href="/writer_question_set_settings/{{ nav_active.id }}/" title="Your settings for this set"><i class="fa fa-gear"></i></a>{% endif %}
             <a class="app-usercard-icon app-logout" href="/logout/" title="Log out"><i class="fa fa-arrow-right-from-bracket"></i></a>
         </div>

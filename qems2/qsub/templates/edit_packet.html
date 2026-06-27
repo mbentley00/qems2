@@ -19,7 +19,18 @@
     </span>
 </h3>
 {% if message %}
-    <div class="{{ message_class }}">{{ message }}</p>
+    <div class="{{ message_class }}">{{ message }}</div>
+{% endif %}
+{% if can_rename %}
+<form method="post" action="/edit_packet/{{ packet.id }}/" class="packet-rename-form" style="margin: 0 0 14px;">
+    {% csrf_token %}
+    <label style="font-size: 0.85rem; color: #565b66; font-weight: 600; margin: 0;">Packet name</label>
+    <span style="display: inline-flex; gap: 6px; align-items: center;">
+        <input type="text" name="packet_name" value="{{ packet.packet_name }}" maxlength="200"
+               style="margin: 0; width: auto; min-width: 240px; display: inline-block;">
+        <button type="submit" class="button tiny secondary" style="margin: 0;">Rename</button>
+    </span>
+</form>
 {% endif %}
 
 <dl class="tabs" data-tab>

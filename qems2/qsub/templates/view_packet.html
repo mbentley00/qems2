@@ -628,7 +628,7 @@ $(function() {
     // no selection), the browser's normal context menu is left alone.
     var $ctxMenu = $('<div id="doc-context-menu" style="display:none;">' +
         '<a href="#" class="doc-ctx-item" data-action="comment"><i class="fa fa-comment"></i> Comment on selection</a>' +
-        '<a href="#" class="doc-ctx-item" data-action="toggle-mode"><i class="fa fa-arrows-up-down"></i> <span class="ctx-mode-label"></span></a>' +
+        '<a href="#" class="doc-ctx-item" data-action="toggle-mode"><i class="fa fa-arrows-up-down ctx-mode-icon"></i> <span class="ctx-mode-label"></span></a>' +
         '</div>').appendTo('body');
     var pendingCtxAnchor = null;
 
@@ -669,8 +669,13 @@ $(function() {
         if (readOnly) {
             $modeItem.hide();
         } else {
+            var toComment = (docMode === 'reorder');
             $modeItem.show().find('.ctx-mode-label').text(
-                docMode === 'reorder' ? 'Switch to comment mode' : 'Switch to reorder mode');
+                toComment ? 'Switch to comment mode' : 'Switch to reorder mode');
+            // Icon reflects the mode you'd switch TO: a comment when going to
+            // comment mode, the reorder arrows when going to reorder mode.
+            $modeItem.find('.ctx-mode-icon')
+                .attr('class', 'fa ctx-mode-icon ' + (toComment ? 'fa-comment' : 'fa-arrows-up-down'));
         }
 
         if (!pendingCtxAnchor && readOnly) { $ctxMenu.hide(); return; }  // nothing to show

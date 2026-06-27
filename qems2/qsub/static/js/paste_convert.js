@@ -788,6 +788,25 @@ $(function () {
         window.location.assign(window.location.pathname + window.location.search);
     }
 
+    // Refresh just the comments panel (edit tossup/bonus pages) in place so
+    // adding/replying/resolving doesn't reload the whole page. Re-fetches the
+    // current page and swaps in the server-rendered .comments markup (keeping
+    // fidelity and the delegated action handlers). Returns true if it handled
+    // the refresh; false (no .comments panel) lets callers fall back to a full
+    // GET reload — doc view, packet grid, etc. don't have this sidebar.
+    function qemsRefreshComments(done) {
+        var $panel = $('.edit-comments .comments');
+        if (!$panel.length) { return false; }
+        $.get(window.location.pathname + window.location.search, function (html) {
+            var $fresh = $(html).find('.edit-comments .comments').first();
+            if ($fresh.length) { $panel.html($fresh.html()); }
+            else { qemsGetReload(); }
+            if (typeof done === 'function') { done(); }
+        }).fail(function () { qemsGetReload(); });
+        return true;
+    }
+    window.qemsRefreshComments = qemsRefreshComments;
+
     // Post a new top-level comment (tossup/bonus/packet) via AJAX. Avoids the
     // django_comments security form, whose timestamp expires on a long-open tab
     // (which produced a "bad request" when adding a comment).
@@ -805,7 +824,11 @@ $(function () {
             comment_text: text
         }, function (response) {
             var json = $.parseJSON(response);
-            if (json.success) { qemsGetReload(); }
+            if (json.success) {
+                $form.find('.new-comment-text').val('');
+                if (!qemsRefreshComments()) { qemsGetReload(); }
+                $btn.prop('disabled', false);
+            }
             else { alert(json.message || 'Could not post comment.'); $btn.prop('disabled', false); }
         }).fail(function () { $btn.prop('disabled', false); });
     });
@@ -830,7 +853,7 @@ $(function () {
         e.preventDefault();
         var id = $(this).data('comment-id');
         $.post('/resolve_comment/', { comment_id: id }, function () {
-            qemsGetReload();
+            if (!qemsRefreshComments()) { qemsGetReload(); }
         });
     });
 
@@ -963,12 +986,15 @@ $(function () {
             qset_id: qsetId
         }, function (response) {
             var json_response = $.parseJSON(response);
+            var ok = (json_response['message_class'] || '').indexOf('success') >= 0;
+            // On success, refresh the comments panel in place (no page reload).
+            if (ok && qemsRefreshComments()) { return; }
             var dialog = $('#info-dialog').dialog({
                 modal: true,
                 buttons: {
                     Ok: function () {
                         $(this).dialog('close');
-                        qemsGetReload();
+                        if (!(ok && qemsRefreshComments())) { qemsGetReload(); }
                     }
                 }
             });

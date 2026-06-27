@@ -254,12 +254,22 @@ $(function () {
         }
     });
 
-    $('.delete_comment').click(function(e) {
+    // Delegated so the handler still fires on comments inserted by an in-place
+    // comments refresh (edit tossup/bonus). On the edit pages we remove the
+    // comment node directly — no full page reload; elsewhere we fall back to the
+    // old confirm-dialog-then-reload flow.
+    $(document).on('click', '.delete_comment', function(e) {
         e.preventDefault();
+        var $link = $(this);
         var result = confirm("Are you sure you want to delete this comment?  It can only be restored by a QEMS2 admin.");
         if (result == true) {
-            $.post('/delete_comment/', {comment_id: $(this).attr('value'), qset_id: $(this).attr('qset')}, function (response) {
+            $.post('/delete_comment/', {comment_id: $link.attr('value'), qset_id: $link.attr('qset')}, function (response) {
                 var json_response = $.parseJSON(response);
+                var $item = $link.closest('.comment-item');
+                if ($item.length) {
+                    $item.fadeOut(150, function () { $(this).remove(); });
+                    return;
+                }
                 var dialog = $('#info-dialog').dialog({
                     modal: true,
                     buttons: {
@@ -275,12 +285,19 @@ $(function () {
         }
     });
 
-    $('.delete_all_comments').click(function (e) {
+    $(document).on('click', '.delete_all_comments', function (e) {
         e.preventDefault();
+        var $link = $(this);
         var result = confirm("Are you sure you want to delete all comments?  It can only be restored by a QEMS2 admin.");
         if (result == true) {
-            $.post('/delete_all_comments/', { question_id: $(this).attr('value'), qset_id: $(this).attr('qset'), question_type: $(this).attr('question-type'), }, function (response) {
+            $.post('/delete_all_comments/', { question_id: $link.attr('value'), qset_id: $link.attr('qset'), question_type: $link.attr('question-type'), }, function (response) {
                 var json_response = $.parseJSON(response);
+                var $list = $('.edit-comments .comments');
+                if ($list.length) {
+                    $list.find('.comment-item').fadeOut(150, function () { $(this).remove(); });
+                    $link.remove();
+                    return;
+                }
                 var dialog = $('#info-dialog').dialog({
                     modal: true,
                     buttons: {

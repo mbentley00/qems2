@@ -1397,8 +1397,26 @@ def edit_packet(request, packet_id):
     read_only = True
     tossup_status = []
     bonus_status = []
+    can_rename = qset.is_owner(user) or user in qset.editor.all()
 
-    if request.method == 'GET':
+    if request.method == 'POST' and 'packet_name' in request.POST:
+        if can_rename:
+            new_name = (request.POST.get('packet_name') or '').strip()[:200]
+            if not new_name:
+                message, message_class = 'Packet name cannot be empty.', 'alert-box warning'
+            elif Packet.objects.filter(question_set=qset, packet_name=new_name).exclude(id=packet.id).exists():
+                message = 'A packet named "{0}" already exists in this set.'.format(new_name)
+                message_class = 'alert-box warning'
+            elif new_name != packet.packet_name:
+                packet.packet_name = new_name
+                packet.save(update_fields=['packet_name'])
+                cache.clear()
+                message, message_class = 'Packet renamed to "{0}".'.format(new_name), 'alert-box success'
+        else:
+            message = 'Only an owner or editor can rename packets.'
+            message_class = 'alert-box alert'
+
+    if request.method in ('GET', 'POST'):
         if qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all():
             tossups = packet.tossup_set.order_by('question_number').all()
             bonuses = packet.bonus_set.order_by('question_number').all()
@@ -1468,6 +1486,7 @@ def edit_packet(request, packet_id):
          'bonus_status': bonus_status,
          'role': get_role_no_owner(user, qset),
          'read_only': read_only,
+         'can_rename': can_rename,
          'user': user})
 
 @login_required
