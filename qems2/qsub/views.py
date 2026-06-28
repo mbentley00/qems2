@@ -7753,15 +7753,18 @@ def _question_buzz_data(question, qtype):
         words = _tossup_reading(question)['words']
         rows = []
         for b in buzzes:
-            heard = ' '.join(words[:b.buzz_word_index]) if words else ''
+            heard_words = words[:b.buzz_word_index] if words else []
+            heard = ' '.join(heard_words)
             if len(heard) > 140:
                 heard = '...' + heard[-140:]
+            # Just the last few words the player heard before buzzing.
+            heard_tail = ' '.join(heard_words[-3:])
             rows.append({
                 'player': b.get_player_name(), 'date': b.buzz_date,
                 'correct': b.correct, 'powered': b.powered, 'value': b.value,
                 'fraction': '{0:.0f}%'.format(100.0 * b.buzz_fraction()),
-                'answer_given': b.answer_given, 'heard': heard, 'source': b.source,
-                'history_url': b.history_url()})
+                'answer_given': b.answer_given, 'heard': heard, 'heard_tail': heard_tail,
+                'source': b.source, 'history_url': b.history_url()})
         return {
             'qtype': 'tossup', 'plays': len(buzzes), 'correct': len(correct),
             'powers': len(powers), 'negs': len(negs),

@@ -9,23 +9,23 @@
     <span class="pt-stat"><strong>{{ playtest.negs }}</strong> neg{{ playtest.negs|pluralize }}</span>
     <span class="pt-stat">Avg buzz: <strong>{{ playtest.avg_buzz }}</strong> in</span>
 </div>
+<div class="playtest-scroll">
 <table class="table-striped playtest-table">
-    <thead><tr><th>When</th><th>Player</th><th>Result</th><th>Buzz point</th><th>Answer given</th><th>Heard up to buzz</th><th>Source</th><th>Version</th></tr></thead>
+    <thead><tr><th>When</th><th>Player</th><th>Result</th><th>Answer given</th><th>Buzz point</th><th>Version</th></tr></thead>
     <tbody>
     {% for r in playtest.rows %}
         <tr>
             <td>{{ r.date|to_short_datetime }}</td>
-            <td>{{ r.player }}</td>
-            <td>{% if r.correct %}{% if r.powered %}<span class="result-power">Power (+{{ r.value }})</span>{% else %}<span class="result-correct">Correct (+{{ r.value }})</span>{% endif %}{% else %}<span class="result-wrong">Incorrect ({{ r.value }})</span>{% endif %}</td>
-            <td>{{ r.fraction }} in</td>
+            <td>{{ r.player }}{% if r.source %} ({{ r.source|capfirst }}){% endif %}</td>
+            <td>{% if r.correct %}{% if r.powered %}<span class="result-power">{{ r.fraction }} (+{{ r.value }})</span>{% else %}<span class="result-correct">{{ r.fraction }} (+{{ r.value }})</span>{% endif %}{% else %}<span class="result-wrong">{{ r.fraction }} ({{ r.value }})</span>{% endif %}</td>
             <td>{{ r.answer_given }}</td>
-            <td class="pt-heard">{{ r.heard }}</td>
-            <td>{{ r.source }}</td>
+            <td class="pt-heard">{{ r.heard_tail }}</td>
             <td>{% if r.history_url %}<a href="{{ r.history_url }}" title="View the version of this question played for this buzz">version</a>{% else %}&mdash;{% endif %}</td>
         </tr>
     {% endfor %}
     </tbody>
 </table>
+</div>
 {% else %}
 <div class="playtest-summary">
     <span class="pt-stat"><strong>{{ playtest.plays }}</strong> play{{ playtest.plays|pluralize }}</span>
@@ -34,30 +34,37 @@
     <span class="pt-stat">Part 2: <strong>{{ playtest.p2 }}</strong></span>
     <span class="pt-stat">Part 3: <strong>{{ playtest.p3 }}</strong></span>
 </div>
+<div class="playtest-scroll">
 <table class="table-striped playtest-table">
-    <thead><tr><th>When</th><th>Player</th><th>Part 1</th><th>Part 2</th><th>Part 3</th><th>Total</th><th>Source</th><th>Version</th></tr></thead>
+    <thead><tr><th>When</th><th>Player</th><th>Part 1</th><th>Part 2</th><th>Part 3</th><th>Total</th><th>Version</th></tr></thead>
     <tbody>
     {% for r in playtest.rows %}
         <tr>
             <td>{{ r.date|to_short_datetime }}</td>
-            <td>{{ r.player }}</td>
+            <td>{{ r.player }}{% if r.source %} ({{ r.source|capfirst }}){% endif %}</td>
             <td>{% if r.p1 %}<span class="result-correct">10</span>{% else %}<span class="result-wrong">0</span>{% endif %}</td>
             <td>{% if r.p2 %}<span class="result-correct">10</span>{% else %}<span class="result-wrong">0</span>{% endif %}</td>
             <td>{% if r.p3 %}<span class="result-correct">10</span>{% else %}<span class="result-wrong">0</span>{% endif %}</td>
             <td><strong>{{ r.total }}</strong></td>
-            <td>{{ r.source }}</td>
             <td>{% if r.history_url %}<a href="{{ r.history_url }}" title="View the version of this question played for this result">version</a>{% else %}&mdash;{% endif %}</td>
         </tr>
     {% endfor %}
     </tbody>
 </table>
+</div>
 {% endif %}
 <style>
 .playtest-summary { margin: 0.5rem 0 0.75rem; }
 .pt-stat { display: inline-block; margin-right: 1.5rem; }
+/* Scroll the table sideways instead of squishing it on narrow screens. */
+.playtest-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .playtest-table { width: 100%; font-size: 0.9rem; }
 .playtest-table td { vertical-align: top; }
-.pt-heard { color: #555; max-width: 320px; }
+/* The edit column sets overflow-wrap:anywhere, which otherwise shreds short
+   headers and names mid-word ("RES ULT", "versio n"). Keep normal wrapping. */
+.playtest-table th, .playtest-table td { overflow-wrap: normal; word-break: normal; }
+.playtest-table th { white-space: nowrap; }
+.pt-heard { color: #555; white-space: nowrap; }
 .result-power { color: #1565c0; font-weight: bold; }
 .result-correct { color: #43AC6A; font-weight: bold; }
 .result-wrong { color: #f04124; }
