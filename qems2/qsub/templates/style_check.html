@@ -67,8 +67,8 @@
     <span id="selected-count" class="sc-guide-note">0 selected</span>
     <span class="sc-bulk-label">With selected:</span>
     <button type="button" class="button tiny success bulk-action" data-action="apply">Apply fixes</button>
-    <button type="button" class="button tiny secondary bulk-action" data-action="dismiss">Dismiss</button>
-    <button type="button" class="button tiny alert bulk-action" data-action="dismiss-all">Dismiss for set</button>
+    <button type="button" class="button tiny secondary bulk-action" data-action="dismiss" title="Hide the selected issues on their own questions only">Dismiss</button>
+    <button type="button" class="button tiny alert bulk-action" data-action="dismiss-all" title="Stop flagging the selected suggestions on every question in the set">Dismiss for set</button>
 </div>
 {% for r in results %}
 <div class="sc-q">
@@ -88,8 +88,8 @@
                     <a class="style-action sc-link" data-action="restore" title="Restore this issue">undo</a>
                 {% else %}
                     {% if i.fixable %}<a class="style-action sc-fix" data-action="apply" title="Apply this fix">Fix</a><a class="style-action sc-fix sc-fix-open" data-action="apply-open" title="Apply this fix and open the question">Fix&nbsp;&#8599;</a>{% endif %}
-                    <a class="style-action sc-link" data-action="dismiss" title="Hide this issue from future checks">dismiss</a>
-                    <a class="style-action sc-link" data-action="dismiss-all" title="Hide this suggestion for every question in the set">set</a>
+                    <a class="style-action sc-link" data-action="dismiss" title="Hide just this issue, on this question only">dismiss</a>
+                    <a class="style-action sc-link" data-action="dismiss-all" title="Stop flagging this suggestion on every question in the set">dismiss for set</a>
                 {% endif %}
             </span>
         </li>

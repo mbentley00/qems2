@@ -69,6 +69,7 @@
         {% endif %}
         {% if bonus %}
         <a href="/move_bonus/{{ qset.id }}/{{ bonus.id }}" class="button small secondary">Move set</a>
+        {% if role == "editor" %}<a href="#" class="button small secondary edit-swap-btn" data-qtype="bonus" data-qid="{{ bonus.id }}" data-packet="{{ bonus.packet.id }}" data-num="{{ bonus.question_number }}">Swap</a>{% endif %}
         <a href="/bonus_history/{{ bonus.id }}" class="button small secondary">History</a>
         <a href="/convert_bonus/{{ bonus.id }}" class="button small secondary convert_bonus" value="{{ bonus.id }}" qset-id="{{ qset.id }}" target-type="ACF-style tossup">Convert to ACF tossup</a>
         {% if question_type == "VHSL bonus" %}<a href="/convert_bonus/{{ bonus.id }}" class="button small secondary convert_bonus" value="{{ bonus.id }}" qset-id="{{ qset.id }}" target-type="ACF-style bonus">Convert to ACF bonus</a>{% endif %}
@@ -295,6 +296,7 @@ $(function () {
 <p>Do not include [10] labels with bonus parts or the word ANSWER: in answer lines.</p>
 
 {% include "dialog.html" %}
+{% if bonus and role == "editor" %}{% include "_swap_dialog.html" %}{% endif %}
 
 <script src="{% static 'js/anchored_comments.js' %}?v=2"></script>
 <script>

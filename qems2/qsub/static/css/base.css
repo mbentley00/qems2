@@ -232,6 +232,10 @@
        a text caret so it reads as an editable text box, not a clickable thing. */
     cursor: text;
 }
+/* Italic glyphs slant/overhang to the right, which inflates the gap after them
+   so a single trailing space reads as two. Pull the following text back a hair
+   to keep one space looking like one space. */
+.rich-editor i, .rich-editor em { margin-right: -0.07em; }
 
 /* Stem / leadin / part-text fields start a bit taller than answer lines; they
    still grow with content as you type, so the empty box stays compact. */
@@ -599,16 +603,18 @@ body.app-authed .app-setpicker-toggle:hover { background: #f1f1f5; color: var(--
 .app-role-opt { flex: 1; text-align: center; font-size: .82rem; font-weight: 600; color: var(--qx-muted);
     padding: 5px 0; border-radius: 7px; }
 .app-role-opt.is-active { background: #fff; color: var(--qx-ink); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
-.app-usercard { display: flex; align-items: center; gap: 4px; }
-.app-usercard-main { display: flex; align-items: center; gap: 10px; flex: 1 1 auto; min-width: 0;
-    padding: 4px 6px; border-radius: 9px; }
+.app-usercard { display: flex; align-items: center; gap: 1px; }
+.app-usercard-main { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0;
+    padding: 4px 4px; border-radius: 9px; }
 .app-usercard-main:hover { background: #f3f3f7; text-decoration: none; }
-.app-avatar { width: 34px; height: 34px; border-radius: 50%; background: #e6d8fb; color: var(--qx-primary);
-    font-weight: 700; font-size: .8rem; display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+.app-avatar { width: 32px; height: 32px; border-radius: 50%; background: #e6d8fb; color: var(--qx-primary);
+    font-weight: 700; font-size: .78rem; display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
 .app-user-meta { display: flex; flex-direction: column; min-width: 0; }
 .app-user-name { font-weight: 700; font-size: .86rem; color: var(--qx-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .app-user-sub { font-size: .74rem; color: var(--qx-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.app-usercard-icon { flex: 0 0 auto; color: var(--qx-muted); padding: 7px; border-radius: 7px; }
+/* Footer action icons (theme/settings/logout) stay compact so the username
+   keeps room — three icons in a 250px sidebar otherwise squeeze it to "Mi". */
+.app-usercard-icon { flex: 0 0 auto; color: var(--qx-muted); padding: 5px; border-radius: 7px; font-size: .92rem; }
 .app-usercard-icon:hover { color: var(--qx-primary); background: #f1f1f5; }
 
 /* ---- Main area + top bar ---- */
@@ -871,8 +877,10 @@ html[data-theme="dark"] body.app-authed .app-content .button.secondary { backgro
 html[data-theme="dark"] .edit-comments { border-color: var(--qx-border); }
 html[data-theme="dark"] .comment-quote { background: var(--qx-elevate); }
 
-/* The theme toggle button in the sidebar footer */
+/* The theme toggle button in the sidebar footer — kept the same compact size
+   as the gear/logout icons so the username row doesn't get squeezed. */
 .app-theme-toggle { background: none; border: none; cursor: pointer; color: var(--qx-muted);
-    width: 30px; height: 30px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; }
+    flex: 0 0 auto; padding: 5px; margin: 0; border-radius: 7px; font-size: .92rem; line-height: 1;
+    display: inline-flex; align-items: center; justify-content: center; }
 .app-theme-toggle:hover { color: var(--qx-primary); background: #f1f1f5; }
 html[data-theme="dark"] .app-theme-toggle:hover { background: var(--qx-hover); }

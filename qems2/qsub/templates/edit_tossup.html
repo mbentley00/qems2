@@ -64,6 +64,7 @@
         <a href="#" id="copy-for-discord-plain-tossup" class="button small secondary">Copy for Discord (no spoilers)</a>
         {% if tossup %}
         <a href="/move_tossup/{{ qset.id }}/{{ tossup.id }}" class="button small secondary">Move set</a>
+        {% if role == "editor" %}<a href="#" class="button small secondary edit-swap-btn" data-qtype="tossup" data-qid="{{ tossup.id }}" data-packet="{{ tossup.packet.id }}" data-num="{{ tossup.question_number }}">Swap</a>{% endif %}
         <a href="/tossup_history/{{ tossup.id }}" class="button small secondary">History</a>
         <a href="/convert_tossup/{{ tossup.id }}" class="button small secondary convert_tossup" value="{{ tossup.id }}" qset-id="{{ qset.id }}" target-type="ACF-style bonus">Convert to ACF bonus</a>
         <a href="/categories/{{ qset.id }}/{{ tossup.category.id }}" class="button small secondary">All in category</a>
@@ -202,6 +203,7 @@
 <p>Do not include the word ANSWER: in answer lines.</p>
 
 {% include "dialog.html" %}
+{% if tossup and role == "editor" %}{% include "_swap_dialog.html" %}{% endif %}
 
 <script src="{% static 'js/anchored_comments.js' %}?v=2"></script>
 <script>

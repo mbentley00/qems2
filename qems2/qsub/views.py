@@ -5950,6 +5950,7 @@ def packet_grid(request, qset_id):
                 'answer': preview_func(question),
                 'category': html.unescape(str(question.category)) if question.category else '',
                 'edit_url': '{0}{1}/'.format(edit_url, question.id),
+                'edited': question.edited,
             }
         rows = []
         for number in range(1, max_num + 1):

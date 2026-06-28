@@ -1,0 +1,98 @@
+{# Swap-with-another-question dialog for the edit tossup/bonus pages. Mirrors
+   the doc-view / packet-grid swap: lists candidates from /swap_candidates/ and
+   performs the swap via /move_packet_question/. The source question is read from
+   the clicked .edit-swap-btn's data attributes. #}
+<div id="edit-swap-dialog" title="Swap with another question" style="display:none;">
+    <p id="edit-swap-source" style="margin-bottom: 8px;"></p>
+    <div style="margin-bottom: 8px;">
+        <input type="text" id="edit-swap-search" placeholder="Type to search all questions to swap (answer or text)&hellip;" style="width:100%; margin-bottom:0;">
+    </div>
+    <div style="margin-bottom: 10px;" id="edit-swap-scope-row">
+        <label style="display:inline; margin-right: 12px;"><input type="radio" name="edit-swap-scope" value="leaf" checked> Same sub-subcategory</label>
+        <label style="display:inline; margin-right: 12px;"><input type="radio" name="edit-swap-scope" value="sub"> Same subcategory</label>
+        <label style="display:inline;"><input type="radio" name="edit-swap-scope" value="top"> Same category</label>
+    </div>
+    <div id="edit-swap-candidates"></div>
+</div>
+<style>
+#edit-swap-candidates { max-height: 340px; overflow-y: auto; }
+.edit-swap-candidate { padding: 6px 8px; border-bottom: 1px solid #eee; cursor: pointer; font-size: 0.9em; }
+.edit-swap-candidate:hover { background-color: #d9edf7; }
+.edit-swap-candidate .swap-cand-packet { font-weight: bold; }
+.edit-swap-candidate .swap-cand-category { color: #777; font-size: 0.9em; }
+html[data-theme="dark"] .edit-swap-candidate { border-bottom-color: var(--qx-border); }
+html[data-theme="dark"] .edit-swap-candidate:hover { background-color: var(--qx-hover); }
+</style>
+<script>
+$(function () {
+    var $btn = $('.edit-swap-btn');
+    if (!$btn.length) { return; }
+    var swapSource = null;
+    var $dialog = $('#edit-swap-dialog').dialog({ autoOpen: false, modal: true, width: 600, closeOnEscape: true });
+
+    function loadCandidates() {
+        var scope = $('input[name="edit-swap-scope"]:checked').val();
+        var query = $('#edit-swap-search').val().trim();
+        $('#edit-swap-scope-row').css('opacity', query ? 0.4 : 1);
+        var $list = $('#edit-swap-candidates').html('<em>Loading&hellip;</em>');
+        $.get('/swap_candidates/', {
+            question_type: swapSource.qtype, question_id: swapSource.qid, scope: scope, q: query
+        }, function (response) {
+            var json = $.parseJSON(response);
+            if (json.error) { $list.html('<div class="alert-box warning">' + json.error + '</div>'); return; }
+            $('#edit-swap-source').html('Swapping: <strong>' + (json.source_answer || '') + '</strong> <span class="swap-cand-category">(' + json.source_category + ')</span>');
+            if (!json.candidates.length) { $list.html('<em>No matching questions.</em>'); return; }
+            $list.empty();
+            $.each(json.candidates, function (_, cand) {
+                var label = cand.unpacketized ? '(unpacketized): '
+                    : cand.packet_name + ' #' + cand.number + (cand.is_tiebreaker ? ' (TB)' : '') + ': ';
+                var $row = $('<div class="edit-swap-candidate">')
+                    .append($('<span class="swap-cand-packet">').text(label))
+                    .append($('<span>').text(cand.answer + ' '))
+                    .append($('<div class="swap-cand-category">').text(cand.category));
+                $row.on('click', function () {
+                    var post;
+                    if (cand.unpacketized) {
+                        if (!swapSource.packetId) {
+                            alert('This question is not in a packet, so there is no slot to swap into. Pick a packetized question instead.');
+                            return;
+                        }
+                        post = { question_type: swapSource.qtype, question_id: cand.id,
+                                 target_packet_id: swapSource.packetId, target_number: swapSource.num };
+                    } else {
+                        post = { question_type: swapSource.qtype, question_id: swapSource.qid,
+                                 target_packet_id: cand.packet_id, target_number: cand.number };
+                    }
+                    $.post('/move_packet_question/', post, function (r) {
+                        var j = $.parseJSON(r);
+                        if (j.success) { window.location.assign(window.location.pathname + window.location.search); }
+                        else { alert(j.message); }
+                    });
+                });
+                $list.append($row);
+            });
+        });
+    }
+
+    $btn.on('click', function (e) {
+        e.preventDefault();
+        var $b = $(this);
+        swapSource = {
+            qtype: $b.data('qtype'),
+            qid: $b.data('qid'),
+            packetId: $b.data('packet') || null,
+            num: $b.data('num') || null
+        };
+        $('input[name="edit-swap-scope"][value="leaf"]').prop('checked', true);
+        $('#edit-swap-search').val('');
+        $dialog.dialog('open');
+        loadCandidates();
+    });
+    $('input[name="edit-swap-scope"]').on('change', function () { if (swapSource) loadCandidates(); });
+    var t = null;
+    $('#edit-swap-search').on('input', function () {
+        if (!swapSource) { return; }
+        clearTimeout(t); t = setTimeout(loadCandidates, 250);
+    });
+});
+</script>
