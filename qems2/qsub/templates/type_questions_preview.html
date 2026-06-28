@@ -47,10 +47,10 @@
                     {% endif %}<br>
                     Type: {{ tossup.question_type|safe}}
                 </p>
-                <input type="hidden" name="tossup-text-{{ forloop.counter0 }}" value="{{ tossup.tossup_text|safe }}">
-                <input type="hidden" name="tossup-answer-{{ forloop.counter0 }}" value="{{ tossup.tossup_answer|safe }}"> 
-                <input type="hidden" name="tossup-category-{{ forloop.counter0 }}" value="{{ tossup.category }}">                
-                <input type="hidden" name="tossup-type-{{ forloop.counter0 }}" value="{{ tossup.question_type|safe }}">  
+                <input type="hidden" name="tossup-text-{{ forloop.counter0 }}" value="{{ tossup.tossup_text|force_escape }}">
+                <input type="hidden" name="tossup-answer-{{ forloop.counter0 }}" value="{{ tossup.tossup_answer|force_escape }}">
+                <input type="hidden" name="tossup-category-{{ forloop.counter0 }}" value="{{ tossup.category|force_escape }}">
+                <input type="hidden" name="tossup-type-{{ forloop.counter0 }}" value="{{ tossup.question_type|force_escape }}">
                 {% endfor %}
             {% endautoescape %}
 
@@ -60,18 +60,18 @@
                 {{ bonus|bonus_html_verbose }}
                 
 
-                <input type="hidden" name="bonus-leadin-{{ forloop.counter0 }}" value="{{ bonus.leadin|safe }}">
-                <input type="hidden" name="bonus-category-{{ forloop.counter0 }}" value="{{ bonus.category }}">
-                <input type="hidden" name="bonus-type-{{ forloop.counter0 }}" value="{{ bonus.question_type|safe }}">            
-                <input type="hidden" name="bonus-part1-{{ forloop.counter0 }}" value="{{ bonus.part1_text|safe }}">
-                <input type="hidden" name="bonus-answer1-{{ forloop.counter0 }}" value="{{ bonus.part1_answer|safe }}">
-                <input type="hidden" name="bonus-difficulty1-{{ forloop.counter0 }}" value="{{ bonus.part1_difficulty }}">
-                <input type="hidden" name="bonus-part2-{{ forloop.counter0 }}" value="{{ bonus.part2_text|safe }}">
-                <input type="hidden" name="bonus-answer2-{{ forloop.counter0 }}" value="{{ bonus.part2_answer|safe }}">
-                <input type="hidden" name="bonus-difficulty2-{{ forloop.counter0 }}" value="{{ bonus.part2_difficulty }}">
-                <input type="hidden" name="bonus-part3-{{ forloop.counter0 }}" value="{{ bonus.part3_text|safe }}">
-                <input type="hidden" name="bonus-answer3-{{ forloop.counter0 }}" value="{{ bonus.part3_answer|safe }}">
-                <input type="hidden" name="bonus-difficulty3-{{ forloop.counter0 }}" value="{{ bonus.part3_difficulty }}">
+                <input type="hidden" name="bonus-leadin-{{ forloop.counter0 }}" value="{{ bonus.leadin|force_escape }}">
+                <input type="hidden" name="bonus-category-{{ forloop.counter0 }}" value="{{ bonus.category|force_escape }}">
+                <input type="hidden" name="bonus-type-{{ forloop.counter0 }}" value="{{ bonus.question_type|force_escape }}">
+                <input type="hidden" name="bonus-part1-{{ forloop.counter0 }}" value="{{ bonus.part1_text|force_escape }}">
+                <input type="hidden" name="bonus-answer1-{{ forloop.counter0 }}" value="{{ bonus.part1_answer|force_escape }}">
+                <input type="hidden" name="bonus-difficulty1-{{ forloop.counter0 }}" value="{{ bonus.part1_difficulty|force_escape }}">
+                <input type="hidden" name="bonus-part2-{{ forloop.counter0 }}" value="{{ bonus.part2_text|force_escape }}">
+                <input type="hidden" name="bonus-answer2-{{ forloop.counter0 }}" value="{{ bonus.part2_answer|force_escape }}">
+                <input type="hidden" name="bonus-difficulty2-{{ forloop.counter0 }}" value="{{ bonus.part2_difficulty|force_escape }}">
+                <input type="hidden" name="bonus-part3-{{ forloop.counter0 }}" value="{{ bonus.part3_text|force_escape }}">
+                <input type="hidden" name="bonus-answer3-{{ forloop.counter0 }}" value="{{ bonus.part3_answer|force_escape }}">
+                <input type="hidden" name="bonus-difficulty3-{{ forloop.counter0 }}" value="{{ bonus.part3_difficulty|force_escape }}">
 
                 {% endfor %}
             {% endautoescape %}
