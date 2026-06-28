@@ -9,7 +9,7 @@ OUT = r"C:\Users\mbent\claude\qems2\_deploy_local.zip"
 
 # Top-level entries to skip entirely
 SKIP_TOP = {".git", "static", ".claude", "_logs"}
-SKIP_FILES = {"db.sqlite3", "secret", "nul", "_logs.zip", "build_deploy_zip.py"}
+SKIP_FILES = {"db.sqlite3", "secret", "anthropic_key", "nul", "_logs.zip", "build_deploy_zip.py"}
 
 def skip(rel):
     parts = rel.replace("\\", "/").split("/")

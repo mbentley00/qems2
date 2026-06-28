@@ -67,15 +67,6 @@
                 <textarea id="unified-bonus-text" rows="16" class="unified-editor-textarea expanding" style="width:100%;"></textarea>
             </div>
         {% endif %}
-        {% if bonus %}
-        <a href="/move_bonus/{{ qset.id }}/{{ bonus.id }}" class="button small secondary">Move set</a>
-        {% if role == "editor" %}<a href="#" class="button small secondary edit-swap-btn" data-qtype="bonus" data-qid="{{ bonus.id }}" data-packet="{{ bonus.packet.id }}" data-num="{{ bonus.question_number }}">Swap</a>{% endif %}
-        <a href="/bonus_history/{{ bonus.id }}" class="button small secondary">History</a>
-        <a href="/convert_bonus/{{ bonus.id }}" class="button small secondary convert_bonus" value="{{ bonus.id }}" qset-id="{{ qset.id }}" target-type="ACF-style tossup">Convert to ACF tossup</a>
-        {% if question_type == "VHSL bonus" %}<a href="/convert_bonus/{{ bonus.id }}" class="button small secondary convert_bonus" value="{{ bonus.id }}" qset-id="{{ qset.id }}" target-type="ACF-style bonus">Convert to ACF bonus</a>{% endif %}
-        <a href="/categories/{{ qset.id }}/{{ bonus.category.id }}" class="button small secondary">All in category</a>
-        <a href="/delete_bonus/{{ bonus.id }}" class="button small alert delete_bonus" value="{{ bonus.id }}" qset-id="{{ qset.id }}">Delete</a>
-        {% endif %}
         <div id="individual-fields-container">
         {% if question_type == "ACF-style bonus" %}
             <label>
@@ -163,6 +154,17 @@
                 <li><label>{{ form.read_carefully }} Read Answer Carefully</label></li>
             </ul>
         </div>
+
+        {% if bonus %}
+        <div class="qmeta-actions" style="margin-bottom:16px;">
+            <a href="/move_bonus/{{ qset.id }}/{{ bonus.id }}" class="button small secondary">Move set</a>
+            {% if role == "editor" %}<a href="#" class="button small secondary edit-swap-btn" data-qtype="bonus" data-qid="{{ bonus.id }}" data-packet="{{ bonus.packet.id }}" data-num="{{ bonus.question_number }}">Swap Packets</a>{% endif %}
+            <a href="/bonus_history/{{ bonus.id }}" class="button small secondary">History</a>
+            <a href="/convert_bonus/{{ bonus.id }}" class="button small secondary convert_bonus" value="{{ bonus.id }}" qset-id="{{ qset.id }}" target-type="ACF-style tossup">Convert to ACF tossup</a>
+            {% if question_type == "VHSL bonus" %}<a href="/convert_bonus/{{ bonus.id }}" class="button small secondary convert_bonus" value="{{ bonus.id }}" qset-id="{{ qset.id }}" target-type="ACF-style bonus">Convert to ACF bonus</a>{% endif %}
+            <a href="/delete_bonus/{{ bonus.id }}" class="button small alert delete_bonus" value="{{ bonus.id }}" qset-id="{{ qset.id }}">Delete</a>
+        </div>
+        {% endif %}
 
         {% include "question_tags.html" %}
 

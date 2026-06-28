@@ -41,7 +41,18 @@
 
     {% if can_configure %}<a href="#" id="toggle-style-settings" class="sc-config-toggle">Configure rules&hellip;</a>{% endif %}
     {% if guide_obj.url %}<span class="sc-guide-note">Rules: <a href="{{ guide_obj.url }}" target="_blank" rel="noopener">{{ guide_obj.name }}</a></span>{% endif %}
+    {% if is_ai_user %}<button type="button" id="ai-grammar-btn" class="button tiny secondary" data-qset="{{ qset.id }}" style="margin:0;"><i class="fa fa-wand-magic-sparkles"></i> AI grammar check</button>{% endif %}
 </div>
+
+{% if is_ai_user %}
+<div id="ai-grammar-panel" style="display:none; margin: 0 0 18px;">
+    <div class="panel radius">
+        <strong>AI grammar &amp; spelling check</strong> <span class="sc-guide-note">(admin only &middot; Haiku)</span>
+        <div id="ai-grammar-status" class="sc-guide-note" style="margin-top:6px;">Running&hellip;</div>
+        <div id="ai-grammar-results"></div>
+    </div>
+</div>
+{% endif %}
 
 {% if can_configure %}
 <form method="post" action="" id="style-settings-form" class="sc-config" style="display:none;">
@@ -263,5 +274,55 @@ $(function () {
     });
 });
 </script>
+
+{% if is_ai_user %}
+<script>
+// Admin-only AI grammar/spelling check. Calls Claude (Haiku) over the set's
+// questions and lists suggested corrections, each linking to the question.
+$(function () {
+    var $btn = $('#ai-grammar-btn');
+    if (!$btn.length) { return; }
+    function esc(s) { return $('<div>').text(s == null ? '' : s).html(); }
+    $btn.on('click', function () {
+        var qset = $btn.data('qset');
+        $btn.prop('disabled', true);
+        $('#ai-grammar-panel').show();
+        $('#ai-grammar-status').text('Running AI check… this can take a few seconds.');
+        $('#ai-grammar-results').empty();
+        $.post('/ai_grammar_check/' + qset + '/', {
+            csrfmiddlewaretoken: '{{ csrf_token }}'
+        }, function (resp) {
+            if (typeof resp === 'string') { try { resp = JSON.parse(resp); } catch (e) {} }
+            $btn.prop('disabled', false);
+            if (!resp || !resp.ok) {
+                $('#ai-grammar-status').text((resp && resp.message) || 'The AI check failed.');
+                return;
+            }
+            var note = 'Checked ' + resp.checked + ' question(s).';
+            if (resp.truncated) { note += ' (Only the first ' + resp.checked + ' of ' + resp.total + ' were checked.)'; }
+            if (!resp.findings.length) {
+                $('#ai-grammar-status').text(note + ' No grammar or spelling issues found.');
+                return;
+            }
+            $('#ai-grammar-status').text(note + ' ' + resp.findings.length + ' suggestion(s):');
+            var $list = $('<ul class="square"></ul>');
+            resp.findings.forEach(function (f) {
+                var $li = $('<li style="margin-bottom:6px;"></li>');
+                var loc = f.edit_url
+                    ? '<a href="' + esc(f.edit_url) + '" target="_blank" rel="noopener">' + esc(f.label) + '</a>'
+                    : esc(f.label);
+                $li.html(loc + ': <del>' + esc(f.excerpt) + '</del> &rarr; <strong>' + esc(f.suggestion) + '</strong>'
+                    + (f.explanation ? ' <span class="sc-guide-note">' + esc(f.explanation) + '</span>' : ''));
+                $list.append($li);
+            });
+            $('#ai-grammar-results').append($list);
+        }).fail(function () {
+            $btn.prop('disabled', false);
+            $('#ai-grammar-status').text('The AI check request failed.');
+        });
+    });
+});
+</script>
+{% endif %}
 
 {% endblock %}

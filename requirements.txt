@@ -15,3 +15,4 @@ psycopg2-binary
 whitenoise
 edge-tts
 imageio-ffmpeg
+anthropic==0.112.0

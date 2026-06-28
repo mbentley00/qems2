@@ -59,17 +59,9 @@
         <div class="alert-box info" style="margin-bottom:8px;">You can't edit this question directly, but you can
         edit the text below and <strong>Save as Suggested Changes</strong> for the author or an editor to review.</div>
         {% endif %}
-        <a href="#" id="paste-full-tossup" class="button small secondary">Paste Full Tossup</a>
+        <a href="#" id="paste-full-tossup" class="button small secondary">Copy</a>
         <a href="#" id="copy-for-discord-tossup" class="button small secondary">Copy for Discord</a>
         <a href="#" id="copy-for-discord-plain-tossup" class="button small secondary">Copy for Discord (no spoilers)</a>
-        {% if tossup %}
-        <a href="/move_tossup/{{ qset.id }}/{{ tossup.id }}" class="button small secondary">Move set</a>
-        {% if role == "editor" %}<a href="#" class="button small secondary edit-swap-btn" data-qtype="tossup" data-qid="{{ tossup.id }}" data-packet="{{ tossup.packet.id }}" data-num="{{ tossup.question_number }}">Swap</a>{% endif %}
-        <a href="/tossup_history/{{ tossup.id }}" class="button small secondary">History</a>
-        <a href="/convert_tossup/{{ tossup.id }}" class="button small secondary convert_tossup" value="{{ tossup.id }}" qset-id="{{ qset.id }}" target-type="ACF-style bonus">Convert to ACF bonus</a>
-        <a href="/categories/{{ qset.id }}/{{ tossup.category.id }}" class="button small secondary">All in category</a>
-        <a href="/delete_tossup/{{ tossup.id }}" class="button small alert delete_tossup" value="{{ tossup.id }}" qset-id="{{ qset.id }}">Delete</a>
-        {% endif %}
         <label>
             Tossup Text
             {{ form.tossup_text }}
@@ -114,6 +106,15 @@
             </ul>
         </div>
 
+        {% if tossup %}
+        <div class="qmeta-actions" style="margin-bottom:16px;">
+            <a href="/move_tossup/{{ qset.id }}/{{ tossup.id }}" class="button small secondary">Move set</a>
+            {% if role == "editor" %}<a href="#" class="button small secondary edit-swap-btn" data-qtype="tossup" data-qid="{{ tossup.id }}" data-packet="{{ tossup.packet.id }}" data-num="{{ tossup.question_number }}">Swap Packets</a>{% endif %}
+            <a href="/tossup_history/{{ tossup.id }}" class="button small secondary">History</a>
+            <a href="/convert_tossup/{{ tossup.id }}" class="button small secondary convert_tossup" value="{{ tossup.id }}" qset-id="{{ qset.id }}" target-type="ACF-style bonus">Convert to ACF bonus</a>
+            <a href="/delete_tossup/{{ tossup.id }}" class="button small alert delete_tossup" value="{{ tossup.id }}" qset-id="{{ qset.id }}">Delete</a>
+        </div>
+        {% endif %}
 
         {% include "question_tags.html" %}
 

@@ -7029,6 +7029,7 @@ def style_check(request, qset_id):
                    'guides': style_checker.STYLE_GUIDES,
                    'guide_obj': next((g for g in style_checker.STYLE_GUIDES if g['key'] == guide), None),
                    'can_configure': qset.is_owner(user) or user in qset.editor.all(),
+                   'is_ai_user': _is_ai_user(request.user),
                    'rule_settings': [{'code': c, 'label': lbl, 'enabled': c not in disabled}
                                      for c, lbl in style_checker.configurable_rules(guide)]})
 
@@ -7076,6 +7077,72 @@ def packet_style_issues(request, packet_id):
         if found:
             issues['bonus-{0}'.format(b.id)] = found
     return HttpResponse(json.dumps({'issues': issues, 'guide': guide}))
+
+
+def _is_ai_user(user):
+    """AI-assisted features are gated to the admin user for now."""
+    return user.is_authenticated and user.username == 'admin'
+
+
+def _clean_for_ai(text):
+    """Strip QEMS markup and decode entities so the AI sees readable prose."""
+    return re.sub(r'[_~]', '', html.unescape(text or '')).strip()
+
+
+# Cap how many questions one AI grammar pass covers, to bound latency/cost.
+_AI_GRAMMAR_LIMIT = 50
+
+
+@login_required
+def ai_grammar_check(request, qset_id):
+    """Admin-only AI grammar/spelling/error pass over a set's questions.
+    Returns JSON findings; the Style Check page renders them."""
+    from . import ai
+    if not _is_ai_user(request.user):
+        return HttpResponse(json.dumps({'ok': False, 'message': 'Not authorized.'}), status=403)
+    if not ai.ai_enabled():
+        return HttpResponse(json.dumps({'ok': False, 'message': 'AI features are not configured.'}))
+    user = request.user.writer
+    try:
+        qset = QuestionSet.objects.get(id=qset_id)
+    except QuestionSet.DoesNotExist:
+        return HttpResponse(json.dumps({'ok': False, 'message': 'Set not found.'}))
+
+    items, refs = [], {}
+    total = 0
+    for tu in qset.tossup_set.select_related('packet').order_by('packet__packet_name', 'question_number'):
+        total += 1
+        if len(items) >= _AI_GRAMMAR_LIMIT:
+            continue
+        ref = 'tossup-{0}'.format(tu.id)
+        text = _clean_for_ai(tu.tossup_text) + '\nANSWER: ' + _clean_for_ai(tu.tossup_answer)
+        items.append({'ref': ref, 'text': text})
+        refs[ref] = {'edit_url': '/edit_tossup/{0}/'.format(tu.id),
+                     'label': _grid_answer_preview(tu.tossup_answer)}
+    for b in qset.bonus_set.select_related('packet').order_by('packet__packet_name', 'question_number'):
+        total += 1
+        if len(items) >= _AI_GRAMMAR_LIMIT:
+            continue
+        ref = 'bonus-{0}'.format(b.id)
+        parts = [_clean_for_ai(b.leadin),
+                 _clean_for_ai(b.part1_text), 'ANSWER: ' + _clean_for_ai(b.part1_answer),
+                 _clean_for_ai(b.part2_text), 'ANSWER: ' + _clean_for_ai(b.part2_answer),
+                 _clean_for_ai(b.part3_text), 'ANSWER: ' + _clean_for_ai(b.part3_answer)]
+        items.append({'ref': ref, 'text': '\n'.join(p for p in parts if p.strip())})
+        refs[ref] = {'edit_url': '/edit_bonus/{0}/'.format(b.id),
+                     'label': _grid_answer_preview(b.part1_answer, 30)}
+
+    findings, error = ai.grammar_check_questions(items)
+    if error:
+        return HttpResponse(json.dumps({'ok': False, 'message': error}))
+    # Attach the edit link + answer label to each finding for rendering.
+    for f in findings:
+        meta = refs.get(f.get('ref'), {})
+        f['edit_url'] = meta.get('edit_url', '')
+        f['label'] = meta.get('label', f.get('ref', ''))
+    return HttpResponse(json.dumps({'ok': True, 'findings': findings,
+                                    'checked': len(items), 'total': total,
+                                    'truncated': total > len(items)}))
 
 
 def _style_question(qtype, qid):

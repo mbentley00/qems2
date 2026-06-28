@@ -29,9 +29,13 @@ $(function () {
         //add_rows();
     });*/
 
-    // Set up sorting for all tables w/ tablesorter class
+    // Set up sorting for all tables w/ tablesorter class.
+    // NOTE: widthFixed is intentionally off. It freezes column widths measured
+    // at init, but tables inside an inactive tab (display:none, e.g. Recent
+    // Comments) measure as content-sized and then never expand to fill the
+    // page when the tab is shown. Without it, tables follow their CSS width.
     $('table.tablesorter').tablesorter({
-        widthFixed:true
+        widthFixed:false
     });
 
     // Make columns of some tables the same width

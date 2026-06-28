@@ -139,6 +139,19 @@ if not SECRET_KEY:
     with open(os.path.join(PROJECT_ROOT, 'secret'), 'r') as f:
         SECRET_KEY = f.read().strip()
 
+# Anthropic / Claude API key for the AI-assisted features (admin-only). Prefer
+# the ANTHROPIC_API_KEY env var (set as an Azure app setting in production);
+# fall back to a git-ignored `anthropic_key` file for local dev. Never commit
+# the key. AI features are disabled when no key is configured.
+ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '').strip()
+if not ANTHROPIC_API_KEY:
+    _anthropic_key_file = os.path.join(PROJECT_ROOT, 'anthropic_key')
+    if os.path.exists(_anthropic_key_file):
+        with open(_anthropic_key_file, 'r') as f:
+            ANTHROPIC_API_KEY = f.read().strip()
+# Default to Haiku for now — cheapest tier, fine for grammar/spelling passes.
+AI_DEFAULT_MODEL = os.environ.get('AI_DEFAULT_MODEL', 'claude-haiku-4-5')
+
 #SECRET_KEY = '%&amp;5&amp;wmrx-g8zpk8=m*kttzkxfy^38ziedy$1kf-4uwme8bksba'
 
 # TEMPLATE_LOADERS removed (handled by TEMPLATES setting below)

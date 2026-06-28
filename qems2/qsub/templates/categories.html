@@ -38,13 +38,12 @@
                     <th>Author</th>
                     <th>Preview</th>
                     <th>Answer</th>
-                    <th>Question Type</th>
                     <th>Category</th>
                     <th>Packet</th>
                     <th>Created</th>
                     <th>Modified</th>
                     <th>Edited</th>
-                    <th>Proofread</th>                    
+                    <th>Proofread</th>
                     <th>Comments</th>
                     <th>Last Comment</th>
                 </tr>
@@ -56,7 +55,6 @@
                     <td>{{ tossup.author }}</td>
                     <td><a href="/edit_tossup/{{ tossup.id }}">{{ tossup.tossup_text|safe|preview|question_html }}</a></td>
                     <td><a href="/edit_tossup/{{ tossup.id }}">{{ tossup|tossup_answer }}</a></td>
-                    <td>Tossup</td>
                     <td>{{ tossup.category }}</td>
                     <td>{% if tossup.packet %} {{ tossup.packet }} {% else %} Not in packet {% endif %}</td>
                     <td>{{ tossup.created_date|to_short_datetime }}</td>
@@ -85,7 +83,6 @@
                     <th>Author</th>
                     <th>Preview</th>
                     <th>Answer</th>
-                    <th>Question Type</th>
                     <th>Category</th>
                     <th>Packet</th>
                     <th>Created</th>
@@ -103,7 +100,6 @@
                     <td>{{ bonus.author }}</td>
                     <td><a href="/edit_bonus/{{ bonus.id }}/">{{ bonus|bonus_leadin }}</a></td>
                     <td><a href="/edit_bonus/{{ bonus.id }}/">{{ bonus|bonus_answers }}</a></td>
-                    <td>Bonus</td>
                     <td>{{ bonus.category }}</td>
                     <td>{% if bonus.packet %} {{ bonus.packet }} {% else %} Not in packet {% endif %}</td>
                     <td>{{ bonus.created_date|to_short_datetime }}</td>
