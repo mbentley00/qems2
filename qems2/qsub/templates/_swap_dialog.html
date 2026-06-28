@@ -1,7 +1,9 @@
-{# Swap-with-another-question dialog for the edit tossup/bonus pages. Mirrors
-   the doc-view / packet-grid swap: lists candidates from /swap_candidates/ and
-   performs the swap via /move_packet_question/. The source question is read from
-   the clicked .edit-swap-btn's data attributes. #}
+{% comment %}
+Swap-with-another-question dialog for the edit tossup/bonus pages. Mirrors the
+doc-view / packet-grid swap: lists candidates from /swap_candidates/ and performs
+the swap via /move_packet_question/. The source question is read from the clicked
+.edit-swap-btn's data attributes.
+{% endcomment %}
 <div id="edit-swap-dialog" title="Swap with another question" style="display:none;">
     <p id="edit-swap-source" style="margin-bottom: 8px;"></p>
     <div style="margin-bottom: 8px;">
