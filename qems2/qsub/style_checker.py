@@ -45,6 +45,7 @@ RULE_LABELS = [
     ('repeated_word', 'Repeated words ("the the")'),
     ('contractions', 'Contractions (don\'t, it\'s, …)'),
     ('imprecise_from', 'Imprecise "from this country" (prefer "born in")'),
+    ('late_identifier', 'Identifier comes late in the first sentence'),
     ('unbalanced_parens', 'Unbalanced parentheses'),
     ('answer_leak', 'ANSWER: leaked into question text'),
     ('numerals', 'Numerals in "For 10 points"'),
@@ -213,6 +214,58 @@ def _answer_alt_issues(label, raw_answer):
                    'answer_alts', '{0}|{1}'.format(label, head_key))]
 
 
+# Prepositions that introduce a trailing phrase the identifier can sit in. When
+# the answer cue ("this artist") is the object of one of these AND lands late in
+# the opening sentence, the phrase can usually be fronted to surface the cue
+# earlier ("...by this artist" -> "By this artist, ...").
+_IDENT_PREPS = {
+    'in', 'on', 'at', 'by', 'for', 'with', 'of', 'from', 'to', 'within', 'during',
+    'throughout', 'about', 'near', 'into', 'onto', 'upon', 'over', 'under', 'around',
+    'among', 'amongst', 'across', 'against', 'toward', 'towards', 'via',
+}
+
+
+def _first_sentence(plain):
+    """The opening sentence of `plain` (best-effort; splits on . ! ? + space)."""
+    m = re.search(r'[.!?]\s', plain)
+    return plain[:m.start() + 1] if m else plain
+
+
+def _late_identifier_issues(label, raw):
+    """Flag a tossup whose first-sentence answer cue ("this/these X") is the
+    object of a preposition and sits late in the sentence — i.e. the phrase
+    holding the cue could be moved to the front so it reads earlier."""
+    plain = _plain(raw).strip()
+    if not plain:
+        return []
+    words = _first_sentence(plain).split()
+    n = len(words)
+    if n < 10:
+        return []
+
+    def clean(w):
+        return w.strip('.,;:!?()"‘’\'').lower()
+
+    idx = next((i for i, w in enumerate(words) if clean(w) in ('this', 'these')), None)
+    if idx is None or idx < 6:
+        return []
+    # The cue must be the object of a preposition (a trailing phrase) and land in
+    # the back portion of the sentence.
+    if clean(words[idx - 1]) not in _IDENT_PREPS:
+        return []
+    if idx / float(n) < 0.55:
+        return []
+    nxt = clean(words[idx + 1]) if idx + 1 < n else ''
+    if not nxt.isalpha():
+        return []
+    ident = '{0} {1}'.format(clean(words[idx]), nxt)
+    return [_issue(
+        INFO,
+        '{0}: the cue "{1}" comes late in the first sentence; consider fronting the '
+        '"{2} {1} ..." phrase so the answer cue appears earlier.'.format(label, ident, clean(words[idx - 1])),
+        'late_identifier', '{0}|{1}'.format(label, ident))]
+
+
 def check_tossup(tu, guide=DEFAULT_GUIDE, disabled=None):
     enabled = _enabled_codes(guide, disabled)
     issues = []
@@ -221,6 +274,7 @@ def check_tossup(tu, guide=DEFAULT_GUIDE, disabled=None):
 
     issues += _mechanical_issues('Question', text, 'tossup_text')
     issues += _prose_issues('Question', text, 'tossup_text')
+    issues += _late_identifier_issues('Question', text)
 
     if re.search(r'\banswers?\s*:', plain, re.IGNORECASE):
         issues.append(_issue(WARNING, '"ANSWER:" in question text', 'answer_leak'))

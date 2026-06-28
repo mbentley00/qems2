@@ -291,8 +291,9 @@
 .qmeta-packet .qmeta-label { font-weight: 700; color: #565b66; margin-right: 6px; }
 .qmeta-gridlink { margin-left: 10px; font-size: 0.85rem; }
 /* Action buttons + Save share one row; Save is pushed to the right. */
-.qmeta-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 16px; }
-.qmeta-actions .button { margin: 0; }
+.qmeta-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 16px; }
+/* Tighter padding so the row fits on one line at smaller widths. */
+.qmeta-actions .button { margin: 0; padding: 0.5rem 0.7rem; font-size: 0.78rem; }
 .qmeta-actions .qmeta-save { margin-left: auto; }
 /* Copy/export icon tools floated into the question preview (saves a button row). */
 .app-content .panel.question { position: relative; }

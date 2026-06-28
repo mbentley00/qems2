@@ -157,7 +157,7 @@
 
         {% if bonus %}
         <div class="qmeta-actions" style="margin-bottom:16px;">
-            <a href="/move_bonus/{{ qset.id }}/{{ bonus.id }}" class="button small secondary">Move set</a>
+            <a href="/move_bonus/{{ qset.id }}/{{ bonus.id }}" class="button small secondary">Move Set</a>
             {% if role == "editor" %}<a href="#" class="button small secondary edit-swap-btn" data-qtype="bonus" data-qid="{{ bonus.id }}" data-packet="{{ bonus.packet.id }}" data-num="{{ bonus.question_number }}">Swap Packets</a>{% endif %}
             <a href="/bonus_history/{{ bonus.id }}" class="button small secondary">History</a>
             <a href="/convert_bonus/{{ bonus.id }}" class="button small secondary convert_bonus" value="{{ bonus.id }}" qset-id="{{ qset.id }}" target-type="ACF-style tossup">Convert to ACF tossup</a>
