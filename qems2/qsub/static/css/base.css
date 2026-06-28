@@ -249,8 +249,10 @@
 
 /* Edit-tossup / edit-bonus two-column layout: editing on the left, comments
    in a sticky panel on the right (mirrors the document view). */
-.edit-layout { display: flex; gap: 20px; align-items: flex-start; }
-.edit-main { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+/* Grid (not flex) so the main column reliably fills the remaining width and its
+   children stretch to it — flex-grow left the preview panel short of full width. */
+.edit-layout { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 20px; align-items: start; }
+.edit-main { min-width: 0; overflow-wrap: anywhere; }
 .edit-comments {
     flex: 0 0 330px; max-width: 330px;
     position: sticky; top: 8px;
@@ -288,6 +290,20 @@
 .qmeta-packet { font-size: 0.95rem; }
 .qmeta-packet .qmeta-label { font-weight: 700; color: #565b66; margin-right: 6px; }
 .qmeta-gridlink { margin-left: 10px; font-size: 0.85rem; }
+/* Action buttons + Save share one row; Save is pushed to the right. */
+.qmeta-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 16px; }
+.qmeta-actions .button { margin: 0; }
+.qmeta-actions .qmeta-save { margin-left: auto; }
+/* Copy/export icon tools floated into the question preview (saves a button row). */
+.app-content .panel.question { position: relative; }
+.q-copy-tools { float: right; display: inline-flex; gap: 4px; margin: 0 0 6px 10px; }
+.q-copy-btn { display: inline-flex; align-items: center; justify-content: center;
+    width: 30px; height: 30px; border-radius: 7px; }
+body.app-authed a.q-copy-btn { color: var(--qx-muted); }
+body.app-authed a.q-copy-btn:hover { color: var(--qx-primary); background: #f1f1f5; }
+html[data-theme="dark"] body.app-authed a.q-copy-btn:hover { background: var(--qx-hover); }
+/* Live character count tucked to the right of the "Tossup Text" label. */
+.char-count-inline { float: right; font-weight: normal; color: #888; font-size: 0.85rem; }
 .qmeta-flags { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 0; list-style: none; }
 .qmeta-flags li { margin: 0; }
 .qmeta-flags label { display: inline-flex; align-items: center; gap: 6px; font-weight: 500;
