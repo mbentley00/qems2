@@ -508,7 +508,13 @@ $(function () {
      * - Text before (*) is bold-wrapped with **...**
      * - Answer is spoiler-tagged
      */
-    function formatTossupForDiscord(text, answer, author, category) {
+    // A question id tag appended to the last answer line so Discord bots can
+    // link a pasted question back to the server even as its text changes.
+    function qidSuffix(qid) {
+        return qid ? ' <qid:' + qid + '>' : '';
+    }
+
+    function formatTossupForDiscord(text, answer, author, category, qid) {
         text = (text || '').trim();
         answer = (answer || '').trim();
         var info = { author: author || '', category: category || '' };
@@ -543,7 +549,7 @@ $(function () {
             }).join(' ');
         }
 
-        result += '\nANSWER: ||' + discordAnswer + '||';
+        result += '\nANSWER: ||' + discordAnswer + '||' + qidSuffix(qid);
         if (info.author || info.category) {
             result += '\n<' + info.author + ', ' + info.category + '>';
         }
@@ -558,7 +564,7 @@ $(function () {
      * - All answers are spoilered
      * - Difficulty placeholder appended
      */
-    function formatBonusForDiscord(leadin, parts, author, category) {
+    function formatBonusForDiscord(leadin, parts, author, category, qid) {
         var info = { author: author || '', category: category || '' };
         var result = qemsToDiscordMarkup((leadin || '').trim()) + '\n';
 
@@ -575,7 +581,7 @@ $(function () {
             } else {
                 result += label + ' ||' + partText + '||\n';
             }
-            result += 'ANSWER: ||' + partAnswer + '||\n';
+            result += 'ANSWER: ||' + partAnswer + '||' + (i === 3 ? qidSuffix(qid) : '') + '\n';
             difficulties.push(diff || '?');
         }
 
@@ -616,9 +622,16 @@ $(function () {
         setTimeout(function () { $button.text(originalText); }, 2000);
     }
 
+    // The saved question's id, read from the preview panel's anchor region
+    // (present on the edit pages once a question exists; blank for a new one).
+    function domQuestionId() {
+        var $a = $('.anchor-region[data-question-id]').first();
+        return ($a.length ? $a.attr('data-question-id') : '') || '';
+    }
+
     function domTossupArgs() {
         var info = getAuthorAndCategory();
-        return [($('#id_tossup_text').val() || ''), ($('#id_tossup_answer').val() || ''), info.author, info.category];
+        return [($('#id_tossup_text').val() || ''), ($('#id_tossup_answer').val() || ''), info.author, info.category, domQuestionId()];
     }
 
     function domBonusArgs() {
@@ -631,7 +644,7 @@ $(function () {
                 diff: ($('#id_part' + i + '_difficulty').val() || '')
             });
         }
-        return [($('#id_leadin').val() || ''), parts, info.author, info.category];
+        return [($('#id_leadin').val() || ''), parts, info.author, info.category, domQuestionId()];
     }
 
     // Expose the formatters for other pages (e.g. the packet document view)
@@ -670,7 +683,7 @@ $(function () {
      * Format a tossup for Discord without spoiler tags.
      * Clean Discord markdown with category + author for sharing finished questions.
      */
-    function formatTossupForDiscordPlain(text, answer, author, category) {
+    function formatTossupForDiscordPlain(text, answer, author, category, qid) {
         var info = { author: author || '', category: category || '' };
 
         var rendered = qemsToDiscordMarkup((text || '').trim());
@@ -683,7 +696,7 @@ $(function () {
             result = rendered;
         }
         answer = (answer || '').trim();
-        result += '\nANSWER: ' + qemsToDiscordMarkup(answer);
+        result += '\nANSWER: ' + qemsToDiscordMarkup(answer) + qidSuffix(qid);
         if (info.author || info.category) {
             result += '\n<' + info.author + ', ' + info.category + '>';
         }
@@ -693,7 +706,7 @@ $(function () {
     /**
      * Format a bonus for Discord without spoiler tags.
      */
-    function formatBonusForDiscordPlain(leadin, parts, author, category) {
+    function formatBonusForDiscordPlain(leadin, parts, author, category, qid) {
         var info = { author: author || '', category: category || '' };
         var result = qemsToDiscordMarkup((leadin || '').trim()) + ' For 10 points each:\n';
 
@@ -703,7 +716,7 @@ $(function () {
             var partAnswer = qemsToDiscordMarkup((part.answer || '').trim());
             var diff = (part.diff || '');
             result += '[10' + diff + '] ' + partText + '\n';
-            result += 'ANSWER: ' + partAnswer + '\n';
+            result += 'ANSWER: ' + partAnswer + (i === 3 ? qidSuffix(qid) : '') + '\n';
         }
 
         if (info.author || info.category) {

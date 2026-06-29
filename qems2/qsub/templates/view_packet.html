@@ -400,13 +400,14 @@ $(function() {
         var q = discordData[$(this).data('key')];
         if (!q || !window.QemsDiscord) return;
         var plain = $(this).data('mode') === 'plain';
+        var qid = $(this).closest('.doc-question').data('qid') || q.id || '';
         var text;
         if (q.qtype === 'tossup') {
-            text = plain ? QemsDiscord.tossupPlain(q.text, q.answer, q.author, q.category)
-                         : QemsDiscord.tossup(q.text, q.answer, q.author, q.category);
+            text = plain ? QemsDiscord.tossupPlain(q.text, q.answer, q.author, q.category, qid)
+                         : QemsDiscord.tossup(q.text, q.answer, q.author, q.category, qid);
         } else {
-            text = plain ? QemsDiscord.bonusPlain(q.leadin, q.parts, q.author, q.category)
-                         : QemsDiscord.bonus(q.leadin, q.parts, q.author, q.category);
+            text = plain ? QemsDiscord.bonusPlain(q.leadin, q.parts, q.author, q.category, qid)
+                         : QemsDiscord.bonus(q.leadin, q.parts, q.author, q.category, qid);
         }
         QemsDiscord.copy(text, $(this));
     });

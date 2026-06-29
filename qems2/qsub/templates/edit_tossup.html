@@ -39,8 +39,8 @@
             {% if form %}
             <div class="q-copy-tools">
                 <a href="#" id="paste-full-tossup" class="q-copy-btn" title="Copy the full tossup">Copy</a>
-                <a href="#" id="copy-for-discord-tossup" class="q-copy-btn" title="Copy formatted for Discord">Discord</a>
-                <a href="#" id="copy-for-discord-plain-tossup" class="q-copy-btn" title="Copy for Discord without spoiler markup">Discord (clean)</a>
+                <a href="#" id="copy-for-discord-plain-tossup" class="q-copy-btn" title="Copy for Discord (standard, no spoiler tags)">Discord</a>
+                <a href="#" id="copy-for-discord-tossup" class="q-copy-btn" title="Copy for Discord with the answer hidden behind spoiler tags">Discord (spoiler)</a>
             </div>
             {% endif %}
             <div class="anchor-region" data-question-type="tossup" data-question-id="{{ tossup.id }}">

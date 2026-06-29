@@ -252,7 +252,10 @@
 /* Grid (not flex) so the main column reliably fills the remaining width and its
    children stretch to it — flex-grow left the preview panel short of full width. */
 .edit-layout { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 20px; align-items: start; }
-.edit-main { min-width: 0; overflow-wrap: anywhere; }
+/* width:100% forces the main column (and its panel/form) to fill the grid track
+   even if a child would otherwise shrink-wrap to its content. */
+.edit-main { min-width: 0; width: 100%; overflow-wrap: anywhere; }
+.edit-main > .panel.question, .edit-main > form { width: 100%; box-sizing: border-box; }
 .edit-comments {
     flex: 0 0 330px; max-width: 330px;
     position: sticky; top: 8px;
@@ -299,10 +302,10 @@
    button row). Small text pills — Font Awesome glyphs don't render reliably
    inside the serif preview panel, so use labels with full tooltips. */
 .app-content .panel.question { position: relative; }
-.q-copy-tools { position: absolute; right: 14px; bottom: 12px; display: inline-flex; gap: 6px; }
-.q-copy-btn { display: inline-flex; align-items: center; padding: 3px 9px; border-radius: 7px;
-    border: 1px solid var(--qx-border); background: #fff;
-    font-family: var(--qx-sans); font-size: 0.72rem; font-weight: 600; line-height: 1.4; white-space: nowrap; }
+.q-copy-tools { position: absolute; right: 14px; bottom: 12px; display: flex; align-items: center; gap: 6px; }
+.q-copy-btn { display: inline-flex; align-items: center; box-sizing: border-box; height: 26px; padding: 0 10px;
+    border-radius: 7px; border: 1px solid var(--qx-border); background: #fff;
+    font-family: var(--qx-sans); font-size: 0.72rem; font-weight: 600; line-height: 1; white-space: nowrap; }
 body.app-authed a.q-copy-btn { color: #565b66; }
 body.app-authed a.q-copy-btn:hover { color: var(--qx-primary); background: #f1f1f5; }
 html[data-theme="dark"] .q-copy-btn { background: var(--qx-elevate); }
