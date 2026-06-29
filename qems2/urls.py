@@ -93,6 +93,7 @@ urlpatterns = [
     re_path(r'^edit_bonus/(?P<bonus_id>[0-9]+)/$', edit_bonus),
     re_path(r'^delete_bonus/$', delete_bonus),
     re_path(r'^add_packets/(?P<qset_id>[0-9]+)/$', add_packets),
+    re_path(r'^add_packet/(?P<qset_id>[0-9]+)/$', add_packet),
     re_path(r'^edit_packet/(?P<packet_id>[0-9]+)/$', edit_packet),
     re_path(r'^type_questions/$', type_questions),
     re_path(r'^type_questions/(?P<qset_id>[0-9]+)/$', type_questions),

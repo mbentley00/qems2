@@ -6181,6 +6181,32 @@ def _create_packets_continuing(qset, count, existing, user):
 
 
 @login_required
+def add_packet(request, qset_id):
+    """Add a single empty packet to a set (owner/editor), continuing the naming
+    scheme. Doesn't touch existing packets, questions, or packetization — just
+    adds one more packet. Redirects back to the page the button was on."""
+    user = request.user.writer
+    try:
+        qset = QuestionSet.objects.get(id=int(qset_id))
+    except (ValueError, QuestionSet.DoesNotExist):
+        return HttpResponseRedirect('/main/')
+    if not (qset.is_owner(user) or user in qset.editor.all()):
+        return render(request, 'failure.html',
+                      {'message': 'Only an owner or editor can add packets.',
+                       'message_class': 'alert-box alert'})
+    if request.method == 'POST':
+        existing = [p for p in sorted_packets(qset) if p.packet_name != EXTRAS_PACKET_NAME]
+        new = _create_packets_continuing(qset, 1, existing, user)
+        qset.num_packets = (qset.num_packets or 0) + 1
+        qset.save(update_fields=['num_packets'])
+        cache.clear()
+        if new:
+            messages.success(request, 'Added packet "{0}".'.format(new[0].packet_name))
+    return HttpResponseRedirect(request.META.get('HTTP_REFERER')
+                                or '/packet_grid/{0}/'.format(qset.id))
+
+
+@login_required
 def assign_unpacketized(request):
     """Non-destructively place unpacketized questions: first into empty slots of
     existing packets, then into newly created packets for any overflow. Does not

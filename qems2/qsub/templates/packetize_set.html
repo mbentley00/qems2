@@ -21,6 +21,11 @@
     <div class="{{ message_class }}">{{ message }}</div>
 {% endif %}
 
+<form method="post" action="/add_packet/{{ qset.id }}/" style="margin-bottom:14px;">
+    {% csrf_token %}
+    <button type="submit" class="button small secondary" style="margin:0;" title="Add one more empty packet (doesn't change existing packets)"><i class="fa fa-plus"></i> Add a packet</button>
+</form>
+
 {% if report %}
 <div class="panel radius">
     <h5>Packetization Results <a href="/packet_grid/{{ qset.id }}/" class="button small primary right">View Packet Grid</a></h5>

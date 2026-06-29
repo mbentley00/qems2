@@ -295,13 +295,14 @@
 /* Tighter padding so the row fits on one line at smaller widths. */
 .qmeta-actions .button { margin: 0; padding: 0.5rem 0.7rem; font-size: 0.78rem; }
 .qmeta-actions .qmeta-save { margin-left: auto; }
-/* Copy/export icon tools pinned to the bottom-right of the question preview
-   (saves a button row). Visible bordered buttons so they read as clickable. */
+/* Copy/export tools pinned to the bottom-right of the question preview (saves a
+   button row). Small text pills — Font Awesome glyphs don't render reliably
+   inside the serif preview panel, so use labels with full tooltips. */
 .app-content .panel.question { position: relative; }
 .q-copy-tools { position: absolute; right: 14px; bottom: 12px; display: inline-flex; gap: 6px; }
-.q-copy-btn { display: inline-flex; align-items: center; justify-content: center;
-    width: 30px; height: 30px; border-radius: 7px;
-    border: 1px solid var(--qx-border); background: #fff; }
+.q-copy-btn { display: inline-flex; align-items: center; padding: 3px 9px; border-radius: 7px;
+    border: 1px solid var(--qx-border); background: #fff;
+    font-family: var(--qx-sans); font-size: 0.72rem; font-weight: 600; line-height: 1.4; white-space: nowrap; }
 body.app-authed a.q-copy-btn { color: #565b66; }
 body.app-authed a.q-copy-btn:hover { color: var(--qx-primary); background: #f1f1f5; }
 html[data-theme="dark"] .q-copy-btn { background: var(--qx-elevate); }

@@ -25,6 +25,10 @@
     Drag an unpacketized question (below) onto a cell to place it; drag a cell question onto the
     unpacketized panel to remove it from its packet. Rows beyond the per-packet count are tiebreakers.
     <span class="right">
+        <form method="post" action="/add_packet/{{ qset.id }}/" style="display:inline; margin:0;">
+            {% csrf_token %}
+            <button type="submit" class="button small secondary" title="Add one more empty packet (doesn't change existing packets)"><i class="fa fa-plus"></i> Add a packet</button>
+        </form>
         <a href="/packet_grid_log/{{ qset.id }}/" class="button small secondary">Change log</a>
         <button type="button" id="undo-grid-change" class="button small">&#8630; Undo last change</button>
         <button type="button" id="reorder-packets-btn" class="button small secondary">Reorder packets</button>
