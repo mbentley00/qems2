@@ -93,7 +93,7 @@ $(function () {
         var $editor = $('<div class="rich-editor" contenteditable="true" spellcheck="true"></div>');
         // Only the big bulk "type questions" box gets the extra-tall sizing.
         // (Edit-page fields are also multiline so Enter works, but size by role.)
-        if (textarea.id === 'id_questions') { $editor.addClass('rich-editor-multiline'); }
+        if (textarea.id === 'id_questions' || textarea.id === 'unified-bonus-text') { $editor.addClass('rich-editor-multiline'); }
         // Long stem/leadin/part-text fields start taller; answer lines stay short.
         var TALL_FIELDS = ['id_tossup_text', 'id_leadin',
                            'id_part1_text', 'id_part2_text', 'id_part3_text'];
@@ -278,6 +278,12 @@ $(function () {
 
     // Type Questions page: one big line-oriented box
     $('#id_questions').each(function () {
+        enhance(this, true);
+    });
+
+    // The unified bonus editor is a whole-bonus rich-text box (multiline).
+    // paste_convert.js populates its value and shows it before this runs.
+    $('#unified-bonus-text').each(function () {
         enhance(this, true);
     });
 

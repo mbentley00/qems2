@@ -263,6 +263,17 @@ $(function () {
                 parseUnifiedToFields();
             }
         });
+
+        // Default to the unified editor view (whole-bonus rich text). Populate
+        // the textarea from the saved fields now, before rich_editor.js enhances
+        // it (this script runs first), so the rich editor renders the content.
+        if ($unifiedContainer.length && $unifiedTextarea.length) {
+            unifiedMode = true;
+            $unifiedTextarea.val(fieldsToUnified());
+            $individualContainer.hide();
+            $unifiedContainer.show();
+            $toggleBtn.text('Switch to Individual Fields');
+        }
     }
 
     function fieldsToUnified() {
