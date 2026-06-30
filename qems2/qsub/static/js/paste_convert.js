@@ -276,6 +276,15 @@ $(function () {
         }
     }
 
+    // Exposed so the bonus page's difficulty-warning check can pull the
+    // [10e]/[10m]/[10h] difficulties out of the unified text into the fields
+    // BEFORE it validates them (it runs before this script's submit handler).
+    window.qemsSyncBonusUnified = function () {
+        if (unifiedMode && $unifiedTextarea && $unifiedTextarea.length) {
+            parseUnifiedToFields();
+        }
+    };
+
     function fieldsToUnified() {
         var leadin = ($('#id_leadin').val() || '').trim();
         var parts = [];

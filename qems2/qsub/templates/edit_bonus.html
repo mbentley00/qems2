@@ -193,6 +193,9 @@
 <script>
 $(function () {
     $('form').on('submit', function (e) {
+        // In the unified editor the difficulties are in the [10e]/[10m]/[10h]
+        // text; pull them into the fields before checking them here.
+        if (window.qemsSyncBonusUnified) { window.qemsSyncBonusUnified(); }
         var d1 = $('#id_part1_difficulty').val();
         var d2 = $('#id_part2_difficulty').val();
         var d3 = $('#id_part3_difficulty').val();
