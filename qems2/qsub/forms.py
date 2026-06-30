@@ -219,6 +219,15 @@ class BonusForm(forms.ModelForm):
         self.fields['question_type'] = forms.ModelChoiceField(queryset=QuestionType.objects.all(), required=False)
         self.fields['question_type'].widget.attrs['style'] = 'display:none'
 
+        # Short labels for the compact per-part "Dif" dropdowns (E / M / H).
+        short_diff = [('', '–'), ('e', 'E'), ('m', 'M'), ('h', 'H')]
+        for i in (1, 2, 3):
+            fld = self.fields.get('part{0}_difficulty'.format(i))
+            if fld is not None:
+                fld.choices = short_diff
+                if hasattr(fld.widget, 'choices'):
+                    fld.widget.choices = short_diff
+
         if qset_id:
             try:
                 qset = QuestionSet.objects.get(id=qset_id)

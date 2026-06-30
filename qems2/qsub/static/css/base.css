@@ -251,7 +251,7 @@
    difficulty selects and ate too much vertical space. Scoped to the container
    so the unified editor, tossup editor, and Type Questions box are unaffected.
    Editors still grow with content; this mainly tightens labels/margins. */
-#individual-fields-container > label { margin: 0.45rem 0 0.1rem; font-size: 0.8rem; font-weight: 600; color: #565b66; }
+#individual-fields-container label { display: block; margin: 0.45rem 0 0.1rem; font-size: 0.8rem; font-weight: 600; color: #565b66; }
 #individual-fields-container > label:first-child { margin-top: 0; }
 #individual-fields-container .rich-editor-wrapper { margin-bottom: 0; }
 #individual-fields-container .rich-editor-toolbar { padding: 0.1em 0.4em; }
@@ -261,6 +261,13 @@
 #individual-fields-container .rich-editor.rich-editor-tall { min-height: 2.6em; }
 #individual-fields-container .rich-editor.rich-editor-short { min-height: 1.8em; }
 #individual-fields-container select { margin: 0 0 0.2rem; height: 34px; }
+/* Per-part row: a short "Dif" dropdown column sits to the left of the part
+   text, so difficulty + part text read as columns in one row. */
+#individual-fields-container .bonus-part { display: flex; gap: 10px; align-items: flex-start; margin-top: 0.5rem; }
+#individual-fields-container .bonus-part-dif { flex: 0 0 52px; margin-top: 0; }
+#individual-fields-container .bonus-part-dif select { width: 100%; padding: 0 0.2rem; text-align: center; }
+#individual-fields-container .bonus-part-main { flex: 1 1 auto; min-width: 0; }
+#individual-fields-container .bonus-part-main > label:first-child { margin-top: 0; }
 
 /* Edit-tossup / edit-bonus two-column layout: editing on the left, comments
    in a sticky panel on the right (mirrors the document view). */

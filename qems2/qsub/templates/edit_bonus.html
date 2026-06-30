@@ -75,50 +75,62 @@
             </label>
             {% if form.leadin.errors %}{{ form.leadin.errors }}{% endif %}
         {% endif %}
-        <label>
-            Part 1 Text
-            {{ form.part1_text }}
-            {% if form.part1_text.errors %}{{ form.part1_text.errors }}{% endif %}
-        </label>
-        <label>
-            Part 1 Answer
-            {{ form.part1_answer }}
-            {% if form.part1_answer.errors %}{{ form.part1_answer.errors }}{% endif %}
-        </label>
-        <label>
-            Part 1 Difficulty
-            {{ form.part1_difficulty }}
-        </label>
+        <div class="bonus-part">
+            <label class="bonus-part-dif">
+                Dif
+                {{ form.part1_difficulty }}
+            </label>
+            <div class="bonus-part-main">
+                <label>
+                    Part 1 Text
+                    {{ form.part1_text }}
+                    {% if form.part1_text.errors %}{{ form.part1_text.errors }}{% endif %}
+                </label>
+                <label>
+                    Part 1 Answer
+                    {{ form.part1_answer }}
+                    {% if form.part1_answer.errors %}{{ form.part1_answer.errors }}{% endif %}
+                </label>
+            </div>
+        </div>
 
         {% if question_type == "ACF-style bonus" %}
-            <label>
-                Part 2 Text
-                {{ form.part2_text }}
-                {% if form.part2_text.errors %}{{ form.part2_text.errors }}{% endif %}
-            </label>
-            <label>
-                Part 2 Answer
-                {{ form.part2_answer }}
-                {% if form.part2_answer.errors %}{{ form.part2_answer.errors }}{% endif %}
-            </label>
-            <label>
-                Part 2 Difficulty
-                {{ form.part2_difficulty }}
-            </label>
-            <label>
-                Part 3 Text
-                {{ form.part3_text }}
-                {% if form.part3_text.errors %}{{ form.part3_text.errors }}{% endif %}
-            </label>
-            <label>
-                Part 3 Answer
-                {{ form.part3_answer }}
-                {% if form.part3_answer.errors %}{{ form.part3_answer.errors }}{% endif %}
-            </label>
-            <label>
-                Part 3 Difficulty
-                {{ form.part3_difficulty }}
-            </label>
+            <div class="bonus-part">
+                <label class="bonus-part-dif">
+                    Dif
+                    {{ form.part2_difficulty }}
+                </label>
+                <div class="bonus-part-main">
+                    <label>
+                        Part 2 Text
+                        {{ form.part2_text }}
+                        {% if form.part2_text.errors %}{{ form.part2_text.errors }}{% endif %}
+                    </label>
+                    <label>
+                        Part 2 Answer
+                        {{ form.part2_answer }}
+                        {% if form.part2_answer.errors %}{{ form.part2_answer.errors }}{% endif %}
+                    </label>
+                </div>
+            </div>
+            <div class="bonus-part">
+                <label class="bonus-part-dif">
+                    Dif
+                    {{ form.part3_difficulty }}
+                </label>
+                <div class="bonus-part-main">
+                    <label>
+                        Part 3 Text
+                        {{ form.part3_text }}
+                        {% if form.part3_text.errors %}{{ form.part3_text.errors }}{% endif %}
+                    </label>
+                    <label>
+                        Part 3 Answer
+                        {{ form.part3_answer }}
+                        {% if form.part3_answer.errors %}{{ form.part3_answer.errors }}{% endif %}
+                    </label>
+                </div>
+            </div>
         {% endif %}
         </div>
         {% if bonus %}
