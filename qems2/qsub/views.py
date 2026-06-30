@@ -1966,10 +1966,15 @@ def edit_tossup(request, tossup_id):
                 '/edit_tossup/{0}/?suggested={1}#suggested-changes'.format(tossup.id, created))
 
         if user == tossup.author or qset.is_owner(user) or user in qset.editor.all():
-            form = TossupForm(request.POST, qset_id=qset.id, role=role)
+            # Pass instance so the current author stays a valid choice even when
+            # they aren't a member of this set (imported/moved questions).
+            form = TossupForm(request.POST, instance=tossup, qset_id=qset.id, role=role)
             can_change = True
             if tossup.locked and not (qset.is_owner(user) or user in qset.editor.all()):
                 can_change = False
+            # Stay in edit mode (not suggest/read-only) on a form error so an
+            # owner/editor sees the form and the error, not the suggest panel.
+            read_only = not can_change
 
             if form.is_valid() and can_change:
                 read_only = False
@@ -2128,11 +2133,17 @@ def edit_bonus(request, bonus_id):
                 '/edit_bonus/{0}/?suggested={1}#suggested-changes'.format(bonus.id, created))
 
         if user == bonus.author or qset.is_owner(user) or user in qset.editor.all():
-            form = BonusForm(request.POST, qset_id=qset.id, role=role, question_type=question_type)
+            # Pass instance so the current author stays a valid choice even when
+            # they aren't a member of this set (imported/moved questions).
+            form = BonusForm(request.POST, instance=bonus, qset_id=qset.id, role=role, question_type=question_type)
 
             can_change = True
             if bonus.locked and not (qset.is_owner(user) or user in qset.editor.all()):
                 can_change = False
+            # Stay in edit mode (not suggest/read-only) even if the form has an
+            # error, so an owner/editor sees the form and the error, not the
+            # "you can't edit this directly" panel.
+            read_only = not can_change
 
             if form.is_valid() and can_change:
                 is_bonus_already_edited = bonus.edited

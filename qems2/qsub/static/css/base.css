@@ -247,6 +247,21 @@
     min-height: 2.25em;
 }
 
+/* Compact the individual-fields bonus editor — it has 7 text fields plus 3
+   difficulty selects and ate too much vertical space. Scoped to the container
+   so the unified editor, tossup editor, and Type Questions box are unaffected.
+   Editors still grow with content; this mainly tightens labels/margins. */
+#individual-fields-container > label { margin: 0.45rem 0 0.1rem; font-size: 0.8rem; font-weight: 600; color: #565b66; }
+#individual-fields-container > label:first-child { margin-top: 0; }
+#individual-fields-container .rich-editor-wrapper { margin-bottom: 0; }
+#individual-fields-container .rich-editor-toolbar { padding: 0.1em 0.4em; }
+#individual-fields-container .rich-editor-toolbar a.rich-editor-btn { padding: 0.05em 0.4em; font-size: 0.85em; }
+#individual-fields-container .rich-editor-hint { font-size: 0.7em; padding-top: 0.25em; }
+#individual-fields-container .rich-editor { padding: 0.35em 0.5em; }
+#individual-fields-container .rich-editor.rich-editor-tall { min-height: 2.6em; }
+#individual-fields-container .rich-editor.rich-editor-short { min-height: 1.8em; }
+#individual-fields-container select { margin: 0 0 0.2rem; height: 34px; }
+
 /* Edit-tossup / edit-bonus two-column layout: editing on the left, comments
    in a sticky panel on the right (mirrors the document view). */
 /* Grid (not flex) so the main column reliably fills the remaining width and its
