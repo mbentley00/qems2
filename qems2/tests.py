@@ -3174,3 +3174,128 @@ class AIGrammarCheckTests(TestCase):
         resp, _ = self._run_check(self._fake_finding())
         self.assertEqual(resp.status_code, 403)
         self.assertEqual(AIGrammarFinding.objects.count(), 0)
+
+
+class YappHtmlConversionTests(TestCase):
+    """QEMS markup -> the HTML YAPP/MODAQ expects."""
+
+    def _c(self, text):
+        from qems2.qsub.yapp_export import qems_to_yapp_html
+        return qems_to_yapp_html(text)
+
+    def test_required_answer_is_bold_underline(self):
+        self.assertEqual(self._c('_France_'), '<b><u>France</u></b>')
+
+    def test_prompt_is_underline_only(self):
+        self.assertEqual(self._c('__Paris__'), '<u>Paris</u>')
+
+    def test_italics_use_em(self):
+        self.assertEqual(self._c('~Hamlet~'), '<em>Hamlet</em>')
+
+    def test_power_marker_kept_literal(self):
+        self.assertEqual(self._c('a stem (*) more'), 'a stem (*) more')
+
+    def test_superscript_and_subscript(self):
+        self.assertEqual(self._c(r'E=mc\S2\S'), 'E=mc<sup>2</sup>')
+        self.assertEqual(self._c(r'H\s2\sO'), 'H<sub>2</sub>O')
+
+    def test_escaped_chars_are_literal(self):
+        self.assertEqual(self._c(r'C\_2'), 'C_2')
+        self.assertEqual(self._c(r'a \~ b'), 'a ~ b')
+
+    def test_unclosed_markup_is_closed(self):
+        self.assertEqual(self._c('_France'), '<b><u>France</u></b>')
+
+
+class YappJsonExportTests(TestCase):
+    """Exporting a set to YAPP JSON: one .json per packet, correct schema."""
+
+    def setUp(self):
+        import io as _io, zipfile as _zip, json as _json
+        self._io, self._zip, self._json = _io, _zip, _json
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        self.acf_tu = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.acf_bn = QuestionType.objects.get(question_type=ACF_STYLE_BONUS)
+        self.ou = User.objects.create_user('yj_owner', password='pw', email='y@test.com')
+        self.ou.first_name, self.ou.last_name = 'Pat', 'Writer'
+        self.ou.save()
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='yj dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='Science', subcategory='Biology')
+        self.qset = QuestionSet.objects.create(
+            name='YJ Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=2, distribution=self.dist)
+        self.owner.question_set_editor.add(self.qset)
+        self.p2 = Packet.objects.create(question_set=self.qset, packet_name='Packet 2', created_by=self.owner)
+        self.p10 = Packet.objects.create(question_set=self.qset, packet_name='Packet 10', created_by=self.owner)
+        self.tu = Tossup.objects.create(
+            author=self.owner, question_set=self.qset, packet=self.p2,
+            question_type=self.acf_tu, category=self.de,
+            tossup_text='A stem clue. (*) The end.', tossup_answer='_Photosynthesis_',
+            created_date=datetime.now(), last_changed_date=datetime.now(), question_number=1)
+        Tossup.objects.create(
+            author=self.owner, question_set=self.qset, packet=self.p10,
+            question_type=self.acf_tu, category=self.de,
+            tossup_text='Ten stem. (*) end.', tossup_answer='_Mitochondria_',
+            created_date=datetime.now(), last_changed_date=datetime.now(), question_number=1)
+        self.bn = Bonus.objects.create(
+            author=self.owner, question_set=self.qset, packet=self.p2,
+            question_type=self.acf_bn, category=self.de,
+            leadin='Answer these.', part1_text='P1', part1_answer='_Alpha_',
+            part1_difficulty='e', part2_text='P2', part2_answer='_Beta_',
+            part2_difficulty='m', part3_text='P3', part3_answer='_Gamma_', part3_difficulty='h',
+            created_date=datetime.now(), last_changed_date=datetime.now(), question_number=1)
+        self.client.login(username='yj_owner', password='pw')
+
+    def _zipf(self):
+        resp = self.client.get('/export_question_set/{0}/yapp-json/'.format(self.qset.id))
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp['Content-Type'], 'application/zip')
+        return self._zip.ZipFile(self._io.BytesIO(resp.content))
+
+    def _payload(self, zf, name):
+        return self._json.loads(zf.read(name).decode('utf-8'))
+
+    def test_one_json_per_packet(self):
+        zf = self._zipf()
+        names = zf.namelist()
+        self.assertIn('Packet 2.json', names)
+        self.assertIn('Packet 10.json', names)
+
+    def test_tossup_schema_and_html(self):
+        data = self._payload(self._zipf(), 'Packet 2.json')
+        self.assertEqual(len(data['tossups']), 1)
+        t = data['tossups'][0]
+        self.assertEqual(t['number'], 1)
+        self.assertIn('(*)', t['question'])                       # power kept literal
+        self.assertEqual(t['answer'], '<b><u>Photosynthesis</u></b>')
+        self.assertEqual(t['metadata'], 'Pat Writer, Science - Biology')
+
+    def test_bonus_schema_values_and_difficulty(self):
+        data = self._payload(self._zipf(), 'Packet 2.json')
+        self.assertEqual(len(data['bonuses']), 1)
+        b = data['bonuses'][0]
+        self.assertEqual(b['leadin'], 'Answer these.')
+        self.assertEqual(b['parts'], ['P1', 'P2', 'P3'])
+        self.assertEqual(b['answers'],
+                         ['<b><u>Alpha</u></b>', '<b><u>Beta</u></b>', '<b><u>Gamma</u></b>'])
+        self.assertEqual(b['values'], [10, 10, 10])
+        self.assertEqual(b['difficultyModifiers'], ['e', 'm', 'h'])
+
+    def test_packet_10_isolated(self):
+        data = self._payload(self._zipf(), 'Packet 10.json')
+        self.assertEqual(data['tossups'][0]['answer'], '<b><u>Mitochondria</u></b>')
+        self.assertEqual(data['bonuses'], [])
+
+    def test_unpacketed_questions_go_to_own_file(self):
+        Tossup.objects.create(
+            author=self.owner, question_set=self.qset, packet=None,
+            question_type=self.acf_tu, category=self.de,
+            tossup_text='Loose one.', tossup_answer='_Loose_',
+            created_date=datetime.now(), last_changed_date=datetime.now(), question_number=1)
+        zf = self._zipf()
+        self.assertIn('Unpacketed.json', zf.namelist())
+        data = self._payload(zf, 'Unpacketed.json')
+        self.assertEqual(data['tossups'][0]['answer'], '<b><u>Loose</u></b>')

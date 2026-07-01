@@ -4856,6 +4856,58 @@ def export_question_set(request, qset_id, output_format):
                     filename = f"{qset.name} - Packets.zip" if qset.name else "packets.zip"
                     response['Content-Disposition'] = f'attachment; filename="{filename}"'
                     return response
+            elif output_format == "yapp-json":
+                # Export each packet as a YAPP (YetAnotherPacketParser) JSON file,
+                # readable by MODAQ. One .json per packet, zipped for the set.
+                from . import yapp_export
+
+                def _packet_sort_key(pk):
+                    nums = re.findall(r'\d+', pk.packet_name or '')
+                    return (int(nums[0]) if nums else float('inf'),
+                            pk.packet_name or '', pk.id)
+
+                def _safe_filename(name):
+                    return re.sub(r'[\\/:*?"<>|]', '_', name or 'Packet').strip() or 'Packet'
+
+                # (name, tossups, bonuses) groups: one per packet, plus a trailing
+                # group for any questions that aren't in a packet.
+                groups = []
+                for packet in sorted(Packet.objects.filter(question_set=qset),
+                                     key=_packet_sort_key):
+                    groups.append((
+                        packet.packet_name,
+                        list(Tossup.objects.filter(packet=packet, question_set=qset)
+                             .select_related('category', 'author').order_by('question_number')),
+                        list(Bonus.objects.filter(packet=packet, question_set=qset)
+                             .select_related('category', 'author').order_by('question_number'))))
+                unpacketed_tus = list(
+                    Tossup.objects.filter(packet__isnull=True, question_set=qset)
+                    .select_related('category', 'author').order_by('question_number'))
+                unpacketed_bos = list(
+                    Bonus.objects.filter(packet__isnull=True, question_set=qset)
+                    .select_related('category', 'author').order_by('question_number'))
+                if unpacketed_tus or unpacketed_bos:
+                    groups.append(('Unpacketed', unpacketed_tus, unpacketed_bos))
+
+                zip_buf = io.BytesIO()
+                with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+                    used_names = set()
+                    for name, tus, bos in groups:
+                        payload = yapp_export.packet_to_yapp(tus, bos)
+                        base = _safe_filename(name)
+                        fname = base
+                        n = 2
+                        while fname in used_names:
+                            fname = '{0} ({1})'.format(base, n)
+                            n += 1
+                        used_names.add(fname)
+                        zf.writestr('{0}.json'.format(fname),
+                                    json.dumps(payload, ensure_ascii=False, indent=2))
+
+                response = HttpResponse(zip_buf.getvalue(), content_type='application/zip')
+                filename = f"{qset.name} - YAPP JSON.zip" if qset.name else "packets-yapp-json.zip"
+                response['Content-Disposition'] = f'attachment; filename="{filename}"'
+                return response
             elif (output_format == "pdf"):
                 # TODO: Experiment with one of those PDF libraries
                 message = 'Not supported yet.'
