@@ -19,6 +19,7 @@ from collections import defaultdict
 from functools import wraps
 
 from django.http import JsonResponse
+from django.utils.dateparse import parse_datetime
 from django.views.decorators.csrf import csrf_exempt
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.sites.models import Site
@@ -207,8 +208,10 @@ def api_ping(request):
 def api_buzzes(request):
     """Record tossup buzzes. Body: {"events": [{external_id, answer, player_name,
     buzz_word_index, total_words, char_position, correct, powered, value, neg,
-    answer_given}, ...]}. `answer` is matched to a tossup; `player_name` records
-    who buzzed; `answer_given` (optional) stores what they said."""
+    answer_given, occurred_at}, ...]}. `answer` is matched to a tossup;
+    `player_name` records who buzzed; `answer_given` (optional) stores what they
+    said; `occurred_at` (optional ISO-8601) sets when the buzz happened.
+    Re-sending the same `external_id` updates the existing buzz in place."""
     events, err = _load_events(request, 'events')
     if err:
         return err
@@ -216,8 +219,10 @@ def api_buzzes(request):
     idx = _tossup_index(qset)
 
     eids = [e.get('external_id') for e in events if isinstance(e, dict) and e.get('external_id')]
-    seen = set(TossupBuzz.objects.filter(external_id__in=eids)
-               .values_list('external_id', flat=True)) if eids else set()
+    # Existing rows by external_id, so a re-send UPDATES in place (corrected
+    # position/value/time) instead of being skipped as an unchangeable duplicate.
+    existing = {b.external_id: b for b in
+                TossupBuzz.objects.filter(external_id__in=eids)} if eids else {}
 
     # Current question version per matched tossup, fetched once (see history_url).
     resolved_ids = [_resolve(idx, e.get('answer'))[1] for e in events if isinstance(e, dict)]
@@ -229,9 +234,6 @@ def api_buzzes(request):
             results.append({'external_id': '', 'status': 'error', 'error': 'not an object'})
             continue
         eid = (e.get('external_id') or '').strip()
-        if eid and eid in seen:
-            results.append({'external_id': eid, 'status': 'duplicate'})
-            continue
         status, qid = _resolve(idx, e.get('answer'))
         if status != 'ok':
             results.append({'external_id': eid, 'status': status})
@@ -246,19 +248,33 @@ def api_buzzes(request):
         else:
             value = -5 if e.get('neg') else 0
         name = (e.get('player_name') or '').strip()
+        when = parse_datetime(e.get('occurred_at') or '')
 
-        TossupBuzz.objects.create(
-            tossup_id=qid, session=_discord_session(qset, name), player=None,
-            player_name=name, buzz_word_index=_int(e.get('buzz_word_index')),
+        fields = dict(
+            tossup_id=qid, player_name=name,
+            buzz_word_index=_int(e.get('buzz_word_index')),
             total_words=_int(e.get('total_words')),
             char_position=_int(e.get('char_position')),
             correct=correct, powered=powered, value=value,
             answer_given=(e.get('answer_given') or '')[:1000],
             tossup_history_id=hist_ids.get(qid),
-            source=PLAYTEST_SOURCE_DISCORD, external_id=eid)
-        if eid:
-            seen.add(eid)
-        results.append({'external_id': eid, 'status': 'recorded', 'value': value})
+            source=PLAYTEST_SOURCE_DISCORD)
+        if when:
+            fields['buzz_date'] = when
+
+        obj = existing.get(eid) if eid else None
+        if obj is not None:
+            for k, v in fields.items():
+                setattr(obj, k, v)
+            obj.save()
+            results.append({'external_id': eid, 'status': 'updated', 'value': value})
+        else:
+            obj = TossupBuzz.objects.create(
+                session=_discord_session(qset, name), player=None,
+                external_id=eid, **fields)
+            if eid:
+                existing[eid] = obj
+            results.append({'external_id': eid, 'status': 'recorded', 'value': value})
 
     return _api_json({'ok': True, 'results': results})
 
@@ -266,8 +282,10 @@ def api_buzzes(request):
 @discord_api
 def api_bonus_results(request):
     """Record bonus results. Body: {"events": [{external_id, answer, player_name,
-    part1_correct, part2_correct, part3_correct}, ...]}. `answer` is matched
-    against any of the bonus's part answers."""
+    part1_correct, part2_correct, part3_correct, occurred_at}, ...]}. `answer` is
+    matched against any of the bonus's part answers; `occurred_at` (optional
+    ISO-8601) sets when it happened. Re-sending the same `external_id` updates
+    the existing result in place."""
     events, err = _load_events(request, 'events')
     if err:
         return err
@@ -275,8 +293,9 @@ def api_bonus_results(request):
     idx = _bonus_index(qset)
 
     eids = [e.get('external_id') for e in events if isinstance(e, dict) and e.get('external_id')]
-    seen = set(BonusResult.objects.filter(external_id__in=eids)
-               .values_list('external_id', flat=True)) if eids else set()
+    # See api_buzzes: re-sends UPDATE the existing row instead of being skipped.
+    existing = {b.external_id: b for b in
+                BonusResult.objects.filter(external_id__in=eids)} if eids else {}
 
     # Current question version per matched bonus, fetched once (see history_url).
     resolved_ids = [_resolve(idx, e.get('answer'))[1] for e in events if isinstance(e, dict)]
@@ -288,9 +307,6 @@ def api_bonus_results(request):
             results.append({'external_id': '', 'status': 'error', 'error': 'not an object'})
             continue
         eid = (e.get('external_id') or '').strip()
-        if eid and eid in seen:
-            results.append({'external_id': eid, 'status': 'duplicate'})
-            continue
         status, qid = _resolve(idx, e.get('answer'))
         if status != 'ok':
             results.append({'external_id': eid, 'status': status})
@@ -300,16 +316,30 @@ def api_bonus_results(request):
         p2 = bool(e.get('part2_correct'))
         p3 = bool(e.get('part3_correct'))
         name = (e.get('player_name') or '').strip()
+        total = 10 * sum((p1, p2, p3))
+        when = parse_datetime(e.get('occurred_at') or '')
 
-        BonusResult.objects.create(
-            bonus_id=qid, session=_discord_session(qset, name), player=None,
-            player_name=name, part1_correct=p1, part2_correct=p2, part3_correct=p3,
-            total=10 * sum((p1, p2, p3)),
+        fields = dict(
+            bonus_id=qid, player_name=name,
+            part1_correct=p1, part2_correct=p2, part3_correct=p3, total=total,
             bonus_history_id=hist_ids.get(qid),
-            source=PLAYTEST_SOURCE_DISCORD, external_id=eid)
-        if eid:
-            seen.add(eid)
-        results.append({'external_id': eid, 'status': 'recorded', 'total': 10 * sum((p1, p2, p3))})
+            source=PLAYTEST_SOURCE_DISCORD)
+        if when:
+            fields['answered_date'] = when
+
+        obj = existing.get(eid) if eid else None
+        if obj is not None:
+            for k, v in fields.items():
+                setattr(obj, k, v)
+            obj.save()
+            results.append({'external_id': eid, 'status': 'updated', 'total': total})
+        else:
+            obj = BonusResult.objects.create(
+                session=_discord_session(qset, name), player=None,
+                external_id=eid, **fields)
+            if eid:
+                existing[eid] = obj
+            results.append({'external_id': eid, 'status': 'recorded', 'total': total})
 
     return _api_json({'ok': True, 'results': results})
 

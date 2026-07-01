@@ -1464,7 +1464,9 @@ class TossupBuzz(models.Model):
     # Stable id supplied by an external recorder (e.g. the Discord bot) so the
     # same buzz can be re-sent without being recorded twice. Blank for web play.
     external_id = models.CharField(max_length=200, blank=True, default='', db_index=True)
-    buzz_date = models.DateTimeField(auto_now_add=True)
+    # Defaults to now (web play) but is overridable so an importer can record
+    # when the buzz actually happened (e.g. the Discord results message time).
+    buzz_date = models.DateTimeField(default=timezone.now)
 
     def history_url(self):
         """Deep link to the version of the tossup this buzz was recorded on."""
@@ -1513,7 +1515,8 @@ class BonusResult(models.Model):
                                       null=True, blank=True, related_name='results')
     # See TossupBuzz.external_id.
     external_id = models.CharField(max_length=200, blank=True, default='', db_index=True)
-    answered_date = models.DateTimeField(auto_now_add=True)
+    # See TossupBuzz.buzz_date — overridable so an import can set the real time.
+    answered_date = models.DateTimeField(default=timezone.now)
 
     def history_url(self):
         """Deep link to the version of the bonus this result was recorded on."""
