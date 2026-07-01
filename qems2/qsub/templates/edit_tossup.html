@@ -115,6 +115,7 @@
             <a href="/delete_tossup/{{ tossup.id }}" class="button small alert delete_tossup" value="{{ tossup.id }}" qset-id="{{ qset.id }}">Delete</a>
             {% endif %}
             <input type="submit" id="submit-bonus" value="Save" class="button primary qmeta-save" />
+            {% if can_suggest %}<button type="submit" name="save_as_suggestion" value="1" class="button small secondary" title="Save your edits as proposed changes for the author or an editor to review — the question itself isn't changed yet.">Save as Suggested Changes</button>{% endif %}
         </div>
 
         {% include "question_tags.html" %}
@@ -124,23 +125,16 @@
             {{ form.question_type }}
         </div>
     {% endif %}
-    {% if form and can_suggest %}
-        <div class="suggest-save panel radius" style="clear:both; margin-top:8px;">
-            <label>Suggestion note (optional)
-                <input type="text" name="suggestion_note" maxlength="255" placeholder="Why you're proposing this change">
-            </label>
-            <button type="submit" name="save_as_suggestion" value="1" class="button small secondary" style="margin:0;">
-                Save as Suggested Changes
-            </button>
-            <small style="color:#888; display:block; margin-top:4px;">Saves your edits to the text fields above as
-            proposed changes (track-changes) for the author or an editor to accept or reject &mdash; the question itself isn't changed yet.</small>
+    {% if form and read_only and can_suggest %}
+        <div class="save-actions">
+            <button type="submit" name="save_as_suggestion" value="1" class="button secondary" title="Save your edits as proposed changes for the author or an editor to review — the question itself isn't changed yet.">Save as Suggested Changes</button>
         </div>
     {% endif %}
 </form>
+{% if tossup and pending_suggestions %}{% include "_suggested_changes.html" with question_type="tossup" q_id=tossup.id %}{% endif %}
 
 {% include "_discord_threads.html" %}
 {% include "_playtest_results.html" %}
-{% if tossup %}{% include "_suggested_changes.html" with question_type="tossup" q_id=tossup.id %}{% endif %}
 </div>{# .edit-main #}
 <div class="edit-comments">
 {% if tossup %}

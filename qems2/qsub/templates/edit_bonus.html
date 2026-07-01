@@ -186,21 +186,15 @@
         </div>
 
         <div id="difficulty-warning" class="alert-box warning" style="display:none;"></div>
-        <input type="submit" id="submit-bonus" value="Save" class="button primary right" />
     {% endif %}
-    {% if form and can_suggest %}
-        <div class="suggest-save panel radius" style="clear:both; margin-top:8px;">
-            <label>Suggestion note (optional)
-                <input type="text" name="suggestion_note" maxlength="255" placeholder="Why you're proposing this change">
-            </label>
-            <button type="submit" name="save_as_suggestion" value="1" class="button small secondary" style="margin:0;">
-                Save as Suggested Changes
-            </button>
-            <small style="color:#888; display:block; margin-top:4px;">Saves your edits to the text fields above as
-            proposed changes (track-changes) for the author or an editor to accept or reject &mdash; the question itself isn't changed yet.</small>
+    {% if form %}
+        <div class="save-actions">
+            {% if not read_only %}<input type="submit" id="submit-bonus" value="Save" class="button primary" />{% endif %}
+            {% if can_suggest %}<button type="submit" name="save_as_suggestion" value="1" class="button secondary" title="Save your edits as proposed changes for the author or an editor to review — the question itself isn't changed yet.">Save as Suggested Changes</button>{% endif %}
         </div>
     {% endif %}
 </form>
+{% if bonus and pending_suggestions %}{% include "_suggested_changes.html" with question_type="bonus" q_id=bonus.id %}{% endif %}
 {% if question_type == "ACF-style bonus" and not read_only %}
 <script>
 $(function () {
@@ -250,7 +244,6 @@ $(function () {
 {% endif %}
 {% include "_discord_threads.html" %}
 {% include "_playtest_results.html" %}
-{% if bonus %}{% include "_suggested_changes.html" with question_type="bonus" q_id=bonus.id %}{% endif %}
 </div>{# .edit-main #}
 <div class="edit-comments">
 {% if bonus %}

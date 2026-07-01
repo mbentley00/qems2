@@ -320,6 +320,9 @@
 /* Tighter padding so the row fits on one line at smaller widths. */
 .qmeta-actions .button { margin: 0; padding: 0.5rem 0.7rem; font-size: 0.78rem; }
 .qmeta-actions .qmeta-save { margin-left: auto; }
+/* Save row (Save + Save as Suggested Changes) when Save isn't in the action row. */
+.save-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; margin: 8px 0 16px; clear: both; }
+.save-actions .button { margin: 0; }
 /* Copy/export tools share the "Last modified" row, pushed to the right. In
    normal flow (not absolutely positioned) so they always align cleanly with
    each other and the row. Small text pills — Font Awesome glyphs don't render
