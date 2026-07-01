@@ -1996,6 +1996,20 @@ class UnpacketizedAssignmentTests(TestCase):
         self.assertIn('doc-swap-btn', html)
         self.assertIn('doc-swap-dialog', html)
 
+    def test_move_packet_question_swaps_positions_not_shift(self):
+        # Doc-view reorder drag now posts to move_packet_question, which must
+        # SWAP the two questions' numbers (11<->2), not shift the rest down.
+        two = self._tu('two', packet=self.p1, number=2)
+        three = self._tu('three', packet=self.p1, number=3)
+        resp = self.client.post('/move_packet_question/', {
+            'question_type': 'tossup', 'question_id': three.id,
+            'target_packet_id': self.p1.id, 'target_number': 1})
+        self.assertTrue(json.loads(resp.content)['success'])
+        self.placed.refresh_from_db(); two.refresh_from_db(); three.refresh_from_db()
+        self.assertEqual(three.question_number, 1)         # dragged one takes slot 1
+        self.assertEqual(self.placed.question_number, 3)   # occupant swaps back to slot 3
+        self.assertEqual(two.question_number, 2)           # bystander untouched
+
     def test_packet_revision_changes_on_edit_and_move(self):
         # The document-view staleness token changes when a question in the
         # packet is edited or moved out.

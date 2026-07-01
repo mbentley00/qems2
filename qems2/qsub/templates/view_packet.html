@@ -775,27 +775,41 @@ $(function() {
         docSwapTimer = setTimeout(loadSwapCandidates, 250);
     });
 
-    function saveOrder() {
-        var data = { packet_id: packetId };
-        var tossupIds = [], bonusIds = [];
-        $('.doc-question').each(function() {
-            if ($(this).data('qtype') === 'tossup') {
-                tossupIds.push($(this).data('qid'));
-            } else {
-                bonusIds.push($(this).data('qid'));
-            }
+    // Snapshot the original per-type question numbers in page order, taken once
+    // on load. A drag SWAPS the dragged question with whatever question sat at
+    // the drop position (matching the packet grid), rather than shifting the
+    // rest of the packet down. Only one swap happens per page load (we reload
+    // afterward), so this snapshot stays valid for the drag.
+    var origNumsByType = { tossup: [], bonus: [] };
+    $('.doc-question').each(function() {
+        var qt = String($(this).data('qtype'));
+        if (origNumsByType[qt]) { origNumsByType[qt].push($(this).data('num')); }
+    });
+
+    function swapOnDrop(ui) {
+        var qtype = String(ui.item.data('qtype'));
+        var order = origNumsByType[qtype] || [];
+        var items = $('.doc-question').filter(function() {
+            return String($(this).data('qtype')) === qtype;
         });
-        $.post('/reorder_packet_questions/', {
-            packet_id: packetId,
-            'tossup_ids[]': tossupIds,
-            'bonus_ids[]': bonusIds
+        var newIndex = items.index(ui.item);        // 0-based slot it was dropped into
+        var sourceNum = ui.item.data('num');
+        var targetNum = order[newIndex];
+        if (newIndex < 0 || targetNum === undefined || targetNum === sourceNum) {
+            // Dropped back in place (or an unexpected state): just resync the view.
+            location.reload();
+            return;
+        }
+        // move_packet_question swaps: the dragged question takes targetNum and the
+        // question currently at targetNum takes the dragged question's old number.
+        $.post('/move_packet_question/', {
+            question_type: qtype,
+            question_id: ui.item.data('qid'),
+            target_packet_id: packetId,
+            target_number: targetNum
         }, function(response) {
             var json = $.parseJSON(response);
-            if (json.success) {
-                location.reload();
-            } else {
-                alert(json.message);
-            }
+            if (json.success) { location.reload(); } else { alert(json.message); }
         });
     }
 
@@ -806,13 +820,13 @@ $(function() {
         forcePlaceholderSize: true,
         start: function() { suppressClick = true; },
         stop: function() { setTimeout(function() { suppressClick = false; }, 200); },
-        update: function() { saveOrder(); }
+        update: function(event, ui) { swapOnDrop(ui); }
     });
 
     // ---- Mode toggle: Comment (select text) vs Reorder (drag) ----
     var HINTS = {
         comment: 'Comment mode: select text and right-click to comment (or use the per-question Comment tag). Right-click toggles mode.',
-        reorder: 'Reorder mode: drag a question to reposition it; numbering updates automatically. Right-click toggles mode.'
+        reorder: 'Reorder mode: drag a question onto another to swap their positions (the two trade numbers; the rest of the packet stays put). Right-click toggles mode.'
     };
     var MODE_KEY = 'qemsDocMode';
     function setMode(mode) {
