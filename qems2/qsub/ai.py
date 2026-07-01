@@ -69,21 +69,14 @@ _GRAMMAR_SYSTEM = (
 )
 
 
-def grammar_check_questions(items, model=None):
-    """Run an AI grammar/spelling/error pass over the given questions.
+# How many questions to send per Claude call. Batching keeps each request well
+# within the model's output budget so the whole set can be checked across
+# several calls rather than truncated to one request.
+_GRAMMAR_BATCH_SIZE = 40
 
-    `items` is a list of dicts: {'ref': str, 'text': str}. Returns
-    (findings, error) where findings is a list of dicts (ref, severity,
-    excerpt, suggestion, explanation) and error is a user-facing string (or
-    None on success).
-    """
-    client = _client()
-    if client is None:
-        return [], 'AI features are not configured (no API key).'
-    if not items:
-        return [], None
 
-    model = model or settings.AI_DEFAULT_MODEL
+def _grammar_check_batch(client, model, items):
+    """Check a single batch of questions. Returns (findings, error)."""
     body = '\n\n'.join('[{0}]\n{1}'.format(it['ref'], it['text']) for it in items)
     try:
         resp = client.messages.create(
@@ -103,3 +96,29 @@ def grammar_check_questions(items, model=None):
     except (ValueError, TypeError):
         return [], 'The AI returned an unexpected response.'
     return data.get('findings', []), None
+
+
+def grammar_check_questions(items, model=None):
+    """Run an AI grammar/spelling/error pass over the given questions.
+
+    `items` is a list of dicts: {'ref': str, 'text': str}. The whole list is
+    checked, in batches, so there is no cap on set size. Returns
+    (findings, error) where findings is a list of dicts (ref, severity,
+    excerpt, suggestion, explanation). On a mid-run failure, whatever findings
+    were gathered so far are returned alongside the error string.
+    """
+    client = _client()
+    if client is None:
+        return [], 'AI features are not configured (no API key).'
+    if not items:
+        return [], None
+
+    model = model or settings.AI_DEFAULT_MODEL
+    findings = []
+    for start in range(0, len(items), _GRAMMAR_BATCH_SIZE):
+        batch = items[start:start + _GRAMMAR_BATCH_SIZE]
+        batch_findings, error = _grammar_check_batch(client, model, batch)
+        if error:
+            return findings, error
+        findings.extend(batch_findings)
+    return findings, None

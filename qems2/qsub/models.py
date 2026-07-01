@@ -353,6 +353,30 @@ class SuggestedEdit(models.Model):
             self.field, self.question_type, self.question_id, self.status)
 
 
+class AIGrammarFinding(models.Model):
+    """A grammar/spelling suggestion produced by the AI grammar check for one
+    question in a set. Persisted so the results survive a page reload; a whole
+    set's findings are replaced on each rerun, and a single finding disappears
+    when dismissed."""
+    question_set = models.ForeignKey(QuestionSet, on_delete=models.CASCADE,
+                                     related_name='ai_grammar_findings')
+    question_type = models.CharField(max_length=10)  # 'tossup' | 'bonus'
+    question_id = models.PositiveIntegerField()
+    severity = models.CharField(max_length=10, default='warning')  # 'error' | 'warning'
+    excerpt = models.TextField(blank=True, default='')
+    suggestion = models.TextField(blank=True, default='')
+    explanation = models.TextField(blank=True, default='')
+    created_by = models.ForeignKey(Writer, on_delete=models.SET_NULL, null=True)
+    created_date = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['id']
+
+    def __str__(self):
+        return 'ai grammar finding on {0} {1}'.format(
+            self.question_type, self.question_id)
+
+
 class DistributionPerPacket(models.Model):
 
     #packet = models.ManyToManyField(Packet)

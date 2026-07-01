@@ -3099,3 +3099,78 @@ class RoleGroupJoinAndNotifyTests(TestCase):
         self.client.login(username='jn_owner', password='pw')
         self.client.post('/role_groups/', {'action': 'create', 'name': 'Aged Group'})
         self.assertTrue(RoleGroup.objects.filter(name='Aged Group').exists())
+
+
+class AIGrammarCheckTests(TestCase):
+    """AI grammar check runs over the whole set (batched), persists findings so
+    they survive a reload, and lets a finding be dismissed or replaced on rerun."""
+
+    def setUp(self):
+        # The AI features are gated to the 'admin' user.
+        self.admin = User.objects.create_superuser('admin', 'admin@t.com', 'pw')
+        self.owner = Writer.objects.get(user=self.admin)
+        self.dist = Distribution.objects.create(name='ai dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='Literature', subcategory='European')
+        self.qset = QuestionSet.objects.create(
+            name='AI Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist, tossups_per_packet=1, bonuses_per_packet=1)
+        self.tu = Tossup.objects.create(
+            author=self.owner, question_set=self.qset,
+            tossup_text='This work was wrote by teh author.', tossup_answer='_Faust_',
+            category=self.de, created_date=datetime.now(), last_changed_date=datetime.now(),
+            question_number=1)
+        self.client.login(username='admin', password='pw')
+
+    def _fake_finding(self):
+        return [{'ref': 'tossup-{0}'.format(self.tu.id), 'severity': 'error',
+                 'excerpt': 'wrote', 'suggestion': 'written',
+                 'explanation': 'passive past participle'}]
+
+    def _run_check(self, findings):
+        from unittest import mock
+        with mock.patch('qems2.qsub.ai.ai_enabled', return_value=True), \
+             mock.patch('qems2.qsub.ai.grammar_check_questions',
+                        return_value=(findings, None)) as m:
+            resp = self.client.post('/ai_grammar_check/%d/' % self.qset.id)
+        return resp, m
+
+    def test_check_persists_findings(self):
+        resp, m = self._run_check(self._fake_finding())
+        self.assertEqual(resp.status_code, 200)
+        # The whole set was passed to the checker (no 50-cap slicing here).
+        items = m.call_args[0][0]
+        self.assertEqual(len(items), 1)
+        self.assertEqual(AIGrammarFinding.objects.filter(question_set=self.qset).count(), 1)
+        f = AIGrammarFinding.objects.get()
+        self.assertEqual(f.suggestion, 'written')
+        self.assertEqual(f.question_type, 'tossup')
+        self.assertEqual(f.question_id, self.tu.id)
+
+    def test_findings_render_on_page_load(self):
+        self._run_check(self._fake_finding())
+        body = self.client.get('/style_check/%d/?guide=minkowski' % self.qset.id).content.decode()
+        # The persisted finding is embedded for the JS to render on load.
+        self.assertIn('written', body)
+        self.assertIn('/edit_tossup/%d/' % self.tu.id, body)
+
+    def test_rerun_replaces_findings(self):
+        self._run_check(self._fake_finding())
+        first_id = AIGrammarFinding.objects.get().id
+        self._run_check(self._fake_finding())
+        self.assertEqual(AIGrammarFinding.objects.count(), 1)
+        self.assertNotEqual(AIGrammarFinding.objects.get().id, first_id)  # fresh row
+
+    def test_dismiss_removes_one_finding(self):
+        self._run_check(self._fake_finding())
+        fid = AIGrammarFinding.objects.get().id
+        resp = self.client.post('/dismiss_ai_grammar_finding/', {'finding_id': fid})
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(AIGrammarFinding.objects.filter(id=fid).exists())
+
+    def test_non_admin_forbidden(self):
+        u = User.objects.create_user('plain', password='pw', email='p@t.com')
+        self.client.logout(); self.client.login(username='plain', password='pw')
+        resp, _ = self._run_check(self._fake_finding())
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(AIGrammarFinding.objects.count(), 0)

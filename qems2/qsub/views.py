@@ -7067,6 +7067,8 @@ def style_check(request, qset_id):
                    'guide_obj': next((g for g in style_checker.STYLE_GUIDES if g['key'] == guide), None),
                    'can_configure': qset.is_owner(user) or user in qset.editor.all(),
                    'is_ai_user': _is_ai_user(request.user),
+                   'ai_findings_json': (json.dumps(_ai_grammar_findings_json(qset)).replace('<', '\\u003c')
+                                        if _is_ai_user(request.user) else '[]'),
                    'rule_settings': [{'code': c, 'label': lbl, 'enabled': c not in disabled}
                                      for c, lbl in style_checker.configurable_rules(guide)]})
 
@@ -7126,14 +7128,44 @@ def _clean_for_ai(text):
     return re.sub(r'[_~]', '', html.unescape(text or '')).strip()
 
 
-# Cap how many questions one AI grammar pass covers, to bound latency/cost.
-_AI_GRAMMAR_LIMIT = 50
+def _ai_grammar_ref_meta(qset):
+    """Return {ref: {'edit_url', 'label'}} for every question in a set, keyed by
+    the 'tossup-<id>' / 'bonus-<id>' refs the grammar checker uses."""
+    refs = {}
+    for tu in qset.tossup_set.all():
+        refs['tossup-{0}'.format(tu.id)] = {
+            'edit_url': '/edit_tossup/{0}/'.format(tu.id),
+            'label': _grid_answer_preview(tu.tossup_answer)}
+    for b in qset.bonus_set.all():
+        refs['bonus-{0}'.format(b.id)] = {
+            'edit_url': '/edit_bonus/{0}/'.format(b.id),
+            'label': _grid_answer_preview(b.part1_answer, 30)}
+    return refs
+
+
+def _ai_grammar_findings_json(qset):
+    """Serialize a set's persisted AI grammar findings for the template/JS,
+    attaching each question's edit link and answer label."""
+    found = list(qset.ai_grammar_findings.all())
+    if not found:
+        return []
+    refs = _ai_grammar_ref_meta(qset)
+    out = []
+    for f in found:
+        ref = '{0}-{1}'.format(f.question_type, f.question_id)
+        meta = refs.get(ref, {})
+        out.append({'id': f.id, 'severity': f.severity, 'excerpt': f.excerpt,
+                    'suggestion': f.suggestion, 'explanation': f.explanation,
+                    'edit_url': meta.get('edit_url', ''),
+                    'label': meta.get('label', ref)})
+    return out
 
 
 @login_required
 def ai_grammar_check(request, qset_id):
-    """Admin-only AI grammar/spelling/error pass over a set's questions.
-    Returns JSON findings; the Style Check page renders them."""
+    """Admin-only AI grammar/spelling/error pass over a set's questions. Checks
+    the whole set (batched), replaces any prior findings, persists the new ones
+    so they survive a reload, and returns them as JSON."""
     from . import ai
     if not _is_ai_user(request.user):
         return HttpResponse(json.dumps({'ok': False, 'message': 'Not authorized.'}), status=403)
@@ -7145,41 +7177,54 @@ def ai_grammar_check(request, qset_id):
     except QuestionSet.DoesNotExist:
         return HttpResponse(json.dumps({'ok': False, 'message': 'Set not found.'}))
 
-    items, refs = [], {}
-    total = 0
+    items = []
     for tu in qset.tossup_set.select_related('packet').order_by('packet__packet_name', 'question_number'):
-        total += 1
-        if len(items) >= _AI_GRAMMAR_LIMIT:
-            continue
-        ref = 'tossup-{0}'.format(tu.id)
         text = _clean_for_ai(tu.tossup_text) + '\nANSWER: ' + _clean_for_ai(tu.tossup_answer)
-        items.append({'ref': ref, 'text': text})
-        refs[ref] = {'edit_url': '/edit_tossup/{0}/'.format(tu.id),
-                     'label': _grid_answer_preview(tu.tossup_answer)}
+        items.append({'ref': 'tossup-{0}'.format(tu.id), 'text': text})
     for b in qset.bonus_set.select_related('packet').order_by('packet__packet_name', 'question_number'):
-        total += 1
-        if len(items) >= _AI_GRAMMAR_LIMIT:
-            continue
-        ref = 'bonus-{0}'.format(b.id)
         parts = [_clean_for_ai(b.leadin),
                  _clean_for_ai(b.part1_text), 'ANSWER: ' + _clean_for_ai(b.part1_answer),
                  _clean_for_ai(b.part2_text), 'ANSWER: ' + _clean_for_ai(b.part2_answer),
                  _clean_for_ai(b.part3_text), 'ANSWER: ' + _clean_for_ai(b.part3_answer)]
-        items.append({'ref': ref, 'text': '\n'.join(p for p in parts if p.strip())})
-        refs[ref] = {'edit_url': '/edit_bonus/{0}/'.format(b.id),
-                     'label': _grid_answer_preview(b.part1_answer, 30)}
+        items.append({'ref': 'bonus-{0}'.format(b.id),
+                      'text': '\n'.join(p for p in parts if p.strip())})
 
     findings, error = ai.grammar_check_questions(items)
     if error:
         return HttpResponse(json.dumps({'ok': False, 'message': error}))
-    # Attach the edit link + answer label to each finding for rendering.
-    for f in findings:
-        meta = refs.get(f.get('ref'), {})
-        f['edit_url'] = meta.get('edit_url', '')
-        f['label'] = meta.get('label', f.get('ref', ''))
-    return HttpResponse(json.dumps({'ok': True, 'findings': findings,
-                                    'checked': len(items), 'total': total,
-                                    'truncated': total > len(items)}))
+
+    # Rerun replaces the whole set's findings. Persist the fresh ones, mapping
+    # each back to its question via the ref label.
+    with transaction.atomic():
+        qset.ai_grammar_findings.all().delete()
+        for f in findings:
+            ref = f.get('ref', '')
+            if '-' not in ref:
+                continue
+            qtype, _, qid = ref.partition('-')
+            if qtype not in ('tossup', 'bonus') or not qid.isdigit():
+                continue
+            AIGrammarFinding.objects.create(
+                question_set=qset, question_type=qtype, question_id=int(qid),
+                severity=f.get('severity', 'warning'), excerpt=f.get('excerpt', ''),
+                suggestion=f.get('suggestion', ''), explanation=f.get('explanation', ''),
+                created_by=user)
+
+    out = _ai_grammar_findings_json(qset)
+    return HttpResponse(json.dumps({'ok': True, 'findings': out,
+                                    'checked': len(items)}))
+
+
+@login_required
+def dismiss_ai_grammar_finding(request):
+    """Delete a single persisted AI grammar finding (admin only)."""
+    if request.method != 'POST':
+        return HttpResponse(json.dumps({'ok': False, 'error': 'POST required'}), status=405)
+    if not _is_ai_user(request.user):
+        return HttpResponse(json.dumps({'ok': False, 'error': 'Not authorized'}), status=403)
+    fid = request.POST.get('finding_id', '')
+    AIGrammarFinding.objects.filter(id=fid).delete()
+    return HttpResponse(json.dumps({'ok': True}))
 
 
 def _style_question(qtype, qid):
