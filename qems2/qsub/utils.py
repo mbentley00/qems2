@@ -374,40 +374,48 @@ def get_character_count(line, ignore_pronunciation):
 
     return count
 
-def are_special_characters_balanced(line):
+def special_character_imbalance_reason(line):
+    """Return a human-readable reason the formatting characters are unbalanced,
+    or None if everything is balanced.  Underscores (_) mark underlined text,
+    tildes (~) mark italics, and parentheses must nest one level deep at most.
+    A preceding backslash escapes any of these."""
     underlineFlag = False
     italicsFlag = False
     parensFlag = False
     previousChar = ""
     for c in line:
         if (c == '_' and previousChar != "\\"):
-            if (underlineFlag):
-                underlineFlag = False
-            else:
-                underlineFlag = True
+            underlineFlag = not underlineFlag
         elif (c == '~' and previousChar != "\\"):
-            if (italicsFlag):
-                italicsFlag = False
-            else:
-                italicsFlag = True
+            italicsFlag = not italicsFlag
         elif (c == '(' and previousChar != "\\"):
             if (parensFlag):
-                # There are too many open parens
-                return False
+                return ('Nested parentheses: an opening "(" appears before an '
+                        'earlier "(" was closed. Escape a literal paren as "\\(".')
             else:
                 parensFlag = True
         elif (c == ')' and previousChar != "\\"):
             if (parensFlag):
                 parensFlag = False
             else:
-                # There are too many close parens
-                return False
+                return ('An extra closing ")" appears with no matching "(". '
+                        'Escape a literal paren as "\\)".')
         previousChar = c
 
-    if (underlineFlag or italicsFlag or parensFlag):
-        return False
-    else:
-        return True
+    if underlineFlag:
+        return ('Unbalanced underline markers ("_"): there is an odd number of '
+                'them, so some underlined text is never closed. Escape a literal '
+                'underscore as "\\_".')
+    if italicsFlag:
+        return ('Unbalanced italics markers ("~"): there is an odd number of '
+                'them, so some italicized text is never closed. Escape a literal '
+                'tilde as "\\~".')
+    if parensFlag:
+        return ('An opening "(" is never closed. Escape a literal paren as "\\(".')
+    return None
+
+def are_special_characters_balanced(line):
+    return special_character_imbalance_reason(line) is None
 
 def does_answerline_have_underlines(line):
     if (line == ""):
@@ -460,12 +468,15 @@ def strip_answer_from_answer_line(line):
 
 class InvalidTossup(Exception):
 
-    def __init__(self, *args):
+    def __init__(self, *args, reason=None):
         self.args = [a for a in args]
+        self.reason = reason
 
     def __str__(self):
         s = '*' * 50 + '<br />'
         s += 'Invalid tossup {0}!<br />'.format(self.args[2])
+        if self.reason:
+            s += '{0}<br />'.format(self.reason)
         s += 'The problem is in field: {0}, which has value: {1}<br />'.format(self.args[0], self.args[1])
         s += '*' * 50 + '<br />'
 
@@ -474,12 +485,15 @@ class InvalidTossup(Exception):
 
 class InvalidBonus(Exception):
 
-    def __init__(self, *args):
+    def __init__(self, *args, reason=None):
         self.args = [a for a in args]
+        self.reason = reason
 
     def __str__(self):
         s = '*' * 50 + '<br />'
         s += 'Invalid bonus {0}!<br />'.format(self.args[2])
+        if self.reason:
+            s += '{0}<br />'.format(self.reason)
         s += 'The problem is in field: {0}, which has value: {1}<br />'.format(self.args[0], self.args[1])
         s += '*' * 50 + '<br />'
 

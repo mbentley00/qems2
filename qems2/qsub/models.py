@@ -805,19 +805,28 @@ class Tossup (models.Model):
     def is_valid(self):
 
         if self.tossup_text == '':
-            raise InvalidTossup('question', self.tossup_text, self.question_number)
+            raise InvalidTossup('question', self.tossup_text, self.question_number,
+                                reason='The question text is empty.')
 
         if self.tossup_answer == '':
-            raise InvalidTossup('answer', self.tossup_answer, self.question_number)
+            raise InvalidTossup('answer', self.tossup_answer, self.question_number,
+                                reason='The answer line is empty.')
 
-        if (not are_special_characters_balanced(self.tossup_text)):
-            raise InvalidTossup('question', self.tossup_text, self.question_number)
+        text_reason = special_character_imbalance_reason(self.tossup_text)
+        if text_reason is not None:
+            raise InvalidTossup('question', self.tossup_text, self.question_number,
+                                reason=text_reason)
 
-        if (not are_special_characters_balanced(self.tossup_answer)):
-            raise InvalidTossup('answer', self.tossup_answer, self.question_number)
+        answer_reason = special_character_imbalance_reason(self.tossup_answer)
+        if answer_reason is not None:
+            raise InvalidTossup('answer', self.tossup_answer, self.question_number,
+                                reason=answer_reason)
 
         if (not does_answerline_have_underlines(self.tossup_answer)):
-            raise InvalidTossup('answer', self.tossup_answer, self.question_number)
+            raise InvalidTossup('answer', self.tossup_answer, self.question_number,
+                                reason='The answer line has no underlined portion. Mark '
+                                       'the required part(s) of the answer with underscores, '
+                                       'e.g. "_hole_s".')
 
         return True
 
@@ -1103,24 +1112,34 @@ class Bonus(models.Model):
             print("valid acf")
 
             if self.leadin == '':
-                raise InvalidBonus('leadin', self.leadin, self.question_number)
+                raise InvalidBonus('leadin', self.leadin, self.question_number,
+                                   reason='The leadin is empty.')
 
-            if (not are_special_characters_balanced(self.leadin)):
-                raise InvalidBonus('leadin', self.leadin, self.question_number)
+            leadin_reason = special_character_imbalance_reason(self.leadin)
+            if leadin_reason is not None:
+                raise InvalidBonus('leadin', self.leadin, self.question_number,
+                                   reason=leadin_reason)
 
             answers = [self.part1_answer, self.part2_answer, self.part3_answer]
             for answer in answers:
-                if (not are_special_characters_balanced(answer)):
-                    raise InvalidBonus('answers', answer, self.question_number)
+                answer_reason = special_character_imbalance_reason(answer)
+                if answer_reason is not None:
+                    raise InvalidBonus('answers', answer, self.question_number,
+                                       reason=answer_reason)
                 if (not does_answerline_have_underlines(answer)):
-                    raise InvalidBonus('answers', answer, self.question_number)
+                    raise InvalidBonus('answers', answer, self.question_number,
+                                       reason='This answer has no underlined portion. Mark '
+                                              'the required part(s) with underscores, e.g. "_France_".')
 
             parts = [self.part1_text, self.part2_text, self.part3_text]
             for part in parts:
                 if part == '':
-                    raise InvalidBonus('parts', part, self.question_number)
-                if (not are_special_characters_balanced(part)):
-                    raise InvalidBonus('parts', part, self.question_number)
+                    raise InvalidBonus('parts', part, self.question_number,
+                                       reason='A bonus part is empty.')
+                part_reason = special_character_imbalance_reason(part)
+                if part_reason is not None:
+                    raise InvalidBonus('parts', part, self.question_number,
+                                       reason=part_reason)
 
             return True
 
@@ -1136,17 +1155,24 @@ class Bonus(models.Model):
 
             answers = [self.part1_answer]
             for answer in answers:
-                if (not are_special_characters_balanced(answer)):
-                    raise InvalidBonus('answer', answer, self.question_number)
+                answer_reason = special_character_imbalance_reason(answer)
+                if answer_reason is not None:
+                    raise InvalidBonus('answer', answer, self.question_number,
+                                       reason=answer_reason)
                 if (not does_answerline_have_underlines(answer)):
-                    raise InvalidBonus('answer', answer, self.question_number)
+                    raise InvalidBonus('answer', answer, self.question_number,
+                                       reason='This answer has no underlined portion. Mark '
+                                              'the required part(s) with underscores, e.g. "_France_".')
 
             parts = [self.part1_text]
             for part in parts:
                 if part == '':
-                    raise InvalidBonus('part', part, self.question_number)
-                if (not are_special_characters_balanced(part)):
-                    raise InvalidBonus('part', part, self.question_number)
+                    raise InvalidBonus('part', part, self.question_number,
+                                       reason='The bonus part is empty.')
+                part_reason = special_character_imbalance_reason(part)
+                if part_reason is not None:
+                    raise InvalidBonus('part', part, self.question_number,
+                                       reason=part_reason)
 
             return True
 

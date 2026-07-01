@@ -636,7 +636,7 @@ def _describe_parse_error(ex):
         number = args[2] if len(args) > 2 else '?'
         kind = 'tossup' if isinstance(ex, InvalidTossup) else 'bonus'
         snippet = (value[:80] + '…') if len(value) > 80 else value
-        reason = {
+        reason = getattr(ex, 'reason', None) or {
             'answer': 'answer has no underlined required portion (or unbalanced _ / ~)',
             'answers': 'an answer has no underlined required portion (or unbalanced _ / ~)',
             'question': 'question has unbalanced _ / ~ markup',
