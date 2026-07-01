@@ -3299,3 +3299,113 @@ class YappJsonExportTests(TestCase):
         self.assertIn('Unpacketed.json', zf.namelist())
         data = self._payload(zf, 'Unpacketed.json')
         self.assertEqual(data['tossups'][0]['answer'], '<b><u>Loose</u></b>')
+
+
+class RoleGroupPendingRequestTests(TestCase):
+    """Requesting to join a role group creates a pending request the manager can
+    approve/decline, with a direct-approve link in the notification email."""
+
+    def setUp(self):
+        from datetime import timedelta
+        self.ou = User.objects.create_user('rg_owner', password='pw', email='owner@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.ru = User.objects.create_user('rg_req', password='pw', email='req@t.com')
+        self.ru.first_name, self.ru.last_name = 'Ray', 'Quester'
+        self.ru.save()
+        self.req = Writer.objects.get(user=self.ru)
+        for u in (self.ou, self.ru):
+            u.date_joined = timezone.now() - timedelta(days=3); u.save()
+        self.group = RoleGroup.objects.create(name='RG Group', created_by=self.owner)
+
+    def _wait_mail(self, n=1, timeout=2.0):
+        import time
+        end = time.time() + timeout
+        while time.time() < end and len(mail.outbox) < n:
+            time.sleep(0.02)
+
+    def _request_join(self):
+        self.client.login(username='rg_req', password='pw')
+        return self.client.post('/role_groups/',
+                                {'action': 'request_join', 'group_id': self.group.id})
+
+    def test_request_creates_pending_and_emails_approve_link(self):
+        mail.outbox = []
+        self._request_join()
+        self.assertTrue(RoleGroupJoinRequest.objects.filter(
+            role_group=self.group, requester=self.req).exists())
+        self._wait_mail(1)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn('owner@t.com', mail.outbox[0].to)
+        self.assertIn('/approve_group_join/{0}/{1}/'.format(self.group.id, self.req.id),
+                      mail.outbox[0].body)
+
+    def test_duplicate_request_does_not_duplicate(self):
+        self._request_join()
+        self._request_join()
+        self.assertEqual(RoleGroupJoinRequest.objects.filter(
+            role_group=self.group, requester=self.req).count(), 1)
+
+    def test_manager_sees_pending_list(self):
+        self._request_join()
+        self.client.logout(); self.client.login(username='rg_owner', password='pw')
+        body = self.client.get('/role_groups/').content.decode()
+        self.assertIn('Pending join requests', body)
+        self.assertIn('rg_req', body)
+
+    def test_requester_does_not_see_pending_list(self):
+        self._request_join()
+        # Still logged in as requester; they should see "pending", not the manage list.
+        body = self.client.get('/role_groups/').content.decode()
+        self.assertNotIn('Pending join requests', body)
+        self.assertIn('pending', body)
+
+    def test_approve_action_adds_member_and_clears_request(self):
+        self._request_join()
+        self.client.logout(); self.client.login(username='rg_owner', password='pw')
+        mail.outbox = []
+        self.client.post('/role_groups/', {'action': 'approve_join',
+                                           'group_id': self.group.id, 'writer_id': self.req.id})
+        self.assertTrue(self.group.members.filter(id=self.req.id).exists())
+        self.assertFalse(RoleGroupJoinRequest.objects.filter(
+            role_group=self.group, requester=self.req).exists())
+        self._wait_mail(1)
+        self.assertTrue(any('req@t.com' in m.to for m in mail.outbox))
+
+    def test_decline_action_clears_without_adding(self):
+        self._request_join()
+        self.client.logout(); self.client.login(username='rg_owner', password='pw')
+        self.client.post('/role_groups/', {'action': 'decline_join',
+                                           'group_id': self.group.id, 'writer_id': self.req.id})
+        self.assertFalse(self.group.members.filter(id=self.req.id).exists())
+        self.assertFalse(RoleGroupJoinRequest.objects.filter(
+            role_group=self.group, requester=self.req).exists())
+
+    def test_email_link_view_approves_on_post(self):
+        self._request_join()
+        self.client.logout(); self.client.login(username='rg_owner', password='pw')
+        url = '/approve_group_join/{0}/{1}/'.format(self.group.id, self.req.id)
+        # GET shows a confirmation page, no side effect.
+        self.assertEqual(self.client.get(url).status_code, 200)
+        self.assertFalse(self.group.members.filter(id=self.req.id).exists())
+        # POST approves.
+        self.client.post(url)
+        self.assertTrue(self.group.members.filter(id=self.req.id).exists())
+        self.assertFalse(RoleGroupJoinRequest.objects.filter(
+            role_group=self.group, requester=self.req).exists())
+
+    def test_non_manager_cannot_approve_via_link(self):
+        self._request_join()
+        stranger = User.objects.create_user('rg_str', password='pw', email='s@t.com')
+        self.client.logout(); self.client.login(username='rg_str', password='pw')
+        resp = self.client.post('/approve_group_join/{0}/{1}/'.format(self.group.id, self.req.id))
+        self.assertFalse(self.group.members.filter(id=self.req.id).exists())
+        self.assertIn(b'creator', resp.content)
+
+    def test_add_member_clears_any_pending_request(self):
+        self._request_join()
+        self.client.logout(); self.client.login(username='rg_owner', password='pw')
+        self.client.post('/role_groups/', {'action': 'add_member',
+                                           'group_id': self.group.id, 'username': 'rg_req'})
+        self.assertTrue(self.group.members.filter(id=self.req.id).exists())
+        self.assertFalse(RoleGroupJoinRequest.objects.filter(
+            role_group=self.group, requester=self.req).exists())

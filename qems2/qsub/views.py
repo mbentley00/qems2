@@ -225,6 +225,43 @@ def approve_join(request, qset_id, writer_id):
                   {'qset': qset, 'requester': requester, 'already': already, 'user': user})
 
 
+@login_required
+def approve_group_join(request, group_id, writer_id):
+    """Manager-facing approval of a role-group join request, linked directly from
+    the request email. Shows a confirmation page; on POST adds the requester as a
+    member, clears the pending request, and emails them."""
+    user = request.user.writer
+    try:
+        group = RoleGroup.objects.get(id=int(group_id))
+        requester = Writer.objects.get(id=int(writer_id))
+    except (ValueError, RoleGroup.DoesNotExist, Writer.DoesNotExist):
+        return render(request, 'failure.html',
+                      {'message': 'That group or user no longer exists.',
+                       'message_class': 'alert-box alert'})
+
+    if not group.can_manage(user):
+        return render(request, 'failure.html',
+                      {'message': 'Only the group\'s creator can approve join requests.',
+                       'message_class': 'alert-box alert'})
+
+    already = group.members.filter(id=requester.id).exists()
+
+    if request.method == 'POST' and not already:
+        group.members.add(requester)
+        RoleGroupJoinRequest.objects.filter(role_group=group, requester=requester).delete()
+        reconcile_group(group)
+        _notify_added_to_group(requester, group, user)
+        cache.clear()
+        return render(request, 'approve_group_join.html',
+                      {'group': group, 'requester': requester, 'added': True, 'user': user})
+
+    if already:
+        RoleGroupJoinRequest.objects.filter(role_group=group, requester=requester).delete()
+
+    return render(request, 'approve_group_join.html',
+                  {'group': group, 'requester': requester, 'already': already, 'user': user})
+
+
 def _writer_email(writer):
     return writer.user.email if (writer and writer.user and writer.user.email) else ''
 
@@ -265,8 +302,8 @@ def _notify_added_to_group(writer, group, by_writer):
 
 
 def _notify_group_join_request(group, requester):
-    """Email the group owner that someone has requested to join. Returns False if
-    the owner has no email on file."""
+    """Email the group owner that someone has requested to join, with a direct
+    approve link. Returns False if the owner has no email on file."""
     email = _writer_email(group.created_by)
     if not email:
         return False
@@ -274,11 +311,14 @@ def _notify_group_join_request(group, requester):
     from django.conf import settings as dj_settings
     rname = _actor_name(requester)
     remail = requester.user.email or ''
+    approve_url = '{0}/approve_group_join/{1}/{2}/'.format(
+        dj_settings.BASE_URL.rstrip('/'), group.id, requester.id)
     subject = 'QEMS3: {0} requests to join role group "{1}"'.format(rname, group.name)
     body = ('{0} (@{1}{2}) has requested to join your QEMS3 role group "{3}".\n\n'
-            'To add them, open Role Groups and use "Add member":\n{4}/role_groups/').format(
+            'Approve this request (adds them to the group):\n{4}\n\n'
+            'Or open Role Groups to review pending requests:\n{5}/role_groups/').format(
         rname, requester.user.username, ', ' + remail if remail else '',
-        group.name, dj_settings.BASE_URL)
+        group.name, approve_url, dj_settings.BASE_URL)
     _send_mail_async(subject, body, [email])
     return True
 
@@ -1295,12 +1335,18 @@ def role_groups(request):
                 message, message_class = 'Group not found.', 'alert-box warning'
             elif group.can_manage(user) or group.members.filter(id=user.id).exists():
                 message, message_class = 'You are already part of this group.', 'alert-box warning'
-            elif _notify_group_join_request(group, user):
-                message, message_class = ('Your request to join "{0}" was emailed to the group '
-                                          'owner.'.format(group.name), 'alert-box success')
+            elif RoleGroupJoinRequest.objects.filter(role_group=group, requester=user).exists():
+                message, message_class = ('You already have a pending request to join '
+                                          '"{0}".'.format(group.name), 'alert-box info')
             else:
-                message, message_class = ('The group owner has no email on file, so the request '
-                                          'could not be sent.', 'alert-box warning')
+                RoleGroupJoinRequest.objects.get_or_create(role_group=group, requester=user)
+                if _notify_group_join_request(group, user):
+                    message, message_class = ('Your request to join "{0}" was sent to the group '
+                                              'owner.'.format(group.name), 'alert-box success')
+                else:
+                    message, message_class = ('Your request to join "{0}" is pending. (The group '
+                                              'owner has no email on file, but they\'ll see it in '
+                                              'their pending list.)'.format(group.name), 'alert-box info')
         else:
             try:
                 group = RoleGroup.objects.get(id=int(request.POST.get('group_id', 0)))
@@ -1322,11 +1368,34 @@ def role_groups(request):
                         message, message_class = '{0} is already a member.'.format(uname), 'alert-box warning'
                     else:
                         group.members.add(w)
+                        RoleGroupJoinRequest.objects.filter(role_group=group, requester=w).delete()
                         reconcile_group(group)
                         _notify_added_to_group(w, group, user)
                         message, message_class = 'Added {0}.'.format(uname), 'alert-box success'
                 except Writer.DoesNotExist:
                     message, message_class = 'No user named "{0}".'.format(uname), 'alert-box warning'
+            elif action in ('approve_join', 'decline_join'):
+                try:
+                    w = Writer.objects.get(id=int(request.POST.get('writer_id', 0)))
+                except (ValueError, Writer.DoesNotExist):
+                    w = None
+                if w is None:
+                    message, message_class = 'That user no longer exists.', 'alert-box warning'
+                else:
+                    RoleGroupJoinRequest.objects.filter(role_group=group, requester=w).delete()
+                    if action == 'approve_join':
+                        if group.members.filter(id=w.id).exists():
+                            message, message_class = ('{0} is already a member.'.format(
+                                w.user.username), 'alert-box info')
+                        else:
+                            group.members.add(w)
+                            reconcile_group(group)
+                            _notify_added_to_group(w, group, user)
+                            message, message_class = ('Approved {0}.'.format(
+                                w.user.username), 'alert-box success')
+                    else:
+                        message, message_class = ('Declined {0}\'s request.'.format(
+                            w.user.username), 'alert-box success')
             elif action == 'remove_member':
                 try:
                     w = Writer.objects.get(id=int(request.POST.get('writer_id', 0)))
@@ -1337,17 +1406,23 @@ def role_groups(request):
                     pass
 
     groups = []
-    for g in RoleGroup.objects.all().order_by('name').prefetch_related('members__user', 'set_assignments__question_set'):
+    for g in RoleGroup.objects.all().order_by('name').prefetch_related(
+            'members__user', 'set_assignments__question_set', 'join_requests__requester__user'):
         member_list = list(g.members.all().order_by('user__username'))
         is_member = any(m.id == user.id for m in member_list)
         can_manage = g.can_manage(user)
+        # Only a manager sees who's waiting to join.
+        pending = list(g.join_requests.all()) if can_manage else []
+        has_requested = any(r.requester_id == user.id for r in g.join_requests.all())
         # Membership is private: only members (and managers) see who's in a group.
         groups.append({'group': g,
                        'members': member_list if (is_member or can_manage) else None,
                        'member_count': len(member_list),
                        'assignments': list(g.set_assignments.all()),
+                       'pending': pending,
                        'can_manage': can_manage,
-                       'is_member': is_member})
+                       'is_member': is_member,
+                       'has_requested': has_requested})
     return render(request, 'role_groups.html',
                   {'groups': groups, 'message': message, 'message_class': message_class, 'user': user})
 

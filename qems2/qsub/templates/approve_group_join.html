@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% block title %}Approve Join Request - QEMS3{% endblock %}
+
+{% block content %}
+{% load static %}
+{% load filters %}
+
+<h3 class="page-header">Join request for {{ group.name }}</h3>
+
+{% if added %}
+    <div class="alert-box success">
+        {{ requester|verbose_username }} has been added to the role group
+        <strong>{{ group.name }}</strong>. They've been emailed to let them know, and
+        they now hold the group's role on every set it's attached to.
+    </div>
+    <p><a href="/role_groups/" class="button small secondary">Go to Role Groups</a></p>
+{% elif already %}
+    <div class="alert-box info">
+        {{ requester|verbose_username }} is already a member of <strong>{{ group.name }}</strong>.
+        No action needed.
+    </div>
+    <p><a href="/role_groups/" class="button small secondary">Go to Role Groups</a></p>
+{% else %}
+    <div class="panel">
+        <p><strong>{{ requester|verbose_username }}</strong> has requested to join the role group
+        <strong>{{ group.name }}</strong>. Members automatically get the group's role on every
+        question set it's attached to.</p>
+        <form action="" method="post">
+            {% csrf_token %}
+            <button type="submit" class="button primary">Approve &amp; add to group</button>
+            <a href="/role_groups/" class="button secondary">Review in Role Groups</a>
+        </form>
+    </div>
+{% endif %}
+
+{% endblock %}

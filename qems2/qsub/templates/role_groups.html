@@ -40,6 +40,40 @@ them and they lose it.</p>
     <p style="color:#888; margin-bottom:6px;">Not attached to any set yet.</p>
     {% endif %}
 
+    {% if g.can_manage and g.pending %}
+    <div class="panel radius" style="background:#fff8e1; border:1px solid #f0d99b; padding:8px 10px; margin-bottom:8px;">
+        <strong>Pending join requests ({{ g.pending|length }})</strong>
+        <table class="table-striped" style="margin:6px 0 0;">
+            <tbody>
+            {% for r in g.pending %}
+                <tr>
+                    <td>{{ r.requester.user.first_name }} {{ r.requester.user.last_name }}
+                        <span style="color:#888;">"{{ r.requester.user.username }}"</span>
+                        {% if r.requester.user.email %}<span style="color:#aaa;">&middot; {{ r.requester.user.email }}</span>{% endif %}
+                    </td>
+                    <td style="text-align:right; white-space:nowrap;">
+                        <form method="post" action="/role_groups/" style="display:inline;">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="approve_join">
+                            <input type="hidden" name="group_id" value="{{ g.group.id }}">
+                            <input type="hidden" name="writer_id" value="{{ r.requester.id }}">
+                            <button type="submit" class="button tiny success" style="margin:0;">Approve</button>
+                        </form>
+                        <form method="post" action="/role_groups/" style="display:inline;">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="decline_join">
+                            <input type="hidden" name="group_id" value="{{ g.group.id }}">
+                            <input type="hidden" name="writer_id" value="{{ r.requester.id }}">
+                            <button type="submit" class="button tiny secondary" style="margin:0;">Decline</button>
+                        </form>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
     {% if g.is_member or g.can_manage %}
     <table class="table-striped" style="margin-bottom:8px;">
         <tbody>
@@ -83,6 +117,9 @@ them and they lose it.</p>
         <p style="color:#999; font-size:0.85em;">You're a member. Only the group's creator can manage members.</p>
         {% endif %}
     {% else %}
+    {% if g.has_requested %}
+    <p style="color:#888; font-size:0.9em;">Membership is private. <strong>Your request to join is pending</strong> the group owner's approval.</p>
+    {% else %}
     <p style="color:#888; font-size:0.9em;">Membership is private. Ask to be added:</p>
     <form method="post" action="/role_groups/" style="display:inline;">
         {% csrf_token %}
@@ -90,6 +127,7 @@ them and they lose it.</p>
         <input type="hidden" name="group_id" value="{{ g.group.id }}">
         <button type="submit" class="button tiny primary" style="margin:0;">Request to join</button>
     </form>
+    {% endif %}
     {% endif %}
 </div>
 {% empty %}

@@ -291,6 +291,25 @@ class RoleGroup(models.Model):
                  (writer.user and writer.user.is_superuser)))
 
 
+class RoleGroupJoinRequest(models.Model):
+    """A pending request from a writer to join a role group. Created when someone
+    clicks "Request to join"; removed when a manager approves (the writer becomes
+    a member) or declines, or when the writer is added by other means."""
+    role_group = models.ForeignKey(RoleGroup, on_delete=models.CASCADE,
+                                   related_name='join_requests')
+    requester = models.ForeignKey('Writer', on_delete=models.CASCADE,
+                                  related_name='role_group_join_requests')
+    created_date = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('role_group', 'requester')
+        ordering = ['created_date']
+
+    def __str__(self):
+        return 'join request: writer {0} -> group {1}'.format(
+            self.requester_id, self.role_group_id)
+
+
 class SetRoleGroupAssignment(models.Model):
     """Attaches a RoleGroup to a QuestionSet with a role (editor or writer)."""
     ROLE_CHOICES = (('editor', 'Editor'), ('writer', 'Writer'))
