@@ -207,9 +207,9 @@ document.addEventListener('DOMContentLoaded', function () {
 .doc-packet-count { font-size: 0.85em; color: #555; margin: 0 4px; }
 .doc-mode-hint { font-size: 0.85em; color: #666; margin-bottom: 10px; }
 .doc-mode-btn { margin-bottom: 0; }
-.doc-swap-btn { color:#bbb; margin-left:8px; font-size:0.85em; font-weight:bold; white-space:nowrap; }
-.doc-question:hover .doc-swap-btn { color:#008cba; }
-.doc-swap-btn:hover { color:#005f7a !important; text-decoration:underline; }
+/* The per-question Swap action reads as a clear button (accent pill), not a
+   faint hover-only link. a.doc-tag:hover already inverts to the accent fill. */
+.doc-swap-btn { background:#e8f4fb; color:#006f9a; font-weight:bold; white-space:nowrap; }
 .doc-reorder-mode .doc-swap-btn { display:none; }
 #doc-swap-candidates { max-height: 320px; overflow-y: auto; }
 .doc-swap-candidate { padding:6px 8px; border-bottom:1px solid #eee; cursor:pointer; font-size:0.85em; }
