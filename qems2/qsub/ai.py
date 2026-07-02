@@ -2,9 +2,10 @@
 
 These are gated to the admin user in the views; this module only deals with
 talking to the Claude API. The API key comes from settings.ANTHROPIC_API_KEY
-(env var or the git-ignored `anthropic_key` file) and the model defaults to
-Haiku (settings.AI_DEFAULT_MODEL). AI features are simply unavailable when no
-key is configured.
+(env var or the git-ignored `anthropic_key` file). Proofreading uses the cheap
+default model (settings.AI_DEFAULT_MODEL, Haiku); suggesting alternate answers
+is a harder knowledge task and uses a stronger model (settings.AI_ANSWER_MODEL,
+Sonnet). AI features are simply unavailable when no key is configured.
 """
 
 import json
@@ -25,9 +26,8 @@ def _client():
     return anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
 
 
-# JSON schema the checker constrains Claude's response to, so we get back clean
-# lists rather than free-form prose. One call returns both grammar findings and
-# suggested alternate answers.
+# --- grammar / spelling proofread -----------------------------------------
+
 _GRAMMAR_SCHEMA = {
     'type': 'object',
     'properties': {
@@ -50,7 +50,32 @@ _GRAMMAR_SCHEMA = {
                 'additionalProperties': False,
             },
         },
-        'answer_suggestions': {
+    },
+    'required': ['findings'],
+    'additionalProperties': False,
+}
+
+_GRAMMAR_SYSTEM = (
+    "You are a meticulous copy editor for quizbowl questions. You are given a "
+    "list of questions, each preceded by a ref label. Check each one for "
+    "genuine grammar mistakes, spelling errors, typos, punctuation errors, and "
+    "obvious word-level errors (e.g. wrong homophone, doubled or missing "
+    "words). Report only real errors that should be fixed — do not flag "
+    "stylistic preferences, quizbowl formatting conventions, pronunciation "
+    "guides, the markup characters (underscores, tildes, asterisks), or "
+    "matters of taste. If a question has no errors, return nothing for it. For "
+    "each finding, copy the problematic text verbatim into 'excerpt', give the "
+    "corrected text in 'suggestion', and set 'ref' to the exact ref label of "
+    "the question it came from."
+)
+
+
+# --- alternate-answer suggestions -----------------------------------------
+
+_ANSWER_SCHEMA = {
+    'type': 'object',
+    'properties': {
+        'suggestions': {
             'type': 'array',
             'items': {
                 'type': 'object',
@@ -58,95 +83,106 @@ _GRAMMAR_SCHEMA = {
                     'ref': {'type': 'string',
                             'description': 'The exact ref label of the question this applies to.'},
                     'suggestion': {'type': 'string',
-                                   'description': 'A single alternate acceptable/promptable answer '
-                                                  'to add, phrased like "accept X" or "prompt on Y".'},
+                                   'description': 'A single alternate name for the SAME answer to '
+                                                  'add, phrased like "accept X" or "prompt on Y".'},
                     'explanation': {'type': 'string',
-                                    'description': 'Why this answer should be accepted or prompted.'},
+                                    'description': 'Why this names the same answer and should be '
+                                                   'accepted or prompted.'},
                 },
                 'required': ['ref', 'suggestion', 'explanation'],
                 'additionalProperties': False,
             },
         },
     },
-    'required': ['findings', 'answer_suggestions'],
+    'required': ['suggestions'],
     'additionalProperties': False,
 }
 
-_GRAMMAR_SYSTEM = (
-    "You are a meticulous copy editor and quizbowl subject expert reviewing "
-    "quizbowl questions. You are given a list of questions, each preceded by a "
-    "ref label and ending with its ANSWER line. Do two things.\n\n"
-    "1) GRAMMAR: Check each question for genuine grammar mistakes, spelling "
-    "errors, typos, punctuation errors, and obvious word-level errors (e.g. "
-    "wrong homophone, doubled or missing words). Report only real errors that "
-    "should be fixed — do not flag stylistic preferences, quizbowl formatting "
-    "conventions, pronunciation guides, the markup characters (underscores, "
-    "tildes, asterisks), or matters of taste. For each, copy the problematic "
-    "text verbatim into 'excerpt' and the corrected text into 'suggestion'. "
-    "Put these in 'findings'.\n\n"
-    "2) ALTERNATE ANSWERS: For each question's ANSWER line, suggest any "
-    "alternate answers a knowledgeable player might reasonably give that should "
-    "be explicitly accepted or prompted but are NOT already present — e.g. "
-    "common alternate names, English vs. original-language forms, well-known "
-    "nicknames, or a more/less specific form that deserves a prompt. Only "
-    "suggest genuinely reasonable additions that are clearly correct for what "
-    "the question asks and are not already in the answer line. Phrase each as "
-    "'accept X' or 'prompt on Y' in 'suggestion' with a brief justification in "
-    "'explanation'. Put these in 'answer_suggestions'.\n\n"
-    "Set 'ref' to the exact ref label of the question. Return nothing for a "
-    "question that needs nothing. Be conservative: no false positives."
+_ANSWER_SYSTEM = (
+    "You are an expert quizbowl editor reviewing answer lines. Each question is "
+    "given with a ref label, its text, and its ANSWER line (after 'ANSWER:'). "
+    "The correct answer is the underlined/required entity named on the ANSWER "
+    "line. Your ONLY job: identify additional ways to name that SAME correct "
+    "entity that a moderator should accept or prompt on but that are NOT already "
+    "on the answer line — alternate spellings, transliterations, English vs. "
+    "original-language names, common nicknames, full vs. partial names, or a "
+    "broader/narrower form that merits a prompt.\n\n"
+    "ABSOLUTE RULES:\n"
+    "- An alternate answer must refer to the EXACT SAME person, place, thing, or "
+    "work as the given answer. It is another NAME for the answer — never a "
+    "different entity.\n"
+    "- NEVER suggest something that merely appears in the question as a CLUE (an "
+    "author, character, related person, place, or work mentioned to lead to the "
+    "answer). Clues are not answers. Example: if the answer is the city "
+    "'Vienna' and the question mentions Adolf Loos as a clue, do NOT suggest "
+    "'accept Adolf Loos' — Loos is not Vienna. This mistake is the single most "
+    "important thing to avoid.\n"
+    "- Do not restate the answer already given, or trivial case/punctuation "
+    "variants of it.\n"
+    "- If you are not highly confident an addition is a correct equivalent that "
+    "a good moderator would accept, suggest nothing. MOST questions need "
+    "nothing — returning an empty list is the common, correct outcome.\n\n"
+    "For each suggestion, set 'ref' to the exact ref label, phrase 'suggestion' "
+    "as 'accept X' or 'prompt on Y', and give a one-line 'explanation' of why it "
+    "names the same answer."
 )
 
 
 # How many questions to send per Claude call. Batching keeps each request well
 # within the model's output budget so the whole set can be checked across
 # several calls rather than truncated to one request.
-_GRAMMAR_BATCH_SIZE = 40
+_BATCH_SIZE = 40
 
 
-def _grammar_check_batch(client, model, items):
-    """Check a single batch of questions. Returns (findings, error), where each
-    finding carries a 'kind': 'grammar' or 'answer' (an alternate-answer
-    suggestion)."""
+def _grammar_batch(client, model, items):
+    """Proofread one batch. Returns (findings, error); findings carry kind='grammar'."""
     body = '\n\n'.join('[{0}]\n{1}'.format(it['ref'], it['text']) for it in items)
     try:
         resp = client.messages.create(
-            model=model,
-            max_tokens=8000,
-            system=_GRAMMAR_SYSTEM,
-            messages=[{'role': 'user', 'content':
-                       'Review these questions:\n\n' + body}],
-            output_config={'format': {'type': 'json_schema', 'schema': _GRAMMAR_SCHEMA}},
-        )
+            model=model, max_tokens=8000, system=_GRAMMAR_SYSTEM,
+            messages=[{'role': 'user', 'content': 'Check these questions for errors:\n\n' + body}],
+            output_config={'format': {'type': 'json_schema', 'schema': _GRAMMAR_SCHEMA}})
     except Exception as ex:
         return [], 'The AI grammar check failed: {0}'.format(ex)
-
     text = next((b.text for b in resp.content if getattr(b, 'type', '') == 'text'), '')
     try:
         data = json.loads(text)
     except (ValueError, TypeError):
         return [], 'The AI returned an unexpected response.'
+    return [dict(f, kind='grammar') for f in data.get('findings', [])], None
 
-    findings = []
-    for f in data.get('findings', []):
-        findings.append(dict(f, kind='grammar'))
-    for a in data.get('answer_suggestions', []):
-        findings.append({'kind': 'answer', 'ref': a.get('ref', ''), 'severity': 'info',
-                         'excerpt': '', 'suggestion': a.get('suggestion', ''),
-                         'explanation': a.get('explanation', '')})
-    return findings, None
+
+def _answer_batch(client, model, items):
+    """Suggest alternate answers for one batch. Returns (findings, error);
+    findings carry kind='answer'."""
+    body = '\n\n'.join('[{0}]\n{1}'.format(it['ref'], it['text']) for it in items)
+    try:
+        resp = client.messages.create(
+            model=model, max_tokens=8000, system=_ANSWER_SYSTEM,
+            messages=[{'role': 'user', 'content':
+                       'Suggest alternate acceptable answers for these questions:\n\n' + body}],
+            output_config={'format': {'type': 'json_schema', 'schema': _ANSWER_SCHEMA}})
+    except Exception as ex:
+        return [], 'The AI answer-suggestion pass failed: {0}'.format(ex)
+    text = next((b.text for b in resp.content if getattr(b, 'type', '') == 'text'), '')
+    try:
+        data = json.loads(text)
+    except (ValueError, TypeError):
+        return [], 'The AI returned an unexpected response.'
+    return [{'kind': 'answer', 'ref': a.get('ref', ''), 'severity': 'info', 'excerpt': '',
+             'suggestion': a.get('suggestion', ''), 'explanation': a.get('explanation', '')}
+            for a in data.get('suggestions', [])], None
 
 
 def grammar_check_questions(items, model=None):
-    """Run one AI pass over the given questions that both proofreads them and
-    suggests alternate acceptable answers.
+    """Proofread the questions AND suggest alternate acceptable answers.
 
     `items` is a list of dicts: {'ref': str, 'text': str}. The whole list is
-    checked, in batches, so there is no cap on set size. Returns
-    (findings, error) where findings is a list of dicts (kind, ref, severity,
-    excerpt, suggestion, explanation); kind is 'grammar' or 'answer'. On a
-    mid-run failure, whatever findings were gathered so far are returned
-    alongside the error string.
+    processed in batches (no cap on set size). Grammar uses AI_DEFAULT_MODEL;
+    alternate answers use the stronger AI_ANSWER_MODEL. Returns (findings, error)
+    where findings is a list of dicts (kind, ref, severity, excerpt, suggestion,
+    explanation); kind is 'grammar' or 'answer'. On a mid-run failure, whatever
+    was gathered so far is returned alongside the error string.
     """
     client = _client()
     if client is None:
@@ -154,11 +190,19 @@ def grammar_check_questions(items, model=None):
     if not items:
         return [], None
 
-    model = model or settings.AI_DEFAULT_MODEL
+    grammar_model = model or settings.AI_DEFAULT_MODEL
+    answer_model = getattr(settings, 'AI_ANSWER_MODEL', None) or grammar_model
+
     findings = []
-    for start in range(0, len(items), _GRAMMAR_BATCH_SIZE):
-        batch = items[start:start + _GRAMMAR_BATCH_SIZE]
-        batch_findings, error = _grammar_check_batch(client, model, batch)
+    for start in range(0, len(items), _BATCH_SIZE):
+        batch = items[start:start + _BATCH_SIZE]
+        batch_findings, error = _grammar_batch(client, grammar_model, batch)
+        if error:
+            return findings, error
+        findings.extend(batch_findings)
+    for start in range(0, len(items), _BATCH_SIZE):
+        batch = items[start:start + _BATCH_SIZE]
+        batch_findings, error = _answer_batch(client, answer_model, batch)
         if error:
             return findings, error
         findings.extend(batch_findings)

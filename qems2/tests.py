@@ -3290,31 +3290,45 @@ class AIGrammarCheckTests(TestCase):
         self.assertIn('Alt answer', body)
         self.assertIn('accept the Painter of the Hole', body)
 
-    def test_ai_batch_merges_grammar_and_answer_suggestions(self):
-        # The ai layer tags grammar findings and alt-answer suggestions with a kind.
+    def test_ai_grammar_batch_tags_grammar_kind(self):
         from unittest import mock
         from qems2.qsub import ai as ai_mod
 
         class _Block:
             type = 'text'
-            text = json.dumps({
-                'findings': [{'ref': 'tossup-1', 'severity': 'warning', 'excerpt': 'teh',
-                              'suggestion': 'the', 'explanation': 'typo'}],
-                'answer_suggestions': [{'ref': 'tossup-1', 'suggestion': 'accept X',
-                                        'explanation': 'alt name'}]})
+            text = json.dumps({'findings': [
+                {'ref': 'tossup-1', 'severity': 'warning', 'excerpt': 'teh',
+                 'suggestion': 'the', 'explanation': 'typo'}]})
 
         class _Resp:
             content = [_Block()]
 
         client = mock.MagicMock()
         client.messages.create.return_value = _Resp()
-        merged, err = ai_mod._grammar_check_batch(client, 'm', [{'ref': 'tossup-1', 'text': 'q'}])
+        out, err = ai_mod._grammar_batch(client, 'm', [{'ref': 'tossup-1', 'text': 'q'}])
         self.assertIsNone(err)
-        kinds = sorted(f['kind'] for f in merged)
-        self.assertEqual(kinds, ['answer', 'grammar'])
-        ans = next(f for f in merged if f['kind'] == 'answer')
-        self.assertEqual(ans['severity'], 'info')
-        self.assertEqual(ans['suggestion'], 'accept X')
+        self.assertEqual([f['kind'] for f in out], ['grammar'])
+
+    def test_ai_answer_batch_tags_answer_kind(self):
+        from unittest import mock
+        from qems2.qsub import ai as ai_mod
+
+        class _Block:
+            type = 'text'
+            text = json.dumps({'suggestions': [
+                {'ref': 'tossup-1', 'suggestion': 'accept X', 'explanation': 'alt name'}]})
+
+        class _Resp:
+            content = [_Block()]
+
+        client = mock.MagicMock()
+        client.messages.create.return_value = _Resp()
+        out, err = ai_mod._answer_batch(client, 'm', [{'ref': 'tossup-1', 'text': 'q'}])
+        self.assertIsNone(err)
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]['kind'], 'answer')
+        self.assertEqual(out[0]['severity'], 'info')
+        self.assertEqual(out[0]['suggestion'], 'accept X')
 
 
 class YappHtmlConversionTests(TestCase):

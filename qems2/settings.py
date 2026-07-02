@@ -151,6 +151,11 @@ if not ANTHROPIC_API_KEY:
             ANTHROPIC_API_KEY = f.read().strip()
 # Default to Haiku for now — cheapest tier, fine for grammar/spelling passes.
 AI_DEFAULT_MODEL = os.environ.get('AI_DEFAULT_MODEL', 'claude-haiku-4-5')
+# Suggesting alternate answers is a harder knowledge/reasoning task than
+# proofreading (Haiku tends to grab clue entities as if they were answers), so
+# it uses a stronger model by default. Sonnet 5 gives near-Opus knowledge and
+# reasoning with structured-output support at lower cost than Opus.
+AI_ANSWER_MODEL = os.environ.get('AI_ANSWER_MODEL', 'claude-sonnet-5')
 
 #SECRET_KEY = '%&amp;5&amp;wmrx-g8zpk8=m*kttzkxfy^38ziedy$1kf-4uwme8bksba'
 
