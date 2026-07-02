@@ -4504,12 +4504,29 @@ def export_question_set(request, qset_id, output_format):
                 tu_comment_ct = ContentType.objects.get_for_model(Tossup)
                 bs_comment_ct = ContentType.objects.get_for_model(Bonus)
 
+                # Export options come from the packetized-Word options form. A
+                # legacy plain link (no `opts` marker) keeps the old defaults:
+                # comments/writers/editors/ids on, credits off.
+                _opts_explicit = request.GET.get('opts') == '1'
+
+                def _export_opt(name, default):
+                    if _opts_explicit:
+                        return request.GET.get(name) == '1'
+                    return default
+
+                include_comments = _export_opt('comments', True)
+                include_writers = _export_opt('writers', True)
+                include_editors = _export_opt('editors', True)
+                include_ids = _export_opt('ids', True)
+                include_credits = _export_opt('credits', False)
+
                 def question_meta(q):
                     """Attribution line in the standard QEMS packet format:
-                    ``<Author, Category - Subcategory> ~Id~ <Editor: Name>``."""
+                    ``<Author, Category - Subcategory> ~Id~ <Editor: Name>``.
+                    Writer name, question id and editor name are each optional."""
                     # get_real_name() pads with spaces and is blank when a writer
                     # has no name, so strip before deciding what to include.
-                    author = html.unescape(safe_name(q.author)).strip()
+                    author = html.unescape(safe_name(q.author)).strip() if include_writers else ''
                     cat = html.unescape(safe_category(q.category)).strip()
                     if author and cat:
                         head = '<{0}, {1}>'.format(author, cat)
@@ -4519,11 +4536,50 @@ def export_question_set(request, qset_id, output_format):
                         head = '<{0}>'.format(cat)
                     else:
                         head = ''
-                    meta = '{0} ~{1}~'.format(head, q.id).strip()
-                    editor = html.unescape(safe_name(q.editor)).strip() if q.editor else ''
-                    if q.edited and editor:
-                        meta += ' <Editor: {0}>'.format(editor)
-                    return meta
+                    parts = [head]
+                    if include_ids:
+                        parts.append('~{0}~'.format(q.id))
+                    if include_editors and q.edited:
+                        editor = html.unescape(safe_name(q.editor)).strip() if q.editor else ''
+                        if editor:
+                            parts.append('<Editor: {0}>'.format(editor))
+                    return ' '.join(p for p in parts if p).strip()
+
+                def _set_contributors():
+                    """(writer_names, editor_names): everyone who wrote at least one
+                    question, and every editor of at least one edited question, on
+                    the whole set. Names are de-duplicated and sorted."""
+                    writers, editors = {}, {}
+                    all_qs = (list(Tossup.objects.filter(question_set=qset)
+                                   .select_related('author', 'editor')) +
+                              list(Bonus.objects.filter(question_set=qset)
+                                   .select_related('author', 'editor')))
+                    for q in all_qs:
+                        if q.author_id:
+                            writers[q.author_id] = html.unescape(safe_name(q.author)).strip()
+                        if q.edited and q.editor_id:
+                            editors[q.editor_id] = html.unescape(safe_name(q.editor)).strip()
+                    return (sorted(n for n in writers.values() if n),
+                            sorted(n for n in editors.values() if n))
+
+                def add_credits_to_doc(document):
+                    """Front-matter credits listing the set's writers and editors,
+                    placed before the first tossup of the first packet."""
+                    writer_names, editor_names = _set_contributors()
+                    if not writer_names and not editor_names:
+                        return
+                    document.add_heading('Credits', level=2)
+                    if writer_names:
+                        p = document.add_paragraph()
+                        p.paragraph_format.space_after = Pt(2)
+                        p.add_run('Writers: ').bold = True
+                        p.add_run(', '.join(writer_names))
+                    if editor_names:
+                        p = document.add_paragraph()
+                        p.paragraph_format.space_after = Pt(2)
+                        p.add_run('Editors: ').bold = True
+                        p.add_run(', '.join(editor_names))
+                    document.add_paragraph().paragraph_format.space_after = Pt(8)
 
                 def _initials(name):
                     parts = (name or '').split()
@@ -4630,7 +4686,8 @@ def export_question_set(request, qset_id, output_format):
                     if meta:
                         _line_break(p)
                         p.add_run(meta)
-                    attach_open_comments(document, p, tossup, tu_comment_ct)
+                    if include_comments:
+                        attach_open_comments(document, p, tossup, tu_comment_ct)
 
                 def add_bonus_to_doc(document, bonus, num):
                     # One paragraph per bonus (leadin, each part + answer, then
@@ -4656,7 +4713,8 @@ def export_question_set(request, qset_id, output_format):
                     if meta:
                         _line_break(p)
                         p.add_run(meta)
-                    attach_open_comments(document, p, bonus, bs_comment_ct)
+                    if include_comments:
+                        attach_open_comments(document, p, bonus, bs_comment_ct)
 
                 def add_careful_notes_to_doc(document, tossup_qs, bonus_qs):
                     """At the top of a packet, list the answer lines flagged
@@ -4881,10 +4939,13 @@ def export_question_set(request, qset_id, output_format):
                     zip_buf = io.BytesIO()
                     with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
                         used_names = set()
-                        for packet, tus, bos in zip(packets, packet_tus, packet_bos):
+                        for pkt_i, (packet, tus, bos) in enumerate(zip(packets, packet_tus, packet_bos)):
                             document = new_docx()
                             document.add_heading(
                                 '{0} {1}'.format(qset.name, packet.packet_name), level=1)
+                            # Credits go once, before the first tossup of the first packet.
+                            if include_credits and pkt_i == 0:
+                                add_credits_to_doc(document)
                             add_careful_notes_to_doc(document, tus, bos)
                             if tus:
                                 document.add_heading('Tossups', level=2)

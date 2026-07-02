@@ -160,8 +160,18 @@
         {% endif %}
         {% if role == "editor" %}
             <div class="panel header radius text-center">
-                <strong><a href="/export_question_set/{{ qset.id }}/csv/">Export Question Set to CSV</a></strong> | <strong><a href="/export_question_set/{{ qset.id }}/tsv/">Export to TSV</a></strong> | <strong><a href="/export_question_set/{{ qset.id }}/docx/">Export to Word</a></strong> | <strong><a href="/export_question_set/{{ qset.id }}/docx-by-category/">Export to Word by Category</a></strong> | <strong><a href="/export_question_set/{{ qset.id }}/docx-packetized/">Export Packetized Word</a></strong> | <strong><a href="/export_question_set/{{ qset.id }}/yapp-json/">Export Packetized YAPP JSON</a></strong>
+                <strong><a href="/export_question_set/{{ qset.id }}/csv/">Export Question Set to CSV</a></strong> | <strong><a href="/export_question_set/{{ qset.id }}/tsv/">Export to TSV</a></strong> | <strong><a href="/export_question_set/{{ qset.id }}/docx/">Export to Word</a></strong> | <strong><a href="/export_question_set/{{ qset.id }}/docx-by-category/">Export to Word by Category</a></strong> | <strong><a href="/export_question_set/{{ qset.id }}/yapp-json/">Export Packetized YAPP JSON</a></strong>
             </div>
+            <form method="get" action="/export_question_set/{{ qset.id }}/docx-packetized/" class="panel radius" style="text-align:center;">
+                <input type="hidden" name="opts" value="1">
+                <strong>Export Packetized Word</strong> &mdash; include:
+                <label style="display:inline-block; margin:0 10px;"><input type="checkbox" name="comments" value="1" checked> Open comments</label>
+                <label style="display:inline-block; margin:0 10px;"><input type="checkbox" name="writers" value="1" checked> Writer names</label>
+                <label style="display:inline-block; margin:0 10px;"><input type="checkbox" name="editors" value="1" checked> Editor names</label>
+                <label style="display:inline-block; margin:0 10px;"><input type="checkbox" name="ids" value="1" checked> Question IDs</label>
+                <label style="display:inline-block; margin:0 10px;"><input type="checkbox" name="credits" value="1"> Credits page</label>
+                <button type="submit" class="button tiny primary" style="margin:0 0 0 6px;">Download</button>
+            </form>
             <div class="panel header radius text-center">
                 <strong><a href="/bulk_change_set/{{ qset.id }}">Make Bulk Changes to this Set</a></strong>
             </div>

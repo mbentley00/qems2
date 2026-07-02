@@ -1836,6 +1836,71 @@ class PacketizedWordExportTests(TestCase):
         self.assertIn('<Science - Biology> ~{0}~'.format(tu.id), full)
         self.assertNotIn('< ,', full)
 
+    # --- Packetized Word export options ---
+
+    def _zip_opts(self, **params):
+        params.setdefault('opts', '1')
+        resp = self.client.get(
+            '/export_question_set/{0}/docx-packetized/'.format(self.qset.id), params)
+        self.assertEqual(resp.status_code, 200)
+        return self._zip.ZipFile(self._io.BytesIO(resp.content))
+
+    def _p2_text(self, zf):
+        return '\n'.join(p.text for p in self._doc(zf, 'Packet 2.docx').paragraphs)
+
+    def test_option_excludes_open_comments(self):
+        self.Comment.objects.create(
+            content_type=self.tu_ct, object_pk=str(self.tu_p2.id), site=self.site,
+            user=self.ou, user_name='', comment='a note', is_public=True, is_removed=False)
+        # opts marker present, but "comments" box unchecked (omitted).
+        zf = self._zip_opts(writers='1', editors='1', ids='1')
+        self.assertEqual(len(self._doc(zf, 'Packet 2.docx').comments), 0)
+        # Sanity: with comments on, it IS attached.
+        zf2 = self._zip_opts(comments='1', writers='1', editors='1', ids='1')
+        self.assertEqual(len(self._doc(zf2, 'Packet 2.docx').comments), 1)
+
+    def test_option_excludes_writer_names(self):
+        zf = self._zip_opts(editors='1', ids='1')  # writers omitted
+        full = self._p2_text(zf)
+        name = self.owner.get_real_name().strip()
+        self.assertNotIn('<{0},'.format(name), full)          # author head gone
+        self.assertIn('<Science - Biology>', full)            # category kept
+        self.assertIn('~{0}~'.format(self.tu_p2.id), full)    # id kept
+
+    def test_option_excludes_question_ids(self):
+        zf = self._zip_opts(writers='1', editors='1')  # ids omitted
+        self.assertNotIn('~{0}~'.format(self.tu_p2.id), self._p2_text(zf))
+
+    def test_option_excludes_editor_names(self):
+        zf = self._zip_opts(writers='1', ids='1')  # editors omitted
+        self.assertNotIn('<Editor:', self._p2_text(zf))
+
+    def test_credits_page_lists_contributors(self):
+        zf = self._zip_opts(comments='1', writers='1', editors='1', ids='1', credits='1')
+        full = self._p2_text(zf)
+        name = self.owner.get_real_name().strip()
+        self.assertIn('Credits', full)
+        self.assertIn('Writers:', full)
+        self.assertIn('Editors:', full)   # tu_p2 is edited by the owner
+        self.assertIn(name, full)
+
+    def test_credits_only_on_first_packet(self):
+        zf = self._zip_opts(credits='1')
+        p10 = '\n'.join(p.text for p in self._doc(zf, 'Packet 10.docx').paragraphs)
+        self.assertNotIn('Credits', p10)
+
+    def test_default_link_keeps_comments_and_attribution(self):
+        # A legacy plain link (no opts marker) keeps the historical behavior.
+        self.Comment.objects.create(
+            content_type=self.tu_ct, object_pk=str(self.tu_p2.id), site=self.site,
+            user=self.ou, user_name='', comment='legacy note', is_public=True, is_removed=False)
+        zf = self._open_zip('docx-packetized')
+        doc = self._doc(zf, 'Packet 2.docx')
+        self.assertEqual(len(doc.comments), 1)
+        full = '\n'.join(p.text for p in doc.paragraphs)
+        self.assertIn('~{0}~'.format(self.tu_p2.id), full)
+        self.assertNotIn('Credits', full)   # credits off by default
+
 
 class QuestionSetSettingsSaveTests(TestCase):
     """Editing question-set settings (e.g. max tossup character count) persists.
