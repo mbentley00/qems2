@@ -381,7 +381,10 @@ class AIGrammarFinding(models.Model):
                                      related_name='ai_grammar_findings')
     question_type = models.CharField(max_length=10)  # 'tossup' | 'bonus'
     question_id = models.PositiveIntegerField()
-    severity = models.CharField(max_length=10, default='warning')  # 'error' | 'warning'
+    # 'grammar' (a grammar/spelling fix) or 'answer' (a suggested alternate
+    # acceptable/promptable answer to add to the answer line).
+    kind = models.CharField(max_length=10, default='grammar')
+    severity = models.CharField(max_length=10, default='warning')  # 'error' | 'warning' | 'info'
     excerpt = models.TextField(blank=True, default='')
     suggestion = models.TextField(blank=True, default='')
     explanation = models.TextField(blank=True, default='')

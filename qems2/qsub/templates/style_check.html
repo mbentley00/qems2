@@ -41,13 +41,13 @@
 
     {% if can_configure %}<a href="#" id="toggle-style-settings" class="sc-config-toggle">Configure rules&hellip;</a>{% endif %}
     {% if guide_obj.url %}<span class="sc-guide-note">Rules: <a href="{{ guide_obj.url }}" target="_blank" rel="noopener">{{ guide_obj.name }}</a></span>{% endif %}
-    {% if is_ai_user %}<button type="button" id="ai-grammar-btn" class="button tiny secondary" data-qset="{{ qset.id }}" style="margin:0;"><i class="fa fa-wand-magic-sparkles"></i> <span class="ai-grammar-btn-label">AI grammar check</span></button>{% endif %}
+    {% if is_ai_user %}<button type="button" id="ai-grammar-btn" class="button tiny secondary" data-qset="{{ qset.id }}" style="margin:0;"><i class="fa fa-wand-magic-sparkles"></i> <span class="ai-grammar-btn-label">AI check</span></button>{% endif %}
 </div>
 
 {% if is_ai_user %}
 <div id="ai-grammar-panel" style="display:none; margin: 0 0 18px;">
     <div class="panel radius">
-        <strong>AI grammar &amp; spelling check</strong> <span class="sc-guide-note">(admin only &middot; Haiku)</span>
+        <strong>AI review: grammar &amp; alternate answers</strong> <span class="sc-guide-note">(admin only &middot; Haiku)</span>
         <div id="ai-grammar-status" class="sc-guide-note" style="margin-top:6px;">Running&hellip;</div>
         <ul id="ai-grammar-results" class="ai-grammar-list"></ul>
     </div>
@@ -165,6 +165,10 @@
 .ai-grammar-msg { flex:1 1 auto; }
 .ai-grammar-msg del { color:#c0392b; }
 .ai-grammar-msg strong { color:#1c7c3e; }
+.ai-kind { display:inline-block; padding:0 6px; border-radius:9px; font-size:0.68rem;
+           font-weight:bold; color:#fff; vertical-align:middle; }
+.ai-kind-grammar { background:#d4870c; }
+.ai-kind-answer { background:#1565c0; }
 .ai-grammar-dismiss { flex:0 0 auto; cursor:pointer; color:#bdc1c5; font-size:0.78rem; white-space:nowrap; }
 .ai-grammar-list li:hover .ai-grammar-dismiss { color:#8a8f94; }
 .ai-grammar-dismiss:hover { color:#c0392b; text-decoration:underline; }
@@ -306,10 +310,18 @@ $(function () {
             var loc = f.edit_url
                 ? '<a href="' + esc(f.edit_url) + '" target="_blank" rel="noopener">' + esc(f.label) + '</a>'
                 : esc(f.label);
-            $li.append('<span class="ai-grammar-msg">' + loc + ': <del>' + esc(f.excerpt)
-                + '</del> &rarr; <strong>' + esc(f.suggestion) + '</strong>'
-                + (f.explanation ? ' <span class="sc-guide-note">' + esc(f.explanation) + '</span>' : '')
-                + '</span>');
+            var body;
+            if (f.kind === 'answer') {
+                // A suggested alternate acceptable/promptable answer to add.
+                body = '<span class="ai-kind ai-kind-answer">Alt answer</span> ' + loc
+                    + ': <strong>' + esc(f.suggestion) + '</strong>'
+                    + (f.explanation ? ' <span class="sc-guide-note">' + esc(f.explanation) + '</span>' : '');
+            } else {
+                body = '<span class="ai-kind ai-kind-grammar">Grammar</span> ' + loc
+                    + ': <del>' + esc(f.excerpt) + '</del> &rarr; <strong>' + esc(f.suggestion) + '</strong>'
+                    + (f.explanation ? ' <span class="sc-guide-note">' + esc(f.explanation) + '</span>' : '');
+            }
+            $li.append('<span class="ai-grammar-msg">' + body + '</span>');
             $li.append('<a class="ai-grammar-dismiss" title="Dismiss this suggestion">dismiss</a>');
             $list.append($li);
         });
@@ -317,17 +329,23 @@ $(function () {
 
     function setStatus(text) { $('#ai-grammar-status').text(text); }
 
+    function counts() {
+        var g = 0, a = 0;
+        findings.forEach(function (f) { if (f.kind === 'answer') { a++; } else { g++; } });
+        return g + ' grammar, ' + a + ' alt-answer suggestion(s)';
+    }
+
     function summarize() {
         if (!findings.length) {
-            setStatus('No grammar or spelling issues found. Rerun to check again after edits.');
+            setStatus('Nothing suggested. Rerun to check again after edits.');
         } else {
-            setStatus(findings.length + ' suggestion(s). These stay until dismissed or you rerun the check.');
+            setStatus(counts() + '. These stay until dismissed or you rerun the check.');
         }
     }
 
     // Show persisted findings from a previous run on page load.
     if (findings.length) {
-        $('.ai-grammar-btn-label').text('Rerun AI grammar check');
+        $('.ai-grammar-btn-label').text('Rerun AI check');
         $('#ai-grammar-panel').show();
         renderFindings();
         summarize();
@@ -349,11 +367,11 @@ $(function () {
                 return;
             }
             findings = resp.findings || [];
-            $('.ai-grammar-btn-label').text('Rerun AI grammar check');
+            $('.ai-grammar-btn-label').text('Rerun AI check');
             renderFindings();
             setStatus('Checked ' + resp.checked + ' question(s). '
-                + (findings.length ? findings.length + ' suggestion(s). These stay until dismissed or you rerun the check.'
-                                   : 'No grammar or spelling issues found.'));
+                + (findings.length ? counts() + '. These stay until dismissed or you rerun the check.'
+                                   : 'Nothing suggested.'));
         }).fail(function () {
             $btn.prop('disabled', false);
             setStatus('The AI check request failed.');

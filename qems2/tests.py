@@ -3274,6 +3274,48 @@ class AIGrammarCheckTests(TestCase):
         self.assertEqual(resp.status_code, 403)
         self.assertEqual(AIGrammarFinding.objects.count(), 0)
 
+    def test_grammar_finding_defaults_to_grammar_kind(self):
+        self._run_check(self._fake_finding())
+        self.assertEqual(AIGrammarFinding.objects.get().kind, 'grammar')
+
+    def test_alternate_answer_finding_persisted_and_rendered(self):
+        alt = [{'ref': 'tossup-{0}'.format(self.tu.id), 'kind': 'answer', 'severity': 'info',
+                'excerpt': '', 'suggestion': 'accept the Painter of the Hole',
+                'explanation': 'common alternate title'}]
+        self._run_check(alt)
+        f = AIGrammarFinding.objects.get()
+        self.assertEqual(f.kind, 'answer')
+        self.assertEqual(f.suggestion, 'accept the Painter of the Hole')
+        body = self.client.get('/style_check/%d/?guide=minkowski' % self.qset.id).content.decode()
+        self.assertIn('Alt answer', body)
+        self.assertIn('accept the Painter of the Hole', body)
+
+    def test_ai_batch_merges_grammar_and_answer_suggestions(self):
+        # The ai layer tags grammar findings and alt-answer suggestions with a kind.
+        from unittest import mock
+        from qems2.qsub import ai as ai_mod
+
+        class _Block:
+            type = 'text'
+            text = json.dumps({
+                'findings': [{'ref': 'tossup-1', 'severity': 'warning', 'excerpt': 'teh',
+                              'suggestion': 'the', 'explanation': 'typo'}],
+                'answer_suggestions': [{'ref': 'tossup-1', 'suggestion': 'accept X',
+                                        'explanation': 'alt name'}]})
+
+        class _Resp:
+            content = [_Block()]
+
+        client = mock.MagicMock()
+        client.messages.create.return_value = _Resp()
+        merged, err = ai_mod._grammar_check_batch(client, 'm', [{'ref': 'tossup-1', 'text': 'q'}])
+        self.assertIsNone(err)
+        kinds = sorted(f['kind'] for f in merged)
+        self.assertEqual(kinds, ['answer', 'grammar'])
+        ans = next(f for f in merged if f['kind'] == 'answer')
+        self.assertEqual(ans['severity'], 'info')
+        self.assertEqual(ans['suggestion'], 'accept X')
+
 
 class YappHtmlConversionTests(TestCase):
     """QEMS markup -> the HTML YAPP/MODAQ expects."""

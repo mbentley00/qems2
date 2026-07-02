@@ -25,8 +25,9 @@ def _client():
     return anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
 
 
-# JSON schema the grammar checker constrains Claude's response to, so we get
-# back a clean list of findings rather than free-form prose.
+# JSON schema the checker constrains Claude's response to, so we get back clean
+# lists rather than free-form prose. One call returns both grammar findings and
+# suggested alternate answers.
 _GRAMMAR_SCHEMA = {
     'type': 'object',
     'properties': {
@@ -49,23 +50,51 @@ _GRAMMAR_SCHEMA = {
                 'additionalProperties': False,
             },
         },
+        'answer_suggestions': {
+            'type': 'array',
+            'items': {
+                'type': 'object',
+                'properties': {
+                    'ref': {'type': 'string',
+                            'description': 'The exact ref label of the question this applies to.'},
+                    'suggestion': {'type': 'string',
+                                   'description': 'A single alternate acceptable/promptable answer '
+                                                  'to add, phrased like "accept X" or "prompt on Y".'},
+                    'explanation': {'type': 'string',
+                                    'description': 'Why this answer should be accepted or prompted.'},
+                },
+                'required': ['ref', 'suggestion', 'explanation'],
+                'additionalProperties': False,
+            },
+        },
     },
-    'required': ['findings'],
+    'required': ['findings', 'answer_suggestions'],
     'additionalProperties': False,
 }
 
 _GRAMMAR_SYSTEM = (
-    "You are a meticulous copy editor for quizbowl questions. You are given a "
-    "list of questions, each preceded by a ref label. Check each one for "
-    "genuine grammar mistakes, spelling errors, typos, punctuation errors, and "
-    "obvious word-level errors (e.g. wrong homophone, doubled or missing "
-    "words). Report only real errors that should be fixed — do not flag "
-    "stylistic preferences, quizbowl formatting conventions, pronunciation "
-    "guides, the markup characters (underscores, tildes, asterisks), or "
-    "matters of taste. If a question has no errors, return nothing for it. For "
-    "each finding, copy the problematic text verbatim into 'excerpt', give the "
-    "corrected text in 'suggestion', and set 'ref' to the exact ref label of "
-    "the question it came from."
+    "You are a meticulous copy editor and quizbowl subject expert reviewing "
+    "quizbowl questions. You are given a list of questions, each preceded by a "
+    "ref label and ending with its ANSWER line. Do two things.\n\n"
+    "1) GRAMMAR: Check each question for genuine grammar mistakes, spelling "
+    "errors, typos, punctuation errors, and obvious word-level errors (e.g. "
+    "wrong homophone, doubled or missing words). Report only real errors that "
+    "should be fixed — do not flag stylistic preferences, quizbowl formatting "
+    "conventions, pronunciation guides, the markup characters (underscores, "
+    "tildes, asterisks), or matters of taste. For each, copy the problematic "
+    "text verbatim into 'excerpt' and the corrected text into 'suggestion'. "
+    "Put these in 'findings'.\n\n"
+    "2) ALTERNATE ANSWERS: For each question's ANSWER line, suggest any "
+    "alternate answers a knowledgeable player might reasonably give that should "
+    "be explicitly accepted or prompted but are NOT already present — e.g. "
+    "common alternate names, English vs. original-language forms, well-known "
+    "nicknames, or a more/less specific form that deserves a prompt. Only "
+    "suggest genuinely reasonable additions that are clearly correct for what "
+    "the question asks and are not already in the answer line. Phrase each as "
+    "'accept X' or 'prompt on Y' in 'suggestion' with a brief justification in "
+    "'explanation'. Put these in 'answer_suggestions'.\n\n"
+    "Set 'ref' to the exact ref label of the question. Return nothing for a "
+    "question that needs nothing. Be conservative: no false positives."
 )
 
 
@@ -76,7 +105,9 @@ _GRAMMAR_BATCH_SIZE = 40
 
 
 def _grammar_check_batch(client, model, items):
-    """Check a single batch of questions. Returns (findings, error)."""
+    """Check a single batch of questions. Returns (findings, error), where each
+    finding carries a 'kind': 'grammar' or 'answer' (an alternate-answer
+    suggestion)."""
     body = '\n\n'.join('[{0}]\n{1}'.format(it['ref'], it['text']) for it in items)
     try:
         resp = client.messages.create(
@@ -84,7 +115,7 @@ def _grammar_check_batch(client, model, items):
             max_tokens=8000,
             system=_GRAMMAR_SYSTEM,
             messages=[{'role': 'user', 'content':
-                       'Check these questions for errors:\n\n' + body}],
+                       'Review these questions:\n\n' + body}],
             output_config={'format': {'type': 'json_schema', 'schema': _GRAMMAR_SCHEMA}},
         )
     except Exception as ex:
@@ -95,17 +126,27 @@ def _grammar_check_batch(client, model, items):
         data = json.loads(text)
     except (ValueError, TypeError):
         return [], 'The AI returned an unexpected response.'
-    return data.get('findings', []), None
+
+    findings = []
+    for f in data.get('findings', []):
+        findings.append(dict(f, kind='grammar'))
+    for a in data.get('answer_suggestions', []):
+        findings.append({'kind': 'answer', 'ref': a.get('ref', ''), 'severity': 'info',
+                         'excerpt': '', 'suggestion': a.get('suggestion', ''),
+                         'explanation': a.get('explanation', '')})
+    return findings, None
 
 
 def grammar_check_questions(items, model=None):
-    """Run an AI grammar/spelling/error pass over the given questions.
+    """Run one AI pass over the given questions that both proofreads them and
+    suggests alternate acceptable answers.
 
     `items` is a list of dicts: {'ref': str, 'text': str}. The whole list is
     checked, in batches, so there is no cap on set size. Returns
-    (findings, error) where findings is a list of dicts (ref, severity,
-    excerpt, suggestion, explanation). On a mid-run failure, whatever findings
-    were gathered so far are returned alongside the error string.
+    (findings, error) where findings is a list of dicts (kind, ref, severity,
+    excerpt, suggestion, explanation); kind is 'grammar' or 'answer'. On a
+    mid-run failure, whatever findings were gathered so far are returned
+    alongside the error string.
     """
     client = _client()
     if client is None:

@@ -7426,7 +7426,7 @@ def _ai_grammar_findings_json(qset):
     for f in found:
         ref = '{0}-{1}'.format(f.question_type, f.question_id)
         meta = refs.get(ref, {})
-        out.append({'id': f.id, 'severity': f.severity, 'excerpt': f.excerpt,
+        out.append({'id': f.id, 'kind': f.kind, 'severity': f.severity, 'excerpt': f.excerpt,
                     'suggestion': f.suggestion, 'explanation': f.explanation,
                     'edit_url': meta.get('edit_url', ''),
                     'label': meta.get('label', ref)})
@@ -7478,6 +7478,7 @@ def ai_grammar_check(request, qset_id):
                 continue
             AIGrammarFinding.objects.create(
                 question_set=qset, question_type=qtype, question_id=int(qid),
+                kind=f.get('kind', 'grammar'),
                 severity=f.get('severity', 'warning'), excerpt=f.get('excerpt', ''),
                 suggestion=f.get('suggestion', ''), explanation=f.get('explanation', ''),
                 created_by=user)
