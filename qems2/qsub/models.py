@@ -1519,7 +1519,10 @@ class TossupBuzz(models.Model):
     correct = models.BooleanField(default=False)
     # Whether the buzz was inside the power mark (before "(*)").
     powered = models.BooleanField(default=False)
-    # Score: 15 power, 10 get, -5 neg, 0 otherwise.
+    # Whether the buzz was inside the 20-point superpower mark (before "(+)").
+    # A superpowered buzz is also powered.
+    superpowered = models.BooleanField(default=False)
+    # Score: 20 superpower, 15 power, 10 get, -5 neg, 0 otherwise.
     value = models.IntegerField(default=0)
     answer_given = models.TextField(blank=True, default='')
 

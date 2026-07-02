@@ -540,7 +540,8 @@ $(function () {
         var info = { author: author || '', category: category || '' };
 
         var discordAnswer = qemsToDiscordMarkup(answer);
-        var powerIdx = text.indexOf('(*)');
+        // Bold runs to the last power mark: a (+) superpower precedes the (*) power.
+        var powerIdx = Math.max(text.indexOf('(*)'), text.indexOf('(+)'));
         var hasPower = powerIdx !== -1;
         var result = '';
 
@@ -707,8 +708,9 @@ $(function () {
         var info = { author: author || '', category: category || '' };
 
         var rendered = qemsToDiscordMarkup((text || '').trim());
-        // Bold the power: everything up to and including the (*) marker.
-        var powerIdx = rendered.indexOf('(*)');
+        // Bold the power: everything up to and including the last power marker
+        // (a (+) superpower precedes the (*) power).
+        var powerIdx = Math.max(rendered.indexOf('(*)'), rendered.indexOf('(+)'));
         var result;
         if (powerIdx !== -1) {
             result = '**' + rendered.substring(0, powerIdx + 3) + '**' + rendered.substring(powerIdx + 3);

@@ -3423,3 +3423,103 @@ class RoleGroupPendingRequestTests(TestCase):
         self.assertTrue(self.group.members.filter(id=self.req.id).exists())
         self.assertFalse(RoleGroupJoinRequest.objects.filter(
             role_group=self.group, requester=self.req).exists())
+
+
+class SuperpowerTests(TestCase):
+    """20-point superpower "(+)" marks: rendering, play reading/scoring, YAPP
+    export, and the style checker."""
+
+    def setUp(self):
+        import json as _json
+        self._json = _json
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf_tu = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('sp_owner', password='pw', email='sp@test.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='sp dist')
+        self.qset = QuestionSet.objects.create(
+            name='SP Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.owner.question_set_editor.add(self.qset)
+        self.tu = Tossup(
+            author=self.owner, question_set=self.qset, question_type=self.acf_tu,
+            tossup_text='w1 w2 (+) w3 w4 (*) w5 w6.', tossup_answer='_Ans_',
+            question_number=1)
+        self.tu.save_question(edit_type=QUESTION_CREATE, changer=self.owner)
+        self.client.login(username='sp_owner', password='pw')
+
+    def test_render_bolds_through_last_mark(self):
+        from qems2.qsub.utils import get_formatted_question_html
+        html = get_formatted_question_html('a (+) b (*) c', True, True, False, True)
+        self.assertEqual(html, '<strong>a (+) b (*)</strong> c')
+
+    def test_reading_reports_both_indices(self):
+        from qems2.qsub.views import _tossup_reading
+        r = _tossup_reading(self.tu)
+        self.assertEqual(r['words'][:2], ['w1', 'w2'])
+        self.assertEqual(r['superpower_index'], 2)  # (+) before w3
+        self.assertEqual(r['power_index'], 4)       # (*) before w5
+
+    def _buzz(self, heard, **extra):
+        data = {'tossup_id': self.tu.id, 'correct': 'true', 'buzz_word_index': heard,
+                'total_words': 6, 'char_position': 0}
+        data.update(extra)
+        resp = self.client.post('/record_buzz/', data)
+        return self._json.loads(resp.content)
+
+    def test_superpower_buzz_scores_20(self):
+        j = self._buzz(2, superpowered='true', powered='true')
+        self.assertEqual(j['value'], 20)
+        b = TossupBuzz.objects.latest('id')
+        self.assertTrue(b.superpowered)
+        self.assertTrue(b.powered)
+
+    def test_power_buzz_scores_15(self):
+        j = self._buzz(3, superpowered='false', powered='true')
+        self.assertEqual(j['value'], 15)
+        b = TossupBuzz.objects.latest('id')
+        self.assertFalse(b.superpowered)
+        self.assertTrue(b.powered)
+
+    def test_regular_buzz_scores_10(self):
+        j = self._buzz(5, superpowered='false', powered='false')
+        self.assertEqual(j['value'], 10)
+
+    def test_yapp_export_keeps_both_marks(self):
+        from qems2.qsub.yapp_export import qems_to_yapp_html
+        self.assertEqual(qems_to_yapp_html('a (+) b (*) c'), 'a (+) b (*) c')
+
+    def test_style_checker_ok_with_superpower(self):
+        from qems2.qsub import style_checker
+        self.tu.tossup_text = 'A clue (+) more clue (*) giveaway. For 10 points, name this _thing_.'
+        codes = [i['code'] for i in style_checker.check_tossup(self.tu, 'minkowski', set())]
+        self.assertNotIn('unbalanced_parens', codes)
+        self.assertNotIn('power', codes)
+
+    def test_style_checker_flags_superpower_after_power(self):
+        from qems2.qsub import style_checker
+        self.tu.tossup_text = 'A clue (*) more (+) giveaway. For 10 points, name this _thing_.'
+        msgs = ' '.join(i['message'] for i in style_checker.check_tossup(self.tu, 'minkowski', set()))
+        self.assertIn('superpower', msgs)
+
+
+class CommentMentionColorTests(TestCase):
+    """@mentions in rendered comments are wrapped in a blue span."""
+
+    def _html(self, text):
+        from qems2.qsub.templatetags.filters import comment_html
+        return str(comment_html(text))
+
+    def test_mention_is_colored(self):
+        out = self._html('hey @alice please look')
+        self.assertIn('class="at-mention"', out)
+        self.assertIn('@alice', out)
+        self.assertIn('#1565c0', out)
+
+    def test_email_is_not_mentioned(self):
+        out = self._html('email me at bob@example.com thanks')
+        self.assertNotIn('at-mention', out)
+
+    def test_leading_mention_is_colored(self):
+        out = self._html('@bob hi')
+        self.assertIn('class="at-mention"', out)

@@ -162,6 +162,7 @@
 .play-card { border: 1px solid #d9d9d9; border-radius: 6px; padding: 1.25rem; background: #fff; margin-bottom: 1rem; }
 .question-text { font-size: 1.2rem; line-height: 1.7; }
 #tossup-text .power-on { font-weight: bold; }
+#tossup-text .superpower-on { font-weight: bold; color: #6a1b9a; }
 .reveal-hint { color: #888; font-size: 0.85rem; margin-top: 0.5rem; min-height: 1.1em; }
 #tossup-controls { margin-top: 1rem; }
 .key-hint { opacity: 0.7; font-size: 0.8em; }
@@ -225,7 +226,7 @@
     var $tossupText = $('#tossup-text');
 
     // --- Tossup chunk state ---
-    var words = [], powerIndex = -1, chunkEnds = [], revealedChunks = 0, buzzed = false;
+    var words = [], powerIndex = -1, superpowerIndex = -1, chunkEnds = [], revealedChunks = 0, buzzed = false;
 
     function post(url, data, cb) {
         if (sessionId) { data.session_id = sessionId; }
@@ -244,12 +245,13 @@
     }
 
     // Break the tossup into ~CHUNK_SIZE-word chunks, but force a chunk boundary
-    // exactly at the (*) power mark so the power clue is sent on its own.
-    function buildChunks(n, size, power) {
+    // exactly at each power mark ((+) superpower, (*) power) so those clues are
+    // sent on their own.
+    function buildChunks(n, size, marks) {
         var ends = [], i = 0;
         while (i < n) {
             var end = Math.min(i + size, n);
-            if (power > i && power < end) { end = power; }
+            marks.forEach(function (m) { if (m > i && m < end) { end = m; } });
             ends.push(end);
             i = end;
         }
@@ -263,7 +265,9 @@
     function renderTossupText() {
         var shown = revealedWords(), html = '';
         for (var i = 0; i < shown; i++) {
-            var cls = (powerIndex >= 0 && i < powerIndex) ? 'power-on' : '';
+            var cls = '';
+            if (superpowerIndex >= 0 && i < superpowerIndex) { cls = 'superpower-on'; }
+            else if (powerIndex >= 0 && i < powerIndex) { cls = 'power-on'; }
             html += '<span class="' + cls + '">' + _.escape(words[i]) + '</span> ';
         }
         $tossupText.html(html);
@@ -275,7 +279,8 @@
 
     function startTossup(q) {
         words = q.words; powerIndex = q.power_index;
-        chunkEnds = buildChunks(words.length, CHUNK_SIZE, powerIndex);
+        superpowerIndex = (typeof q.superpower_index === 'number') ? q.superpower_index : -1;
+        chunkEnds = buildChunks(words.length, CHUNK_SIZE, [superpowerIndex, powerIndex]);
         revealedChunks = words.length ? 1 : 0;
         buzzed = false;
         $('#buzz-panel').hide();
@@ -326,6 +331,7 @@
     function judgeTossup(correct) {
         var q = playlist[pos].q;
         var heard = revealedWords();
+        var superpowered = correct && superpowerIndex >= 0 && heard <= superpowerIndex;
         var powered = correct && powerIndex >= 0 && heard <= powerIndex;
         var atEnd = revealedChunks >= chunkEnds.length;
         var neg = !correct && $('#neg-toggle').is(':checked') && !atEnd;
@@ -336,6 +342,7 @@
             char_position: words.slice(0, heard).join(' ').length,
             correct: correct ? 'true' : 'false',
             powered: powered ? 'true' : 'false',
+            superpowered: superpowered ? 'true' : 'false',
             neg: neg ? 'true' : 'false',
             answer_given: $('#answer-input').val()
         }, function (resp) {

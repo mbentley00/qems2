@@ -161,10 +161,15 @@ def get_formatted_question_html(line, allowUnderlines, allowParens, allowNewLine
     output = u""
     nextChar = u""
     
-    # If powers are allowed, see if there's a power in this question
-    # If so, then start the question in power
-    if (allowPowers):        
-        powerIndex = line.find(u"(*)")
+    # If powers are allowed, see if there's a power in this question. The bold
+    # power region runs from the start to the LAST power mark: a 20-point
+    # superpower "(+)" (when present) comes before the 15-point power "(*)", and
+    # everything up to and including the last mark is bold. Either mark is
+    # optional; a tossup may carry both.
+    if (allowPowers):
+        starIndex = line.find(u"(*)")
+        plusIndex = line.find(u"(+)")
+        powerIndex = max(starIndex, plusIndex)
         if (powerIndex > -1):
             powerFlag = True
             output += u"<strong>"
@@ -178,7 +183,7 @@ def get_formatted_question_html(line, allowUnderlines, allowParens, allowNewLine
         
         if (index >= powerIndex and powerFlag):
             powerFlag = False
-            output += u"(*)</strong>"
+            output += line[index:index + 3] + u"</strong>"  # the actual mark: (*) or (+)
             index += 3 # Skip over the rest of what's in the power mark
             continue
         

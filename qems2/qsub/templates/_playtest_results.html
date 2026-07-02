@@ -5,6 +5,7 @@
 <div class="playtest-summary">
     <span class="pt-stat"><strong>{{ playtest.plays }}</strong> buzz{{ playtest.plays|pluralize:"es" }}</span>
     <span class="pt-stat"><strong>{{ playtest.correct }}</strong> correct ({{ playtest.conversion }})</span>
+    {% if playtest.superpowers %}<span class="pt-stat"><strong>{{ playtest.superpowers }}</strong> superpower{{ playtest.superpowers|pluralize }}</span>{% endif %}
     <span class="pt-stat"><strong>{{ playtest.powers }}</strong> power{{ playtest.powers|pluralize }}</span>
     <span class="pt-stat"><strong>{{ playtest.negs }}</strong> neg{{ playtest.negs|pluralize }}</span>
     <span class="pt-stat">Avg buzz: <strong>{{ playtest.avg_buzz }}</strong> in</span>
@@ -17,7 +18,7 @@
         <tr>
             <td>{{ r.date|to_short_datetime }}</td>
             <td>{{ r.player }}{% if r.source %} ({{ r.source|capfirst }}){% endif %}</td>
-            <td>{% if r.correct %}{% if r.powered %}<span class="result-power">{{ r.fraction }} (+{{ r.value }})</span>{% else %}<span class="result-correct">{{ r.fraction }} (+{{ r.value }})</span>{% endif %}{% else %}<span class="result-wrong">{{ r.fraction }} ({{ r.value }})</span>{% endif %}</td>
+            <td>{% if r.correct %}{% if r.superpowered %}<span class="result-superpower">{{ r.fraction }} (+{{ r.value }})</span>{% elif r.powered %}<span class="result-power">{{ r.fraction }} (+{{ r.value }})</span>{% else %}<span class="result-correct">{{ r.fraction }} (+{{ r.value }})</span>{% endif %}{% else %}<span class="result-wrong">{{ r.fraction }} ({{ r.value }})</span>{% endif %}</td>
             <td>{{ r.answer_given }}</td>
             <td class="pt-heard">{{ r.heard_tail }}</td>
             <td>{% if r.history_url %}<a href="{{ r.history_url }}" title="View the version of this question played for this buzz">version</a>{% else %}&mdash;{% endif %}</td>
@@ -65,6 +66,7 @@
 .playtest-table th, .playtest-table td { overflow-wrap: normal; word-break: normal; }
 .playtest-table th { white-space: nowrap; }
 .pt-heard { color: #555; white-space: nowrap; }
+.result-superpower { color: #6a1b9a; font-weight: bold; }
 .result-power { color: #1565c0; font-weight: bold; }
 .result-correct { color: #43AC6A; font-weight: bold; }
 .result-wrong { color: #f04124; }

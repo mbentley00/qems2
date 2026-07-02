@@ -4215,7 +4215,9 @@ def add_qems_formatted_runs(paragraph, text, bold=False, is_answer=False):
     need_restore_italics = False
 
     if allow_powers:
-        power_index = text.find("(*)")
+        # Bold runs to the last power mark: a 20-point superpower "(+)" precedes
+        # the 15-point power "(*)"; either is optional.
+        power_index = max(text.find("(*)"), text.find("(+)"))
         if power_index > -1:
             power_flag = True
 
@@ -4256,10 +4258,10 @@ def add_qems_formatted_runs(paragraph, text, bold=False, is_answer=False):
 
         new_bold, new_italic, new_underline, new_sub, new_sup = current_state()
 
-        # Power mark
+        # Power mark ((*) or (+))
         if index == power_index and power_flag:
             flush(new_bold, new_italic, new_underline, new_sub, new_sup)
-            run = paragraph.add_run("(*)")
+            run = paragraph.add_run(text[index:index + 3])
             run.bold = True
             power_flag = False
             index += 3
@@ -7719,18 +7721,23 @@ def recap(request, qset_id):
 
 def _tossup_reading(tossup):
     """Turn a tossup into the data the play UI reads clue-by-clue: a list of
-    display words, the index of the power boundary (the word containing the
-    "(*)" power mark, or -1 if unmarked), and the answer as formatted HTML."""
+    display words, the power boundary word indices, and the answer as formatted
+    HTML. `power_index` is the word containing the 15-point "(*)" mark and
+    `superpower_index` the 20-point "(+)" mark (each -1 if unmarked)."""
     plain = strip_markup(tossup.tossup_text or '').replace('\n', ' ').strip()
     raw_words = [w for w in plain.split(' ') if w != '']
     power_index = -1
+    superpower_index = -1
     words = []
-    for i, w in enumerate(raw_words):
+    for w in raw_words:
+        if '(+)' in w and superpower_index == -1:
+            superpower_index = len(words)
+            w = w.replace('(+)', '').strip()
         if '(*)' in w and power_index == -1:
             power_index = len(words)
             w = w.replace('(*)', '').strip()
-            if w == '':
-                continue
+        if w == '':
+            continue
         words.append(w)
     answer_html = get_formatted_question_html(tossup.tossup_answer, True, True, False, False)
     return {
@@ -7739,6 +7746,7 @@ def _tossup_reading(tossup):
         'number': tossup.question_number or 0,
         'words': words,
         'power_index': power_index,
+        'superpower_index': superpower_index,
         'answer_html': answer_html,
         'category': str(tossup.category) if tossup.category else '',
     }
@@ -7888,7 +7896,9 @@ def record_buzz(request):
         return HttpResponse(json.dumps({'success': False, 'message': 'Not authorized'}))
 
     correct = request.POST.get('correct') == 'true'
-    powered = request.POST.get('powered') == 'true'
+    superpowered = request.POST.get('superpowered') == 'true'
+    # A superpower buzz is also inside the regular power region.
+    powered = superpowered or request.POST.get('powered') == 'true'
     neg = request.POST.get('neg') == 'true'
     try:
         buzz_word_index = int(request.POST.get('buzz_word_index') or 0)
@@ -7898,7 +7908,7 @@ def record_buzz(request):
         return HttpResponse(json.dumps({'success': False, 'message': 'Bad buzz position'}))
 
     if correct:
-        value = 15 if powered else 10
+        value = 20 if superpowered else 15 if powered else 10
     elif neg:
         value = -5
     else:
@@ -7909,6 +7919,7 @@ def record_buzz(request):
         tossup=tossup, session=session, player=user,
         buzz_word_index=buzz_word_index, total_words=total_words,
         char_position=char_position, correct=correct, powered=powered and correct,
+        superpowered=superpowered and correct,
         value=value, answer_given=request.POST.get('answer_given', '')[:1000],
         tossup_history=tossup.latest_history(), source=PLAYTEST_SOURCE_WEB)
 
@@ -7957,6 +7968,7 @@ def _question_buzz_data(question, qtype):
             return None
         correct = [b for b in buzzes if b.correct]
         powers = [b for b in correct if b.powered]
+        superpowers = [b for b in correct if b.superpowered]
         negs = [b for b in buzzes if b.value < 0]
         fracs = [b.buzz_fraction() for b in correct]
         words = _tossup_reading(question)['words']
@@ -7970,13 +7982,14 @@ def _question_buzz_data(question, qtype):
             heard_tail = ' '.join(heard_words[-3:])
             rows.append({
                 'player': b.get_player_name(), 'date': b.buzz_date,
-                'correct': b.correct, 'powered': b.powered, 'value': b.value,
+                'correct': b.correct, 'powered': b.powered,
+                'superpowered': b.superpowered, 'value': b.value,
                 'fraction': '{0:.0f}%'.format(100.0 * b.buzz_fraction()),
                 'answer_given': b.answer_given, 'heard': heard, 'heard_tail': heard_tail,
                 'source': b.source, 'history_url': b.history_url()})
         return {
             'qtype': 'tossup', 'plays': len(buzzes), 'correct': len(correct),
-            'powers': len(powers), 'negs': len(negs),
+            'powers': len(powers), 'superpowers': len(superpowers), 'negs': len(negs),
             'conversion': '{0:.0f}%'.format(100.0 * len(correct) / len(buzzes)),
             'avg_buzz': '{0:.0f}%'.format(100.0 * sum(fracs) / len(fracs)) if fracs else '—',
             'rows': rows}

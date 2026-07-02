@@ -68,9 +68,9 @@ def qems_to_yapp_html(text):
             i += 2
             continue
 
-        # Power marker stays as literal text.
-        if text[i:i + 3] == '(*)':
-            out.append('(*)')
+        # Power markers stay as literal text ((+) superpower, (*) power).
+        if text[i:i + 3] == '(*)' or text[i:i + 3] == '(+)':
+            out.append(text[i:i + 3])
             i += 3
             continue
 

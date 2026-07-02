@@ -105,7 +105,7 @@ def _mechanical_issues(label, raw, field):
     fixable ones carry a `fix` keyed to `field` so they can be auto-applied."""
     issues = []
     text = _plain(raw)
-    no_power = text.replace('(*)', '')
+    no_power = text.replace('(*)', '').replace('(+)', '')
     if '  ' in text:
         issues.append(_issue(WARNING, '{0}: double space'.format(label), 'double_space', label,
                              {'field': field, 'op': 'regex', 'pattern': r' {2,}', 'repl': ' '}))
@@ -290,6 +290,11 @@ def check_tossup(tu, guide=DEFAULT_GUIDE, disabled=None):
 
     if text.count('(*)') > 1:
         issues.append(_issue(WARNING, 'more than one power mark (*)', 'power'))
+    if text.count('(+)') > 1:
+        issues.append(_issue(WARNING, 'more than one superpower mark (+)', 'power'))
+    # A 20-point superpower "(+)" should precede the 15-point power "(*)".
+    if '(+)' in text and '(*)' in text and text.find('(+)') > text.find('(*)'):
+        issues.append(_issue(WARNING, 'superpower (+) should come before the power (*)', 'power'))
 
     if plain.rstrip().endswith('?'):
         issues.append(_issue(WARNING, 'interrogative giveaway; prefer imperative', 'imperative'))
@@ -330,8 +335,9 @@ def check_bonus(b, guide=DEFAULT_GUIDE, disabled=None):
         issues.append(_issue(INFO, 'Leadin: no "For 10 points each"', 'fpe', 'leadin'))
 
     for label, raw, field in parts:
-        if '(*)' in raw:
-            issues.append(_issue(WARNING, '{0}: power mark (*) not allowed in bonus'.format(label),
+        if '(*)' in raw or '(+)' in raw:
+            mark = '(*)' if '(*)' in raw else '(+)'
+            issues.append(_issue(WARNING, '{0}: power mark {1} not allowed in bonus'.format(label, mark),
                                  'power', label))
 
     for label, ans in (('Answer 1', b.part1_answer), ('Answer 2', b.part2_answer), ('Answer 3', b.part3_answer)):

@@ -1,3 +1,4 @@
+import re
 from django.template.defaultfilters import register
 from django.utils.safestring import mark_safe
 from qems2.qsub.models import *
@@ -241,9 +242,20 @@ def commenter_name(comment):
     real = '{0} {1}'.format(user.first_name or '', user.last_name or '').strip()
     return '{0} ("{1}")'.format(real, user.username) if real else user.username
 
+# An @mention: "@" at the start or after whitespace/an open paren, then a
+# username (letters/digits/underscore, optionally with dots/hyphens inside).
+# The leading boundary keeps email addresses ("a@b.com") from matching.
+_MENTION_RE = re.compile(r'(^|[\s(])@([A-Za-z0-9_][A-Za-z0-9_.\-]*)')
+
+
 @register.filter(name='comment_html')
 def comment_html(comment):
-    return get_formatted_question_html(comment, False, False, True, False)
+    formatted = get_formatted_question_html(comment, False, False, True, False)
+    highlighted = _MENTION_RE.sub(
+        lambda m: '{0}<span class="at-mention" style="color:#1565c0;font-weight:bold;">@{1}</span>'.format(
+            m.group(1), m.group(2)),
+        formatted)
+    return mark_safe(highlighted)
 
 @register.filter(name='tossup_html')
 def tossup_html(tossup):
