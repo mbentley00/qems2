@@ -54,6 +54,8 @@
         <i class="fa fa-users"></i> Writers</a>
     <a class="app-nav-item{% if '/duplicate_check/' in request.path %} active{% endif %}" href="/duplicate_check/{{ nav_active.id }}/">
         <i class="fa fa-clone"></i> Duplicate Checker</a>
+    <a class="app-nav-item{% if '/compare_repeats/' in request.path %} active{% endif %}" href="/compare_repeats/{{ nav_active.id }}/">
+        <i class="fa fa-code-compare"></i> Compare Repeats</a>
     <a class="app-nav-item{% if '/style_check/' in request.path %} active{% endif %}" href="/style_check/{{ nav_active.id }}/">
         <i class="fa fa-wand-magic-sparkles"></i> Style Check</a>
     <a class="app-nav-item{% if '/category_tags/' in request.path %} active{% endif %}" href="/category_tags/{{ nav_active.id }}/">

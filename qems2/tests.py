@@ -1889,6 +1889,26 @@ class PacketizedWordExportTests(TestCase):
         p10 = '\n'.join(p.text for p in self._doc(zf, 'Packet 10.docx').paragraphs)
         self.assertNotIn('Credits', p10)
 
+    def test_pdf_export_returns_pdf(self):
+        resp = self.client.get('/export_question_set/{0}/pdf/'.format(self.qset.id))
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp['Content-Type'], 'application/pdf')
+        self.assertTrue(resp.content.startswith(b'%PDF'))
+        self.assertGreater(len(resp.content), 1000)
+
+    def test_pdf_export_handles_unicode(self):
+        # Diacritics / Greek must not crash the PDF (bundled Unicode font).
+        Tossup.objects.create(
+            author=self.owner, question_set=self.qset, packet=self.p2,
+            question_type=self.acf_tu, category=self.de,
+            tossup_text='About Küçük Kaynarca and Ω. (*) end.',
+            tossup_answer='_Hammarskjöld_', created_date=datetime.now(),
+            last_changed_date=datetime.now(), question_number=3)
+        resp = self.client.get('/export_question_set/{0}/pdf/'.format(self.qset.id),
+                               {'opts': '1', 'credits': '1', 'writers': '1'})
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.content.startswith(b'%PDF'))
+
     def test_default_link_keeps_comments_and_attribution(self):
         # A legacy plain link (no opts marker) keeps the historical behavior.
         self.Comment.objects.create(
@@ -3588,3 +3608,104 @@ class CommentMentionColorTests(TestCase):
     def test_leading_mention_is_colored(self):
         out = self._html('@bob hi')
         self.assertIn('class="at-mention"', out)
+
+
+class CompareRepeatsTests(TestCase):
+    """Compare a set against an uploaded previous set to flag repeats."""
+
+    def setUp(self):
+        import json as _json
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        self._json = _json
+        self._Upload = SimpleUploadedFile
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        self.acf_tu = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.acf_bn = QuestionType.objects.get(question_type=ACF_STYLE_BONUS)
+        self.ou = User.objects.create_user('cr_owner', password='pw', email='c@test.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='cr dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='Science', subcategory='Physics')
+        self.qset = QuestionSet.objects.create(
+            name='2027 NSC', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.owner.question_set_editor.add(self.qset)
+        self.p1 = Packet.objects.create(question_set=self.qset, packet_name='Packet 1', created_by=self.owner)
+        # Current tossup: distinctive answer + a leadin that overlaps the old one.
+        self.tu = Tossup.objects.create(
+            author=self.owner, question_set=self.qset, packet=self.p1,
+            question_type=self.acf_tu, category=self.de, question_number=1,
+            tossup_text=('This theorem connects continuous symmetries with conservation '
+                         'laws in Lagrangian mechanics. (*) It is fundamental.'),
+            tossup_answer="_Noether's theorem_",
+            created_date=datetime.now(), last_changed_date=datetime.now())
+        # Current bonus whose HARD part (part 3) has a distinctive answer.
+        self.bn = Bonus.objects.create(
+            author=self.owner, question_set=self.qset, packet=self.p1,
+            question_type=self.acf_bn, category=self.de, question_number=1,
+            leadin='Answer these.', part1_text='Easy.', part1_answer='_Isaac Newton_',
+            part1_difficulty='e', part2_text='Medium.', part2_answer='_Albert Einstein_',
+            part2_difficulty='m', part3_text='Hard.',
+            part3_answer='_the Treaty of Kucuk Kaynarca_', part3_difficulty='h',
+            created_date=datetime.now(), last_changed_date=datetime.now())
+        self.client.login(username='cr_owner', password='pw')
+
+    def _prev_file(self, payload, name='2026 NSC Packet 1.json'):
+        data = self._json.dumps(payload).encode('utf-8')
+        return self._Upload(name, data, content_type='application/json')
+
+    def _compare(self, payload):
+        resp = self.client.post('/compare_repeats/{0}/'.format(self.qset.id),
+                                {'packet_files': self._prev_file(payload)})
+        self.assertEqual(resp.status_code, 200)
+        return resp
+
+    def test_flags_hard_part_answer_repeat_as_critical(self):
+        payload = {'bonuses': [
+            {'leadin': 'Old leadin.', 'parts': ['a', 'b', 'c'],
+             'answers': ['Foo', 'Bar', 'the Treaty of Kucuk Kaynarca'],
+             'difficultyModifiers': ['e', 'm', 'h']}]}
+        findings = self._compare(payload).context['findings']
+        bonus_findings = [f for f in findings if f['qtype'] == 'bonus']
+        self.assertTrue(bonus_findings)
+        self.assertEqual(bonus_findings[0]['severity'], 'critical')
+        self.assertTrue(any(m['kind'] == 'hard-part' for m in bonus_findings[0]['matches']))
+
+    def test_flags_repeated_unusual_answer(self):
+        payload = {'tossups': [
+            {'question': 'Totally different clue about math.',
+             'answer': "ANSWER: Noether's theorem"}]}
+        findings = self._compare(payload).context['findings']
+        tu = [f for f in findings if f['qtype'] == 'tossup']
+        self.assertTrue(tu)
+        self.assertTrue(any(m['kind'] == 'answer' for m in tu[0]['matches']))
+
+    def test_flags_repeated_leadin(self):
+        payload = {'tossups': [
+            {'question': ('This theorem connects continuous symmetries with conservation '
+                          'laws in Lagrangian mechanics in an old set.'),
+             'answer': 'ANSWER: Something Else Entirely'}]}
+        findings = self._compare(payload).context['findings']
+        tu = [f for f in findings if f['qtype'] == 'tossup']
+        self.assertTrue(tu)
+        self.assertTrue(any(m['kind'] == 'leadin' for m in tu[0]['matches']))
+
+    def test_common_single_word_answer_not_flagged(self):
+        # A ubiquitous one-word answer shared by chance is not a repeat.
+        Tossup.objects.create(
+            author=self.owner, question_set=self.qset, packet=self.p1,
+            question_type=self.acf_tu, category=self.de, question_number=2,
+            tossup_text='A country in Europe. (*) end.', tossup_answer='_France_',
+            created_date=datetime.now(), last_changed_date=datetime.now())
+        payload = {'tossups': [
+            {'question': 'A wholly unrelated clue.', 'answer': 'ANSWER: France'}]}
+        findings = self._compare(payload).context['findings']
+        france = [f for f in findings if 'France' in (f['answer_preview'] or '')]
+        self.assertFalse(france)
+
+    def test_no_repeats_reports_clean(self):
+        payload = {'tossups': [
+            {'question': 'Nothing in common.', 'answer': 'ANSWER: Zzz Unrelated Thing'}]}
+        findings = self._compare(payload).context['findings']
+        self.assertEqual(findings, [])

@@ -866,6 +866,53 @@ def _dup_preview_html(raw_text, term, width=280):
 
 
 @login_required
+def compare_repeats(request, qset_id):
+    """Compare this set against a PREVIOUS set (uploaded as packet files) to flag
+    repeats: shared unusual answers, matching hard bonus parts, and tossup
+    leadins/early clues that closely match an old tossup's."""
+    from . import set_compare
+    user = request.user.writer
+    qset = QuestionSet.objects.get(id=qset_id)
+    if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+        return render(request, 'failure.html',
+                      {'message': 'You are not authorized to view this set.',
+                       'message_class': 'alert-box alert'})
+
+    findings = None
+    parse_errors = []
+    counts = {}
+    message = message_class = ''
+    if request.method == 'POST':
+        form = CompareRepeatsForm(request.POST, request.FILES)
+        if form.is_valid():
+            from .packet_set_importer import PacketImportError
+            files = form.cleaned_data['packet_files']
+            try:
+                prev_tu, prev_bo, parse_errors = set_compare.parse_previous_questions(files, qset)
+                findings = set_compare.compare(qset, prev_tu, prev_bo)
+                counts = {'prev_tossups': len(prev_tu), 'prev_bonuses': len(prev_bo),
+                          'flagged': len(findings),
+                          'critical': sum(1 for f in findings if f['severity'] == 'critical')}
+                message = ('Compared against {0} tossups and {1} bonuses; flagged '
+                           '{2} question(s).').format(len(prev_tu), len(prev_bo), len(findings))
+                message_class = 'alert-box success' if findings else 'alert-box info'
+            except PacketImportError as ex:
+                message, message_class = str(ex), 'alert-box alert'
+            except Exception as ex:
+                message, message_class = 'Comparison failed: {0}'.format(ex), 'alert-box alert'
+        else:
+            message = "Please choose the previous set's packet files (.json, .docx, or .pdf)."
+            message_class = 'alert-box alert'
+    else:
+        form = CompareRepeatsForm()
+
+    return render(request, 'compare_repeats.html',
+                  {'qset': qset, 'user': user, 'form': form, 'findings': findings,
+                   'parse_errors': parse_errors, 'counts': counts,
+                   'message': message, 'message_class': message_class})
+
+
+@login_required
 def duplicate_check(request, qset_id):
     user = request.user.writer
     qset = QuestionSet.objects.get(id=qset_id)
@@ -5046,20 +5093,55 @@ def export_question_set(request, qset_id, output_format):
                 filename = f"{qset.name} - YAPP JSON.zip" if qset.name else "packets-yapp-json.zip"
                 response['Content-Disposition'] = f'attachment; filename="{filename}"'
                 return response
-            elif (output_format == "pdf"):
-                # TODO: Experiment with one of those PDF libraries
-                message = 'Not supported yet.'
-                message_class = 'alert-box alert'
-                q_set = []
-                tossups = []
-                bonuses = []
-                return render(request, 'export_question_set.html',
-                                    {'user': user,
-                                     'q_set': q_set,
-                                     'tossups': tossups,
-                                     'bonuses': bonuses,
-                                     'message': message,
-                                     'message_class': message_class})
+            elif output_format == "pdf":
+                # Packetized, moderator-ready PDF (one page per packet).
+                from . import pdf_export
+
+                _explicit = request.GET.get('opts') == '1'
+
+                def _o(name, default):
+                    return (request.GET.get(name) == '1') if _explicit else default
+
+                pdf_opts = {'writers': _o('writers', True), 'editors': _o('editors', True),
+                            'ids': _o('ids', True), 'credits': _o('credits', False)}
+
+                def _packet_sort_key(pk):
+                    nums = re.findall(r'\d+', pk.packet_name or '')
+                    return (int(nums[0]) if nums else float('inf'),
+                            pk.packet_name or '', pk.id)
+
+                groups = []
+                for packet in sorted(Packet.objects.filter(question_set=qset), key=_packet_sort_key):
+                    groups.append((
+                        packet.packet_name,
+                        list(Tossup.objects.filter(packet=packet, question_set=qset)
+                             .select_related('category', 'author', 'editor').order_by('question_number')),
+                        list(Bonus.objects.filter(packet=packet, question_set=qset)
+                             .select_related('category', 'author', 'editor').order_by('question_number'))))
+                unp_tu = list(Tossup.objects.filter(packet__isnull=True, question_set=qset)
+                              .select_related('category', 'author', 'editor').order_by('question_number'))
+                unp_bo = list(Bonus.objects.filter(packet__isnull=True, question_set=qset)
+                              .select_related('category', 'author', 'editor').order_by('question_number'))
+                if unp_tu or unp_bo:
+                    groups.append(('Unpacketed', unp_tu, unp_bo))
+
+                credits = None
+                if pdf_opts['credits']:
+                    writers, editors = {}, {}
+                    for q in (list(Tossup.objects.filter(question_set=qset).select_related('author', 'editor')) +
+                              list(Bonus.objects.filter(question_set=qset).select_related('author', 'editor'))):
+                        if q.author_id:
+                            writers[q.author_id] = html.unescape(safe_name(q.author)).strip()
+                        if q.edited and q.editor_id:
+                            editors[q.editor_id] = html.unescape(safe_name(q.editor)).strip()
+                    credits = (sorted(n for n in writers.values() if n),
+                               sorted(n for n in editors.values() if n))
+
+                pdf_bytes = pdf_export.build_packetized_pdf(qset.name, groups, pdf_opts, credits=credits)
+                response = HttpResponse(pdf_bytes, content_type='application/pdf')
+                filename = f"{qset.name} - Packets.pdf" if qset.name else "packets.pdf"
+                response['Content-Disposition'] = f'attachment; filename="{filename}"'
+                return response
             else:
                 message = 'Unsupported export format.'
                 message_class = 'alert-box alert'

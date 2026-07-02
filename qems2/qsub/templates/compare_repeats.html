@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+
+{% block header %}{% include "header.html" %}{% endblock %}
+
+{% block title %}Compare Repeats - QEMS3{% endblock %}
+
+{% block content %}
+<h3 class="page-header">Compare repeats: {{ qset.name }}</h3>
+<p style="color:#555;">Upload the packets of a <strong>previous</strong> set (e.g. last year's
+tournament) to see what this set repeats from it. Accepts the same files as the packet
+importer — <strong>.json</strong> (YAPP/MODAQ), <strong>.docx</strong>, or <strong>.pdf</strong>.
+The previous set is only read for the comparison; nothing is saved.</p>
+
+<div class="panel radius">
+    <form method="post" action="/compare_repeats/{{ qset.id }}/" enctype="multipart/form-data">
+        {% csrf_token %}
+        <label>Previous set packets (.json, .docx, or .pdf)
+            {{ form.packet_files }}
+        </label>
+        <button type="submit" class="button small primary" style="margin-top:8px;">Compare</button>
+    </form>
+</div>
+
+{% if message %}<div class="{{ message_class }}">{{ message }}</div>{% endif %}
+
+{% if parse_errors %}
+<div class="alert-box warning">
+    {{ parse_errors|length }} item(s) in the uploaded set couldn't be parsed and were skipped:
+    <ul style="margin:6px 0 0;">{% for e in parse_errors %}<li>{{ e }}</li>{% endfor %}</ul>
+</div>
+{% endif %}
+
+{% if findings is not None %}
+    {% if findings %}
+    <p class="cr-legend">
+        <span class="cr-pill cr-critical">Critical</span> repeated hard bonus part &nbsp;
+        <span class="cr-pill cr-warning">Warning</span> repeated answer or leadin/early clue
+    </p>
+    {% for f in findings %}
+    <div class="cr-card cr-sev-{{ f.severity }}">
+        <div class="cr-head">
+            <span class="cr-pill cr-{{ f.severity }}">{{ f.severity|capfirst }}</span>
+            <a href="{{ f.edit_url }}" target="_blank" rel="noopener" class="cr-loc">{{ f.location }}</a>
+            <span class="cr-answer">{{ f.answer_preview }}</span>
+        </div>
+        <ul class="cr-matches">
+            {% for m in f.matches %}
+            <li class="cr-match cr-match-{{ m.severity }}">
+                <strong>{{ m.detail }}</strong>
+                {% if m.preview %}<div class="cr-preview">{{ m.preview }}</div>{% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endfor %}
+    {% else %}
+    <div class="alert-box success">No repeats found against the uploaded set. Nice work!</div>
+    {% endif %}
+{% endif %}
+
+<style>
+.cr-legend { color:#666; font-size:0.85rem; margin:14px 0 8px; }
+.cr-pill { display:inline-block; padding:1px 8px; border-radius:10px; font-size:0.72rem;
+    font-weight:bold; color:#fff; }
+.cr-pill.cr-critical { background:#c0392b; }
+.cr-pill.cr-warning { background:#d4870c; }
+.cr-pill.cr-info { background:#9aa0a6; }
+.cr-card { border:1px solid #e8e8e8; border-left-width:4px; border-radius:4px;
+    padding:8px 12px; margin-bottom:8px; }
+.cr-card.cr-sev-critical { border-left-color:#c0392b; }
+.cr-card.cr-sev-warning { border-left-color:#d4870c; }
+.cr-head { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
+.cr-loc { font-weight:bold; }
+.cr-answer { color:#333; }
+.cr-matches { list-style:none; margin:6px 0 0; }
+.cr-match { padding:3px 0 3px 10px; border-left:2px solid #eee; margin:0 0 3px; font-size:0.9rem; }
+.cr-match-critical { border-left-color:#c0392b; }
+.cr-match-warning { border-left-color:#d4870c; }
+.cr-preview { color:#777; font-size:0.82rem; margin-top:2px; }
+</style>
+{% endblock %}

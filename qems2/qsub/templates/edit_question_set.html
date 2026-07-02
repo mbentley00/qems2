@@ -170,7 +170,9 @@
                 <label style="display:inline-block; margin:0 10px;"><input type="checkbox" name="editors" value="1" checked> Editor names</label>
                 <label style="display:inline-block; margin:0 10px;"><input type="checkbox" name="ids" value="1" checked> Question IDs</label>
                 <label style="display:inline-block; margin:0 10px;"><input type="checkbox" name="credits" value="1"> Credits page</label>
-                <button type="submit" class="button tiny primary" style="margin:0 0 0 6px;">Download</button>
+                <button type="submit" class="button tiny primary" style="margin:0 0 0 6px;">Word</button>
+                <button type="submit" class="button tiny primary" style="margin:0 0 0 4px;" formaction="/export_question_set/{{ qset.id }}/pdf/">PDF</button>
+                <span class="sc-guide-note" style="display:block; margin-top:4px;">(Comments apply to the Word export only.)</span>
             </form>
             <div class="panel header radius text-center">
                 <strong><a href="/bulk_change_set/{{ qset.id }}">Make Bulk Changes to this Set</a></strong>

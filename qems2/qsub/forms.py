@@ -402,6 +402,12 @@ class ImportPacketsForm(forms.Form):
             raise forms.ValidationError('Choose either a new tournament name or an existing set, not both.')
         return cleaned
 
+class CompareRepeatsForm(forms.Form):
+    """Upload the previous set's packets to compare the current set against."""
+    packet_files = MultipleFileField(
+        label='Previous set packets (.json, .docx, or .pdf)')
+
+
 class NewPacketsForm(forms.Form):
 
     packet_name = forms.CharField(max_length=200, required=False)

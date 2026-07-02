@@ -136,6 +136,7 @@ urlpatterns = [
     re_path(r'^convert_bonus/$', convert_bonus),
     re_path(r'^view_all_questions/(?P<qset_id>[0-9]+)/$', view_all_questions),
     re_path(r'^duplicate_check/(?P<qset_id>[0-9]+)/$', duplicate_check),
+    re_path(r'^compare_repeats/(?P<qset_id>[0-9]+)/$', compare_repeats),
     re_path(r'^view_all_comments/(?P<qset_id>[0-9]+)/$', view_all_comments),
     re_path(r'^question_set_distribution/(?P<qset_id>[0-9]+)/$', question_set_distribution),
 
