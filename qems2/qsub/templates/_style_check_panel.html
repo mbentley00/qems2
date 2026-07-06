@@ -1,0 +1,160 @@
+{# Style-check panel for the edit tossup/bonus pages. Include with:          #}
+{# {% include "_style_check_panel.html" with question_type="tossup" q_id=tossup.id %} #}
+<div class="panel header radius text-center" style="margin-top:1rem;"><strong>Style Check</strong></div>
+<div id="style-panel" data-qtype="{{ question_type }}" data-qid="{{ q_id }}">
+    <div class="style-panel-top">
+        <span id="style-panel-status" class="style-panel-note">Checking&hellip;</span>
+        <span class="style-panel-links">
+            <a href="#" id="style-panel-refresh" title="Rerun the style check on the saved question">recheck</a>
+            <a href="#" id="style-panel-full-link" target="_blank" rel="noopener" title="Style check for the whole set">whole set &#8599;</a>
+        </span>
+    </div>
+    <ul id="style-panel-list" class="style-panel-issues"></ul>
+
+    <div class="style-panel-top grammar-panel-top">
+        <span class="style-panel-note"><strong>Grammar</strong> <span id="grammar-panel-status"></span></span>
+        <span class="style-panel-links">
+            <label class="grammar-spelling-toggle" title="Also report possible misspellings (noisy on proper nouns)"><input type="checkbox" id="grammar-spelling"> spelling</label>
+            <a href="#" id="grammar-panel-run" title="Check the text you're editing for grammar issues — runs in your browser via Harper">check grammar</a>
+        </span>
+    </div>
+    <ul id="grammar-panel-list" class="style-panel-issues"></ul>
+</div>
+
+<style>
+.style-panel-top { display: flex; align-items: baseline; gap: 0.75em; margin: 0.4rem 0 0.3rem; }
+.style-panel-note { color: #777; font-size: 0.9em; }
+.style-panel-links { margin-left: auto; font-size: 0.8rem; white-space: nowrap; }
+.style-panel-links a { color: #8a8f94; margin-left: 0.8em; }
+.style-panel-links a:hover { color: #008CBA; }
+.style-panel-issues { list-style: none; margin: 0 0 0.75rem; }
+.style-panel-issues .style-issue { display: flex; align-items: baseline; gap: 0.45em;
+    padding: 0.15rem 0 0.15rem 0.55em; margin: 0; border-left: 3px solid transparent; font-size: 0.9rem; }
+.style-panel-issues .sev-error { border-left-color: #c0392b; }
+.style-panel-issues .sev-warning { border-left-color: #d4870c; }
+.style-panel-issues .sev-info { border-left-color: #d3d6d9; }
+.style-panel-issues .style-issue-msg { flex: 1 1 auto; }
+.style-panel-issues .style-issue-actions { flex: 0 0 auto; white-space: nowrap; }
+.style-panel-issues .style-action { cursor: pointer; }
+.style-panel-issues .sc-fix { display: inline-block; font-size: 0.78rem; font-weight: bold;
+    line-height: 1.4; padding: 0 0.4rem; border-radius: 3px; background: #dff3e6; color: #1c7c3e; }
+.style-panel-issues .sc-fix:hover { background: #cdebd8; }
+.style-panel-issues .sc-dismiss { color: #bdc1c5; font-size: 0.78rem; margin-left: 0.55em; }
+.style-panel-issues .style-issue:hover .sc-dismiss { color: #8a8f94; }
+.style-panel-issues .sc-dismiss:hover { color: #c0392b; text-decoration: underline; }
+.grammar-panel-top { border-top: 1px solid #e8eaec; padding-top: 0.5rem; }
+.grammar-spelling-toggle { display: inline; font-weight: normal; font-size: 0.8rem; color: #8a8f94; margin-right: 0.4em; }
+.grammar-spelling-toggle input { margin: 0 0.25em 0 0; }
+.style-panel-issues .grammar-problem { font-weight: bold; }
+.style-panel-issues .grammar-fix { color: #1c7c3e; }
+.style-panel-issues .grammar-field { color: #8a8f94; }
+</style>
+
+<script src="/static/js/harper_check.js?v=1"></script>
+<script>
+$(function () {
+    var $panel = $('#style-panel');
+    if (!$panel.length) { return; }
+    var qtype = $panel.data('qtype'), qid = $panel.data('qid'), guide = '';
+    function esc(s) { return $('<div>').text(s == null ? '' : s).html(); }
+
+    function setStatus(text) { $('#style-panel-status').text(text).show(); }
+
+    function load() {
+        setStatus('Checking…');
+        $.get('/question_style_issues/', { question_type: qtype, question_id: qid }, function (resp) {
+            if (typeof resp === 'string') { try { resp = JSON.parse(resp); } catch (e) {} }
+            var $list = $('#style-panel-list').empty();
+            if (!resp || !resp.ok) { setStatus((resp && resp.error) || 'The style check failed.'); return; }
+            guide = resp.guide;
+            $('#style-panel-full-link').attr('href', '/style_check/' + resp.qset_id + '/');
+            if (!resp.issues.length) { setStatus('No style issues found.'); return; }
+            setStatus(resp.issues.length + ' style suggestion' + (resp.issues.length === 1 ? '' : 's') + ':');
+            $.each(resp.issues, function (_, i) {
+                var $li = $('<li>').addClass('style-issue sev-' + i.severity);
+                // message_html (when present) is escaped server-side and carries
+                // answer-line formatting (underline/bold/italics).
+                $li.append($('<span class="style-issue-msg">').html(i.message_html || esc(i.message)));
+                var $actions = $('<span class="style-issue-actions">');
+                if (i.fixable) {
+                    $('<a class="style-action sc-fix" title="Apply this fix (reloads the page; unsaved edits are lost)">Fix</a>')
+                        .on('click', function () {
+                            $.post('/apply_style_fix/', { question_type: qtype, question_id: qid,
+                                code: i.code, token: i.token, guide: guide }, function (r) {
+                                if (typeof r === 'string') { try { r = JSON.parse(r); } catch (e) {} }
+                                if (r && r.ok) { location.reload(); }
+                                else { alert((r && r.error) || 'Could not apply the fix.'); }
+                            });
+                        }).appendTo($actions);
+                }
+                $('<a class="style-action sc-dismiss" title="Hide this suggestion for this question">dismiss</a>')
+                    .on('click', function () {
+                        $.post('/dismiss_style_issue/', { question_type: qtype, question_id: qid,
+                            code: i.code, token: i.token, action: '', scope: '' }, function () {
+                            $li.remove();
+                            if (!$('#style-panel-list li').length) { setStatus('No style issues found.'); }
+                        });
+                    }).appendTo($actions);
+                $li.append($actions);
+                $list.append($li);
+            });
+        });
+    }
+
+    $('#style-panel-refresh').on('click', function (e) { e.preventDefault(); load(); });
+    load();
+
+    // ---- Grammar (Harper, client-side WASM) — lints the LIVE editor text ----
+    function grammarFields() {
+        var fields = [];
+        function add(name, sel) {
+            var $el = $(sel);
+            if ($el.length) { fields.push({ name: name, text: $el.val() || '' }); }
+        }
+        if (qtype === 'tossup') {
+            add('Text', '#id_tossup_text');
+        } else {
+            add('Leadin', '#id_leadin');
+            add('Part 1', '#id_part1_text');
+            add('Part 2', '#id_part2_text');
+            add('Part 3', '#id_part3_text');
+        }
+        return fields;
+    }
+
+    function renderGrammar(findings) {
+        var $list = $('#grammar-panel-list').empty();
+        if (!findings.length) {
+            $('#grammar-panel-status').text('— no issues found.');
+            return;
+        }
+        $('#grammar-panel-status').text('— ' + findings.length + ' suggestion' + (findings.length === 1 ? '' : 's') + ':');
+        $.each(findings, function (_, f) {
+            var $msg = $('<span class="style-issue-msg">');
+            if (qtype === 'bonus' && f.field) { $msg.append($('<span class="grammar-field">').text(f.field + ': ')); }
+            if (f.problem) { $msg.append($('<span class="grammar-problem">').text('“' + f.problem + '”')).append(' — '); }
+            $msg.append(document.createTextNode(f.message));
+            if (f.replacements.length) {
+                $msg.append(' ').append($('<span class="grammar-fix">').text('→ ' + f.replacements.join(' / ')));
+            }
+            $list.append($('<li class="style-issue sev-info">').append($msg));
+        });
+    }
+
+    var grammarRunning = false;
+    function runGrammar() {
+        if (grammarRunning || !window.QemsHarper) { return; }
+        grammarRunning = true;
+        $('#grammar-panel-list').empty();
+        $('#grammar-panel-status').text('— checking… (first run downloads the checker)');
+        window.QemsHarper.lintFields(grammarFields(), $('#grammar-spelling').is(':checked'))
+            .then(function (findings) { renderGrammar(findings); })
+            .catch(function () { $('#grammar-panel-status').text('— the grammar checker failed to load.'); })
+            .then(function () { grammarRunning = false; });
+    }
+    $('#grammar-panel-run').on('click', function (e) { e.preventDefault(); runGrammar(); });
+    $('#grammar-spelling').on('change', function () {
+        if ($('#grammar-panel-list li').length || $('#grammar-panel-status').text()) { runGrammar(); }
+    });
+});
+</script>

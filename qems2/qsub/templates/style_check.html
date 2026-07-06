@@ -42,6 +42,7 @@
     {% if can_configure %}<a href="#" id="toggle-style-settings" class="sc-config-toggle">Configure rules&hellip;</a>{% endif %}
     {% if guide_obj.url %}<span class="sc-guide-note">Rules: <a href="{{ guide_obj.url }}" target="_blank" rel="noopener">{{ guide_obj.name }}</a></span>{% endif %}
     {% if is_ai_user %}<button type="button" id="ai-grammar-btn" class="button tiny secondary" data-qset="{{ qset.id }}" style="margin:0;"><i class="fa fa-wand-magic-sparkles"></i> <span class="ai-grammar-btn-label">AI check</span></button>{% endif %}
+    <button type="button" id="harper-grammar-btn" class="button tiny secondary" data-qset="{{ qset.id }}" style="margin:0;" title="Grammar-check the whole set with Harper — runs entirely in your browser, free"><i class="fa fa-spell-check"></i> Grammar check</button>
 </div>
 
 {% if is_ai_user %}
@@ -53,6 +54,15 @@
     </div>
 </div>
 {% endif %}
+
+<div id="harper-grammar-panel" style="display:none; margin: 0 0 18px;">
+    <div class="panel radius">
+        <strong>Grammar check</strong> <span class="sc-guide-note">(Harper &middot; runs in your browser &middot; nothing is saved)</span>
+        <label class="sc-inline" style="margin-left:12px; font-weight:normal;" title="Also report possible misspellings (noisy on proper nouns)"><input type="checkbox" id="harper-spelling"> include spelling</label>
+        <div id="harper-grammar-status" class="sc-guide-note" style="margin-top:6px;"></div>
+        <div id="harper-grammar-results"></div>
+    </div>
+</div>
 
 {% if can_configure %}
 <form method="post" action="" id="style-settings-form" class="sc-config" style="display:none;">
@@ -93,7 +103,7 @@
             data-qtype="{{ r.type }}" data-qid="{{ r.id }}" data-code="{{ i.code }}" data-token="{{ i.token }}"
             data-fixable="{% if i.fixable %}1{% else %}0{% endif %}">
             {% if not i.dismissed %}<input type="checkbox" class="issue-check" autocomplete="off" title="Select for a bulk action">{% endif %}
-            <span class="style-issue-msg">{{ i.message }}</span>
+            <span class="style-issue-msg">{% if i.message_html %}{% autoescape off %}{{ i.message_html }}{% endautoescape %}{% else %}{{ i.message }}{% endif %}</span>
             <span class="style-issue-actions">
                 {% if i.dismissed %}
                     <a class="style-action sc-link" data-action="restore" title="Restore this issue">undo</a>
@@ -165,6 +175,7 @@
 .ai-grammar-msg { flex:1 1 auto; }
 .ai-grammar-msg del { color:#c0392b; }
 .ai-grammar-msg strong { color:#1c7c3e; }
+.ai-grammar-msg .ai-alt-ans { color:#1c7c3e; }
 .ai-kind { display:inline-block; padding:0 6px; border-radius:9px; font-size:0.68rem;
            font-weight:bold; color:#fff; vertical-align:middle; }
 .ai-kind-grammar { background:#d4870c; }
@@ -313,8 +324,11 @@ $(function () {
             var body;
             if (f.kind === 'answer') {
                 // A suggested alternate acceptable/promptable answer to add.
+                // suggestion_html carries the answer-line markup already
+                // rendered (underline/bold/italics), escaped server-side.
+                var sug = f.suggestion_html || esc(f.suggestion);
                 body = '<span class="ai-kind ai-kind-answer">Alt answer</span> ' + loc
-                    + ': <strong>' + esc(f.suggestion) + '</strong>'
+                    + ': <span class="ai-alt-ans">' + sug + '</span>'
                     + (f.explanation ? ' <span class="sc-guide-note">' + esc(f.explanation) + '</span>' : '');
             } else {
                 body = '<span class="ai-kind ai-kind-grammar">Grammar</span> ' + loc
@@ -397,5 +411,91 @@ $(function () {
 });
 </script>
 {% endif %}
+
+<script src="/static/js/harper_check.js?v=1"></script>
+<script>
+// Set-wide Harper grammar check: fetches the question text as JSON, then
+// lints everything client-side (WASM) — free, private, available to all
+// set members. Results are transient (rerun after edits).
+$(function () {
+    var $btn = $('#harper-grammar-btn');
+    if (!$btn.length || !window.QemsHarper) { return; }
+    var qset = $btn.data('qset');
+    var running = false;
+
+    function setStatus(text) { $('#harper-grammar-status').text(text); }
+
+    function renderQuestion(q, findings) {
+        var $q = $('<div class="sc-q">');
+        var $head = $('<div class="sc-q-head">');
+        $head.append($('<a class="sc-ans" target="_blank" rel="noopener">').attr('href', q.edit_url).text(q.label || '(no answer)'));
+        $head.append($('<span class="sc-loc">').text(q.qtype === 'tossup' ? 'Tossup' : 'Bonus'));
+        $q.append($head);
+        var $ul = $('<ul class="sc-issues">');
+        findings.forEach(function (f) {
+            var $msg = $('<span class="style-issue-msg">');
+            if (q.qtype === 'bonus' && f.field) { $msg.append($('<span class="sc-guide-note">').text(f.field + ': ')); }
+            if (f.problem) { $msg.append($('<strong>').text('“' + f.problem + '”')).append(' — '); }
+            $msg.append(document.createTextNode(f.message));
+            if (f.replacements.length) {
+                $msg.append(' ').append($('<span style="color:#1c7c3e; font-weight:bold;">').text('→ ' + f.replacements.join(' / ')));
+            }
+            $ul.append($('<li class="style-issue sev-info">').append($msg));
+        });
+        $q.append($ul);
+        $('#harper-grammar-results').append($q);
+    }
+
+    function runHarper() {
+        if (running) { return; }
+        running = true;
+        $btn.prop('disabled', true);
+        $('#harper-grammar-panel').show();
+        $('#harper-grammar-results').empty();
+        setStatus('Loading question text…');
+        var includeSpelling = $('#harper-spelling').is(':checked');
+        $.get('/grammar_texts/' + qset + '/', function (resp) {
+            if (typeof resp === 'string') { try { resp = JSON.parse(resp); } catch (e) {} }
+            if (!resp || !resp.ok) {
+                setStatus((resp && resp.error) || 'Could not load the questions.');
+                running = false; $btn.prop('disabled', false);
+                return;
+            }
+            var questions = resp.questions;
+            var total = questions.length, done = 0, flagged = 0, count = 0;
+            setStatus('Loading the grammar checker… (the first run downloads it)');
+            window.QemsHarper.ensure().then(function () {
+                setStatus('Checking 0/' + total + '…');
+                return questions.reduce(function (p, q) {
+                    return p.then(function () {
+                        return window.QemsHarper.lintFields(q.fields, includeSpelling).then(function (findings) {
+                            done += 1;
+                            if (done % 10 === 0 || done === total) { setStatus('Checking ' + done + '/' + total + '…'); }
+                            if (findings.length) {
+                                flagged += 1;
+                                count += findings.length;
+                                renderQuestion(q, findings);
+                            }
+                        });
+                    });
+                }, Promise.resolve());
+            }).then(function () {
+                setStatus('Checked ' + total + ' question(s) — ' + count + ' suggestion(s) on ' + flagged + '.'
+                          + (count ? '' : ' Nice work!'));
+            }).catch(function () {
+                setStatus('The grammar checker failed to load — check your network and try again.');
+            }).then(function () { running = false; $btn.prop('disabled', false); });
+        }).fail(function () {
+            setStatus('Could not load the questions.');
+            running = false; $btn.prop('disabled', false);
+        });
+    }
+
+    $btn.on('click', runHarper);
+    $('#harper-spelling').on('change', function () {
+        if (!running && ($('#harper-grammar-results').children().length || $('#harper-grammar-status').text())) { runHarper(); }
+    });
+});
+</script>
 
 {% endblock %}
