@@ -19,15 +19,20 @@ import tempfile
 import threading
 import time
 
-# Microsoft's newer "Multilingual"/conversational neural voices sound much more
-# natural than the older Aria/Guy line. (id, friendly label) — the first is the
-# default. NATURAL_VOICES is the allowlist used to validate the ?voice= param.
+# Quizbowl reading wants a measured, even cadence, not chat prosody — so the
+# defaults come from Microsoft's "News/Novel" narration voices rather than the
+# conversational "Multilingual" line (Ava etc. sound expressive but rush and
+# swallow clauses when reading question text). (id, friendly label) — the
+# first is the default. NATURAL_VOICES validates the ?voice= param.
 VOICE_CHOICES = [
-    ("en-US-AvaMultilingualNeural", "Ava — expressive US female (default)"),
-    ("en-US-AndrewMultilingualNeural", "Andrew — warm US male"),
-    ("en-US-BrianMultilingualNeural", "Brian — casual US male"),
-    ("en-US-EmmaMultilingualNeural", "Emma — friendly US female"),
+    ("en-US-AriaNeural", "Aria — newscast US female (default)"),
+    ("en-US-ChristopherNeural", "Christopher — measured US male"),
+    ("en-US-EricNeural", "Eric — even-keeled US male"),
+    ("en-US-SteffanNeural", "Steffan — steady US male"),
+    ("en-US-MichelleNeural", "Michelle — clear US female"),
     ("en-US-JennyNeural", "Jenny — clear US female"),
+    ("en-US-AvaMultilingualNeural", "Ava — expressive US female (conversational)"),
+    ("en-US-AndrewMultilingualNeural", "Andrew — warm US male (conversational)"),
     ("en-GB-RyanNeural", "Ryan — British male"),
     ("en-GB-SoniaNeural", "Sonia — British female"),
 ]
@@ -79,6 +84,10 @@ def clean_for_speech(text):
     text = text.replace("\x00", "(").replace("\x01", ")")
     text = text.replace("\\[", "[").replace("\\]", "]")
     text = text.replace("[", ", ").replace("]", " ")
+    # Formatting toggles that are never read aloud (bold-only, sub/sup, and
+    # pronunciation-guide target markers).
+    for marker in ("\\B", "\\S", "\\s", "\\P"):
+        text = text.replace(marker, "")
     text = text.replace("~", "").replace("_", "").replace("*", "")
     text = _WS_RE.sub(" ", text)
     text = text.replace(" ,", ",").replace(" ;", ";")
