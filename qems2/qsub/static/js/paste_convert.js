@@ -479,6 +479,9 @@ $(function () {
         // 6. Subscript — no Discord equivalent, just keep text
         text = text.replace(/\\s([^\\]+)\\s/g, '$1');
 
+        // 7. Pronunciation-guide target markers — annotation only, dropped
+        text = text.replace(/\\P/g, '');
+
         return text;
     }
 
@@ -641,6 +644,101 @@ $(function () {
         }
         $temp.remove();
         setTimeout(function () { $button.text(originalText); }, 2000);
+    }
+
+    // ========================================================================
+    // 4a. Copy full question (rich text)
+    // ========================================================================
+
+    /**
+     * QEMS markup -> display HTML for the clipboard, mirroring the server-side
+     * renderer: escaped literals (\_ \~ \( \)) resolve to their plain
+     * character (unlike the rich editor, which keeps them visible for
+     * round-tripping).
+     */
+    function qemsToCopyHtml(text) {
+        var html = (text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        html = html.replace(/\\_/g, '\x00US\x00').replace(/\\~/g, '\x00TI\x00')
+                   .replace(/\\\(/g, '\x00OP\x00').replace(/\\\)/g, '\x00CP\x00');
+        html = html.replace(/__([^_]+)__/g, '<u>$1</u>');
+        html = html.replace(/_([^_]+)_/g, '<u><b>$1</b></u>');
+        html = html.replace(/~([^~]+)~/g, '<i>$1</i>');
+        html = html.replace(/\\B([\s\S]+?)\\B/g, '<b>$1</b>');
+        html = html.replace(/\\S([\s\S]+?)\\S/g, '<sup>$1</sup>');
+        html = html.replace(/\\s([\s\S]+?)\\s/g, '<sub>$1</sub>');
+        // Pronunciation-guide target word(s): the same teal the app renders.
+        html = html.replace(/\\P([\s\S]+?)\\P/g, '<span style="color:#0b7285">$1</span>');
+        html = html.replace(/\x00US\x00/g, '_').replace(/\x00TI\x00/g, '~')
+                   .replace(/\x00OP\x00/g, '(').replace(/\x00CP\x00/g, ')');
+        return html.replace(/\n/g, '<br>');
+    }
+
+    /** Question text with the power (everything up to the last mark) bolded. */
+    function qemsQuestionTextToHtml(text) {
+        text = text || '';
+        var powerIdx = Math.max(text.indexOf('(*)'), text.indexOf('(+)'));
+        if (powerIdx === -1) { return qemsToCopyHtml(text); }
+        return '<b>' + qemsToCopyHtml(text.substring(0, powerIdx + 3)) + '</b>'
+             + qemsToCopyHtml(text.substring(powerIdx + 3));
+    }
+
+    /**
+     * Copy with both a rich (text/html) and a plain flavor: rich-text targets
+     * (Word, Docs, email) get real bold/underline/italics; plain targets get
+     * the raw QEMS markup. Falls back to plain-only where ClipboardItem is
+     * unavailable.
+     */
+    function copyRichToClipboard(html, plain, $button) {
+        if (navigator.clipboard && navigator.clipboard.write && window.ClipboardItem) {
+            var originalText = $button.text();
+            var item = new ClipboardItem({
+                'text/html': new Blob([html], { type: 'text/html' }),
+                'text/plain': new Blob([plain], { type: 'text/plain' })
+            });
+            navigator.clipboard.write([item]).then(function () {
+                $button.text('Copied!');
+                setTimeout(function () { $button.text(originalText); }, 2000);
+            }, function () {
+                copyToClipboard(plain, $button);
+            });
+        } else {
+            copyToClipboard(plain, $button);
+        }
+    }
+
+    var $copyFullTossup = $('#copy-full-tossup');
+    if ($copyFullTossup.length) {
+        $copyFullTossup.on('click', function (e) {
+            e.preventDefault();
+            var text = ($('#id_tossup_text').val() || '').trim();
+            var answer = ($('#id_tossup_answer').val() || '').trim();
+            var plain = text + '\nANSWER: ' + answer;
+            var html = '<p>' + qemsQuestionTextToHtml(text) + '</p>'
+                     + '<p>ANSWER: ' + qemsToCopyHtml(answer) + '</p>';
+            copyRichToClipboard(html, plain, $copyFullTossup);
+        });
+    }
+
+    var $copyFullBonus = $('#copy-full-bonus');
+    if ($copyFullBonus.length) {
+        $copyFullBonus.on('click', function (e) {
+            e.preventDefault();
+            if (window.qemsSyncBonusUnified) { window.qemsSyncBonusUnified(); }
+            var leadin = ($('#id_leadin').val() || '').trim();
+            var plainLines = [leadin];
+            var htmlParts = ['<p>' + qemsToCopyHtml(leadin) + '</p>'];
+            for (var i = 1; i <= 3; i++) {
+                var partText = ($('#id_part' + i + '_text').val() || '').trim();
+                var partAnswer = ($('#id_part' + i + '_answer').val() || '').trim();
+                var diff = ($('#id_part' + i + '_difficulty').val() || '');
+                if (!partText && !partAnswer) { continue; }
+                plainLines.push('[10' + diff + '] ' + partText);
+                plainLines.push('ANSWER: ' + partAnswer);
+                htmlParts.push('<p>[10' + diff + '] ' + qemsToCopyHtml(partText) + '<br>'
+                             + 'ANSWER: ' + qemsToCopyHtml(partAnswer) + '</p>');
+            }
+            copyRichToClipboard(htmlParts.join(''), plainLines.join('\n'), $copyFullBonus);
+        });
     }
 
     // The saved question's id, read from the preview panel's anchor region

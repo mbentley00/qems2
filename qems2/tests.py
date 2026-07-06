@@ -1355,7 +1355,8 @@ class StyleCheckFixTests(TestCase):
             'code': 'pronunciation', 'token': 'Question|Goethe', 'guide': 'minkowski'})
         self.assertEqual(resp.status_code, 200)
         self.tu.refresh_from_db()
-        self.assertIn('Goethe ("GUR-tuh")', self.tu.tossup_text)
+        # The fix now annotates the target word: \PGoethe\P ("GUR-tuh")'s
+        self.assertIn('\\PGoethe\\P ("GUR-tuh")', self.tu.tossup_text)
         self.assertIn("(\"GUR-tuh\")'s", self.tu.tossup_text)  # inserted before the 's
 
     def test_apply_is_idempotent_after_guide_present(self):
@@ -2014,6 +2015,22 @@ class UnpacketizedAssignmentTests(TestCase):
         self.assertIsNone(self.placed.packet_id)
         self.assertIsNone(self.placed.question_number)
 
+    def test_grid_shows_edited_and_proofread_tags(self):
+        self.placed.edited = True
+        self.placed.proofread = True
+        self.placed.save()
+        body = self.client.get('/packet_grid/{0}/'.format(self.qset.id)).content.decode()
+        # The rendered spans (the bare class names also appear in the page CSS).
+        self.assertIn('cell-tag tag-edited', body)
+        self.assertIn('cell-tag tag-proofread', body)
+        # An untouched question shows neither tag.
+        self.placed.edited = False
+        self.placed.proofread = False
+        self.placed.save()
+        body = self.client.get('/packet_grid/{0}/'.format(self.qset.id)).content.decode()
+        self.assertNotIn('cell-tag tag-edited', body)
+        self.assertNotIn('cell-tag tag-proofread', body)
+
     def test_grid_shows_unpacketized(self):
         self._tu('lonely')
         resp = self.client.get('/packet_grid/{0}/'.format(self.qset.id))
@@ -2061,6 +2078,39 @@ class UnpacketizedAssignmentTests(TestCase):
         # rather than linking to add-a-tossup.
         grid = html[html.find('grid-scroll'):]
         self.assertNotIn('/add_tossups/', grid)
+
+    def _search(self, src, q):
+        resp = self.client.get('/swap_candidates/', {
+            'question_type': 'tossup', 'question_id': src.id, 'scope': 'leaf', 'q': q})
+        return {c['id'] for c in json.loads(resp.content)['candidates']}
+
+    def test_swap_search_matches_across_markup(self):
+        # "marc jacobs" must find an answer stored with markup between the words.
+        src = self._tu('source', packet=self.p1, number=2)
+        marc = Tossup.objects.create(
+            author=self.owner, question_set=self.qset, packet=self.p1, question_number=3,
+            question_type=self.acf_tu, tossup_text='This designer did things.',
+            tossup_answer='Marc _Jacobs_',
+            created_date=datetime.now(), last_changed_date=datetime.now())
+        for q in ('marc', 'jacobs', 'marc jacobs', 'Marc Jacobs', 'jacobs marc'):
+            self.assertIn(marc.id, self._search(src, q), 'query %r missed it' % q)
+        self.assertNotIn(marc.id, self._search(src, 'marc chagall'))
+
+    def test_swap_search_matches_through_entities_and_diacritics(self):
+        # Imported questions store entities (&#x27;) and answers carry accents;
+        # searches typed plainly must still match.
+        src = self._tu('source', packet=self.p1, number=2)
+        rep = Tossup.objects.create(
+            author=self.owner, question_set=self.qset, packet=self.p1, question_number=3,
+            question_type=self.acf_tu, tossup_text='It&#x27;s a country. (*) For 10 points.',
+            tossup_answer='_République française_',
+            created_date=datetime.now(), last_changed_date=datetime.now())
+        self.assertIn(rep.id, self._search(src, 'republique francaise'))
+        self.assertIn(rep.id, self._search(src, "it's a country"))
+
+    def test_swap_search_excludes_source_question(self):
+        src = self._tu('marc source', packet=self.p1, number=2)
+        self.assertNotIn(src.id, self._search(src, 'marc'))
 
     def test_swap_candidates_fill_mode_lists_unpacketized(self):
         free = self._tu('freebie')  # unpacketized
@@ -2397,6 +2447,31 @@ class AccountAgeAndDistributionPermissionTests(TestCase):
         self.client.login(username='new_u', password='pw')
         resp = self.client.get('/edit_distribution/')  # no id = new dist
         self.assertContains(resp, '2 days after sign-up')
+
+    def test_create_set_seeds_set_wide_entries_unswapped(self):
+        # Creating a set seeds the set-wide distribution from the template's
+        # per-packet minimums x packets. Tossups and bonuses must not be
+        # swapped — a tossup-only distribution used to seed 0 tossups and N
+        # bonuses per category.
+        DistributionEntry.objects.create(
+            distribution=self.my_dist, category='Science', subcategory='Biology',
+            min_tossups=2, max_tossups=2, min_bonuses=0, max_bonuses=0)
+        DistributionEntry.objects.create(
+            distribution=self.my_dist, category='Literature', subcategory='European',
+            min_tossups=1, max_tossups=1, min_bonuses=3, max_bonuses=3)
+        self.client.login(username='old_u', password='pw')
+        resp = self.client.post('/create_question_set/', {
+            'name': 'Swap Check', 'date': '2026-08-01',
+            'distribution': self.my_dist.id, 'num_packets': 2,
+            'max_acf_tossup_length': 750, 'max_acf_bonus_length': 400,
+        })
+        self.assertEqual(resp.status_code, 200)
+        qset = QuestionSet.objects.get(name='Swap Check')
+        by_cat = {e.dist_entry.category: e for e in qset.setwidedistributionentry_set.all()}
+        self.assertEqual(by_cat['Science'].num_tossups, 4)      # 2 packets x 2 min
+        self.assertEqual(by_cat['Science'].num_bonuses, 0)
+        self.assertEqual(by_cat['Literature'].num_tossups, 2)
+        self.assertEqual(by_cat['Literature'].num_bonuses, 6)
 
     def test_distributions_list_only_shows_own(self):
         self.client.login(username='old_u', password='pw')
@@ -3074,10 +3149,401 @@ class AnswerAltsStyleCheckTests(TestCase):
         self.assertIn('also accept', issues[0]['message'])
         self.assertIn('French Republic', issues[0]['message'])
 
+    def test_answer_alts_separated_by_or_not_slash(self):
+        from qems2.qsub import style_checker as sc
+        issues = [i for i in sc.check_tossup(self.tu) if i['code'] == 'answer_alts']
+        # Standard answer-line phrasing: "X; or Y", never "X / Y".
+        self.assertIn('; or ', issues[0]['message'])
+        self.assertNotIn(' / ', issues[0]['message'])
+
+    def test_answer_alts_message_html_underlines_names(self):
+        from qems2.qsub import style_checker as sc
+        issues = [i for i in sc.check_tossup(self.tu) if i['code'] == 'answer_alts']
+        html_msg = issues[0]['message_html']
+        # Each alternate renders as it would on the answer line: underlined+bold.
+        self.assertIn('<u><b>', html_msg)
+        self.assertIn('French Republic</b></u>', html_msg)
+        self.assertNotIn('<i>', html_msg)  # France isn't an italicized title
+
+    def test_answer_alts_italic_when_answer_is_italicized_title(self):
+        from qems2.qsub import style_checker as sc
+        issues = sc._answer_alt_issues('Answer', '~_France_~')
+        # An italicized (tilde-marked) primary answer italicizes its alternates.
+        self.assertIn('<i><u><b>', issues[0]['message_html'])
+
     def test_answer_alts_off_in_generic_guide(self):
         from qems2.qsub import style_checker as sc
         codes = {i['code'] for i in sc.check_tossup(self.tu, guide='generic')}
         self.assertNotIn('answer_alts', codes)
+
+
+class PgAnnotationTests(TestCase):
+    """\\Pwords\\P ties a pronunciation guide to the word(s) it covers."""
+
+    def test_renders_pg_target_span(self):
+        from qems2.qsub.utils import get_formatted_question_html
+        out = get_formatted_question_html('Denis \\PDiderot\\P ("DID-er-OW") wrote.',
+                                          True, True, False, True)
+        self.assertIn('<span class="pg-target">Diderot</span>', out)
+        self.assertIn('<strong class="pronunciation-guide">("DID-er-OW")</strong>', out)
+
+    def test_renders_multiword_target(self):
+        from qems2.qsub.utils import get_formatted_question_html
+        out = get_formatted_question_html('\\PMoholy-Nagy Laszlo\\P ("MO-hoy NODGE")',
+                                          True, True, False, True)
+        self.assertIn('<span class="pg-target">Moholy-Nagy Laszlo</span>', out)
+
+    def test_markers_never_count_toward_length(self):
+        from qems2.qsub.utils import get_character_count
+        plain = 'Denis Diderot wrote.'
+        marked = 'Denis \\PDiderot\\P wrote.'
+        self.assertEqual(get_character_count(marked, False), get_character_count(plain, False))
+        self.assertEqual(get_character_count(marked, True), get_character_count(plain, True))
+
+    def test_odd_marker_count_is_reported(self):
+        from qems2.qsub.utils import special_character_imbalance_reason
+        self.assertIsNone(special_character_imbalance_reason('a \\Pb\\P c'))
+        reason = special_character_imbalance_reason('a \\Pb c')
+        self.assertIn('\\P', reason)
+
+    def test_insert_guide_annotates_target(self):
+        from qems2.qsub.style_checker import _insert_guide
+        out = _insert_guide('Denis Diderot wrote things.', 'Diderot', 'DID-er-OW')
+        self.assertEqual(out, 'Denis \\PDiderot\\P ("DID-er-OW") wrote things.')
+
+    def test_insert_guide_falls_back_when_term_is_marked_up(self):
+        # Wrapping would misnest with the italics, so the guide is inserted
+        # without annotation there.
+        from qems2.qsub.style_checker import _insert_guide
+        out = _insert_guide('The ~Diderot~ essay.', 'Diderot', 'DID-er-OW')
+        self.assertEqual(out, 'The ~Diderot~ ("DID-er-OW") essay.')
+        self.assertNotIn('\\P', out)
+
+    def test_yapp_export_drops_markers(self):
+        from qems2.qsub.yapp_export import qems_to_yapp_html
+        out = qems_to_yapp_html('Denis \\PDiderot\\P ("DID-er-OW") wrote.')
+        self.assertNotIn('\\P', out)
+        self.assertIn('Diderot', out)
+
+    def test_speech_drops_markers(self):
+        from qems2.qsub.audio import clean_for_speech
+        out = clean_for_speech('Denis \\PDiderot\\P ("DID-er-OW") wrote.')
+        self.assertNotIn('P', out.split('Diderot')[0])  # no stray \P before the name
+        self.assertNotIn('\\', out)
+        self.assertIn('Diderot', out)
+
+    def test_docx_runs_color_target_words(self):
+        from docx import Document
+        from qems2.qsub.views import add_qems_formatted_runs
+        doc = Document()
+        p = add_qems_formatted_runs(doc.add_paragraph(), 'Denis \\PDiderot\\P ("DID-er-OW") wrote.')
+        texts = ''.join(r.text for r in p.runs)
+        self.assertNotIn('\\P', texts)
+        colored = [r for r in p.runs if r.font.color and r.font.color.rgb is not None]
+        self.assertEqual([r.text for r in colored], ['Diderot'])
+
+    def test_style_checker_plain_strips_markers(self):
+        from qems2.qsub.style_checker import _plain
+        self.assertEqual(_plain('a \\Pb\\P c'), 'a b c')
+
+
+class EmailPreferenceLinkTests(TestCase):
+    """Notification e-mails carry a direct link to the recipient's per-set
+    e-mail settings so they're easy to stop."""
+
+    def setUp(self):
+        self.au = User.objects.create_user('ep_author', password='pw', email='a@t.com')
+        self.author = Writer.objects.get(user=self.au)
+        self.author.send_mail_on_comments = True
+        self.author.save()
+        self.cu = User.objects.create_user('ep_commenter', password='pw', email='c@t.com')
+        self.dist = Distribution.objects.create(name='ep dist')
+        self.qset = QuestionSet.objects.create(
+            name='EP Set', date=timezone.now(), host='', address='', owner=self.author,
+            num_packets=1, distribution=self.dist)
+        self.tu = Tossup.objects.create(
+            author=self.author, question_set=self.qset, tossup_text='Things.',
+            tossup_answer='_a_', created_date=datetime.now(), last_changed_date=datetime.now())
+
+    def _wait_mail(self, n=1, timeout=2.0):
+        import time
+        end = time.time() + timeout
+        while time.time() < end and len(mail.outbox) < n:
+            time.sleep(0.02)
+
+    def test_comment_email_links_set_email_settings(self):
+        from django.contrib.contenttypes.models import ContentType
+        from django.contrib.sites.models import Site
+        from django_comments.models import Comment
+        mail.outbox = []
+        Comment.objects.create(
+            content_type=ContentType.objects.get_for_model(Tossup), object_pk=str(self.tu.id),
+            site=Site.objects.get_current(), user=self.cu, comment='needs work',
+            submit_date=timezone.now())
+        self._wait_mail(1)
+        self.assertEqual(len(mail.outbox), 1)
+        link = '/writer_question_set_settings/{0}/'.format(self.qset.id)
+        self.assertIn(link, mail.outbox[0].body)
+        html_alt = mail.outbox[0].alternatives[0][0]
+        self.assertIn(link, html_alt)
+
+    def test_new_question_email_links_set_email_settings(self):
+        su = User.objects.create_user('ep_sub', password='pw', email='s@t.com')
+        sub = Writer.objects.get(user=su)
+        WriterQuestionSetSettings.objects.create(
+            writer=sub, question_set=self.qset, email_on_all_new_questions=True)
+        mail.outbox = []
+        Tossup.objects.create(
+            author=self.author, question_set=self.qset, tossup_text='More things.',
+            tossup_answer='_b_', created_date=datetime.now(), last_changed_date=datetime.now())
+        self._wait_mail(1)
+        self.assertTrue(mail.outbox, 'no notification mail was sent')
+        link = '/writer_question_set_settings/{0}/'.format(self.qset.id)
+        self.assertIn(link, mail.outbox[0].body)
+
+
+class SmartQuotesTests(TestCase):
+    """smarten_quotes + the Word-export smart-quotes option."""
+
+    def _sq(self, s):
+        from qems2.qsub.utils import smarten_quotes
+        return smarten_quotes(s)
+
+    def test_double_quotes_by_context(self):
+        self.assertEqual(self._sq('He said "hello there" loudly.'),
+                         'He said “hello there” loudly.')
+        self.assertEqual(self._sq('"At the start."'), '“At the start.”')
+
+    def test_apostrophes_and_singles(self):
+        self.assertEqual(self._sq("It's the writers' room."),
+                         'It’s the writers’ room.')
+        self.assertEqual(self._sq("He said 'quoted' softly."),
+                         'He said ‘quoted’ softly.')
+        self.assertEqual(self._sq("the '90s"), 'the ’90s')
+
+    def test_quote_direction_ignores_markup(self):
+        # In _"Ode"_ the quote still opens even though "_" precedes it.
+        self.assertEqual(self._sq('_"Ode to the West Wind"_'),
+                         '_“Ode to the West Wind”_')
+
+    def test_nested_open_after_open(self):
+        self.assertEqual(self._sq('("DID-er-OW")'), '(“DID-er-OW”)')
+
+    def test_docx_runs_smart_quotes_option(self):
+        from docx import Document
+        from qems2.qsub.views import add_qems_formatted_runs
+        doc = Document()
+        p = add_qems_formatted_runs(doc.add_paragraph(),
+                                    'This "novel" isn&#x27;t long.', smart_quotes=True)
+        text = ''.join(r.text for r in p.runs)
+        self.assertIn('“novel”', text)
+        self.assertIn('isn’t', text)
+        # Off by default: straight quotes preserved.
+        p2 = add_qems_formatted_runs(doc.add_paragraph(), 'This "novel" stays.')
+        self.assertIn('"novel"', ''.join(r.text for r in p2.runs))
+
+
+class CategoryProblemsTests(TestCase):
+    """The Category Issues page: lists questions with a missing or
+    wrong-distribution category and bulk-reassigns them."""
+
+    def setUp(self):
+        self.ou = User.objects.create_user('cp_owner', password='pw', email='c@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='cp dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='History', subcategory='European')
+        self.other_dist = Distribution.objects.create(name='cp other dist')
+        self.foreign_de = DistributionEntry.objects.create(
+            distribution=self.other_dist, category='Science', subcategory='Biology')
+        self.qset = QuestionSet.objects.create(
+            name='CP Set', date=timezone.now(), host='', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+
+        def tu(ans, category):
+            return Tossup.objects.create(
+                author=self.owner, question_set=self.qset, category=category,
+                tossup_text='Text.', tossup_answer='_%s_' % ans,
+                created_date=datetime.now(), last_changed_date=datetime.now())
+        self.good = tu('good', self.de)
+        self.uncategorized = tu('uncategorized', None)
+        self.stale = tu('stale', self.foreign_de)  # category from another distribution
+        self.client.login(username='cp_owner', password='pw')
+
+    def test_lists_only_problem_questions(self):
+        body = self.client.get('/category_problems/{0}/'.format(self.qset.id)).content.decode()
+        self.assertIn('uncategorized', body)
+        self.assertIn('stale', body)
+        self.assertNotIn('>good<', body)
+
+    def test_bulk_assign_fixes_both_kinds(self):
+        resp = self.client.post('/category_problems/{0}/'.format(self.qset.id), {
+            'q': ['tossup-{0}'.format(self.uncategorized.id), 'tossup-{0}'.format(self.stale.id)],
+            'category': self.de.id})
+        self.assertEqual(resp.status_code, 200)
+        self.uncategorized.refresh_from_db(); self.stale.refresh_from_db()
+        self.assertEqual(self.uncategorized.category_id, self.de.id)
+        self.assertEqual(self.stale.category_id, self.de.id)
+        body = resp.content.decode()
+        self.assertIn('Assigned 2 question(s)', body)
+        self.assertIn('valid category', body)  # nothing left to fix
+
+    def test_cannot_assign_foreign_distribution_entry(self):
+        resp = self.client.post('/category_problems/{0}/'.format(self.qset.id), {
+            'q': ['tossup-{0}'.format(self.uncategorized.id)],
+            'category': self.foreign_de.id})
+        self.uncategorized.refresh_from_db()
+        self.assertIsNone(self.uncategorized.category_id)
+        self.assertIn('Pick a category', resp.content.decode())
+
+    def test_writer_sees_page_but_cannot_assign(self):
+        wu = User.objects.create_user('cp_writer', password='pw', email='w@t.com')
+        writer = Writer.objects.get(user=wu)
+        self.qset.writer.add(writer)
+        self.client.logout(); self.client.login(username='cp_writer', password='pw')
+        body = self.client.get('/category_problems/{0}/'.format(self.qset.id)).content.decode()
+        self.assertIn('uncategorized', body)
+        self.assertNotIn('cp-assign-btn', body)
+        resp = self.client.post('/category_problems/{0}/'.format(self.qset.id), {
+            'q': ['tossup-{0}'.format(self.uncategorized.id)], 'category': self.de.id})
+        self.uncategorized.refresh_from_db()
+        self.assertIsNone(self.uncategorized.category_id)
+        self.assertIn('Only owners and editors', resp.content.decode())
+
+    def test_non_member_forbidden(self):
+        User.objects.create_user('cp_nobody', password='pw', email='n@t.com')
+        self.client.logout(); self.client.login(username='cp_nobody', password='pw')
+        body = self.client.get('/category_problems/{0}/'.format(self.qset.id)).content.decode()
+        self.assertIn('not authorized', body)
+
+
+class QuotePunctStyleTests(TestCase):
+    """The quote_punct rule: periods/commas after a closing double quote."""
+
+    def setUp(self):
+        self.ou = User.objects.create_user('qp_owner', password='pw', email='q@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='qp dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='History', subcategory='European')
+        self.qset = QuestionSet.objects.create(
+            name='QP Set', date=timezone.now(), host='', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+
+    def _tu(self, text):
+        return Tossup.objects.create(
+            author=self.owner, question_set=self.qset, category=self.de,
+            tossup_text=text, tossup_answer='_thing_',
+            created_date=datetime.now(), last_changed_date=datetime.now())
+
+    def _codes(self, text):
+        from qems2.qsub import style_checker as sc
+        return {i['code'] for i in sc.check_tossup(self._tu(text))}
+
+    def test_flags_period_outside_quote(self):
+        self.assertIn('quote_punct', self._codes('He wrote "Here is the end of sentence".'))
+
+    def test_flags_comma_outside_quote(self):
+        self.assertIn('quote_punct', self._codes('After "Ozymandias", she left.'))
+
+    def test_correct_usage_not_flagged(self):
+        self.assertNotIn('quote_punct', self._codes('He wrote "the end of sentence." Then more.'))
+
+    def test_pronunciation_guide_not_flagged(self):
+        # The guide's quote is followed by ")" — «("DID-er-OW"),» is fine.
+        self.assertNotIn('quote_punct', self._codes('Diderot ("DID-er-OW"), who wrote.'))
+
+    def test_possessive_apostrophe_not_flagged(self):
+        self.assertNotIn('quote_punct', self._codes("This belonged to the writers'."))
+
+    def test_fix_moves_punctuation_inside(self):
+        from qems2.qsub import style_checker as sc
+        tu = self._tu('He wrote "end of sentence", then "another one".')
+        issue = next(i for i in sc.check_tossup(tu) if i['code'] == 'quote_punct')
+        self.assertTrue(sc.apply_fix(tu, issue['fix']))
+        self.assertEqual(tu.tossup_text, 'He wrote "end of sentence," then "another one."')
+
+
+class QuestionStyleIssuesTests(TestCase):
+    """The per-question style-check endpoint + panel on the edit pages."""
+
+    def setUp(self):
+        from qems2.qsub import answer_db
+        answer_db.reset_cache()
+        self.ou = User.objects.create_user('qsi_owner', password='pw', email='q@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='qsi dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='History', subcategory='European')
+        self.qset = QuestionSet.objects.create(
+            name='QSI Set', date=timezone.now(), host='', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.tu = Tossup.objects.create(
+            author=self.owner, question_set=self.qset,
+            tossup_text='This country did  things. For 10 points, name this country.',
+            tossup_answer='_France_', category=self.de,
+            created_date=datetime.now(), last_changed_date=datetime.now(), question_number=1)
+        self.client.login(username='qsi_owner', password='pw')
+
+    def _issues(self):
+        resp = self.client.get('/question_style_issues/', {
+            'question_type': 'tossup', 'question_id': self.tu.id})
+        data = json.loads(resp.content)
+        self.assertTrue(data['ok'])
+        return data['issues']
+
+    def test_returns_issues_for_question(self):
+        issues = self._issues()
+        codes = {i['code'] for i in issues}
+        self.assertIn('double_space', codes)   # the "did  things" double space
+        self.assertIn('answer_alts', codes)    # France missing standard alternates
+        fixable = [i for i in issues if i['code'] == 'double_space'][0]
+        self.assertTrue(fixable['fixable'])
+
+    def test_honors_dismissals(self):
+        alt = [i for i in self._issues() if i['code'] == 'answer_alts'][0]
+        resp = self.client.post('/dismiss_style_issue/', {
+            'question_type': 'tossup', 'question_id': self.tu.id,
+            'code': alt['code'], 'token': alt['token'], 'action': '', 'scope': ''})
+        self.assertTrue(json.loads(resp.content)['ok'])
+        self.assertNotIn('answer_alts', {i['code'] for i in self._issues()})
+
+    def test_honors_disabled_rules(self):
+        self.qset.disabled_style_rules = 'answer_alts'
+        self.qset.save()
+        self.assertNotIn('answer_alts', {i['code'] for i in self._issues()})
+
+    def test_non_member_forbidden(self):
+        User.objects.create_user('qsi_other', password='pw', email='o2@t.com')
+        self.client.logout(); self.client.login(username='qsi_other', password='pw')
+        resp = self.client.get('/question_style_issues/', {
+            'question_type': 'tossup', 'question_id': self.tu.id})
+        self.assertEqual(resp.status_code, 403)
+
+    def test_copy_button_copies_instead_of_opening_paste_dialog(self):
+        # The edit-page "Copy" button must NOT reuse the add-page's
+        # paste-dialog id (clicking it opened a paste dialog instead of
+        # copying the formatted question).
+        body = self.client.get('/edit_tossup/{0}/'.format(self.tu.id)).content.decode()
+        self.assertIn('copy-full-tossup', body)
+        self.assertNotIn('paste-full-tossup', body)
+        # The add page keeps its Paste Full Tossup dialog button.
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.qset.editor.add(self.owner)  # the author dropdown needs set membership
+        body = self.client.get('/add_tossups/{0}/'.format(self.qset.id)).content.decode()
+        self.assertIn('paste-full-tossup', body)
+
+    def test_panel_included_on_edit_pages(self):
+        body = self.client.get('/edit_tossup/{0}/'.format(self.tu.id)).content.decode()
+        self.assertIn('style-panel', body)
+        self.assertIn('/question_style_issues/', body)
+        b = Bonus.objects.create(
+            author=self.owner, question_set=self.qset, category=self.de,
+            leadin='For 10 points each:', part1_text='t1', part1_answer='_a1_',
+            part2_text='t2', part2_answer='_a2_', part3_text='t3', part3_answer='_a3_',
+            created_date=datetime.now(), last_changed_date=datetime.now(), question_number=1)
+        body = self.client.get('/edit_bonus/{0}/'.format(b.id)).content.decode()
+        self.assertIn('style-panel', body)
 
 
 
@@ -3290,6 +3756,29 @@ class AIGrammarCheckTests(TestCase):
         self.assertIn('Alt answer', body)
         self.assertIn('accept the Painter of the Hole', body)
 
+    def test_alternate_answer_markup_rendered_as_html(self):
+        alt = [{'ref': 'tossup-{0}'.format(self.tu.id), 'kind': 'answer', 'severity': 'info',
+                'excerpt': '', 'suggestion': 'accept ~_Doctor Faustus_~; or _Faustus_',
+                'explanation': 'alternate titles'}]
+        resp, _m = self._run_check(alt)
+        out = json.loads(resp.content.decode())
+        found = out['findings'][0]
+        # The raw markup is kept in `suggestion`; `suggestion_html` renders it.
+        self.assertEqual(found['suggestion'], 'accept ~_Doctor Faustus_~; or _Faustus_')
+        self.assertIn('<i><u><b>Doctor Faustus</b></u></i>', found['suggestion_html'])
+        self.assertIn('; or <u><b>Faustus</b></u>', found['suggestion_html'])
+
+    def test_answer_pass_receives_markup_preserving_items(self):
+        resp, m = self._run_check(self._fake_finding())
+        self.assertEqual(resp.status_code, 200)
+        # The grammar pass sees plain text; the answer pass keeps the markup so
+        # the model can see the underlined/required words.
+        items = m.call_args[0][0]
+        answer_items = m.call_args[1]['answer_items']
+        self.assertNotIn('_Faust_', items[0]['text'])
+        self.assertIn('ANSWER: _Faust_', answer_items[0]['text'])
+        self.assertEqual(items[0]['ref'], answer_items[0]['ref'])
+
     def test_ai_grammar_batch_tags_grammar_kind(self):
         from unittest import mock
         from qems2.qsub import ai as ai_mod
@@ -3329,6 +3818,29 @@ class AIGrammarCheckTests(TestCase):
         self.assertEqual(out[0]['kind'], 'answer')
         self.assertEqual(out[0]['severity'], 'info')
         self.assertEqual(out[0]['suggestion'], 'accept X')
+
+    def test_grammar_check_questions_routes_answer_items_to_answer_pass(self):
+        from unittest import mock
+        from qems2.qsub import ai as ai_mod
+
+        class _Block:
+            type = 'text'
+            text = '{}'  # parses as no findings / no suggestions for either pass
+
+        class _Resp:
+            content = [_Block()]
+
+        client = mock.MagicMock()
+        client.messages.create.return_value = _Resp()
+        with mock.patch.object(ai_mod, '_client', return_value=client):
+            out, err = ai_mod.grammar_check_questions(
+                [{'ref': 'tossup-1', 'text': 'plain answer line'}],
+                answer_items=[{'ref': 'tossup-1', 'text': 'ANSWER: _Marked Up_'}])
+        self.assertIsNone(err)
+        calls = client.messages.create.call_args_list
+        self.assertEqual(len(calls), 2)
+        self.assertIn('plain answer line', calls[0][1]['messages'][0]['content'])
+        self.assertIn('ANSWER: _Marked Up_', calls[1][1]['messages'][0]['content'])
 
 
 class YappHtmlConversionTests(TestCase):
@@ -3765,3 +4277,114 @@ class CompareRepeatsTests(TestCase):
             {'question': 'Nothing in common.', 'answer': 'ANSWER: Zzz Unrelated Thing'}]}
         findings = self._compare(payload).context['findings']
         self.assertEqual(findings, [])
+
+
+class EditorStampTests(TestCase):
+    """Regression: binding the edit form with instance= must not wipe the
+    bookkeeping fields (editor, edited_date, question_history, created_date)
+    that only save_question manages."""
+
+    def setUp(self):
+        self.ou = User.objects.create_user('es_owner', password='pw', email='o@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='es dist')
+        self.entry = DistributionEntry.objects.create(
+            distribution=self.dist, category='History', subcategory='European')
+        self.qt, _ = QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.qset = QuestionSet.objects.create(
+            name='ES Set', date=timezone.now(), host='', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.tu = Tossup(
+            question_set=self.qset, tossup_text='Some question text here.',
+            tossup_answer='_answer_', category=self.entry, author=self.owner,
+            question_type=self.qt)
+        self.tu.save_question(QUESTION_CREATE, self.owner)
+        self.client.login(username='es_owner', password='pw')
+
+    def _post_edit(self, **overrides):
+        data = {
+            'tossup_text': self.tu.tossup_text,
+            'tossup_answer': self.tu.tossup_answer,
+            'category': str(self.entry.id),
+            'author': str(self.owner.id),
+            'question_type': str(self.qt.id),
+        }
+        data.update(overrides)
+        return self.client.post('/edit_tossup/{0}/'.format(self.tu.id), data)
+
+    def test_marking_edited_stamps_editor(self):
+        resp = self._post_edit(edited='on')
+        self.assertEqual(resp.status_code, 200)
+        t = Tossup.objects.get(id=self.tu.id)
+        self.assertTrue(t.edited)
+        self.assertEqual(t.editor_id, self.owner.id)
+        self.assertIsNotNone(t.edited_date)
+
+    def test_resave_keeps_editor_history_and_created_date(self):
+        self._post_edit(edited='on')
+        t = Tossup.objects.get(id=self.tu.id)
+        qh_id, created = t.question_history_id, t.created_date
+        self.assertIsNotNone(qh_id)
+
+        resp = self._post_edit(edited='on', tossup_text='Changed question text here.')
+        self.assertEqual(resp.status_code, 200)
+        t = Tossup.objects.get(id=self.tu.id)
+        self.assertEqual(t.editor_id, self.owner.id)
+        self.assertIsNotNone(t.edited_date)
+        self.assertEqual(t.question_history_id, qh_id)
+        self.assertEqual(t.created_date, created)
+        # No orphaned history chain was spawned by the re-save.
+        self.assertEqual(QuestionHistory.objects.count(), 1)
+
+    def test_edited_and_proofread_in_one_save_stamps_both(self):
+        resp = self._post_edit(edited='on', proofread='on')
+        self.assertEqual(resp.status_code, 200)
+        t = Tossup.objects.get(id=self.tu.id)
+        self.assertEqual(t.editor_id, self.owner.id)
+        self.assertEqual(t.proofreader_id, self.owner.id)
+
+
+class GrammarTextsTests(TestCase):
+    """JSON question-prose endpoint for the client-side Harper grammar check."""
+
+    def setUp(self):
+        self.ou = User.objects.create_user('gt_owner', password='pw', email='o@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.other_u = User.objects.create_user('gt_other', password='pw')
+        self.dist = Distribution.objects.create(name='gt dist')
+        self.entry = DistributionEntry.objects.create(
+            distribution=self.dist, category='Literature', subcategory='European')
+        self.qset = QuestionSet.objects.create(
+            name='GT Set', date=timezone.now(), host='', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.tu = Tossup.objects.create(
+            author=self.owner, question_set=self.qset, question_number=1,
+            tossup_text='This is a a test question.', tossup_answer='_Donatello_',
+            category=self.entry, created_date=datetime.now(), last_changed_date=datetime.now())
+        self.bs = Bonus.objects.create(
+            author=self.owner, question_set=self.qset, question_number=1,
+            leadin='A leadin.', part1_text='Part one.', part1_answer='_one_',
+            part2_text='Part two.', part2_answer='_two_',
+            part3_text='Part three.', part3_answer='_three_', category=self.entry,
+            created_date=datetime.now(), last_changed_date=datetime.now())
+
+    def test_member_gets_question_prose(self):
+        self.client.login(username='gt_owner', password='pw')
+        resp = self.client.get('/grammar_texts/{0}/'.format(self.qset.id))
+        self.assertEqual(resp.status_code, 200)
+        data = json.loads(resp.content)
+        self.assertTrue(data['ok'])
+        self.assertEqual(len(data['questions']), 2)
+        tu = next(q for q in data['questions'] if q['qtype'] == 'tossup')
+        bs = next(q for q in data['questions'] if q['qtype'] == 'bonus')
+        self.assertEqual(tu['fields'][0]['text'], 'This is a a test question.')
+        self.assertEqual(tu['edit_url'], '/edit_tossup/{0}/'.format(self.tu.id))
+        self.assertEqual([f['name'] for f in bs['fields']],
+                         ['Leadin', 'Part 1', 'Part 2', 'Part 3'])
+        # Answer lines are prose-free zones and must not be included.
+        self.assertNotIn('Donatello', json.dumps(data['questions'][0]['fields']))
+
+    def test_non_member_rejected(self):
+        self.client.login(username='gt_other', password='pw')
+        resp = self.client.get('/grammar_texts/{0}/'.format(self.qset.id))
+        self.assertEqual(resp.status_code, 403)

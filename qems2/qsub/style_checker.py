@@ -8,6 +8,7 @@ common pool of rules on or off.
 Each issue is a dict:
     {'severity': 'error'|'warning'|'info',
      'message': str,
+     'message_html': str,  # OPTIONAL: pre-escaped rich rendering of `message`
      'code': str,          # stable rule id
      'token': str,         # distinguishes issues of the same code in a question
      'fix': {...}}         # OPTIONAL, server-side only: how to auto-apply it
@@ -17,6 +18,7 @@ present) is applied server-side by apply_fix(); it is never sent by the client.
 """
 
 import re
+from html import escape as _escape
 
 from .utils import strip_markup
 from .pron_dict import suggest_guides, guide_opener_at
@@ -38,6 +40,7 @@ RULE_LABELS = [
     ('double_space', 'Double spaces'),
     ('space_before_punct', 'Space before punctuation'),
     ('comma_no_space', 'Missing space after a comma'),
+    ('quote_punct', 'Period/comma outside closing quotes'),
     ('ellipsis', 'Ellipsis (… instead of ...)'),
     ('double_hyphen', 'Em dash (— instead of --)'),
     ('number_range', 'En dash for number ranges (1990–1995)'),
@@ -64,8 +67,8 @@ ALL_CODES = [c for c, _ in RULE_LABELS]
 # of these off (e.g. teams that allow contractions).
 GUIDE_CODES = {
     'minkowski': set(ALL_CODES),
-    'generic': {'double_space', 'space_before_punct', 'comma_no_space', 'ellipsis',
-                'double_hyphen', 'unbalanced_parens', 'repeated_word', 'underline'},
+    'generic': {'double_space', 'space_before_punct', 'comma_no_space', 'quote_punct',
+                'ellipsis', 'double_hyphen', 'unbalanced_parens', 'repeated_word', 'underline'},
 }
 
 
@@ -84,8 +87,10 @@ def _enabled_codes(guide, disabled):
     return GUIDE_CODES.get(guide, GUIDE_CODES[DEFAULT_GUIDE]) - set(disabled or ())
 
 
-def _issue(severity, message, code, token='', fix=None):
+def _issue(severity, message, code, token='', fix=None, message_html=''):
     d = {'severity': severity, 'message': message, 'code': code, 'token': token}
+    if message_html:
+        d['message_html'] = message_html
     if fix:
         d['fix'] = fix
     return d
@@ -95,7 +100,7 @@ def _plain(text):
     """Readable plain text: strip HTML/smart quotes (strip_markup) plus QEMS
     markup characters, so style checks see the words as read."""
     t = strip_markup(text or '')
-    for marker in ('\\S', '\\s', '\\B'):
+    for marker in ('\\S', '\\s', '\\B', '\\P'):
         t = t.replace(marker, '')
     return t.replace('_', '').replace('~', '')
 
@@ -128,6 +133,19 @@ def _mechanical_issues(label, raw, field):
     if no_power.count('(') != no_power.count(')'):
         issues.append(_issue(WARNING, '{0}: unbalanced parentheses'.format(label),
                              'unbalanced_parens', label))
+    # American style puts periods and commas INSIDE a closing double quote:
+    # «..."end of sentence".» should be «..."end of sentence."» Only . and ,
+    # are checked — colons, semicolons and question marks belong outside.
+    # Single quotes are skipped (a possessive like «writers'.» is correct).
+    m = re.search(r'["”]([.,])', no_power)
+    if m:
+        issues.append(_issue(
+            WARNING,
+            '{0}: "{1}" after a closing quote — American style puts periods and '
+            'commas inside the quotes'.format(label, m.group(1)),
+            'quote_punct', label,
+            {'field': field, 'op': 'regex',
+             'pattern': r'(["”]|&quot;|&#x22;|&#34;)([.,])', 'repl': r'\2\1'}))
     return issues
 
 
@@ -210,8 +228,19 @@ def _answer_alt_issues(label, raw_answer):
         return []
     shown = missing[:6]
     suffix = '' if len(missing) <= len(shown) else ' …'
-    return [_issue(INFO, '{0}: also accept {1}{2}'.format(label, ' / '.join(shown), suffix),
-                   'answer_alts', '{0}|{1}'.format(label, head_key))]
+    # Standard answer-line phrasing: names joined by "; or", each shown the way
+    # it would appear on the line — underlined + bold, and italicized too when
+    # the primary answer is an italicized title.
+    italic = '~' in (raw_answer or '').split('[', 1)[0]
+
+    def fmt(name):
+        h = '<u><b>{0}</b></u>'.format(_escape(name))
+        return '<i>{0}</i>'.format(h) if italic else h
+
+    return [_issue(INFO, '{0}: also accept {1}{2}'.format(label, '; or '.join(shown), suffix),
+                   'answer_alts', '{0}|{1}'.format(label, head_key),
+                   message_html='{0}: also accept {1}{2}'.format(
+                       _escape(label), '; or '.join(fmt(n) for n in shown), suffix))]
 
 
 # Prepositions that introduce a trailing phrase the identifier can sit in. When
@@ -363,7 +392,7 @@ def check_bonus(b, guide=DEFAULT_GUIDE, disabled=None):
 # QEMS inline markup that interleaves with words: underline/italic chars and the
 # backslash escape tokens. We ignore these when locating a term so a clued term
 # wrapped in markup (e.g. "_Goethe_") still matches and the guide lands after it.
-_MARKUP_TOKENS = ('\\S', '\\s', '\\B')
+_MARKUP_TOKENS = ('\\S', '\\s', '\\B', '\\P')
 
 
 def _strip_markup_indexed(text):
@@ -387,16 +416,23 @@ def _strip_markup_indexed(text):
 
 def _insert_guide(text, term, pron):
     """Insert ``("RESPELLING")`` after the first occurrence of `term` that isn't
-    already followed by a guide. Matching ignores QEMS inline markup so an
-    underlined/italicized term still matches, and the guide is placed after any
-    closing markup. Returns the text unchanged if no occurrence is found."""
+    already followed by a guide, wrapping the term in ``\\P...\\P`` so the guide
+    is tied to exactly the word(s) it covers. Matching ignores QEMS inline
+    markup so an underlined/italicized term still matches, and the guide is
+    placed after any closing markup (the \\P wrap is skipped there — it would
+    misnest with the other markup). Returns the text unchanged if no occurrence
+    is found."""
     guide = ' ("{0}")'.format(pron)
     clean, idx_map = _strip_markup_indexed(text)
     pat = re.compile(r'(?<!\w)' + re.escape(term) + r'(?!\w)', re.IGNORECASE)
     for m in pat.finditer(clean):
+        start = idx_map[m.start()]
         pos = idx_map[m.end()]  # raw index after the term (past any closing markup)
         if guide_opener_at(text, pos):
             continue
+        raw_term = text[start:pos]
+        if raw_term.lower() == m.group(0).lower():
+            return text[:start] + '\\P' + raw_term + '\\P' + guide + text[pos:]
         return text[:pos] + guide + text[pos:]
     return text
 

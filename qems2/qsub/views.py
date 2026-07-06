@@ -10,6 +10,7 @@ import unicodecsv
 import time
 import datetime
 import sys
+import unicodedata
 from collections import defaultdict
 
 from docx import Document
@@ -462,8 +463,8 @@ def create_question_set (request):
             dist_entries = dist.distributionentry_set.all()
             for entry in dist_entries:
                 set_wide_entry = SetWideDistributionEntry()
-                set_wide_entry.num_bonuses = question_set.num_packets * entry.min_tossups
-                set_wide_entry.num_tossups = question_set.num_packets * entry.min_bonuses
+                set_wide_entry.num_tossups = question_set.num_packets * entry.min_tossups
+                set_wide_entry.num_bonuses = question_set.num_packets * entry.min_bonuses
                 set_wide_entry.question_set = question_set
                 set_wide_entry.dist_entry = entry
                 set_wide_entry.save()
@@ -4227,7 +4228,7 @@ def move_bonus(request, q_set_id, bonus_id):
                                  'message': message,
                                  'message_class': message_class})
 
-def add_qems_formatted_runs(paragraph, text, bold=False, is_answer=False):
+def add_qems_formatted_runs(paragraph, text, bold=False, is_answer=False, smart_quotes=False):
     """Convert QEMS markup to python-docx runs on a paragraph.
 
     Markup rules (mirroring get_formatted_question_html in utils.py):
@@ -4237,6 +4238,7 @@ def add_qems_formatted_runs(paragraph, text, bold=False, is_answer=False):
       (text)   → bold (pronunciation guide)
       (*)      → bold (power mark)
       \\s / \\S  → subscript / superscript (approximated with smaller font)
+      \\Ptext\\P → pronunciation-guide target word(s): rendered in a teal color
     """
     if text is None:
         return paragraph
@@ -4245,6 +4247,8 @@ def add_qems_formatted_runs(paragraph, text, bold=False, is_answer=False):
     # YAPP import). Word gets raw characters, not a browser, so decode entities
     # first or they'd render literally as "&#x27;".
     text = html.unescape(text)
+    if smart_quotes:
+        text = smarten_quotes(text)
 
     allow_underlines = True
     allow_parens = True
@@ -4259,6 +4263,7 @@ def add_qems_formatted_runs(paragraph, text, bold=False, is_answer=False):
     sub_flag = False
     super_flag = False
     bold_flag = False
+    pg_flag = False
     need_restore_italics = False
 
     if allow_powers:
@@ -4276,7 +4281,7 @@ def add_qems_formatted_runs(paragraph, text, bold=False, is_answer=False):
     cur_sub = False
     cur_super = False
 
-    def flush(b=cur_bold, i=cur_italic, u=cur_underline, sub=cur_sub, sup=cur_super):
+    def flush(b=cur_bold, i=cur_italic, u=cur_underline, sub=cur_sub, sup=cur_super, pg=False):
         nonlocal buf
         if buf:
             run = paragraph.add_run(buf)
@@ -4287,13 +4292,17 @@ def add_qems_formatted_runs(paragraph, text, bold=False, is_answer=False):
                 run.font.subscript = True
             if sup:
                 run.font.superscript = True
+            if pg:
+                # Pronunciation-guide target word(s): a teal tint, matching the
+                # web view's .pg-target color.
+                run.font.color.rgb = RGBColor(0x0B, 0x72, 0x85)
             buf = ""
 
     def current_state():
         b = bold or power_flag or parens_flag or underline_flag or bold_flag
         i = italics_flag
         u = underline_flag or prompt_flag
-        return b, i, u, sub_flag, super_flag
+        return b, i, u, sub_flag, super_flag, pg_flag
 
     index = 0
     prev = ""
@@ -4303,11 +4312,11 @@ def add_qems_formatted_runs(paragraph, text, bold=False, is_answer=False):
         c = text[index]
         next_c = text[index + 1] if index < len(text) - 1 else ""
 
-        new_bold, new_italic, new_underline, new_sub, new_sup = current_state()
+        new_bold, new_italic, new_underline, new_sub, new_sup, new_pg = current_state()
 
         # Power mark ((*) or (+))
         if index == power_index and power_flag:
-            flush(new_bold, new_italic, new_underline, new_sub, new_sup)
+            flush(new_bold, new_italic, new_underline, new_sub, new_sup, new_pg)
             run = paragraph.add_run(text[index:index + 3])
             run.bold = True
             power_flag = False
@@ -4317,7 +4326,7 @@ def add_qems_formatted_runs(paragraph, text, bold=False, is_answer=False):
 
         # Tildes → italic toggle
         if c == "~":
-            flush(new_bold, new_italic, new_underline, new_sub, new_sup)
+            flush(new_bold, new_italic, new_underline, new_sub, new_sup, new_pg)
             italics_flag = not italics_flag
             index += 1
             prev2, prev = prev, c
@@ -4325,7 +4334,7 @@ def add_qems_formatted_runs(paragraph, text, bold=False, is_answer=False):
 
         # Open paren (pronunciation guide)
         if c == "(" and allow_parens and prev != "\\":
-            flush(new_bold, new_italic, new_underline, new_sub, new_sup)
+            flush(new_bold, new_italic, new_underline, new_sub, new_sup, new_pg)
             if italics_flag:
                 need_restore_italics = True
                 italics_flag = False
@@ -4349,8 +4358,8 @@ def add_qems_formatted_runs(paragraph, text, bold=False, is_answer=False):
         # Close paren
         if c == ")" and allow_parens and prev != "\\":
             buf += ")"
-            new_b, new_i, new_u, new_sub2, new_sup2 = current_state()
-            flush(new_b, new_i, new_u, new_sub2, new_sup2)
+            new_b, new_i, new_u, new_sub2, new_sup2, new_pg2 = current_state()
+            flush(new_b, new_i, new_u, new_sub2, new_sup2, new_pg2)
             if not power_flag:
                 parens_flag = False
             if need_restore_italics:
@@ -4395,6 +4404,16 @@ def add_qems_formatted_runs(paragraph, text, bold=False, is_answer=False):
                 buf = buf[:-1]
             flush(*current_state())
             bold_flag = not bold_flag
+            index += 1
+            prev2, prev = prev, c
+            continue
+
+        # Pronunciation-guide target toggle: \P
+        if c == "P" and prev == "\\" and prev2 != "\\":
+            if buf.endswith("\\"):
+                buf = buf[:-1]
+            flush(*current_state())
+            pg_flag = not pg_flag
             index += 1
             prev2, prev = prev, c
             continue
@@ -4566,6 +4585,7 @@ def export_question_set(request, qset_id, output_format):
                 include_editors = _export_opt('editors', True)
                 include_ids = _export_opt('ids', True)
                 include_credits = _export_opt('credits', False)
+                smart_quotes = _export_opt('smartq', False)
 
                 def question_meta(q):
                     """Attribution line in the standard QEMS packet format:
@@ -4725,10 +4745,11 @@ def export_question_set(request, qset_id, output_format):
                     p.paragraph_format.keep_together = True
                     p.paragraph_format.space_after = Pt(10)
                     p.add_run(f"{num}. ").bold = True
-                    add_qems_formatted_runs(p, safe_text(tossup.tossup_text))
+                    add_qems_formatted_runs(p, safe_text(tossup.tossup_text), smart_quotes=smart_quotes)
                     _line_break(p)
                     p.add_run("ANSWER: ").bold = True
-                    add_qems_formatted_runs(p, safe_text(tossup.tossup_answer), is_answer=True)
+                    add_qems_formatted_runs(p, safe_text(tossup.tossup_answer), is_answer=True,
+                                            smart_quotes=smart_quotes)
                     meta = question_meta(tossup)
                     if meta:
                         _line_break(p)
@@ -4743,7 +4764,7 @@ def export_question_set(request, qset_id, output_format):
                     p.paragraph_format.keep_together = True
                     p.paragraph_format.space_after = Pt(10)
                     p.add_run(f"{num}. ").bold = True
-                    add_qems_formatted_runs(p, safe_text(bonus.leadin))
+                    add_qems_formatted_runs(p, safe_text(bonus.leadin), smart_quotes=smart_quotes)
                     for part_num in range(1, 4):
                         part_text = getattr(bonus, f'part{part_num}_text', None)
                         part_answer = getattr(bonus, f'part{part_num}_answer', None)
@@ -4752,10 +4773,11 @@ def export_question_set(request, qset_id, output_format):
                             diff_tag = part_diff if part_diff else ''
                             _line_break(p)
                             p.add_run(f"[10{diff_tag}] ").bold = True
-                            add_qems_formatted_runs(p, safe_text(part_text))
+                            add_qems_formatted_runs(p, safe_text(part_text), smart_quotes=smart_quotes)
                             _line_break(p)
                             p.add_run("ANSWER: ").bold = True
-                            add_qems_formatted_runs(p, safe_text(part_answer), is_answer=True)
+                            add_qems_formatted_runs(p, safe_text(part_answer), is_answer=True,
+                                                    smart_quotes=smart_quotes)
                     meta = question_meta(bonus)
                     if meta:
                         _line_break(p)
@@ -4783,7 +4805,8 @@ def export_question_set(request, qset_id, output_format):
                         line = document.add_paragraph()
                         line.paragraph_format.space_after = Pt(0)
                         line.add_run('{0} {1}: '.format(label, num or '?')).bold = True
-                        add_qems_formatted_runs(line, safe_text(answer), is_answer=True)
+                        add_qems_formatted_runs(line, safe_text(answer), is_answer=True,
+                                                smart_quotes=smart_quotes)
                     document.add_paragraph().paragraph_format.space_after = Pt(8)
 
                 def save_docx_bytes(document):
@@ -6234,6 +6257,7 @@ def packet_grid(request, qset_id):
                 'category': html.unescape(str(question.category)) if question.category else '',
                 'edit_url': '{0}{1}/'.format(edit_url, question.id),
                 'edited': question.edited,
+                'proofread': question.proofread,
             }
         rows = []
         for number in range(1, max_num + 1):
@@ -6914,6 +6938,46 @@ def reorder_packet_questions(request):
     return HttpResponse(json.dumps({'success': success, 'message': message}))
 
 
+def _swap_search_norm(text):
+    """Normalize question text for swap-dialog searching: decode HTML entities,
+    drop tags and QEMS markup characters, strip diacritics, collapse whitespace,
+    casefold. Makes "marc jacobs" match an answer stored as "Marc _Jacobs_" and
+    "republique" match "République"."""
+    t = html.unescape(text or '')
+    t = re.sub(r'<[^>]+>', '', t)
+    t = t.replace('\\P', '').replace('_', '').replace('~', '')
+    t = unicodedata.normalize('NFKD', t)
+    t = ''.join(ch for ch in t if not unicodedata.combining(ch))
+    return re.sub(r'\s+', ' ', t).casefold().strip()
+
+
+def _swap_search_candidates(model, qset, question_type, search, exclude_id=None):
+    """The set's questions matching a swap-dialog search. Matching happens in
+    Python on normalized text (see _swap_search_norm) rather than SQL icontains,
+    which fails whenever a query spans stored markup, an HTML entity, or a
+    pronunciation guide. Every search word must appear somewhere in the
+    question's combined answer/text; capped at 200 results."""
+    terms = _swap_search_norm(search).split()
+    qs = (model.objects.filter(question_set=qset)
+          .select_related('category', 'packet')
+          .order_by('packet__packet_name', 'question_number'))
+    out = []
+    for q in qs:
+        if q.id == exclude_id:
+            continue
+        if question_type == 'tossup':
+            fields = (q.tossup_answer, q.tossup_text)
+        else:
+            fields = (q.leadin, q.part1_text, q.part1_answer,
+                      q.part2_text, q.part2_answer, q.part3_text, q.part3_answer)
+        hay = _swap_search_norm(' '.join(f for f in fields if f))
+        if all(t in hay for t in terms):
+            out.append(q)
+            if len(out) >= 200:
+                break
+    return out
+
+
 @login_required
 def swap_candidates(request):
     """JSON list of questions that could go in a slot. With a source
@@ -6945,23 +7009,13 @@ def swap_candidates(request):
     if not (qset.is_owner(user) or user in qset.editor.all()):
         return HttpResponse(json.dumps({'error': 'You are not authorized to swap questions in this set!'}))
 
-    def text_filter_for(term):
-        if question_type == 'tossup':
-            return Q(tossup_answer__icontains=term) | Q(tossup_text__icontains=term)
-        return (Q(leadin__icontains=term) |
-                Q(part1_text__icontains=term) | Q(part1_answer__icontains=term) |
-                Q(part2_text__icontains=term) | Q(part2_answer__icontains=term) |
-                Q(part3_text__icontains=term) | Q(part3_answer__icontains=term))
-
     scope = request.GET.get('scope', 'leaf')
     if scope not in ('leaf', 'sub', 'top'):
         scope = 'leaf'
 
     if fill_mode:
         if search:
-            candidates = (model.objects.filter(question_set=qset).filter(text_filter_for(search))
-                          .select_related('category', 'packet')
-                          .order_by('packet__packet_name', 'question_number')[:200])
+            candidates = _swap_search_candidates(model, qset, question_type, search)
             source_label = 'search: "{0}"'.format(search)
         else:
             # Default to the unpacketized pool — the questions you'd most want
@@ -6970,10 +7024,8 @@ def swap_candidates(request):
                           .select_related('category', 'packet').order_by('id')[:200])
             source_label = 'unpacketized'
     elif search:
-        candidates = (model.objects.filter(question_set=qset).filter(text_filter_for(search))
-                      .exclude(id=question.id)
-                      .select_related('category', 'packet')
-                      .order_by('packet__packet_name', 'question_number')[:200])
+        candidates = _swap_search_candidates(model, qset, question_type, search,
+                                             exclude_id=question.id)
         source_label = 'search: "{0}"'.format(search)
     else:
         entry = question.category
@@ -7397,7 +7449,13 @@ def _is_ai_user(user):
 
 def _clean_for_ai(text):
     """Strip QEMS markup and decode entities so the AI sees readable prose."""
-    return re.sub(r'[_~]', '', html.unescape(text or '')).strip()
+    return re.sub(r'\\P|[_~]', '', html.unescape(text or '')).strip()
+
+
+def _ai_answer_line(text):
+    """Decode entities but KEEP the QEMS markup (underscores/tildes) so the AI
+    can see which words are required and mirror the set's answer-line format."""
+    return html.unescape(text or '').strip()
 
 
 def _ai_grammar_ref_meta(qset):
@@ -7426,10 +7484,17 @@ def _ai_grammar_findings_json(qset):
     for f in found:
         ref = '{0}-{1}'.format(f.question_type, f.question_id)
         meta = refs.get(ref, {})
-        out.append({'id': f.id, 'kind': f.kind, 'severity': f.severity, 'excerpt': f.excerpt,
-                    'suggestion': f.suggestion, 'explanation': f.explanation,
-                    'edit_url': meta.get('edit_url', ''),
-                    'label': meta.get('label', ref)})
+        entry = {'id': f.id, 'kind': f.kind, 'severity': f.severity, 'excerpt': f.excerpt,
+                 'suggestion': f.suggestion, 'explanation': f.explanation,
+                 'edit_url': meta.get('edit_url', ''),
+                 'label': meta.get('label', ref)}
+        if f.kind == 'answer':
+            # Render the suggestion's answer-line markup (_required_, ~titles~)
+            # the same way answer lines render elsewhere. Escaped first: the
+            # suggestion is model output, only the markup tags may be HTML.
+            entry['suggestion_html'] = get_formatted_question_html(
+                html.escape(f.suggestion or ''), True, False, False, False)
+        out.append(entry)
     return out
 
 
@@ -7449,19 +7514,25 @@ def ai_grammar_check(request, qset_id):
     except QuestionSet.DoesNotExist:
         return HttpResponse(json.dumps({'ok': False, 'message': 'Set not found.'}))
 
-    items = []
+    # `items` (markup stripped) feeds the grammar pass; `answer_items` keeps the
+    # answer-line markup so the alternate-answer pass sees what's underlined and
+    # can format its suggestions the same way.
+    items, answer_items = [], []
     for tu in qset.tossup_set.select_related('packet').order_by('packet__packet_name', 'question_number'):
-        text = _clean_for_ai(tu.tossup_text) + '\nANSWER: ' + _clean_for_ai(tu.tossup_answer)
-        items.append({'ref': 'tossup-{0}'.format(tu.id), 'text': text})
+        ref = 'tossup-{0}'.format(tu.id)
+        question = _clean_for_ai(tu.tossup_text)
+        items.append({'ref': ref, 'text': question + '\nANSWER: ' + _clean_for_ai(tu.tossup_answer)})
+        answer_items.append({'ref': ref, 'text': question + '\nANSWER: ' + _ai_answer_line(tu.tossup_answer)})
     for b in qset.bonus_set.select_related('packet').order_by('packet__packet_name', 'question_number'):
-        parts = [_clean_for_ai(b.leadin),
-                 _clean_for_ai(b.part1_text), 'ANSWER: ' + _clean_for_ai(b.part1_answer),
-                 _clean_for_ai(b.part2_text), 'ANSWER: ' + _clean_for_ai(b.part2_answer),
-                 _clean_for_ai(b.part3_text), 'ANSWER: ' + _clean_for_ai(b.part3_answer)]
-        items.append({'ref': 'bonus-{0}'.format(b.id),
-                      'text': '\n'.join(p for p in parts if p.strip())})
+        ref = 'bonus-{0}'.format(b.id)
+        for dest, answer in ((items, _clean_for_ai), (answer_items, _ai_answer_line)):
+            parts = [_clean_for_ai(b.leadin),
+                     _clean_for_ai(b.part1_text), 'ANSWER: ' + answer(b.part1_answer),
+                     _clean_for_ai(b.part2_text), 'ANSWER: ' + answer(b.part2_answer),
+                     _clean_for_ai(b.part3_text), 'ANSWER: ' + answer(b.part3_answer)]
+            dest.append({'ref': ref, 'text': '\n'.join(p for p in parts if p.strip())})
 
-    findings, error = ai.grammar_check_questions(items)
+    findings, error = ai.grammar_check_questions(items, answer_items=answer_items)
     if error:
         return HttpResponse(json.dumps({'ok': False, 'message': error}))
 
@@ -7593,6 +7664,78 @@ def dismiss_style_issue(request):
 
 
 @login_required
+def question_style_issues(request):
+    """JSON style-check issues for a single question — the panel on the edit
+    tossup/bonus pages. Runs the same rules as /style_check/ (default guide),
+    honoring the set's disabled rules and both per-question and set-wide
+    dismissals."""
+    from . import style_checker
+    user = request.user.writer
+    qtype = request.GET.get('question_type', '')
+    qid = request.GET.get('question_id', '')
+    if not qid.isdigit():
+        return HttpResponse(json.dumps({'ok': False, 'error': 'No such question'}), status=404)
+    question = _style_question(qtype, qid)
+    if question is None:
+        return HttpResponse(json.dumps({'ok': False, 'error': 'No such question'}), status=404)
+    qset = question.question_set
+    if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+        return HttpResponse(json.dumps({'ok': False, 'error': 'Not authorized'}), status=403)
+
+    guide = request.GET.get('guide', style_checker.DEFAULT_GUIDE)
+    if guide not in style_checker.guide_keys():
+        guide = style_checker.DEFAULT_GUIDE
+    disabled = qset.disabled_style_rule_set()
+    found = (style_checker.check_tossup(question, guide, disabled) if qtype == 'tossup'
+             else style_checker.check_bonus(question, guide, disabled))
+
+    dismissed = set(StyleIssueDismissal.objects.filter(
+        question_type=qtype, question_id=question.id).values_list('code', 'token'))
+    rule_dismissed = set(StyleRuleDismissal.objects.filter(
+        question_set=qset).values_list('code', 'token'))
+
+    issues = []
+    for i in found:
+        key = (i['code'], i.get('token', ''))
+        if key in dismissed or key in rule_dismissed:
+            continue
+        issues.append({'severity': i['severity'], 'message': i['message'],
+                       'message_html': i.get('message_html', ''),
+                       'code': i['code'], 'token': i.get('token', ''),
+                       'fixable': 'fix' in i})
+    return HttpResponse(json.dumps({'ok': True, 'issues': issues, 'guide': guide,
+                                    'qset_id': qset.id}))
+
+
+@login_required
+def grammar_texts(request, qset_id):
+    """JSON dump of a set's question prose for the client-side Harper grammar
+    check on /style_check/. The linting itself happens in the browser (WASM);
+    this just supplies the text. Answer lines are omitted — they aren't prose."""
+    user = request.user.writer
+    qset = QuestionSet.objects.get(id=qset_id)
+    if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+        return HttpResponse(json.dumps({'ok': False, 'error': 'Not authorized'}), status=403)
+
+    questions = []
+    for tu in qset.tossup_set.select_related('packet').order_by('packet__packet_name', 'question_number'):
+        questions.append({'qtype': 'tossup', 'id': tu.id,
+                          'label': _grid_answer_preview(tu.tossup_answer),
+                          'edit_url': '/edit_tossup/{0}/'.format(tu.id),
+                          'fields': [{'name': 'Text', 'text': tu.tossup_text or ''}]})
+    for b in qset.bonus_set.select_related('packet').order_by('packet__packet_name', 'question_number'):
+        fields = [{'name': 'Leadin', 'text': b.leadin or ''}]
+        for n in (1, 2, 3):
+            fields.append({'name': 'Part {0}'.format(n),
+                           'text': getattr(b, 'part{0}_text'.format(n)) or ''})
+        questions.append({'qtype': 'bonus', 'id': b.id,
+                          'label': _grid_answer_preview(b.part1_answer, 30),
+                          'edit_url': '/edit_bonus/{0}/'.format(b.id),
+                          'fields': fields})
+    return HttpResponse(json.dumps({'ok': True, 'questions': questions}))
+
+
+@login_required
 def live_char_count(request):
     """Character count for in-progress edit text, using the set's counting
     rules (pronunciation guides / moderator instructions excluded as configured).
@@ -7659,6 +7802,93 @@ def save_tag_selection(request, qset, question, dist_entry, is_tossup):
             relation.add(question)
         else:
             relation.remove(question)
+
+@login_required
+def category_problems(request, qset_id):
+    """Questions whose category is missing or belongs to a different
+    distribution than the set's current one (e.g. after switching
+    distributions, or moving questions between sets), with bulk reassignment
+    to a valid category. Any member can view; owners/editors can reassign."""
+    user = request.user.writer
+    qset = QuestionSet.objects.get(id=qset_id)
+    if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+        return render(request, 'failure.html',
+                      {'message': 'You are not authorized to view this set!',
+                       'message_class': 'alert-box alert'})
+    can_assign = qset.is_owner(user) or user in qset.editor.all()
+
+    valid_entries = (list(qset.distribution.distributionentry_set.all()
+                          .order_by('category', 'subcategory'))
+                     if qset.distribution_id else [])
+
+    message = ''
+    message_class = ''
+    if request.method == 'POST':
+        if not can_assign:
+            message = 'Only owners and editors can reassign categories.'
+            message_class = 'alert-box alert'
+        else:
+            entry = None
+            raw_entry = request.POST.get('category', '')
+            if raw_entry.isdigit() and qset.distribution_id:
+                # The target must be a category of THIS set's distribution.
+                entry = qset.distribution.distributionentry_set.filter(id=int(raw_entry)).first()
+            refs = request.POST.getlist('q')
+            if entry is None:
+                message = 'Pick a category to assign.'
+                message_class = 'alert-box alert'
+            elif not refs:
+                message = 'Select one or more questions first.'
+                message_class = 'alert-box alert'
+            else:
+                changed = 0
+                for ref in refs:
+                    qtype, _, qid = ref.partition('-')
+                    model = Tossup if qtype == 'tossup' else Bonus if qtype == 'bonus' else None
+                    if model is None or not qid.isdigit():
+                        continue
+                    q = model.objects.filter(id=int(qid), question_set=qset).first()
+                    if q is None:
+                        continue
+                    q.category = entry
+                    q.save()
+                    changed += 1
+                message = 'Assigned {0} question(s) to {1}.'.format(changed, html.unescape(str(entry)))
+                message_class = 'alert-box success'
+
+    problems = []
+
+    def scan(model, qtype, answer_of):
+        for q in (model.objects.filter(question_set=qset)
+                  .select_related('category', 'packet', 'author__user')
+                  .order_by('packet__packet_name', 'question_number')):
+            entry = q.category
+            if entry is not None and entry.distribution_id == qset.distribution_id:
+                continue
+            problems.append({
+                'ref': '{0}-{1}'.format(qtype, q.id),
+                'type': qtype,
+                'answer': answer_of(q),
+                'edit_url': '/edit_{0}/{1}/'.format(qtype, q.id),
+                'packet': q.packet.packet_name if q.packet_id else '',
+                'number': q.question_number or '',
+                'author': str(q.author),
+                'category': html.unescape(str(entry)) if entry else '',
+            })
+
+    scan(Tossup, 'tossup', lambda t: _grid_answer_preview(t.tossup_answer))
+    scan(Bonus, 'bonus', lambda b: ' / '.join(filter(None, [
+        _grid_answer_preview(b.part1_answer, 20),
+        _grid_answer_preview(b.part2_answer, 20),
+        _grid_answer_preview(b.part3_answer, 20)])))
+
+    return render(request, 'category_problems.html',
+                  {'qset': qset, 'user': user, 'problems': problems,
+                   'valid_entries': valid_entries, 'can_assign': can_assign,
+                   'message': message, 'message_class': message_class,
+                   'extra_crumb': 'Category Issues',
+                   'extra_crumb_url': '/category_problems/{0}/'.format(qset.id)})
+
 
 @login_required
 def category_tags(request, qset_id):
@@ -7869,6 +8099,7 @@ def _tossup_reading(tossup):
     HTML. `power_index` is the word containing the 15-point "(*)" mark and
     `superpower_index` the 20-point "(+)" mark (each -1 if unmarked)."""
     plain = strip_markup(tossup.tossup_text or '').replace('\n', ' ').strip()
+    plain = plain.replace('\\P', '')  # PG-target markers aren't read
     raw_words = [w for w in plain.split(' ') if w != '']
     power_index = -1
     superpower_index = -1

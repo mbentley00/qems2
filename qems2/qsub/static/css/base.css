@@ -220,7 +220,11 @@
     background-color: #fff;
     padding: 0.5em;
     min-height: 4.5em;
-    font-family: inherit;
+    /* A serif with a TRUE italic (not the sans stack's oblique): in the site
+       font an italic "\" leans upright and reads as "|", and the slant hides
+       where an italic run ends. Georgia's italic letterforms are unmistakable,
+       and it's closer to the Times New Roman the exported packets use. */
+    font-family: Georgia, 'Times New Roman', serif;
     font-size: 1em;
     line-height: 1.5;
     box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.1);
@@ -228,10 +232,16 @@
        a text caret so it reads as an editable text box, not a clickable thing. */
     cursor: text;
 }
-/* Italic glyphs slant/overhang to the right, which inflates the gap after them
-   so a single trailing space reads as two. Pull the following text back a hair
-   to keep one space looking like one space. */
-.rich-editor i, .rich-editor em { margin-right: -0.07em; }
+/* Make italic runs easy to see the edges of while editing: give them their own
+   ink color (no background box), and a hair of clearance after the run so the
+   last slanted glyph's overhang doesn't crowd the next character. */
+.rich-editor i, .rich-editor em {
+    color: #0b6aa8;
+    padding-right: 0.08em;
+}
+html[data-theme="dark"] .rich-editor i, html[data-theme="dark"] .rich-editor em {
+    color: #7cc0f4;
+}
 
 /* Stem / leadin / part-text fields start a bit taller than answer lines; they
    still grow with content as you type, so the empty box stays compact. */
@@ -323,8 +333,28 @@
 /* Home action buttons: a responsive grid that wraps to fit the screen, instead
    of Foundation's non-wrapping button-group row (which overflowed on mobile). */
 ul.button-group.home-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 8px; margin: 0 0 1.2rem; padding: 0; }
+/* Foundation's .button-group clearfix ::before/::after become anonymous grid
+   items — the ::before occupied the whole first cell, shoving the buttons
+   right and leaving a phantom gap. */
+ul.button-group.home-actions::before, ul.button-group.home-actions::after { content: none; }
 ul.button-group.home-actions > li { display: block; margin: 0; float: none; }
-ul.button-group.home-actions > li > .button { display: block; width: 100%; margin: 0; border-left: 0; border-radius: 8px; }
+/* Fill the cell (equal heights across the row) and center the label, so a
+   long label wrapping to two lines doesn't make one button taller. */
+ul.button-group.home-actions > li > .button { display: flex; align-items: center; justify-content: center;
+    text-align: center; width: 100%; height: 100%; margin: 0; border-left: 0; border-radius: 8px;
+    padding: 0.9rem 1rem; }
+/* Pronunciation-guide target word(s), marked \Pword\P in QEMS markup: a subtle
+   teal so it's clear exactly which words the following ("guide") covers. */
+.pg-target { color: #0b7285; }
+html[data-theme="dark"] .pg-target { color: #66c2cf; }
+/* "PGs above" mode (doc view): the guide moves into ruby text over its words
+   and the inline bold guide is hidden. The ruby annotation exists only after
+   the toggle first runs; rt stays hidden unless the mode class is on. */
+ruby.pg-ruby rt { display: none; font-size: 0.62em; font-weight: normal; color: #0b7285; }
+html[data-theme="dark"] ruby.pg-ruby rt { color: #66c2cf; }
+.doc-pg-above ruby.pg-ruby rt { display: revert; }
+.doc-pg-above strong.pg-inline { display: none; }
+
 /* Copy/export tools share the "Last modified" row, pushed to the right. In
    normal flow (not absolutely positioned) so they always align cleanly with
    each other and the row. Small text pills — Font Awesome glyphs don't render

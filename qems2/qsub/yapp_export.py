@@ -67,6 +67,10 @@ def qems_to_yapp_html(text):
             bold = not bold
             i += 2
             continue
+        if c == '\\' and nxt == 'P':
+            # Pronunciation-guide target marker — annotation only, dropped.
+            i += 2
+            continue
 
         # Power markers stay as literal text ((+) superpower, (*) power).
         if text[i:i + 3] == '(*)' or text[i:i + 3] == '(+)':

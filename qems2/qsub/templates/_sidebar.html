@@ -60,6 +60,8 @@
         <i class="fa fa-wand-magic-sparkles"></i> Style Check</a>
     <a class="app-nav-item{% if '/category_tags/' in request.path %} active{% endif %}" href="/category_tags/{{ nav_active.id }}/">
         <i class="fa fa-tag"></i> Category Tags</a>
+    <a class="app-nav-item{% if '/category_problems/' in request.path %} active{% endif %}" href="/category_problems/{{ nav_active.id }}/">
+        <i class="fa fa-triangle-exclamation"></i> Category Issues</a>
     <a class="app-nav-item{% if '/packetize_set/' in request.path or '/add_packets/' in request.path %} active{% endif %}" href="/packetize_set/{{ nav_active.id }}/">
         <i class="fa fa-layer-group"></i> Packets</a>
 

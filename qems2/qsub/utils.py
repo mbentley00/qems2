@@ -115,6 +115,7 @@ def get_answer_no_formatting(line):
     output = line
     output = strip_markup(output)
     # Strip unescaped markup, then turn "\_"/"\~" back into literal characters.
+    output = output.replace('\\P', '')
     output = re.sub(r'(?<!\\)_', '', output)
     output = re.sub(r'(?<!\\)~', '', output)
     output = output.replace('\\_', '_').replace('\\~', '~')
@@ -151,6 +152,7 @@ def get_formatted_question_html(line, allowUnderlines, allowParens, allowNewLine
     subScriptFlag = False
     superScriptFlag = False
     boldFlag = False
+    pgTargetFlag = False
     powerFlag = False
     powerIndex = -1
     promptFlag = False
@@ -250,6 +252,16 @@ def get_formatted_question_html(line, allowUnderlines, allowParens, allowNewLine
             else:
                 boldFlag = True
                 output += u"<b>"
+        elif (c == u"P" and previousChar == u"\\" and secondPreviousChar != u"\\"):
+            # \Pwords\P marks the word(s) a following pronunciation guide
+            # covers, e.g. Denis \PDiderot\P ("DID-er-OW").
+            output = output[:-1] # Get rid of the escape character
+            if (pgTargetFlag):
+                pgTargetFlag = False
+                output += u"</span>"
+            else:
+                pgTargetFlag = True
+                output += u"<span class=\"pg-target\">"
         else:
             if (c == u"_" and previousChar == u"\\" and secondPreviousChar != u"\\"):
                 # Escaped underscore: render a literal "_", not markup.
@@ -285,6 +297,9 @@ def get_formatted_question_html(line, allowUnderlines, allowParens, allowNewLine
 
     if (boldFlag):
         output += u"</b>"
+
+    if (pgTargetFlag):
+        output += u"</span>"
 
     if (underlineFlag):
         output += u"</b></u>"
@@ -360,6 +375,9 @@ def get_char_count_exclusions(line, ignore_pronunciation):
 
 def get_character_count(line, ignore_pronunciation):
     line = strip_moderator_instructions(line)
+    # \P markers only annotate which words a pronunciation guide covers; they
+    # are never read, so they never count.
+    line = line.replace('\\P', '')
     if not ignore_pronunciation:
         return len(line)
 
@@ -417,6 +435,10 @@ def special_character_imbalance_reason(line):
                 'tilde as "\\~".')
     if parensFlag:
         return ('An opening "(" is never closed. Escape a literal paren as "\\(".')
+    if len(re.findall(r'(?<!\\)\\P', line)) % 2:
+        return ('Unbalanced pronunciation-guide target markers ("\\P"): there is '
+                'an odd number of them. Wrap the word(s) a guide covers in a '
+                'pair, e.g. Denis \\PDiderot\\P ("DID-er-OW").')
     return None
 
 def are_special_characters_balanced(line):
@@ -434,6 +456,48 @@ def does_answerline_have_underlines(line):
 
 def convert_smart_quotes(line):
     return smart_str(line).translate(DOUBLE_QUOTE_MAP).translate(SINGLE_QUOTE_MAP)
+
+
+def _prev_significant_char(text, i):
+    """The nearest character before index i that isn't QEMS inline markup
+    (underscores, tildes, or a \\P/\\B/\\S/\\s toggle), so quote direction is
+    judged by the visible text: in `_"Ode"_` the quote still opens."""
+    j = i - 1
+    while j >= 0:
+        ch = text[j]
+        if ch in ('_', '~'):
+            j -= 1
+        elif ch in ('P', 'B', 'S', 's') and j > 0 and text[j - 1] == '\\':
+            j -= 2
+        else:
+            return ch
+    return ''
+
+
+def smarten_quotes(text):
+    """Convert straight quotes and apostrophes to typographic ("smart") ones,
+    picking opening or closing by context: a quote after a space/start/opening
+    bracket opens; anything else closes. A single quote after a letter is an
+    apostrophe (’), and a leading '90s-style apostrophe stays an apostrophe."""
+    if not text:
+        return text
+    openers = set(' \t\n([{-–—/')
+    out = []
+    for i, c in enumerate(text):
+        if c not in ('"', "'"):
+            out.append(c)
+            continue
+        prev = _prev_significant_char(text, i)
+        opening = (prev == '' or prev in openers or prev in ('‘', '“'))
+        if c == '"':
+            out.append('“' if opening else '”')
+        else:
+            nxt = text[i + 1] if i + 1 < len(text) else ''
+            if opening and not nxt.isdigit():
+                out.append('‘')
+            else:
+                out.append('’')
+    return ''.join(out)
 
 def strip_special_chars(line):
     return line.replace('_', '').replace('~', '')

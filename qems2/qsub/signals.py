@@ -61,6 +61,12 @@ def _question_url(question):
     return '{0}/{1}/{2}'.format(settings.BASE_URL, page, question.id)
 
 
+def _email_settings_url(qset):
+    """The recipient's per-set notification settings — a direct link so it's
+    easy to stop or adjust these e-mails."""
+    return '{0}/writer_question_set_settings/{1}/'.format(settings.BASE_URL, qset.id)
+
+
 def _commenter_display(user, user_name=''):
     """Friendly name for a comment's author: real name with username in quotes,
     just the username, or a bot's posted name."""
@@ -143,8 +149,9 @@ def email_on_comments(sender, instance, created, **kwargs):
             for c in thread:
                 lines.append('- {0}: {1}'.format(
                     _commenter_display(c.user, c.user_name), c.comment or ''))
+        settings_url = _email_settings_url(target.question_set)
         lines += ['', 'View and reply: ' + url,
-                  '', 'To opt out of these e-mails, change the settings in your profile.']
+                  '', 'Stop or adjust these e-mails (your settings for this set): ' + settings_url]
         body = '\n'.join(lines)
 
         # ---- HTML body ----
@@ -181,8 +188,9 @@ def email_on_comments(sender, instance, created, **kwargs):
                     'background:#008CBA;color:#fff;padding:9px 16px;border-radius:4px;'
                     'text-decoration:none;">View &amp; reply</a></p>'.format(esc(url)))
         html.append('<p style="color:#999;font-size:12px;">You\'re receiving this because you '
-                    'wrote or follow this question or set. To opt out, change the settings in '
-                    'your profile.</p></div>')
+                    'wrote or follow this question or set. '
+                    '<a href="{0}" style="color:#008CBA;">Change your e-mail preferences for '
+                    'this set</a>.</p></div>'.format(esc(settings_url)))
         html_body = '\n'.join(html)
 
         subject = 'New QEMS3 comment on "{0}" in {1}'.format(answer_label, qset)
@@ -219,8 +227,9 @@ def _email_on_new_question(instance):
         subject = "New QEMS3 question for " + str(instance) + " in set " + qset
         body = ('{0!s} has written a new question for the set {1!s}:\n\n{2!s}\n\n'
                 'View the question at {3!s}.\n\n'
-                'To opt out of these e-mails, change the settings in your profile.').format(
-            str(instance.author), qset, instance.to_plain_text(), _question_url(instance))
+                'Stop or adjust these e-mails (your settings for this set): {4!s}').format(
+            str(instance.author), qset, instance.to_plain_text(), _question_url(instance),
+            _email_settings_url(qset_obj))
         _send_mail_async(subject, body, mail_set)
     except Exception:
         print("Error sending mail for new question:", sys.exc_info()[0], sys.exc_info()[1])

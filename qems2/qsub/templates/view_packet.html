@@ -59,6 +59,7 @@
         {% if comment_count %}<a href="#" id="toggle-comments" class="button tiny secondary"><i class="fa fa-comment"></i> Comments ({{ comment_count }})</a>{% endif %}
         <a href="#" id="toggle-issues" class="button tiny secondary" title="Show repeat-checker issues for each question"><i class="fa fa-triangle-exclamation"></i> Repeat Issues</a>
         <a href="#" id="toggle-style" class="button tiny secondary" title="Show style-check issues for each question"><i class="fa fa-spell-check"></i> Style Issues</a>
+        <a href="#" id="toggle-pg-above" class="button tiny secondary" title="Show annotated pronunciation guides above the words they cover instead of inline"><i class="fa fa-arrow-up"></i> PGs Above</a>
         <a href="/packet_mp3/{{ packet.id }}/?order={{ order }}" id="mp3-link" class="button tiny secondary" title="Download an MP3 reading of this packet"><i class="fa fa-headphones"></i> MP3</a>
         {% if not read_only %}
         <a href="#" class="button tiny doc-mode-btn" data-mode="comment"><i class="fa fa-comment"></i> Comment</a><a href="#" class="button tiny secondary doc-mode-btn" data-mode="reorder"><i class="fa fa-arrows-up-down"></i> Reorder</a>
@@ -492,7 +493,13 @@ $(function() {
             list.forEach(function(it) {
                 var $row = $('<div>');
                 $('<span class="label ' + (SEV_CLASS[it.severity] || '') + '">').text(it.severity).appendTo($row);
-                $row.append(' ').append(document.createTextNode(it.message));
+                // message_html (when present) is escaped server-side and carries
+                // answer-line formatting (underline/bold/italics).
+                if (it.message_html) {
+                    $row.append(' ').append($('<span>').html(it.message_html));
+                } else {
+                    $row.append(' ').append(document.createTextNode(it.message));
+                }
                 $box.append($row);
             });
             $q.append($box);
@@ -524,6 +531,34 @@ $(function() {
             }
         });
     });
+
+    // ---- "PGs Above": move annotated pronunciation guides into ruby text ----
+    // \Pword\P renders as span.pg-target; the guide right after it becomes the
+    // ruby annotation. Transform once, then the mode class shows/hides it.
+    var pgRubyfied = false;
+    function rubyfyPGs() {
+        $('.doc-page .pg-target').each(function () {
+            var node = this.nextSibling;
+            while (node && node.nodeType === 3 && !node.textContent.trim()) { node = node.nextSibling; }
+            if (!node || node.nodeType !== 1 || !$(node).hasClass('pronunciation-guide')) { return; }
+            var guide = $(node).text().replace(/^\s*\(\s*"?/, '').replace(/"?\s*\)\s*$/, '');
+            $(node).addClass('pg-inline');
+            $(this).wrap('<ruby class="pg-ruby"></ruby>').after($('<rt>').text(guide));
+        });
+    }
+    // Persist the preference per browser.
+    var pgAboveKey = 'qemsDocPgAbove';
+    function setPgAbove(on) {
+        if (on && !pgRubyfied) { rubyfyPGs(); pgRubyfied = true; }
+        $('.doc-page').toggleClass('doc-pg-above', on);
+        $('#toggle-pg-above').toggleClass('primary', on).toggleClass('secondary', !on);
+        try { localStorage.setItem(pgAboveKey, on ? '1' : ''); } catch (err) {}
+    }
+    $('#toggle-pg-above').on('click', function (e) {
+        e.preventDefault();
+        setPgAbove(!$('.doc-page').hasClass('doc-pg-above'));
+    });
+    try { if (localStorage.getItem(pgAboveKey) === '1') { setPgAbove(true); } } catch (err) {}
 
     // Open by default when the packet has comments
     if ($('.doc-comment-card').length) {
@@ -716,16 +751,21 @@ $(function() {
         }
     });
 
+    var docSwapReqSeq = 0;
     function loadSwapCandidates() {
         var scope = $('input[name="doc-swap-scope"]:checked').val();
         var query = $('#doc-swap-search').val().trim();
         $('#doc-swap-scope-row').css('opacity', query ? 0.4 : 1);
         var $list = $('#doc-swap-candidates');
         $list.html('<em>Loading...</em>');
+        var seq = ++docSwapReqSeq;
         $.get('/swap_candidates/', {
             question_type: swapSource.qtype, question_id: swapSource.qid,
             scope: scope, q: query
         }, function(response) {
+            // A newer search superseded this request while it was in flight —
+            // don't let a stale (e.g. slower, broader) response clobber it.
+            if (seq !== docSwapReqSeq) { return; }
             var json = $.parseJSON(response);
             if (json.error) { $list.html('<div class="alert-box warning">' + json.error + '</div>'); return; }
             $('#doc-swap-source').html('Swapping: <strong>' + (json.source_answer || swapSource.answer) + '</strong> <span class="swap-cand-category">(' + json.source_category + ')</span>');

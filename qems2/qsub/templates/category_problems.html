@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% block title %}Category Issues - {{ qset.name }} - QEMS3{% endblock %}
+
+{% block content %}
+
+<h3 class="page-header">Category Issues</h3>
+<ul class="breadcrumbs">
+    <li><a href="/edit_question_set/{{ qset.id }}/">{{ qset.name }}</a></li>
+    <li class="current">Category Issues</li>
+</ul>
+
+{% if message %}<div class="{{ message_class }}">{{ message }}</div>{% endif %}
+
+{% if not problems %}
+<div class="alert-box success">Every question has a valid category from this set's distribution. Nice work!</div>
+{% else %}
+<p class="cp-intro">These <strong>{{ problems|length }}</strong> question(s) have no category, or a category that
+isn't part of this set's current distribution (e.g. from before a distribution change).
+{% if can_assign %}Select questions and assign them a category below.{% endif %}</p>
+
+<form method="post" action="">
+    {% csrf_token %}
+    {% if can_assign %}
+    <div class="cp-bulk-bar">
+        <label class="cp-inline"><input type="checkbox" id="cp-select-all" autocomplete="off"> Select all</label>
+        <span id="cp-selected-count" class="cp-note">0 selected</span>
+        <span class="cp-note" style="margin-left:auto;">Assign selected to:</span>
+        <select name="category" id="cp-category">
+            <option value="">— pick a category —</option>
+            {% for e in valid_entries %}
+            <option value="{{ e.id }}">{{ e.category }}{% if e.subcategory %} - {{ e.subcategory }}{% endif %}</option>
+            {% endfor %}
+        </select>
+        <button type="submit" class="button tiny success" id="cp-assign-btn">Assign category</button>
+    </div>
+    {% endif %}
+
+    <table class="cp-table">
+        <thead>
+            <tr>
+                {% if can_assign %}<th class="cp-check-col"></th>{% endif %}
+                <th>Type</th>
+                <th>Answer</th>
+                <th>Packet</th>
+                <th>Author</th>
+                <th>Current category</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for p in problems %}
+            <tr>
+                {% if can_assign %}<td class="cp-check-col"><input type="checkbox" class="cp-check" name="q" value="{{ p.ref }}" autocomplete="off"></td>{% endif %}
+                <td>{% if p.type == 'tossup' %}Tossup{% else %}Bonus{% endif %}</td>
+                <td><a href="{{ p.edit_url }}" target="_blank" rel="noopener">{{ p.answer|default:'(no answer)' }}</a></td>
+                <td>{% if p.packet %}{{ p.packet }}{% if p.number %} #{{ p.number }}{% endif %}{% else %}<span class="cp-note">(unpacketized)</span>{% endif %}</td>
+                <td>{{ p.author }}</td>
+                <td>{% if p.category %}<span class="cp-stale" title="This category belongs to a different distribution">{{ p.category }}</span>{% else %}<span class="cp-note">(none)</span>{% endif %}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</form>
+{% endif %}
+
+<style>
+.cp-intro { color: #555; }
+.cp-bulk-bar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; flex-wrap: wrap;
+    gap: 0.5rem 0.9rem; background: #fff; border: 1px solid #dcdcdc; border-radius: 4px;
+    padding: 0.45rem 0.7rem; margin-bottom: 0.6rem; }
+.cp-inline { display: inline-block; margin: 0; }
+.cp-bulk-bar select { margin: 0; width: auto; height: auto; padding: 0.25rem 1.6rem 0.25rem 0.5rem; }
+.cp-bulk-bar .button { margin: 0; }
+.cp-note { color: #999; font-size: 0.85rem; }
+.cp-table { width: 100%; }
+.cp-table td, .cp-table th { padding: 0.35rem 0.6rem; }
+.cp-check-col { width: 2em; text-align: center; }
+.cp-check-col input { margin: 0; }
+.cp-stale { color: #c0392b; }
+</style>
+
+<script>
+$(function () {
+    // Clear any checkbox state the browser restored across the reload.
+    $('.cp-check, #cp-select-all').prop('checked', false);
+    function updateCount() {
+        $('#cp-selected-count').text($('.cp-check:checked').length + ' selected');
+    }
+    $('#cp-select-all').on('change', function () {
+        $('.cp-check').prop('checked', this.checked); updateCount();
+    });
+    $(document).on('change', '.cp-check', updateCount);
+    $('form').on('submit', function (e) {
+        if (!$('.cp-check:checked').length) { alert('Select one or more questions first.'); e.preventDefault(); return; }
+        if (!$('#cp-category').val()) { alert('Pick a category to assign.'); e.preventDefault(); return; }
+    });
+    // Pin the sticky bar below the fixed top nav (same fix as the style check page).
+    function syncBarTop() { $('.cp-bulk-bar').css('top', ($('.top-bar').outerHeight() || 0) + 'px'); }
+    syncBarTop();
+    $(window).on('resize', syncBarTop);
+});
+</script>
+
+{% endblock %}

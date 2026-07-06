@@ -83,8 +83,12 @@ _ANSWER_SCHEMA = {
                     'ref': {'type': 'string',
                             'description': 'The exact ref label of the question this applies to.'},
                     'suggestion': {'type': 'string',
-                                   'description': 'A single alternate name for the SAME answer to '
-                                                  'add, phrased like "accept X" or "prompt on Y".'},
+                                   'description': 'The addition to the answer line, phrased like '
+                                                  '"accept X" or "prompt on Y". Use answer-line '
+                                                  'markup: _underscores_ around the required words '
+                                                  'of each accepted name, ~tildes~ around titles of '
+                                                  'works. Join multiple names with "; or" — never '
+                                                  'with a slash.'},
                     'explanation': {'type': 'string',
                                     'description': 'Why this names the same answer and should be '
                                                    'accepted or prompted.'},
@@ -101,6 +105,8 @@ _ANSWER_SCHEMA = {
 _ANSWER_SYSTEM = (
     "You are an expert quizbowl editor reviewing answer lines. Each question is "
     "given with a ref label, its text, and its ANSWER line (after 'ANSWER:'). "
+    "Answer lines use QEMS markup: _underscores_ mark the underlined words a "
+    "player is required to say, and ~tildes~ mark italicized titles of works. "
     "The correct answer is the underlined/required entity named on the ANSWER "
     "line. Your ONLY job: identify additional ways to name that SAME correct "
     "entity that a moderator should accept or prompt on but that are NOT already "
@@ -122,9 +128,18 @@ _ANSWER_SYSTEM = (
     "- If you are not highly confident an addition is a correct equivalent that "
     "a good moderator would accept, suggest nothing. MOST questions need "
     "nothing — returning an empty list is the common, correct outcome.\n\n"
-    "For each suggestion, set 'ref' to the exact ref label, phrase 'suggestion' "
-    "as 'accept X' or 'prompt on Y', and give a one-line 'explanation' of why it "
-    "names the same answer."
+    "FORMAT RULES for 'suggestion' (standard answer-line style):\n"
+    "- Phrase it as 'accept X' or 'prompt on Y'.\n"
+    "- Wrap the words a moderator must hear in underscores, mirroring how the "
+    "given answer line marks its own required portion: 'accept _Bill Clinton_', "
+    "'accept William Jefferson _Clinton_'.\n"
+    "- Italicize titles of works with tildes as well: 'accept ~_The Trial_~'.\n"
+    "- Do NOT underline names after 'prompt on' — write them plain (tildes for "
+    "titles still apply): 'prompt on Clinton'.\n"
+    "- Join multiple names with '; or ' — NEVER separate names with a slash. "
+    "Example: 'accept _William Jefferson Clinton_; or _Bill Clinton_'.\n\n"
+    "For each suggestion, set 'ref' to the exact ref label and give a one-line "
+    "'explanation' of why it names the same answer."
 )
 
 
@@ -174,15 +189,19 @@ def _answer_batch(client, model, items):
             for a in data.get('suggestions', [])], None
 
 
-def grammar_check_questions(items, model=None):
+def grammar_check_questions(items, model=None, answer_items=None):
     """Proofread the questions AND suggest alternate acceptable answers.
 
     `items` is a list of dicts: {'ref': str, 'text': str}. The whole list is
     processed in batches (no cap on set size). Grammar uses AI_DEFAULT_MODEL;
-    alternate answers use the stronger AI_ANSWER_MODEL. Returns (findings, error)
-    where findings is a list of dicts (kind, ref, severity, excerpt, suggestion,
-    explanation); kind is 'grammar' or 'answer'. On a mid-run failure, whatever
-    was gathered so far is returned alongside the error string.
+    alternate answers use the stronger AI_ANSWER_MODEL. `answer_items` (same
+    shape) optionally carries markup-preserving text for the answer pass, so
+    the model can see which words are underlined/required and copy the set's
+    formatting; grammar always reads the plain `items`. Returns (findings,
+    error) where findings is a list of dicts (kind, ref, severity, excerpt,
+    suggestion, explanation); kind is 'grammar' or 'answer'. On a mid-run
+    failure, whatever was gathered so far is returned alongside the error
+    string.
     """
     client = _client()
     if client is None:
@@ -192,6 +211,7 @@ def grammar_check_questions(items, model=None):
 
     grammar_model = model or settings.AI_DEFAULT_MODEL
     answer_model = getattr(settings, 'AI_ANSWER_MODEL', None) or grammar_model
+    answer_src = answer_items if answer_items is not None else items
 
     findings = []
     for start in range(0, len(items), _BATCH_SIZE):
@@ -200,8 +220,8 @@ def grammar_check_questions(items, model=None):
         if error:
             return findings, error
         findings.extend(batch_findings)
-    for start in range(0, len(items), _BATCH_SIZE):
-        batch = items[start:start + _BATCH_SIZE]
+    for start in range(0, len(answer_src), _BATCH_SIZE):
+        batch = answer_src[start:start + _BATCH_SIZE]
         batch_findings, error = _answer_batch(client, answer_model, batch)
         if error:
             return findings, error

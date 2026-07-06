@@ -10,13 +10,22 @@ OUT = r"C:\Users\mbent\claude\qems2\_deploy_local.zip"
 # Top-level entries to skip entirely
 SKIP_TOP = {".git", "static", ".claude", "_logs"}
 SKIP_FILES = {"db.sqlite3", "secret", "anthropic_key", "nul", "_logs.zip", "build_deploy_zip.py"}
+# The app only uses fontawesome's css/all.min.css + webfonts/; the rest of the
+# package (svgs, sprites, js-packages, metadata, ...) is ~22k files / ~65 MB.
+FA_PREFIX = "components/bower_components/fontawesome/"
+FA_KEEP = {"css", "webfonts"}
 
 def skip(rel):
-    parts = rel.replace("\\", "/").split("/")
+    rel = rel.replace("\\", "/")
+    parts = rel.split("/")
     if parts[0] in SKIP_TOP:
         return True
-    if ".git" in parts or "__pycache__" in parts:
+    if ".git" in parts or "__pycache__" in parts or "whoosh_index" in parts:
         return True
+    if rel.startswith(FA_PREFIX):
+        sub = rel[len(FA_PREFIX):].split("/")
+        if len(sub) > 1 and sub[0] not in FA_KEEP:
+            return True
     base = parts[-1]
     if base in SKIP_FILES or base.endswith((".pyc", ".zip")):
         return True

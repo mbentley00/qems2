@@ -43,7 +43,7 @@ def _plain(text):
     """Strip HTML and QEMS markup so names compare as written."""
     t = _html.unescape(text or '')
     t = re.sub(r'<[^>]+>', '', t)
-    return t.replace('_', '').replace('~', '')
+    return t.replace('\\P', '').replace('_', '').replace('~', '')
 
 
 def _clean_name(s):

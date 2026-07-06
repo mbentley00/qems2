@@ -40,10 +40,10 @@
         {{ bonus|bonus_html_verbose }}
         </div>
             <p><strong>Written by:</strong> {{ bonus.author }} on {{ bonus.created_date }}</p>
-            {% if bonus.edited %}
+            {% if bonus.edited and bonus.editor %}
                 <p><strong>Edited by:</strong> {{ bonus.editor }} on {{ bonus.edited_date }}</p>
             {% endif %}
-            {% if bonus.proofread %}
+            {% if bonus.proofread and bonus.proofreader %}
                 <p><strong>Proofread by:</strong> {{ bonus.proofreader }} on {{ bonus.proofread_date }}</p>
             {% endif %}
             <p><strong>Last modified:</strong> {{ bonus.last_changed_date }}</p>
@@ -61,6 +61,7 @@
         {% endif %}
         {% if question_type == "ACF-style bonus" %}
             <a href="#" id="toggle-unified-editor" class="button small secondary">Switch to Unified Editor</a>
+            <a href="#" id="copy-full-bonus" class="button small secondary" title="Copy the full bonus to the clipboard (formatted)">Copy</a>
             <a href="#" id="copy-for-discord-bonus" class="button small secondary">Copy for Discord</a>
             <a href="#" id="copy-for-discord-plain-bonus" class="button small secondary">Copy for Discord (no spoilers)</a>
             <div id="unified-editor-container" style="display:none;">
@@ -242,6 +243,7 @@ $(function () {
 });
 </script>
 {% endif %}
+{% if bonus %}{% include "_style_check_panel.html" with question_type="bonus" q_id=bonus.id %}{% endif %}
 {% include "_discord_threads.html" %}
 {% include "_playtest_results.html" %}
 </div>{# .edit-main #}
@@ -331,6 +333,37 @@ $(function () {
     }
     $(document).on('input', '.rich-editor, #id_leadin, #id_part1_text, #id_part2_text, #id_part3_text', function () {
         clearTimeout(timer); timer = setTimeout(update, 350);
+    });
+
+    // Selected-text count: highlight part of the question (editors or saved
+    // preview) to see how many characters it counts for, using the same rules.
+    var $sel = $('<span id="sel-char-count" style="color:#888; font-weight:normal;"></span>')
+        .appendTo('.char-count-note');
+    var selTimer = null, selSeq = 0;
+    function selectedText() {
+        var el = document.activeElement;
+        if (el && el.tagName === 'TEXTAREA' && el.selectionStart !== el.selectionEnd) {
+            return el.value.substring(el.selectionStart, el.selectionEnd);
+        }
+        var s = window.getSelection();
+        if (!s || s.isCollapsed || !s.rangeCount) { return ''; }
+        var node = s.getRangeAt(0).commonAncestorContainer;
+        if (node.nodeType === 3) { node = node.parentNode; }
+        if (!$(node).closest('.rich-editor, .anchor-region').length) { return ''; }
+        return s.toString();
+    }
+    function updateSelection() {
+        var text = selectedText();
+        var seq = ++selSeq;
+        if (!text) { $sel.text(''); return; }
+        $.post('/live_char_count/', { qset_id: qsetId, text: text }, function (resp) {
+            if (seq !== selSeq) { return; }
+            if (typeof resp === 'string') { try { resp = JSON.parse(resp); } catch (e) { return; } }
+            $sel.text(' · ' + resp.count + ' selected');
+        });
+    }
+    $(document).on('selectionchange', function () {
+        clearTimeout(selTimer); selTimer = setTimeout(updateSelection, 250);
     });
 });
 </script>
