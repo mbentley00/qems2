@@ -917,11 +917,13 @@ class Tossup (models.Model):
             self.created_date = timezone.now()
 
         self.last_changed_date = timezone.now()
-        if (edit_type == QUESTION_EDIT):
+        # The flag can be set without an explicit QUESTION_EDIT (e.g. checked
+        # together with proofread in one save), so backfill a missing stamp.
+        if (edit_type == QUESTION_EDIT) or (self.edited and self.editor is None):
             self.editor = changer
             self.edited_date = timezone.now()
 
-        if (edit_type == QUESTION_PROOFREAD):
+        if (edit_type == QUESTION_PROOFREAD) or (self.proofread and self.proofreader is None):
             self.proofreader = changer
             self.proofread_date = timezone.now()
 
@@ -1269,13 +1271,15 @@ class Bonus(models.Model):
             self.created_date = timezone.now()
 
         self.last_changed_date = timezone.now()
-        if (edit_type == QUESTION_EDIT):
+        # See Tossup.save_question: backfill a missing stamp when the flag is
+        # already set (e.g. edited + proofread checked in the same save).
+        if (edit_type == QUESTION_EDIT) or (self.edited and self.editor is None):
             self.editor = changer
             self.edited_date = timezone.now()
 
-        if (edit_type == QUESTION_PROOFREAD):
+        if (edit_type == QUESTION_PROOFREAD) or (self.proofread and self.proofreader is None):
             self.proofreader = changer
-            self.proofread_date = timezone.now()            
+            self.proofread_date = timezone.now()
 
         if (self.get_bonus_type() == VHSL_BONUS):
             self.leadin = ''

@@ -97,21 +97,18 @@ class TossupForm(forms.ModelForm):
 
     tossup_text = forms.CharField(widget=forms.Textarea(attrs={'rows': 10, 'class': 'expanding'}))
     tossup_answer = forms.CharField(widget=forms.Textarea(attrs={'rows': 1, 'class': 'expanding'}))
-    search_question_content = forms.CharField(widget=forms.HiddenInput, required=False)
-    search_question_answers = forms.CharField(widget=forms.HiddenInput, required=False)
-    question_history = forms.ModelChoiceField(queryset=QuestionHistory.objects.none(), widget=forms.HiddenInput, required=False)
-    editor = forms.ModelChoiceField(queryset=Writer.objects.none(), widget=forms.HiddenInput, required=False)
-    edited_date = forms.DateTimeField(widget=forms.HiddenInput, required=False)
-    proofreader = forms.ModelChoiceField(queryset=Writer.objects.none(), widget=forms.HiddenInput, required=False)
-    proofread_date = forms.DateTimeField(widget=forms.HiddenInput, required=False)
-    last_changed_date = forms.DateTimeField(widget=forms.HiddenInput, required=False)
-    created_date = forms.DateTimeField(widget=forms.HiddenInput, required=False)
 
     category = forms.ModelChoiceField(queryset=DistributionEntry.objects.none())
 
     class Meta:
         model = Tossup
-        exclude = ['question_set', 'subtype', 'time_period', 'location', 'question_number']
+        # The bookkeeping fields (history, editor/proofreader stamps, search
+        # text, dates) are managed by save_question(), never by this form —
+        # excluding them keeps a bound instance from having them wiped to None.
+        exclude = ['question_set', 'subtype', 'time_period', 'location', 'question_number',
+                   'search_question_content', 'search_question_answers', 'question_history',
+                   'editor', 'edited_date', 'proofreader', 'proofread_date',
+                   'created_date', 'last_changed_date']
 
     def __init__(self, *args, **kwargs):
         qset_id = kwargs.pop('qset_id', None)
@@ -192,19 +189,14 @@ class BonusForm(forms.ModelForm):
     part2_answer = forms.CharField(widget=forms.Textarea(attrs={'class': 'expanding', 'rows': 1}), required=False)
     part3_text = forms.CharField(widget=forms.Textarea(attrs={'class': 'expanding', 'rows': 2}), required=False)
     part3_answer = forms.CharField(widget=forms.Textarea(attrs={'class': 'expanding', 'rows': 1}), required=False)
-    search_question_content = forms.CharField(widget=forms.HiddenInput, required=False)
-    search_question_answers = forms.CharField(widget=forms.HiddenInput, required=False)
-    question_history = forms.ModelChoiceField(queryset=QuestionHistory.objects.none(), widget=forms.HiddenInput, required=False)
-    editor = forms.ModelChoiceField(queryset=Writer.objects.none(), widget=forms.HiddenInput, required=False)
-    edited_date = forms.DateTimeField(widget=forms.HiddenInput, required=False)
-    proofreader = forms.ModelChoiceField(queryset=Writer.objects.none(), widget=forms.HiddenInput, required=False)
-    proofread_date = forms.DateTimeField(widget=forms.HiddenInput, required=False)
-    last_changed_date = forms.DateTimeField(widget=forms.HiddenInput, required=False)
-    created_date = forms.DateTimeField(widget=forms.HiddenInput, required=False)
-
     class Meta:
         model = Bonus
-        exclude = ['question_set', 'subtype', 'time_period', 'location', 'question_number']
+        # See TossupForm.Meta: bookkeeping fields belong to save_question(),
+        # not the form, so a bound instance must not overwrite them.
+        exclude = ['question_set', 'subtype', 'time_period', 'location', 'question_number',
+                   'search_question_content', 'search_question_answers', 'question_history',
+                   'editor', 'edited_date', 'proofreader', 'proofread_date',
+                   'created_date', 'last_changed_date']
 
     def __init__(self, *args, **kwargs):
         qset_id = kwargs.pop('qset_id', None)
