@@ -21,7 +21,7 @@ import re
 from html import escape as _escape
 
 from .utils import strip_markup
-from .pron_dict import suggest_guides, guide_opener_at
+from .pron_dict import suggest_guide_matches, context_snippet, guide_opener_at
 
 ERROR = 'error'
 WARNING = 'warning'
@@ -204,13 +204,23 @@ def _prose_issues(label, raw, field):
 
 def _pronunciation_issues(label, raw, field):
     """Suggest a verified-OL pronunciation guide for any dictionary term in the
-    text that doesn't already have one (INFO, auto-applicable)."""
+    text that doesn't already have one (INFO, auto-applicable). Each suggestion
+    shows the term in surrounding context so the editor can confirm the match
+    is the intended sense (e.g. the proper noun, not a common-word homograph)."""
+    plain = _plain(raw)
     issues = []
-    for term, pron in suggest_guides(_plain(raw)):
+    for term, pron, start, end in suggest_guide_matches(plain):
+        prefix, before, match, after, suffix = context_snippet(plain, start, end)
+        message = '{0}: PG for "{1}" ({2}) — {3}{4}{5}{6}{7}'.format(
+            label, term, pron, prefix, before, match, after, suffix)
+        # Bold the matched term inside the (escaped) context so it stands out.
+        message_html = '{0}: PG for "{1}" ({2}) — <span class="pg-context">{3}<strong>{4}</strong>{5}</span>'.format(
+            _escape(label), _escape(term), _escape(pron),
+            _escape(prefix + before), _escape(match), _escape(after + suffix))
         issues.append(_issue(
-            INFO, '{0}: PG for "{1}" ({2})'.format(label, term, pron),
-            'pronunciation', '{0}|{1}'.format(label, term),
-            {'field': field, 'op': 'guide', 'term': term, 'pron': pron}))
+            INFO, message, 'pronunciation', '{0}|{1}'.format(label, term),
+            {'field': field, 'op': 'guide', 'term': term, 'pron': pron},
+            message_html=message_html))
     return issues
 
 

@@ -89,19 +89,19 @@ def _already_guided(text, end_char, pron):
     return bool(np) and np in _alnum_lower(text)
 
 
-def suggest_guides(text):
-    """Return [(term, pron), ...] for verified dictionary terms found in `text`
-    that do not already carry a pronunciation guide. Each term is suggested at
-    most once. `text` should be readable plain text (markup/HTML stripped)."""
+def _iter_guide_matches(text):
+    """Yield (term, pron, start, end) for verified dictionary terms found in
+    `text` that do not already carry a pronunciation guide. Each term is yielded
+    at most once. start/end are character offsets into `text`. `text` should be
+    readable plain text (markup/HTML stripped)."""
     by_first, max_len = _matcher()
     if not by_first:
-        return []
+        return
 
     tokens = [(m.group(0), m.start(), m.end()) for m in _WORD_RE.finditer(text)]
     norm = [normalize_term(tok[0]) for tok in tokens]
     n = len(tokens)
 
-    suggestions = []
     seen = set()
     i = 0
     while i < n:
@@ -111,15 +111,46 @@ def suggest_guides(text):
             for phrase, term, pron in candidates:
                 L = len(phrase)
                 if i + L <= n and tuple(norm[i:i + L]) == phrase:
-                    match = (term, pron, L, tokens[i + L - 1][2])
+                    match = (term, pron, L, tokens[i][1], tokens[i + L - 1][2])
                     break
         if match:
-            term, pron, L, end_char = match
+            term, pron, L, start_char, end_char = match
             low = term.lower()
             if low not in seen and not _already_guided(text, end_char, pron):
-                suggestions.append((term, pron))
+                yield (term, pron, start_char, end_char)
                 seen.add(low)
             i += L
         else:
             i += 1
-    return suggestions
+
+
+def suggest_guides(text):
+    """Return [(term, pron), ...] for verified dictionary terms found in `text`
+    that do not already carry a pronunciation guide."""
+    return [(term, pron) for term, pron, _s, _e in _iter_guide_matches(text)]
+
+
+def suggest_guide_matches(text):
+    """Like suggest_guides but each item is (term, pron, start, end) with the
+    character offsets of the match, so callers can build a context preview."""
+    return list(_iter_guide_matches(text))
+
+
+def context_snippet(text, start, end, words=7):
+    """A readable excerpt of `text` around the [start, end) span: up to `words`
+    whitespace-delimited words of context on each side, preserving the original
+    spacing. Returns (prefix, before, match, after, suffix) where prefix/suffix
+    are an ellipsis ('… ' / ' …') when the text was truncated on that side and
+    `match` is the term itself, so a caller can emphasize it."""
+    left = text[:start]
+    match = text[start:end]
+    right = text[end:]
+    # Each chunk is a word plus its trailing (left) / leading (right) spacing, so
+    # joining the kept chunks reproduces the source text verbatim.
+    left_parts = re.findall(r'\S+\s*', left)
+    right_parts = re.findall(r'\s*\S+', right)
+    before = ''.join(left_parts[-words:])
+    after = ''.join(right_parts[:words])
+    prefix = '… ' if len(left_parts) > words else ''
+    suffix = ' …' if len(right_parts) > words else ''
+    return prefix, before, match, after, suffix
