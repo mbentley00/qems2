@@ -95,6 +95,27 @@
     </div>
 </div>
 
+{% if unplaced_tu or unplaced_bs %}
+<div class="panel radius unplaced-panel" id="unplaced-panel">
+    <strong><i class="fa fa-triangle-exclamation"></i> Not shown in the grid below</strong>
+    <p class="unp-help">These questions are in a packet but can't be placed in the numbered grid, so they'd otherwise be hidden. Fix the question number (open the question, or drag it onto an empty slot) so it appears.</p>
+    {% for q in unplaced_tu %}
+    <div class="unplaced-item">
+        <a href="{{ q.edit_url }}" target="_blank" rel="noopener">{{ q.answer }}</a>
+        <span class="unp-category">Tossup · {{ q.packet_name }} · {{ q.category }}</span>
+        <span class="unplaced-reason">{{ q.reason }}</span>
+    </div>
+    {% endfor %}
+    {% for q in unplaced_bs %}
+    <div class="unplaced-item">
+        <a href="{{ q.edit_url }}" target="_blank" rel="noopener">{{ q.answer }}</a>
+        <span class="unp-category">Bonus · {{ q.packet_name }} · {{ q.category }}</span>
+        <span class="unplaced-reason">{{ q.reason }}</span>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
 {% if not packets %}
 <div class="alert-box info">This set has no packets yet. <a href="/packetize_set/{{ qset.id }}/">Packetize the set</a> to create them.</div>
 {% else %}
@@ -292,6 +313,12 @@
 .unp-item .unp-category { color: #777; font-size: 0.9em; }
 .unp-item.filtered-out { display: none; }
 .unp-none { color: #999; font-size: 0.85em; }
+.unplaced-panel { background: #fff8e1; border: 1px solid #f0c36d; }
+.unplaced-item { padding: 4px 0; border-top: 1px solid #f2e3bf; font-size: 0.85em; }
+.unplaced-item:first-of-type { border-top: none; }
+.unplaced-item > a { font-weight: bold; margin-right: 8px; }
+.unplaced-item .unp-category { color: #777; }
+.unplaced-reason { color: #b3560b; font-style: italic; margin-left: 8px; }
 </style>
 
 <script>

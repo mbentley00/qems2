@@ -1302,6 +1302,39 @@ class PronunciationGuideTests(TestCase):
         pairs = suggest_guides('Goethe admired Goethe and again Goethe.')
         self.assertEqual(len([t for t, _ in pairs if t == 'Goethe']), 1)
 
+    def test_match_offsets_locate_the_term(self):
+        from qems2.qsub.pron_dict import suggest_guide_matches
+        text = 'The poet Goethe wrote this play.'
+        matches = [m for m in suggest_guide_matches(text) if m[0] == 'Goethe']
+        self.assertTrue(matches)
+        _term, _pron, start, end = matches[0]
+        self.assertEqual(text[start:end], 'Goethe')
+
+    def test_context_snippet_marks_term_and_keeps_neighbors(self):
+        from qems2.qsub.pron_dict import context_snippet
+        text = 'A clue painted by Fitz Henry Lane in the foreground of a work.'
+        start = text.index('Lane')
+        prefix, before, match, after, suffix = context_snippet(text, start, start + 4, words=3)
+        self.assertEqual(match, 'Lane')
+        self.assertIn('Henry', before)       # left neighbors kept
+        self.assertIn('foreground', after)   # right neighbors kept
+        self.assertEqual(prefix, '… ')  # truncated on the left
+        self.assertEqual(suffix, ' …')  # truncated on the right
+
+    def test_pronunciation_issue_message_includes_context(self):
+        from qems2.qsub import style_checker
+        issues = style_checker._pronunciation_issues(
+            'Question', 'The poet Goethe wrote this famous tragic play.', 'tossup_text')
+        goethe = [i for i in issues if 'Goethe' in i['message']]
+        self.assertTrue(goethe)
+        i = goethe[0]
+        # The plain message carries the surrounding words for disambiguation...
+        self.assertIn('wrote', i['message'])
+        self.assertIn('PG for "Goethe"', i['message'])
+        # ...and the HTML rendering bolds the matched term inside the context.
+        self.assertIn('<strong>Goethe</strong>', i['message_html'])
+        self.assertIn('pg-context', i['message_html'])
+
 
 class StyleCheckFixTests(TestCase):
     """Auto-apply and dismiss of style-check issues (pronunciation guides etc.)."""
@@ -4388,3 +4421,82 @@ class GrammarTextsTests(TestCase):
         self.client.login(username='gt_other', password='pw')
         resp = self.client.get('/grammar_texts/{0}/'.format(self.qset.id))
         self.assertEqual(resp.status_code, 403)
+
+
+class PacketTiebreakerVisibilityTests(TestCase):
+    """Tiebreakers (questions beyond the per-packet quota) must be visible: the
+    packet grid must not silently drop a duplicate-numbered question, the
+    add-question path must not reuse a number, and the document view must call
+    out the extras."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf_tu = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('tb_owner', password='pw', email='u@test.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='tb dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='History', subcategory='European')
+        self.qset = QuestionSet.objects.create(
+            name='TB Set', date=timezone.now(), host='', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist, tossups_per_packet=2, bonuses_per_packet=2)
+        self.p1 = Packet.objects.create(question_set=self.qset, packet_name='Packet 01', created_by=self.owner)
+        self.client.login(username='tb_owner', password='pw')
+
+    def _tu(self, ans, number):
+        return Tossup.objects.create(
+            author=self.owner, question_set=self.qset, packet=self.p1, question_number=number,
+            question_type=self.acf_tu, category=self.de, tossup_text='Stem (*) end.',
+            tossup_answer='_%s_' % ans, created_date=datetime.now(), last_changed_date=datetime.now())
+
+    def test_next_number_skips_gap_to_avoid_tiebreaker_collision(self):
+        from qems2.qsub.views import _next_question_number
+        # Slots 1 and 3 (a tiebreaker) are taken; slot 2 was unassigned. count+1
+        # would return 3 and collide with the tiebreaker; max+1 returns 4.
+        self._tu('one', 1)
+        self._tu('tb', 3)
+        self.assertEqual(_next_question_number(Tossup, self.p1.id), 4)
+
+    def test_grid_surfaces_duplicate_numbered_question(self):
+        # Two questions share (packet, number) — the grid must show BOTH: one in
+        # the cell, the duplicate in the "not shown" panel, not silently dropped.
+        self._tu('keeper', 1)
+        self._tu('collider', 1)
+        body = self.client.get('/packet_grid/{0}/'.format(self.qset.id)).content.decode()
+        self.assertIn('Not shown in the grid below', body)
+        self.assertIn('collider', body)
+        self.assertIn('duplicates #1', body)
+
+    def test_grid_surfaces_numberless_packet_question(self):
+        Tossup.objects.create(
+            author=self.owner, question_set=self.qset, packet=self.p1, question_number=None,
+            question_type=self.acf_tu, category=self.de, tossup_text='Stem.',
+            tossup_answer='_floating_', created_date=datetime.now(), last_changed_date=datetime.now())
+        body = self.client.get('/packet_grid/{0}/'.format(self.qset.id)).content.decode()
+        self.assertIn('Not shown in the grid below', body)
+        self.assertIn('floating', body)
+        self.assertIn('has no question number', body)
+
+    def test_grid_clean_packet_has_no_unplaced_panel(self):
+        self._tu('a', 1)
+        self._tu('b', 2)
+        self._tu('tb', 3)  # a legitimate tiebreaker, cleanly numbered
+        body = self.client.get('/packet_grid/{0}/'.format(self.qset.id)).content.decode()
+        self.assertNotIn('Not shown in the grid below', body)
+        self.assertIn('(TB)', body)  # row 3 flagged as a tiebreaker row
+
+    def test_doc_view_calls_out_tiebreakers(self):
+        self._tu('regular1', 1)
+        self._tu('regular2', 2)
+        self._tu('spare', 3)
+        body = self.client.get('/view_packet/{0}/'.format(self.p1.id)).content.decode()
+        self.assertIn('callout-extras', body)
+        self.assertIn('extra question', body)
+        self.assertIn('spare', body)   # the extra's answer preview
+        self.assertIn('Tossup 3', body)
+
+    def test_doc_view_no_callout_without_tiebreakers(self):
+        self._tu('regular1', 1)
+        self._tu('regular2', 2)
+        body = self.client.get('/view_packet/{0}/'.format(self.p1.id)).content.decode()
+        self.assertNotIn('callout-extras', body)

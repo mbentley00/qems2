@@ -76,6 +76,24 @@
 <div id="doc-mode-hint" class="doc-mode-hint"></div>
 {% endif %}
 
+{% if extras %}
+<div class="callout-extras">
+    <strong><i class="fa fa-circle-plus"></i> This packet runs long — {{ extras|length }} extra question{{ extras|length|pluralize }} beyond the per-packet count (tiebreaker{{ extras|length|pluralize }}):</strong>
+    <ul>
+        {% for x in extras %}
+        <li><a href="{{ x.edit_url }}" target="_blank" rel="noopener"><strong>{{ x.label }}:</strong> {{ x.answer }}</a></li>
+        {% endfor %}
+    </ul>
+</div>
+<style>
+.callout-extras { border:1px solid #7cb6dd; background:#eef6fc; border-radius:3px;
+    padding:0.6rem 0.9rem; margin-bottom:1rem; font-size:0.95em; }
+.callout-extras ul { margin:0.4rem 0 0; }
+.callout-extras li { margin-bottom:0.2rem; }
+.callout-extras a { color:#1c5a86; }
+</style>
+{% endif %}
+
 {% if careful_notes %}
 <div class="callout-careful">
     <strong><i class="fa fa-triangle-exclamation"></i> Moderator — read these answer lines carefully:</strong>

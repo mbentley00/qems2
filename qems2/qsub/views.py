@@ -34,8 +34,20 @@ from .packet_parser import parse_packet_data
 from .duplicate_checker import find_duplicates, find_internal_issues, find_topic_repeats, find_answer_matches, CRITICAL, WARNING, INFO
 from django.utils.safestring import mark_safe
 from django_comments.models import Comment
-from django.db.models import Q
+from django.db.models import Q, Max
 from django.db import connection
+
+
+def _next_question_number(model, packet_id):
+    """The next free question number in a packet: one past the current highest.
+
+    Using max+1 (not count+1) avoids colliding with an existing tiebreaker when
+    a middle question was unassigned — count+1 would reuse a number already held
+    by the tiebreaker, and the packet grid (keyed by number) would then hide one
+    of the two."""
+    current = (model.objects.filter(packet_id=packet_id)
+               .aggregate(m=Max('question_number'))['m'] or 0)
+    return current + 1
 from django.utils import timezone
 from django.core.cache import cache
 
@@ -1677,7 +1689,7 @@ def add_tossups(request, qset_id, packet_id=None):
                         tossup.question_number = 999
                     else:
                         tossup.packet_id = packet_id
-                        tossup.question_number = Tossup.objects.filter(packet_id=packet_id).count() + 1
+                        tossup.question_number = _next_question_number(Tossup, packet_id)
 
                     tossup.save_question(edit_type=QUESTION_CREATE, changer=user)
                     cache.clear()
@@ -1800,7 +1812,7 @@ def add_bonuses(request, qset_id, bonus_type, packet_id=None):
                     bonus.question_number = 999
                 else:
                     bonus.packet_id = packet_id
-                    bonus.question_number = Bonus.objects.filter(packet_id=packet_id).count() + 1
+                    bonus.question_number = _next_question_number(Bonus, packet_id)
 
                 try:
                     bonus.is_valid()
@@ -2912,7 +2924,7 @@ def assign_tossups_to_packet(request):
                     continue
                 tossup.packet = packet
                 # Potential race condition?
-                tossup.question_number = Tossup.objects.filter(packet_id=packet_id).count() + 1
+                tossup.question_number = _next_question_number(Tossup, packet_id)
                 message = 'Your tossups have been added to the set!'
                 message_class = 'alert-box success'
                 tossup.save()
@@ -2948,7 +2960,7 @@ def assign_bonuses_to_packet(request):
                 if bonus is None:
                     continue
                 bonus.packet = packet
-                bonus.question_number = Bonus.objects.filter(packet_id=packet_id).count() + 1
+                bonus.question_number = _next_question_number(Bonus, packet_id)
                 message = 'Your bonuses have been added to the set!'
                 message_class = 'alert-box success'
                 bonus.save()
@@ -6240,18 +6252,21 @@ def packet_grid(request, qset_id):
     # user-set custom order (Packet.sort_order).
     packets = sorted_packets(qset)
 
+    packet_name_by_id = {p.id: p.packet_name for p in packets}
+
     def build_rows(question_model, preview_func, edit_url):
         qtype = 'tossup' if question_model is Tossup else 'bonus'
         vacancies = {(v.packet_id, v.question_number): v.category
                      for v in PacketSlotVacancy.objects.filter(question_set=qset, question_type=qtype)}
         cells_by_packet = {}
+        unplaced = []  # questions that can't occupy a grid slot (see below)
         max_num = 0
-        for question in question_model.objects.filter(question_set=qset, packet__in=packets).select_related('category', 'packet'):
+        # Order by number so a duplicate's FIRST holder keeps the slot and the
+        # later one is surfaced as unplaced (deterministic, not random).
+        for question in (question_model.objects.filter(question_set=qset, packet__in=packets)
+                         .select_related('category', 'packet').order_by('question_number', 'id')):
             number = question.question_number or 0
-            if number <= 0:
-                continue
-            max_num = max(max_num, number)
-            cells_by_packet.setdefault(question.packet_id, {})[number] = {
+            cell = {
                 'id': question.id,
                 'answer': preview_func(question),
                 'category': html.unescape(str(question.category)) if question.category else '',
@@ -6259,6 +6274,18 @@ def packet_grid(request, qset_id):
                 'edited': question.edited,
                 'proofread': question.proofread,
             }
+            # A question with no number, or a duplicate number within its packet,
+            # can't be placed in the number-keyed grid — surfacing it here keeps
+            # it from silently vanishing (this is how a tiebreaker could "not
+            # show": a manually-added question reused an existing number).
+            if number <= 0 or number in cells_by_packet.get(question.packet_id, {}):
+                cell['packet_name'] = packet_name_by_id.get(question.packet_id, '')
+                cell['reason'] = ('has no question number' if number <= 0
+                                  else 'duplicates #{0} in this packet'.format(number))
+                unplaced.append(cell)
+                continue
+            max_num = max(max_num, number)
+            cells_by_packet.setdefault(question.packet_id, {})[number] = cell
         rows = []
         for number in range(1, max_num + 1):
             cells = []
@@ -6271,11 +6298,11 @@ def packet_grid(request, qset_id):
                              {'empty': True, 'packet_id': p.id,
                               'removed_category': vacancies.get((p.id, number), '')})
             rows.append({'num': number, 'cells': cells})
-        return rows
+        return rows, unplaced
 
-    tossup_rows = build_rows(
+    tossup_rows, unplaced_tu = build_rows(
         Tossup, lambda t: _grid_answer_preview(t.tossup_answer), '/edit_tossup/')
-    bonus_rows = build_rows(
+    bonus_rows, unplaced_bs = build_rows(
         Bonus, lambda b: ' / '.join(filter(None, [
             _grid_answer_preview(b.part1_answer, 20),
             _grid_answer_preview(b.part2_answer, 20),
@@ -6308,6 +6335,8 @@ def packet_grid(request, qset_id):
                               'packets': packets,
                               'tossup_rows': tossup_rows,
                               'bonus_rows': bonus_rows,
+                              'unplaced_tu': unplaced_tu,
+                              'unplaced_bs': unplaced_bs,
                               'tossups_per_packet': qset.tossups_per_packet,
                               'bonuses_per_packet': qset.bonuses_per_packet,
                               'unassigned_tu': len(unpacketized_tu),
@@ -6709,6 +6738,29 @@ def view_packet(request, packet_id):
                     bonus_changers)
                for b in packet_bonuses]
 
+    # Extras beyond the per-packet quota (tiebreakers). Summarized up top so the
+    # moderator can see at a glance that the packet runs long and what the spare
+    # question is. Guard on a positive quota so an unset (0) quota doesn't flag
+    # every question.
+    def _extra_summary(model_questions, view_items, qtype, per_packet):
+        if not per_packet:
+            return []
+        out = []
+        for q, view in zip(model_questions, view_items):
+            if not view['is_tiebreaker']:
+                continue
+            if qtype == 'tossup':
+                ans = _grid_answer_preview(q.tossup_answer)
+            else:
+                ans = _grid_answer_preview(q.part1_answer, 30)
+            out.append({'label': '{0} {1}'.format(
+                'Tossup' if qtype == 'tossup' else 'Bonus', view['number']),
+                'answer': ans, 'edit_url': view['edit_url']})
+        return out
+
+    extras = (_extra_summary(packet_tossups, tossups, 'tossup', qset.tossups_per_packet)
+              + _extra_summary(packet_bonuses, bonuses, 'bonus', qset.bonuses_per_packet))
+
     # Heads-up for the moderator: answer lines flagged "read answer carefully".
     def _careful_answer(q, qtype):
         if qtype == 'tossup':
@@ -6814,6 +6866,7 @@ def view_packet(request, packet_id):
                               'mp3_voices': VOICE_CHOICES,
                               'packet_revision': _packet_revision(packet),
                               'careful_notes': careful_notes,
+                              'extras': extras,
                               'role': get_role_no_owner(user, qset),
                               'read_only': read_only,
                               'user': user})
