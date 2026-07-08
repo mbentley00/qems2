@@ -106,6 +106,10 @@ $(function () {
                        style.indexOf('italic') !== -1);
         var isSup = (tag === 'sup');
         var isSub = (tag === 'sub');
+        // Pronunciation-guide target span written by the rich editor
+        // (<span class="pg-target">) round-trips back to \Pword\P markup.
+        var isPgTarget = (tag === 'span' &&
+                          /\bpg-target\b/.test(node.getAttribute('class') || ''));
 
         // Apply QEMS markup wrappers
         if (isBold && isUnderline) {
@@ -124,6 +128,9 @@ $(function () {
         }
         if (isSub) {
             inner = wrapInlineMarkup(inner, '\\s');
+        }
+        if (isPgTarget) {
+            inner = wrapInlineMarkup(inner, '\\P');
         }
 
         // Block-level elements get a newline after them

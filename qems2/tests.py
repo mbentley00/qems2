@@ -3252,6 +3252,46 @@ class PgAnnotationTests(TestCase):
         self.assertEqual(out, 'The ~Diderot~ ("DID-er-OW") essay.')
         self.assertNotIn('\\P', out)
 
+    def test_pg_span_flags_guide_without_target(self):
+        from qems2.qsub import style_checker
+        issues = style_checker._pg_span_issues(
+            'Question', 'Denis Diderot ("DID-er-OW") wrote things.', 'tossup_text')
+        self.assertEqual(len(issues), 1)
+        i = issues[0]
+        self.assertEqual(i['code'], 'pg_span')
+        self.assertIn('("DID-er-OW")', i['message'])
+        self.assertNotIn('fix', i)  # not auto-fixable — target is ambiguous
+
+    def test_pg_span_accepts_marked_target(self):
+        from qems2.qsub import style_checker
+        issues = style_checker._pg_span_issues(
+            'Question', 'Denis \\PDiderot\\P ("DID-er-OW") wrote things.', 'tossup_text')
+        self.assertEqual(issues, [])
+
+    def test_pg_span_ignores_power_marks_and_escaped_parens(self):
+        from qems2.qsub import style_checker
+        issues = style_checker._pg_span_issues(
+            'Question', 'A clue (*) with a literal \\(aside\\) here.', 'tossup_text')
+        self.assertEqual(issues, [])
+
+    def test_pg_span_rule_is_configurable_and_default_on(self):
+        from qems2.qsub import style_checker
+        codes = [c for c, _ in style_checker.configurable_rules('minkowski')]
+        self.assertIn('pg_span', codes)
+        # Off in the mechanical-only generic guide.
+        gen = [c for c, _ in style_checker.configurable_rules('generic')]
+        self.assertNotIn('pg_span', gen)
+
+    def test_pg_span_can_be_disabled_per_set(self):
+        from qems2.qsub import style_checker
+
+        class _TU:
+            tossup_text = 'Denis Diderot ("DID-er-OW") wrote.'
+            tossup_answer = '_Diderot_'
+        codes = [i['code'] for i in style_checker.check_tossup(
+            _TU(), disabled=['pg_span'])]
+        self.assertNotIn('pg_span', codes)
+
     def test_yapp_export_drops_markers(self):
         from qems2.qsub.yapp_export import qems_to_yapp_html
         out = qems_to_yapp_html('Denis \\PDiderot\\P ("DID-er-OW") wrote.')

@@ -58,6 +58,7 @@ RULE_LABELS = [
     ('imperative', 'Interrogative giveaway'),
     ('underline', 'Answer line has no underline'),
     ('pronunciation', 'Pronunciation-guide suggestions'),
+    ('pg_span', 'Pronunciation guides without a marked target (\\P…\\P)'),
     ('answer_alts', 'Answer line missing standard alternates'),
 ]
 RULE_LABEL_MAP = dict(RULE_LABELS)
@@ -224,6 +225,34 @@ def _pronunciation_issues(label, raw, field):
     return issues
 
 
+# A parenthetical that isn't an escaped literal paren; used to find guides.
+_GUIDE_PAREN = re.compile(r'(?<!\\)\(([^()]*)\)')
+
+
+def _pg_span_issues(label, raw, field):
+    """Flag a pronunciation guide ``("...")`` whose spoken word(s) aren't wrapped
+    in ``\\P...\\P``. Marking the target ties the guide to exactly the word(s) it
+    covers (used for audio and rich rendering). Not auto-fixable — which word(s)
+    a hand-written guide covers is ambiguous, so the editor selects them and uses
+    the editor's "PG" button. Power marks ``(*)``/``(+)`` are not guides."""
+    text = raw or ''
+    issues = []
+    for idx, m in enumerate(_GUIDE_PAREN.finditer(text)):
+        if m.group(1) in ('*', '+'):  # power / superpower marks, not a guide
+            continue
+        # A \P closing the target span should sit just before the '(' (any
+        # whitespace between the marked word and its guide is fine).
+        if text[:m.start()].rstrip().endswith('\\P'):
+            continue
+        guide = m.group(0)
+        issues.append(_issue(
+            INFO,
+            '{0}: pronunciation guide {1} has no marked target — select the word(s) '
+            'it covers and mark them (\\P…\\P)'.format(label, guide),
+            'pg_span', '{0}|{1}|{2}'.format(label, idx, guide)))
+    return issues
+
+
 def _has_underline(raw):
     return '_' in (raw or '')
 
@@ -347,6 +376,9 @@ def check_tossup(tu, guide=DEFAULT_GUIDE, disabled=None):
     if 'pronunciation' in enabled:
         issues += _pronunciation_issues('Question', text, 'tossup_text')
 
+    if 'pg_span' in enabled:
+        issues += _pg_span_issues('Question', text, 'tossup_text')
+
     return [i for i in issues if i['code'] in enabled]
 
 
@@ -393,6 +425,11 @@ def check_bonus(b, guide=DEFAULT_GUIDE, disabled=None):
         for label, raw, field in parts:
             if raw.strip():
                 issues += _pronunciation_issues(label, raw, field)
+
+    if 'pg_span' in enabled:
+        for label, raw, field in parts:
+            if raw.strip():
+                issues += _pg_span_issues(label, raw, field)
 
     return [i for i in issues if i['code'] in enabled]
 

@@ -38,6 +38,8 @@ $(function () {
         html = html.replace(/\\B([\s\S]+?)\\B/g, '<b>$1</b>');
         html = html.replace(/\\S([\s\S]+?)\\S/g, '<sup>$1</sup>');
         html = html.replace(/\\s([\s\S]+?)\\s/g, '<sub>$1</sub>');
+        // \Pword\P marks the target of a following pronunciation guide.
+        html = html.replace(/\\P([\s\S]+?)\\P/g, '<span class="pg-target">$1</span>');
         html = html.replace(/@@QXUS@@/g, '\\_').replace(/@@QXTI@@/g, '\\~');
         return html;
     }
@@ -88,6 +90,9 @@ $(function () {
             '  <a href="#" class="rich-editor-btn" data-cmd="italic" title="Italic (Ctrl+I)"><i>I</i></a>' +
             '  <a href="#" class="rich-editor-btn" data-cmd="subscript" title="Subscript">x<sub>2</sub></a>' +
             '  <a href="#" class="rich-editor-btn" data-cmd="superscript" title="Superscript">x<sup>2</sup></a>' +
+            // Pronunciation-guide target: select the word(s) together with the
+            // following ("...") guide, and this wraps just the word(s) in \P...\P.
+            '  <a href="#" class="rich-editor-btn rich-editor-pg" data-cmd="pgtarget" title="Mark pronunciation-guide target: select the word(s) and their (&quot;...&quot;) guide">PG</a>' +
             '  <span class="rich-editor-hint">Rich text &mdash; pasting from Google Docs/Word keeps formatting</span>' +
             '</div>');
         var $editor = $('<div class="rich-editor" contenteditable="true" spellcheck="true"></div>');
@@ -115,6 +120,44 @@ $(function () {
 
         function syncDown() {
             $ta.val(htmlToQems($editor[0].innerHTML, multiline));
+        }
+
+        // The HTML of the current selection inside this editor (empty if the
+        // selection is collapsed or outside the editor).
+        function selectionHtml() {
+            var sel = window.getSelection();
+            if (!sel || !sel.rangeCount || sel.isCollapsed) { return ''; }
+            var range = sel.getRangeAt(0);
+            if (!$editor[0].contains(range.commonAncestorContainer)) { return ''; }
+            var box = document.createElement('div');
+            box.appendChild(range.cloneContents());
+            return box.innerHTML;
+        }
+
+        // Wrap the selected word(s) in a pronunciation-guide target span
+        // (\Pword\P). The user is expected to select the term together with its
+        // following ("...") guide; the trailing parenthetical is left outside
+        // the span so only the spoken word(s) get marked. If the selection has
+        // no trailing guide, the whole selection is wrapped.
+        function wrapPgTarget() {
+            var html = selectionHtml();
+            if (!html) { return; }
+            // Peel any pg-target markers already inside the selection so we don't
+            // nest spans when re-marking.
+            html = html.replace(/<span class="pg-target">([\s\S]*?)<\/span>/g, '$1');
+            // Split off a trailing ("...") / (...) guide, keeping it outside the span.
+            var m = html.match(/^([\s\S]*?)(\s*\([^()]*\)\s*)$/);
+            var termHtml, tail;
+            if (m && m[1].replace(/<[^>]*>/g, '').trim()) {
+                termHtml = m[1].replace(/\s+$/, '');
+                tail = ' ' + m[2].trim();
+            } else {
+                termHtml = html;
+                tail = '';
+            }
+            document.execCommand('insertHTML', false,
+                '<span class="pg-target">' + termHtml + '</span>' + tail);
+            syncDown();
         }
 
         function resyncUp() {
@@ -205,9 +248,14 @@ $(function () {
         $toolbar.on('click', 'a', function (e) {
             e.preventDefault();
             $editor.focus();
-            $(this).attr('data-cmd').split(',').forEach(function (cmd) {
-                document.execCommand(cmd, false, null);
-            });
+            var cmd = $(this).attr('data-cmd');
+            if (cmd === 'pgtarget') {
+                wrapPgTarget();
+            } else {
+                cmd.split(',').forEach(function (c) {
+                    document.execCommand(c, false, null);
+                });
+            }
             syncDown();
             updateToolbarState();
         });
