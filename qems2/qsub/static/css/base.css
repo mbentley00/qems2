@@ -183,9 +183,9 @@
     box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.15);
 }
 
-/* The pronunciation-guide button, tinted to match the teal .pg-target spans. */
+/* The pronunciation-guide buttons, tinted to match the amber .pg-target spans. */
 .rich-editor-toolbar a.rich-editor-btn.rich-editor-pg {
-    color: #0b7285;
+    color: #a1490b;
     font-weight: bold;
     font-size: 0.85em;
     letter-spacing: 0.02em;
@@ -199,11 +199,37 @@
     box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.25);
 }
 
-.rich-editor-hint {
-    float: right;
-    font-size: 0.75em;
-    color: #888;
-    padding-top: 0.35em;
+/* Editor "cross out part of a comment" affordance: struck comment text plus the
+   floating button shown when text inside a comment is selected. */
+.comment-strikeable del { color: #8a8f9c; text-decoration: line-through; cursor: pointer; }
+.comment-strike-btn {
+    position: absolute;
+    z-index: 1000;
+    background: #2b2f3a;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    padding: 3px 9px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 1px 4px rgba(20,20,40,.3);
+}
+.comment-strike-btn:hover { background: #3d4250; }
+
+/* Raw-markup toggle button, and the greyed-out formatting buttons while the
+   plain textarea is showing (only the toggle itself stays usable). */
+.rich-editor-toolbar a.rich-editor-btn.rich-editor-plain {
+    font-family: monospace;
+    color: #565b66;
+}
+.rich-editor-plainmode .rich-editor-toolbar a.rich-editor-btn:not(.rich-editor-plain) {
+    opacity: 0.4;
+    pointer-events: none;
+}
+.rich-editor-plainmode .rich-editor-plain {
+    background-color: #eef2f7;
+    border-color: #cbd3dd;
 }
 
 /* Keep a long question answer in the top breadcrumb from overflowing the bar. */
@@ -351,15 +377,21 @@ ul.button-group.home-actions > li { display: block; margin: 0; float: none; }
 ul.button-group.home-actions > li > .button { display: flex; align-items: center; justify-content: center;
     text-align: center; width: 100%; height: 100%; margin: 0; border-left: 0; border-radius: 8px;
     padding: 0.9rem 1rem; }
-/* Pronunciation-guide target word(s), marked \Pword\P in QEMS markup: a subtle
-   teal so it's clear exactly which words the following ("guide") covers. */
-.pg-target { color: #0b7285; }
-html[data-theme="dark"] .pg-target { color: #66c2cf; }
+/* Pronunciation-guide target word(s), marked \Pword\P in QEMS markup: amber, not
+   blue, so it can't be mistaken for an italic run (which is blue in the editor).
+   In the editor a dotted underline shows exactly where the marked span ends. */
+.pg-target { color: #a1490b; }
+html[data-theme="dark"] .pg-target { color: #f0a868; }
+.rich-editor .pg-target {
+    border-bottom: 1px dotted currentColor;
+    background: rgba(161, 73, 11, 0.07);
+}
+html[data-theme="dark"] .rich-editor .pg-target { background: rgba(240, 168, 104, 0.12); }
 /* "PGs above" mode (doc view): the guide moves into ruby text over its words
    and the inline bold guide is hidden. The ruby annotation exists only after
    the toggle first runs; rt stays hidden unless the mode class is on. */
-ruby.pg-ruby rt { display: none; font-size: 0.62em; font-weight: normal; color: #0b7285; }
-html[data-theme="dark"] ruby.pg-ruby rt { color: #66c2cf; }
+ruby.pg-ruby rt { display: none; font-size: 0.62em; font-weight: normal; color: #a1490b; }
+html[data-theme="dark"] ruby.pg-ruby rt { color: #f0a868; }
 .doc-pg-above ruby.pg-ruby rt { display: revert; }
 .doc-pg-above strong.pg-inline { display: none; }
 
@@ -529,6 +561,35 @@ body.edit-page-wide .app-content { max-width: none; }
     border-radius: 0.7em;
     text-align: center;
 }
+
+/* First-load-of-the-day "what changed while you were away" banner on the set
+   dashboard. The whole strip is a link to the Activity page. */
+.visit-summary {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    margin-bottom: 1rem;
+    padding: 0.7rem 1rem;
+    border: 1px solid #b9dcf0;
+    border-left: 4px solid #0b6aa8;
+    border-radius: 4px;
+    background: #eef6fb;
+    color: #22333f;
+}
+.visit-summary:hover { background: #e2f0f9; color: #22333f; }
+.visit-summary .fa-bell { color: #0b6aa8; }
+.visit-summary-text { flex: 1; }
+.visit-summary-cta { font-weight: bold; color: #0b6aa8; white-space: nowrap; }
+html[data-theme="dark"] .visit-summary {
+    background: #16303f;
+    border-color: #2b5a75;
+    border-left-color: #4aa3d8;
+    color: #dce8ef;
+}
+html[data-theme="dark"] .visit-summary:hover { background: #1b3a4c; color: #dce8ef; }
+html[data-theme="dark"] .visit-summary .fa-bell,
+html[data-theme="dark"] .visit-summary-cta { color: #7cc0f4; }
 
 /* @mention autocomplete dropdown for comment boxes */
 .mention-dropdown {

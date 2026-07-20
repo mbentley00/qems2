@@ -115,7 +115,9 @@ def get_answer_no_formatting(line):
     output = line
     output = strip_markup(output)
     # Strip unescaped markup, then turn "\_"/"\~" back into literal characters.
-    output = output.replace('\\P', '')
+    # \B bold, \S superscript, \s subscript, \P pronunciation guide.
+    for marker in ('\\B', '\\S', '\\s', '\\P'):
+        output = output.replace(marker, '')
     output = re.sub(r'(?<!\\)_', '', output)
     output = re.sub(r'(?<!\\)~', '', output)
     output = output.replace('\\_', '_').replace('\\~', '~')
@@ -144,7 +146,86 @@ def preview(text):
 def get_formatted_question_html_for_bonus_answers(bonus):
     return get_formatted_question_html(bonus.part1_answer[0:80], True, True, False, False) + '<br />' + get_formatted_question_html(bonus.part2_answer[0:80], True, True, False, False) + '<br />' + get_formatted_question_html(bonus.part3_answer[0:80], True, True, False, False) + '<br />'
 
-def get_formatted_question_html(line, allowUnderlines, allowParens, allowNewLines, allowPowers):
+# A tossup is "all power" when its whole stem is inside the 15-point power
+# region: it renders fully bold and every correct buzz scores a power. `flag`
+# is the stored Tossup.all_power (True/False = an explicit editor choice, None
+# = auto): by default a stem is all-power when it says "for 15 points" and
+# carries no explicit (*)/(+) power mark of its own.
+_FOR_15_RE = re.compile(r'for 15 points', re.IGNORECASE)
+
+def compute_all_power(flag, text):
+    if flag is not None:
+        return flag
+    text = text or u''
+    if u'(*)' in text or u'(+)' in text:
+        return False
+    return _FOR_15_RE.search(text) is not None
+
+# Markup tokens that render to nothing visible (they open/close a span). Used to
+# map an offset in the *displayed* comment text back to the raw stored text.
+_CONSUMED_PAIRS = (u'\\B', u'\\D', u'\\S', u'\\s', u'\\P')
+_ESCAPE_PAIRS = (u'\\~', u'\\_', u'\\\\')
+
+def _plain_to_raw_map(raw):
+    """Walk the raw comment markup, returning (plain_text, offsets) where
+    offsets[k] is the index in `raw` of the k-th visible character (and a final
+    sentinel = len(raw) so an end offset always maps). Mirrors how
+    get_formatted_question_html consumes markup for comments (underlines/parens/
+    powers off): ``~`` toggles italic (consumed), ``\\B \\D \\S \\s \\P`` are
+    consumed, and ``\\~ \\_ \\\\`` emit their second char."""
+    raw = raw or u''
+    plain = []
+    offsets = []
+    i = 0
+    n = len(raw)
+    while i < n:
+        pair = raw[i:i + 2]
+        if pair in _CONSUMED_PAIRS:
+            i += 2
+            continue
+        if pair in _ESCAPE_PAIRS:
+            offsets.append(i + 1)
+            plain.append(raw[i + 1])
+            i += 2
+            continue
+        if raw[i] == u'~':
+            i += 1
+            continue
+        offsets.append(i)
+        plain.append(raw[i])
+        i += 1
+    offsets.append(n)
+    return u''.join(plain), offsets
+
+def toggle_comment_strike(raw, start, end, strike):
+    """Return `raw` with the displayed-text range [start, end) struck through
+    (wrapped in ``\\D``) when `strike` is true, or with the enclosing strike
+    markers removed when false. Offsets index the visible text (see
+    _plain_to_raw_map). Returns the raw unchanged if the offsets are invalid."""
+    raw = raw or u''
+    _plain, offsets = _plain_to_raw_map(raw)
+    last = len(offsets) - 1  # index of the sentinel
+    if not (0 <= start < end <= last):
+        return raw
+    r_start = offsets[start]
+    r_end = offsets[end]
+    if strike:
+        return raw[:r_start] + u'\\D' + raw[r_start:r_end] + u'\\D' + raw[r_end:]
+    # Un-strike: drop the \D markers bracketing this range (later one first so
+    # the earlier index stays valid). The closing marker sits just past the last
+    # struck character, so search from there (offsets[end] would already be past
+    # it, onto the next visible character).
+    r_last = offsets[end - 1]
+    open_at = raw.rfind(u'\\D', 0, r_start)
+    close_at = raw.find(u'\\D', r_last)
+    if open_at == -1 or close_at == -1:
+        return raw
+    raw = raw[:close_at] + raw[close_at + 2:]
+    raw = raw[:open_at] + raw[open_at + 2:]
+    return raw
+
+def get_formatted_question_html(line, allowUnderlines, allowParens, allowNewLines, allowPowers,
+                                allPower=False, allowSuperpower=True):
     italicsFlag = False
     parensFlag = False
     underlineFlag = False
@@ -152,6 +233,7 @@ def get_formatted_question_html(line, allowUnderlines, allowParens, allowNewLine
     subScriptFlag = False
     superScriptFlag = False
     boldFlag = False
+    strikeFlag = False
     pgTargetFlag = False
     powerFlag = False
     powerIndex = -1
@@ -170,12 +252,21 @@ def get_formatted_question_html(line, allowUnderlines, allowParens, allowNewLine
     # optional; a tossup may carry both.
     if (allowPowers):
         starIndex = line.find(u"(*)")
-        plusIndex = line.find(u"(+)")
+        # The 20-point superpower "(+)" is only recognized when the set enables
+        # it; otherwise a stray (+) is left to render as ordinary text.
+        plusIndex = line.find(u"(+)") if allowSuperpower else -1
         powerIndex = max(starIndex, plusIndex)
         if (powerIndex > -1):
             powerFlag = True
             output += u"<strong>"
-                
+
+    # An all-power tossup with no explicit mark is bold from end to end. The
+    # rest of the parsing runs normally so pronunciation guides etc. still
+    # render; we just wrap everything in one <strong>.
+    allPowerWrap = allowPowers and allPower and powerIndex == -1
+    if (allPowerWrap):
+        output += u"<strong>"
+
     while (index < len(line)):
         c = line[index]        
         if (index < len(line) - 1):
@@ -252,6 +343,16 @@ def get_formatted_question_html(line, allowUnderlines, allowParens, allowNewLine
             else:
                 boldFlag = True
                 output += u"<b>"
+        elif (c == u"D" and previousChar == u"\\" and secondPreviousChar != u"\\"):
+            # \Dtext\D strikes text through — used when an editor crosses out
+            # part of a comment to show it's been handled.
+            output = output[:-1] # Get rid of the escape character
+            if (strikeFlag):
+                strikeFlag = False
+                output += u"</del>"
+            else:
+                strikeFlag = True
+                output += u"<del>"
         elif (c == u"P" and previousChar == u"\\" and secondPreviousChar != u"\\"):
             # \Pwords\P marks the word(s) a following pronunciation guide
             # covers, e.g. Denis \PDiderot\P ("DID-er-OW").
@@ -298,6 +399,9 @@ def get_formatted_question_html(line, allowUnderlines, allowParens, allowNewLine
     if (boldFlag):
         output += u"</b>"
 
+    if (strikeFlag):
+        output += u"</del>"
+
     if (pgTargetFlag):
         output += u"</span>"
 
@@ -309,7 +413,10 @@ def get_formatted_question_html(line, allowUnderlines, allowParens, allowNewLine
         
     if (powerFlag):
         output += u"</strong>"
-        
+
+    if (allPowerWrap):
+        output += u"</strong>"
+
     if (promptFlag):
         output += u"</u>"
 

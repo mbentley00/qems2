@@ -92,8 +92,16 @@ $(function () {
             '  <a href="#" class="rich-editor-btn" data-cmd="superscript" title="Superscript">x<sup>2</sup></a>' +
             // Pronunciation-guide target: select the word(s) together with the
             // following ("...") guide, and this wraps just the word(s) in \P...\P.
-            '  <a href="#" class="rich-editor-btn rich-editor-pg" data-cmd="pgtarget" title="Mark pronunciation-guide target: select the word(s) and their (&quot;...&quot;) guide">PG</a>' +
-            '  <span class="rich-editor-hint">Rich text &mdash; pasting from Google Docs/Word keeps formatting</span>' +
+            // With the caret inside an existing mark it removes that mark, so PG
+            // is a toggle; selecting fewer words inside a mark shrinks it.
+            '  <a href="#" class="rich-editor-btn rich-editor-pg" data-cmd="pgtarget" title="Mark pronunciation-guide target: select the word(s) and their (&quot;...&quot;) guide. Click with the caret inside a mark to remove it.">PG</a>' +
+            // Guess every unmarked guide\'s target from how many words its
+            // respelling has, so marks don't have to be placed by hand.
+            '  <a href="#" class="rich-editor-btn rich-editor-pg" data-cmd="pgauto" title="Mark the target of every pronunciation guide in this field, guessing the word(s) each one covers from its respelling">PG auto</a>' +
+            // Switch to editing the raw QEMS markup (e.g. ~foo~ for italics) in
+            // the underlying textarea, to hand-fix anything the rich view got
+            // wrong; the label flips to "Rich" to switch back.
+            '  <a href="#" class="rich-editor-btn rich-editor-plain" data-cmd="plaintext" title="Edit the raw QEMS markup directly (e.g. ~foo~ for italics, _foo_ for answer underlines)">Raw</a>' +
             '</div>');
         var $editor = $('<div class="rich-editor" contenteditable="true" spellcheck="true"></div>');
         // Only the big bulk "type questions" box gets the extra-tall sizing.
@@ -118,8 +126,38 @@ $(function () {
         var $wrapper = $('<div class="rich-editor-wrapper"></div>').append($toolbar, $editor);
         $anchorEl.after($wrapper).hide();
 
+        // When true, the raw textarea is showing and is the source of truth, so
+        // the rich editor must not push its (frozen) content back over it.
+        var plainMode = false;
+
         function syncDown() {
+            if (plainMode) { return; }
             $ta.val(htmlToQems($editor[0].innerHTML, multiline));
+        }
+
+        // Swap between the rich editor and the underlying textarea (the raw
+        // QEMS markup) so a writer can hand-fix something the rich view parsed
+        // wrong. Each side is converted into the other on switch.
+        function setPlainMode(on) {
+            if (on === plainMode) { return; }
+            if (on) {
+                $ta.val(htmlToQems($editor[0].innerHTML, multiline));
+                plainMode = true;
+                $editor.hide();
+                $anchorEl.show();
+                $ta.trigger('focus');
+            } else {
+                plainMode = false;
+                $editor.html(qemsToHtml($ta.val(), multiline));
+                $anchorEl.hide();
+                $editor.show();
+            }
+            $wrapper.toggleClass('rich-editor-plainmode', plainMode);
+            $toolbar.find('.rich-editor-plain')
+                .text(plainMode ? 'Rich' : 'Raw')
+                .attr('title', plainMode
+                    ? 'Back to the rich text editor'
+                    : 'Edit the raw QEMS markup directly (e.g. ~foo~ for italics, _foo_ for answer underlines)');
         }
 
         // The HTML of the current selection inside this editor (empty if the
@@ -134,12 +172,91 @@ $(function () {
             return box.innerHTML;
         }
 
+        // The pg-target span containing `node`, if any (bounded by the editor).
+        function pgTargetAt(node) {
+            while (node && node !== $editor[0]) {
+                if (node.nodeType === 1 && $(node).hasClass('pg-target')) { return node; }
+                node = node.parentNode;
+            }
+            return null;
+        }
+
+        // The pg-target span the caret/selection currently sits inside, if any.
+        function currentPgTarget() {
+            var sel = window.getSelection();
+            if (!sel || !sel.rangeCount) { return null; }
+            var range = sel.getRangeAt(0);
+            if (!$editor[0].contains(range.commonAncestorContainer)) { return null; }
+            return pgTargetAt(range.commonAncestorContainer);
+        }
+
+        function selectNode(node) {
+            var range = document.createRange();
+            range.selectNode(node);
+            var sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+        }
+
+        function rangeHtml(range) {
+            var box = document.createElement('div');
+            box.appendChild(range.cloneContents());
+            return box.innerHTML;
+        }
+
+        // Drop the mark around the caret. Goes through execCommand on a range
+        // covering the span so the native undo stack stays intact.
+        function unmarkPgTarget(span) {
+            var inner = span.innerHTML;
+            selectNode(span);
+            document.execCommand('insertHTML', false, inner);
+            syncDown();
+        }
+
+        // Narrow an existing mark to just the selected word(s): rebuild the
+        // span's contents with the selection marked and the rest plain.
+        function remarkInside(span, range) {
+            var pre = document.createRange();
+            pre.setStart(span, 0);
+            pre.setEnd(range.startContainer, range.startOffset);
+            var post = document.createRange();
+            post.setStart(range.endContainer, range.endOffset);
+            post.setEnd(span, span.childNodes.length);
+            var html = rangeHtml(pre) +
+                '<span class="pg-target">' + rangeHtml(range) + '</span>' +
+                rangeHtml(post);
+            selectNode(span);
+            document.execCommand('insertHTML', false, html);
+            syncDown();
+        }
+
+        // Mark the target of every not-yet-marked guide in this field, guessing
+        // each target from the guide's word count. Mirrors the server's
+        // style_checker.mark_pg_target.
+        function autoMarkPgTargets() {
+            var result = window.QemsMarkup.autoMarkPgTargets($ta.val() || '');
+            if (!result.changed) { return; }
+            $ta.val(result.text);
+            resyncUp();
+        }
+
         // Wrap the selected word(s) in a pronunciation-guide target span
         // (\Pword\P). The user is expected to select the term together with its
         // following ("...") guide; the trailing parenthetical is left outside
         // the span so only the spoken word(s) get marked. If the selection has
         // no trailing guide, the whole selection is wrapped.
+        //
+        // A mark is never a dead end: with the caret inside one and nothing
+        // selected this removes it, and selecting part of a mark moves the mark
+        // onto just that part.
         function wrapPgTarget() {
+            var span = currentPgTarget();
+            if (span) {
+                var sel = window.getSelection();
+                if (!sel || !sel.rangeCount || sel.isCollapsed) { unmarkPgTarget(span); }
+                else { remarkInside(span, sel.getRangeAt(0)); }
+                return;
+            }
             var html = selectionHtml();
             if (!html) { return; }
             // Peel any pg-target markers already inside the selection so we don't
@@ -180,10 +297,21 @@ $(function () {
         // Reflect the formatting at the caret/selection on the toolbar buttons
         // (a button appears "pressed" when its style is active).
         function updateToolbarState() {
+            var inPg = !!currentPgTarget();
             $toolbar.find('.rich-editor-btn').each(function () {
                 var cmd = $(this).attr('data-cmd');
-                var active = false;
-                try { active = document.queryCommandState(cmd); } catch (e) { active = false; }
+                if (cmd === 'pgauto') { return; }
+                var active;
+                if (cmd === 'pgtarget') {
+                    // Pressed while the caret is inside a mark, so it reads as a
+                    // toggle: clicking again removes the mark.
+                    active = inPg;
+                    $(this).attr('title', inPg
+                        ? 'Remove this pronunciation-guide mark (or select fewer words to shrink it)'
+                        : 'Mark pronunciation-guide target: select the word(s) and their ("...") guide');
+                } else {
+                    try { active = document.queryCommandState(cmd); } catch (e) { active = false; }
+                }
                 $(this).toggleClass('active', active);
             });
         }
@@ -247,10 +375,16 @@ $(function () {
         $toolbar.on('mousedown', 'a', function (e) { e.preventDefault(); });
         $toolbar.on('click', 'a', function (e) {
             e.preventDefault();
-            $editor.focus();
             var cmd = $(this).attr('data-cmd');
+            if (cmd === 'plaintext') { setPlainMode(!plainMode); return; }
+            // The formatting buttons act on the rich editor; ignore them while
+            // the raw textarea is showing.
+            if (plainMode) { return; }
+            $editor.focus();
             if (cmd === 'pgtarget') {
                 wrapPgTarget();
+            } else if (cmd === 'pgauto') {
+                autoMarkPgTargets();
             } else {
                 cmd.split(',').forEach(function (c) {
                     document.execCommand(c, false, null);

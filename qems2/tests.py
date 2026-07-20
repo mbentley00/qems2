@@ -3260,7 +3260,8 @@ class PgAnnotationTests(TestCase):
         i = issues[0]
         self.assertEqual(i['code'], 'pg_span')
         self.assertIn('("DID-er-OW")', i['message'])
-        self.assertNotIn('fix', i)  # not auto-fixable — target is ambiguous
+        # Auto-fixable: the target is guessed from the guide's word count.
+        self.assertEqual(i['fix'], {'field': 'tossup_text', 'op': 'pg_span', 'idx': 0})
 
     def test_pg_span_accepts_marked_target(self):
         from qems2.qsub import style_checker
@@ -4165,7 +4166,7 @@ class SuperpowerTests(TestCase):
         self.dist = Distribution.objects.create(name='sp dist')
         self.qset = QuestionSet.objects.create(
             name='SP Set', date=timezone.now(), host='h', address='', owner=self.owner,
-            num_packets=1, distribution=self.dist)
+            num_packets=1, distribution=self.dist, enable_superpower=True)
         self.owner.question_set_editor.add(self.qset)
         self.tu = Tossup(
             author=self.owner, question_set=self.qset, question_type=self.acf_tu,
@@ -4211,6 +4212,29 @@ class SuperpowerTests(TestCase):
         j = self._buzz(5, superpowered='false', powered='false')
         self.assertEqual(j['value'], 10)
 
+    def test_dont_know_scores_zero_and_is_not_correct(self):
+        j = self._buzz(6, correct='false', dont_know='true')
+        self.assertEqual(j['value'], 0)
+        b = TossupBuzz.objects.latest('id')
+        self.assertTrue(b.dont_know)
+        self.assertFalse(b.correct)
+
+    def test_dont_know_never_negs(self):
+        # A client that sends neg alongside dont_know still scores 0, not -5.
+        j = self._buzz(3, correct='false', neg='true', dont_know='true')
+        self.assertEqual(j['value'], 0)
+        self.assertFalse(TossupBuzz.objects.latest('id').correct)
+
+    def test_dont_know_counted_separately_in_results(self):
+        from qems2.qsub.views import _question_buzz_data
+        self._buzz(6, correct='false', dont_know='true')
+        self._buzz(5, correct='true')
+        data = _question_buzz_data(self.tu, 'tossup')
+        self.assertEqual(data['plays'], 2)
+        self.assertEqual(data['correct'], 1)
+        self.assertEqual(data['dont_knows'], 1)
+        self.assertEqual(data['negs'], 0)
+
     def test_yapp_export_keeps_both_marks(self):
         from qems2.qsub.yapp_export import qems_to_yapp_html
         self.assertEqual(qems_to_yapp_html('a (+) b (*) c'), 'a (+) b (*) c')
@@ -4227,6 +4251,411 @@ class SuperpowerTests(TestCase):
         self.tu.tossup_text = 'A clue (*) more (+) giveaway. For 10 points, name this _thing_.'
         msgs = ' '.join(i['message'] for i in style_checker.check_tossup(self.tu, 'minkowski', set()))
         self.assertIn('superpower', msgs)
+
+    # --- Set-level gating: superpower off (the default for new sets) ---
+
+    def test_render_superpower_disabled_is_literal(self):
+        from qems2.qsub.utils import get_formatted_question_html
+        # (+) is no longer a bold boundary; only (*) powers. The (+) inside the
+        # power region prints literally.
+        html = get_formatted_question_html('a (+) b (*) c', True, True, False, True,
+                                           allowSuperpower=False)
+        self.assertEqual(html, '<strong>a (+) b (*)</strong> c')
+
+    def test_reading_ignores_superpower_when_disabled(self):
+        from qems2.qsub.views import _tossup_reading
+        self.qset.enable_superpower = False
+        self.qset.save()
+        r = _tossup_reading(self.tu)
+        self.assertEqual(r['superpower_index'], -1)
+        self.assertEqual(r['power_index'], 4)  # (*) still powers
+        self.assertNotIn('(+)', ' '.join(r['words']))  # marker stripped, not read
+
+    def test_superpower_buzz_scores_15_when_disabled(self):
+        self.qset.enable_superpower = False
+        self.qset.save()
+        j = self._buzz(2, superpowered='true', powered='true')
+        self.assertEqual(j['value'], 15)
+        self.assertFalse(TossupBuzz.objects.latest('id').superpowered)
+
+
+class AllPowerTests(TestCase):
+    """All-power tossups: whole stem bold, every correct buzz a power, with
+    auto-detection from a "for 15 points" giveaway."""
+
+    def setUp(self):
+        import json as _json
+        self._json = _json
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf_tu = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('ap_owner', password='pw', email='ap@test.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='ap dist')
+        self.qset = QuestionSet.objects.create(
+            name='AP Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.owner.question_set_editor.add(self.qset)
+
+    def _tu(self, text, all_power=None):
+        tu = Tossup(author=self.owner, question_set=self.qset, question_type=self.acf_tu,
+                    tossup_text=text, tossup_answer='_Ans_', question_number=1, all_power=all_power)
+        tu.save_question(edit_type=QUESTION_CREATE, changer=self.owner)
+        return tu
+
+    def test_compute_all_power_auto_from_for_15(self):
+        from qems2.qsub.utils import compute_all_power
+        self.assertTrue(compute_all_power(None, 'A clue. For 15 points, name this thing.'))
+        # An explicit power mark opts out of auto all-power.
+        self.assertFalse(compute_all_power(None, 'A (*) clue. For 15 points, name this.'))
+        # No "for 15 points" giveaway, so no auto all-power.
+        self.assertFalse(compute_all_power(None, 'A clue. For 10 points, name this.'))
+
+    def test_explicit_override_wins_either_way(self):
+        from qems2.qsub.utils import compute_all_power
+        self.assertTrue(compute_all_power(True, 'For 10 points, name this.'))
+        self.assertFalse(compute_all_power(False, 'For 15 points, name this.'))
+
+    def test_render_all_power_is_fully_bold(self):
+        from qems2.qsub.utils import get_formatted_question_html
+        html = get_formatted_question_html('a b c', True, True, False, True, allPower=True)
+        self.assertEqual(html, '<strong>a b c</strong>')
+
+    def test_render_all_power_keeps_pronunciation_guide(self):
+        from qems2.qsub.utils import get_formatted_question_html
+        html = get_formatted_question_html('a (b) c', True, True, False, True, allPower=True)
+        self.assertEqual(
+            html, '<strong>a <strong class="pronunciation-guide">(b)</strong> c</strong>')
+
+    def test_to_html_bolds_all_power_tossup(self):
+        tu = self._tu('Clue one. For 15 points, name this.')  # auto all-power
+        self.assertIn('<strong>Clue one. For 15 points, name this.</strong>', tu.to_html())
+
+    def test_all_power_reading_powers_every_word(self):
+        from qems2.qsub.views import _tossup_reading
+        tu = self._tu('For 15 points, name this thing.')  # auto all-power
+        r = _tossup_reading(tu)
+        self.assertEqual(r['power_index'], len(r['words']))
+        self.assertEqual(r['superpower_index'], -1)
+
+    def test_all_power_buzz_scores_15(self):
+        tu = self._tu('For 15 points, name this thing.')
+        self.client.login(username='ap_owner', password='pw')
+        resp = self.client.post('/record_buzz/', {
+            'tossup_id': tu.id, 'correct': 'true', 'powered': 'true',
+            'buzz_word_index': 1, 'total_words': 6, 'char_position': 0})
+        self.assertEqual(self._json.loads(resp.content)['value'], 15)
+
+
+class CommentStrikeTests(TestCase):
+    """Editors crossing out parts of comments (the \\D strike token)."""
+
+    def test_render_strike_token(self):
+        from qems2.qsub.utils import get_formatted_question_html
+        html = get_formatted_question_html('fix \\Dthe pronoun\\D here', False, False, True, False)
+        self.assertEqual(html, 'fix <del>the pronoun</del> here')
+
+    def test_strike_plain_text(self):
+        from qems2.qsub.utils import toggle_comment_strike
+        out = toggle_comment_strike('fix the pronoun here', 4, 15, True)
+        self.assertEqual(out, 'fix \\Dthe pronoun\\D here')
+
+    def test_strike_offsets_skip_markup(self):
+        from qems2.qsub.utils import toggle_comment_strike
+        # ~hi~ renders invisibly, so "world" starts at displayed offset 7.
+        out = toggle_comment_strike('say ~hi~ world now', 7, 12, True)
+        self.assertEqual(out, 'say ~hi~ \\Dworld\\D now')
+
+    def test_unstrike_removes_markers(self):
+        from qems2.qsub.utils import toggle_comment_strike
+        out = toggle_comment_strike('fix \\Dthe pronoun\\D here', 4, 15, False)
+        self.assertEqual(out, 'fix the pronoun here')
+
+    def test_strike_then_unstrike_roundtrips(self):
+        from qems2.qsub.utils import toggle_comment_strike
+        struck = toggle_comment_strike('answer line needs work', 0, 6, True)
+        self.assertEqual(struck, '\\Danswer\\D line needs work')
+        back = toggle_comment_strike(struck, 0, 6, False)
+        self.assertEqual(back, 'answer line needs work')
+
+    def test_invalid_offsets_are_noops(self):
+        from qems2.qsub.utils import toggle_comment_strike
+        self.assertEqual(toggle_comment_strike('short', 2, 99, True), 'short')
+        self.assertEqual(toggle_comment_strike('short', 3, 3, True), 'short')
+
+    def _make_comment(self):
+        from django.contrib.contenttypes.models import ContentType
+        from django.contrib.sites.models import Site
+        from django_comments.models import Comment
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        acf = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        ou = User.objects.create_user('cs_owner', password='pw', email='cs@test.com')
+        owner = Writer.objects.get(user=ou)
+        dist = Distribution.objects.create(name='cs dist')
+        qset = QuestionSet.objects.create(
+            name='CS Set', date=timezone.now(), host='h', address='', owner=owner,
+            num_packets=1, distribution=dist)
+        owner.question_set_editor.add(qset)
+        tu = Tossup(author=owner, question_set=qset, question_type=acf,
+                    tossup_text='For 10 points, name this.', tossup_answer='_Ans_',
+                    question_number=1)
+        tu.save_question(edit_type=QUESTION_CREATE, changer=owner)
+        c = Comment.objects.create(
+            content_type=ContentType.objects.get_for_model(Tossup), object_pk=str(tu.id),
+            site=Site.objects.get_current(), user=ou, comment='fix the pronoun here',
+            is_public=True, is_removed=False)
+        return c
+
+    def test_endpoint_requires_editor(self):
+        import json as _json
+        c = self._make_comment()
+        User.objects.create_user('cs_stranger', password='pw', email='x@test.com')
+        self.client.login(username='cs_stranger', password='pw')
+        resp = self.client.post('/strike_comment/',
+                                {'comment_id': c.id, 'start': 4, 'end': 15, 'strike': 'true'})
+        self.assertFalse(_json.loads(resp.content)['success'])
+        c.refresh_from_db()
+        self.assertEqual(c.comment, 'fix the pronoun here')  # unchanged
+
+    def test_endpoint_strikes_for_editor(self):
+        import json as _json
+        c = self._make_comment()
+        self.client.login(username='cs_owner', password='pw')
+        resp = self.client.post('/strike_comment/',
+                                {'comment_id': c.id, 'start': 4, 'end': 15, 'strike': 'true'})
+        self.assertTrue(_json.loads(resp.content)['success'])
+        c.refresh_from_db()
+        self.assertEqual(c.comment, 'fix \\Dthe pronoun\\D here')
+        # And un-striking the same range restores it.
+        resp = self.client.post('/strike_comment/',
+                                {'comment_id': c.id, 'start': 4, 'end': 15, 'strike': 'false'})
+        self.assertTrue(_json.loads(resp.content)['success'])
+        c.refresh_from_db()
+        self.assertEqual(c.comment, 'fix the pronoun here')
+
+
+class VisitSummaryTests(TestCase):
+    """The dashboard's first-load-of-the-day summary of what changed since your
+    previous visit."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf_tu = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('vs_owner', password='pw', email='vs@test.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.wu = User.objects.create_user('vs_writer', password='pw', email='vsw@test.com')
+        self.writer = Writer.objects.get(user=self.wu)
+        self.dist = Distribution.objects.create(name='vs dist')
+        self.qset = QuestionSet.objects.create(
+            name='VS Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.owner.question_set_editor.add(self.qset)
+        self.writer.question_set_writer.add(self.qset)
+
+    def _visit_yesterday(self):
+        from datetime import timedelta
+        from qems2.qsub.models import SetVisit
+        SetVisit.objects.update_or_create(
+            writer=self.owner, question_set=self.qset,
+            defaults={'last_visit': timezone.now() - timedelta(days=1)})
+
+    def _add_tossup(self, author):
+        tu = Tossup(author=author, question_set=self.qset, question_type=self.acf_tu,
+                    tossup_text='A clue. For 10 points, name this.', tossup_answer='_Ans_',
+                    question_number=1)
+        tu.save_question(edit_type=QUESTION_CREATE, changer=author)
+        return tu
+
+    def _old_tossup(self, author):
+        """A tossup that already existed before the backdated last visit."""
+        from datetime import timedelta
+        tu = self._add_tossup(author)
+        old = timezone.now() - timedelta(days=3)
+        Tossup.objects.filter(id=tu.id).update(created_date=old)
+        tu.refresh_from_db()
+        return tu
+
+    def _summary(self):
+        from qems2.qsub.views import _record_visit_and_summarize
+        return _record_visit_and_summarize(self.owner, self.qset)
+
+    def test_first_ever_visit_has_no_summary(self):
+        self._add_tossup(self.writer)
+        self.assertIsNone(self._summary())
+
+    def test_counts_others_new_questions_since_last_visit(self):
+        self._visit_yesterday()
+        self._add_tossup(self.writer)
+        summary = self._summary()
+        self.assertEqual(summary['new_questions'], 1)
+        self.assertEqual(summary['total'], 1)
+
+    def test_your_own_questions_are_not_counted(self):
+        self._visit_yesterday()
+        self._add_tossup(self.owner)
+        self.assertIsNone(self._summary())
+
+    def test_a_new_question_is_not_also_counted_as_an_edit(self):
+        self._visit_yesterday()
+        self._add_tossup(self.writer)
+        summary = self._summary()
+        self.assertEqual(summary['new_questions'], 1)
+        self.assertEqual(summary['edited_questions'], 0)
+
+    def test_others_edits_to_existing_questions_are_counted(self):
+        tu = self._old_tossup(self.owner)
+        self._visit_yesterday()
+        tu.tossup_text = 'A better clue. For 10 points, name this.'
+        tu.save_question(edit_type=QUESTION_CHANGE, changer=self.writer)
+        summary = self._summary()
+        self.assertEqual(summary['edited_questions'], 1)
+        self.assertEqual(summary['new_questions'], 0)
+
+    def test_your_own_edits_are_not_counted(self):
+        tu = self._old_tossup(self.owner)
+        self._visit_yesterday()
+        tu.tossup_text = 'My own revision. For 10 points, name this.'
+        tu.save_question(edit_type=QUESTION_CHANGE, changer=self.owner)
+        self.assertIsNone(self._summary())
+
+    def test_second_load_the_same_day_shows_nothing(self):
+        self._visit_yesterday()
+        self._add_tossup(self.writer)
+        self.assertIsNotNone(self._summary())   # first load today records the visit
+        self._add_tossup(self.writer)
+        self.assertIsNone(self._summary())      # second load today stays quiet
+
+    def test_comments_by_others_are_counted(self):
+        from django.contrib.contenttypes.models import ContentType
+        from django.contrib.sites.models import Site
+        from django_comments.models import Comment
+        tu = self._add_tossup(self.owner)
+        self._visit_yesterday()
+        Comment.objects.create(
+            content_type=ContentType.objects.get_for_model(Tossup), object_pk=str(tu.id),
+            site=Site.objects.get_current(), user=self.wu, comment='nice clue',
+            is_public=True, is_removed=False)
+        summary = self._summary()
+        self.assertEqual(summary['comments'], 1)
+        self.assertEqual(summary['new_questions'], 0)
+
+    def test_banner_renders_and_links_to_activity(self):
+        self._visit_yesterday()
+        self._add_tossup(self.writer)
+        self.client.login(username='vs_owner', password='pw')
+        resp = self.client.get('/edit_question_set/{0}/'.format(self.qset.id))
+        self.assertContains(resp, 'Since your last visit')
+        self.assertContains(resp, '/activity/{0}/'.format(self.qset.id))
+        # Reloading the same day drops the banner.
+        resp = self.client.get('/edit_question_set/{0}/'.format(self.qset.id))
+        self.assertNotContains(resp, 'Since your last visit')
+
+
+class PlaySelectionTests(TestCase):
+    """The play page skips the player's own questions unless asked not to."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf_tu = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('pl_owner', password='pw', email='pl@test.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.wu = User.objects.create_user('pl_writer', password='pw', email='plw@test.com')
+        self.writer = Writer.objects.get(user=self.wu)
+        self.dist = Distribution.objects.create(name='pl dist')
+        self.qset = QuestionSet.objects.create(
+            name='PL Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.owner.question_set_editor.add(self.qset)
+        self.writer.question_set_writer.add(self.qset)
+        for author, answer in ((self.owner, '_Mine_'), (self.writer, '_Theirs_')):
+            tu = Tossup(author=author, question_set=self.qset, question_type=self.acf_tu,
+                        tossup_text='A clue. For 10 points, name this.', tossup_answer=answer,
+                        question_number=1)
+            tu.save_question(edit_type=QUESTION_CREATE, changer=author)
+        self.client.login(username='pl_owner', password='pw')
+
+    def _answers(self, url):
+        questions = self.client.get(url).context['questions']
+        return {t['answer_html'] for t in questions['tossups']}
+
+    def test_own_questions_skipped_by_default(self):
+        answers = self._answers('/play/{0}/'.format(self.qset.id))
+        self.assertEqual(len(answers), 1)
+        self.assertIn('Theirs', ' '.join(answers))
+
+    def test_include_own_brings_them_back(self):
+        answers = self._answers('/play/{0}/?include_own=1'.format(self.qset.id))
+        self.assertEqual(len(answers), 2)
+        self.assertIn('Mine', ' '.join(answers))
+
+
+class AnswerLineFormatTests(TestCase):
+    """Answers that are accepted are bold + underlined (_x_); prompt targets are
+    underlined only (__x__); bold on its own (\\Bx\\B) is never standard."""
+
+    def _codes(self, answer):
+        from qems2.qsub.style_checker import _answer_format_issues
+        return [i['message'] for i in _answer_format_issues('Answer', answer)]
+
+    def test_standard_line_is_clean(self):
+        line = ('_apex predator_s [accept _super predator_s; '
+                'prompt on __predator__s]')
+        self.assertEqual(self._codes(line), [])
+
+    def test_bold_without_underline_flagged(self):
+        msgs = self._codes('\\Bapex predators\\B [accept _super predators_]')
+        self.assertEqual(len(msgs), 1)
+        self.assertIn('bolded but not underlined', msgs[0])
+
+    def test_bolded_prompt_target_flagged(self):
+        msgs = self._codes('_apex predators_ [prompt on _predators_]')
+        self.assertEqual(len(msgs), 1)
+        self.assertIn('prompt target', msgs[0])
+
+    def test_underline_only_accept_flagged(self):
+        msgs = self._codes('_apex predators_ [accept __super predators__]')
+        self.assertEqual(len(msgs), 1)
+        self.assertIn('underlined but not bolded', msgs[0])
+
+    def test_escaped_underscore_is_not_markup(self):
+        self.assertEqual(self._codes('the \\_ character _x_'), [])
+
+    def test_antiprompt_follows_the_prompt_convention(self):
+        self.assertEqual(self._codes('_x_ [antiprompt on __y__]'), [])
+        msgs = self._codes('_x_ [antiprompt on _y_]')
+        self.assertEqual(len(msgs), 1)
+        self.assertIn('prompt target', msgs[0])
+
+
+class PgAutoMarkTests(TestCase):
+    """The \\P...\\P target of a pronunciation guide can be guessed from how many
+    words the guide's respelling has."""
+
+    def _mark(self, text):
+        from qems2.qsub.style_checker import mark_pg_target
+        return mark_pg_target(text, 0)
+
+    def test_single_word_guide_marks_one_word(self):
+        self.assertEqual(self._mark('Denis Diderot ("DID-er-OW") wrote this.'),
+                         'Denis \\PDiderot\\P ("DID-er-OW") wrote this.')
+
+    def test_two_word_guide_marks_two_words(self):
+        self.assertEqual(self._mark('Jean-Paul Sartre ("zhahn-pohl SAR-truh") wrote.'),
+                         '\\PJean-Paul Sartre\\P ("zhahn-pohl SAR-truh") wrote.')
+
+    def test_power_mark_is_not_a_guide(self):
+        self.assertEqual(self._mark('For (*) 10 points, name Denis Diderot ("DID-er-OW").'),
+                         'For (*) 10 points, name Denis \\PDiderot\\P ("DID-er-OW").')
+
+    def test_already_marked_is_left_alone(self):
+        text = 'Already \\PDiderot\\P ("DID-er-OW") marked.'
+        self.assertEqual(self._mark(text), text)
+
+    def test_pg_span_issue_carries_the_fix(self):
+        from qems2.qsub.style_checker import _pg_span_issues
+        issues = _pg_span_issues('Question', 'Denis Diderot ("DID-er-OW").', 'tossup_text')
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]['fix'],
+                         {'field': 'tossup_text', 'op': 'pg_span', 'idx': 0})
 
 
 class CommentMentionColorTests(TestCase):

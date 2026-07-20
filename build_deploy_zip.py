@@ -2,6 +2,7 @@
 components/ that the app needs), excluding junk. Server collectstatic will
 rebuild static/ from components/ + qsub/static."""
 import os
+import re
 import zipfile
 
 ROOT = r"C:\Users\mbent\claude\qems2\qems2"
@@ -14,6 +15,7 @@ SKIP_FILES = {"db.sqlite3", "secret", "anthropic_key", "nul", "_logs.zip", "buil
 # package (svgs, sprites, js-packages, metadata, ...) is ~22k files / ~65 MB.
 FA_PREFIX = "components/bower_components/fontawesome/"
 FA_KEEP = {"css", "webfonts"}
+TEST_DB_RE = re.compile(r"^default_\d+\.sqlite3$")
 
 def skip(rel):
     rel = rel.replace("\\", "/")
@@ -28,6 +30,9 @@ def skip(rel):
             return True
     base = parts[-1]
     if base in SKIP_FILES or base.endswith((".pyc", ".zip")):
+        return True
+    # Leftover databases from `manage.py test --parallel` (default_1.sqlite3, ...)
+    if TEST_DB_RE.match(base):
         return True
     return False
 

@@ -51,7 +51,7 @@
                     <td>{% if tossup.proofread_date %} {{ tossup.proofread_date|to_short_datetime }} {% endif %}</td>
                     <td>
                     {% for comment in tossup.cached_comments %}
-                        <strong>{{comment.user}}:</strong> {{ comment.comment|preview|comment_html }}<br>
+                        <strong>{{ comment|commenter_name }}:</strong> {{ comment.comment|preview|comment_html }}<br>
                     {% endfor %}
                     </td>
                     <td>{{ tossup|tossup_last_comment_date|to_short_datetime }}</td>
@@ -98,7 +98,7 @@
                     <td>{% if bonus.proofread_date %} {{ bonus.proofread_date|to_short_datetime }} {% endif %}</td>
                     <td>
                     {% for comment in bonus.cached_comments %}
-                        <strong>{{comment.user}}:</strong> {{ comment.comment|preview|comment_html }}<br>
+                        <strong>{{ comment|commenter_name }}:</strong> {{ comment.comment|preview|comment_html }}<br>
                     {% endfor %}
                     </td>
                     <td>{{ bonus|bonus_last_comment_date|to_short_datetime }}</td>

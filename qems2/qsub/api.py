@@ -208,9 +208,10 @@ def api_ping(request):
 def api_buzzes(request):
     """Record tossup buzzes. Body: {"events": [{external_id, answer, player_name,
     buzz_word_index, total_words, char_position, correct, powered, superpowered,
-    value, neg, answer_given, occurred_at}, ...]}. `answer` is matched to a tossup;
-    `player_name` records who buzzed; `answer_given` (optional) stores what they
-    said; `occurred_at` (optional ISO-8601) sets when the buzz happened.
+    value, neg, dont_know, answer_given, occurred_at}, ...]}. `answer` is matched to
+    a tossup; `player_name` records who buzzed; `answer_given` (optional) stores what
+    they said; `dont_know` (optional) marks a heard-but-unanswered question, which is
+    never correct, never a neg, and worth 0; `occurred_at` (optional ISO-8601) sets when the buzz happened.
     Re-sending the same `external_id` updates the existing buzz in place."""
     events, err = _load_events(request, 'events')
     if err:
@@ -239,11 +240,15 @@ def api_buzzes(request):
             results.append({'external_id': eid, 'status': status})
             continue
 
-        correct = bool(e.get('correct'))
-        superpowered = bool(e.get('superpowered')) and correct
+        dont_know = bool(e.get('dont_know'))
+        correct = bool(e.get('correct')) and not dont_know
+        # A 20-point superpower only counts when the set has enabled it.
+        superpowered = bool(e.get('superpowered')) and correct and qset.enable_superpower
         # A superpower buzz is also inside the regular power region.
         powered = (superpowered or bool(e.get('powered'))) and correct
-        if e.get('value') is not None:
+        if dont_know:
+            value = 0
+        elif e.get('value') is not None:
             value = _int(e.get('value'))
         elif correct:
             value = 20 if superpowered else 15 if powered else 10
@@ -257,7 +262,8 @@ def api_buzzes(request):
             buzz_word_index=_int(e.get('buzz_word_index')),
             total_words=_int(e.get('total_words')),
             char_position=_int(e.get('char_position')),
-            correct=correct, powered=powered, superpowered=superpowered, value=value,
+            correct=correct, powered=powered, superpowered=superpowered,
+            dont_know=dont_know, value=value,
             answer_given=(e.get('answer_given') or '')[:1000],
             tossup_history_id=hist_ids.get(qid),
             source=PLAYTEST_SOURCE_DISCORD)

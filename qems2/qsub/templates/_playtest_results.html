@@ -3,11 +3,12 @@
 <div class="panel header radius text-center"><strong>Playtest Results</strong></div>
 {% if playtest.qtype == 'tossup' %}
 <div class="playtest-summary">
-    <span class="pt-stat"><strong>{{ playtest.plays }}</strong> buzz{{ playtest.plays|pluralize:"es" }}</span>
+    <span class="pt-stat"><strong>{{ playtest.plays }}</strong> play{{ playtest.plays|pluralize }}</span>
     <span class="pt-stat"><strong>{{ playtest.correct }}</strong> correct ({{ playtest.conversion }})</span>
     {% if playtest.superpowers %}<span class="pt-stat"><strong>{{ playtest.superpowers }}</strong> superpower{{ playtest.superpowers|pluralize }}</span>{% endif %}
     <span class="pt-stat"><strong>{{ playtest.powers }}</strong> power{{ playtest.powers|pluralize }}</span>
     <span class="pt-stat"><strong>{{ playtest.negs }}</strong> neg{{ playtest.negs|pluralize }}</span>
+    <span class="pt-stat"><strong>{{ playtest.dont_knows }}</strong> didn't know</span>
     <span class="pt-stat">Avg buzz: <strong>{{ playtest.avg_buzz }}</strong> in</span>
 </div>
 <div class="playtest-scroll">
@@ -18,8 +19,8 @@
         <tr>
             <td>{{ r.date|to_short_datetime }}</td>
             <td>{{ r.player }}{% if r.source %} ({{ r.source|capfirst }}){% endif %}</td>
-            <td>{% if r.correct %}{% if r.superpowered %}<span class="result-superpower">{{ r.fraction }} (+{{ r.value }})</span>{% elif r.powered %}<span class="result-power">{{ r.fraction }} (+{{ r.value }})</span>{% else %}<span class="result-correct">{{ r.fraction }} (+{{ r.value }})</span>{% endif %}{% else %}<span class="result-wrong">{{ r.fraction }} ({{ r.value }})</span>{% endif %}</td>
-            <td>{{ r.answer_given }}</td>
+            <td>{% if r.correct %}{% if r.superpowered %}<span class="result-superpower">{{ r.fraction }} (+{{ r.value }})</span>{% elif r.powered %}<span class="result-power">{{ r.fraction }} (+{{ r.value }})</span>{% else %}<span class="result-correct">{{ r.fraction }} (+{{ r.value }})</span>{% endif %}{% elif r.dont_know %}<span class="result-idk">{{ r.fraction }} (didn't know)</span>{% else %}<span class="result-wrong">{{ r.fraction }} ({{ r.value }})</span>{% endif %}</td>
+            <td>{% if r.dont_know %}<em class="result-idk">&mdash;</em>{% else %}{{ r.answer_given }}{% endif %}</td>
             <td class="pt-heard">{{ r.heard_tail }}</td>
             <td>{% if r.history_url %}<a href="{{ r.history_url }}" title="View the version of this question played for this buzz">version</a>{% else %}&mdash;{% endif %}</td>
         </tr>
@@ -70,5 +71,6 @@
 .result-power { color: #1565c0; font-weight: bold; }
 .result-correct { color: #43AC6A; font-weight: bold; }
 .result-wrong { color: #f04124; }
+.result-idk { color: #777; font-style: italic; }
 </style>
 {% endif %}

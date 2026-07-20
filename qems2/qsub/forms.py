@@ -105,10 +105,13 @@ class TossupForm(forms.ModelForm):
         # The bookkeeping fields (history, editor/proofreader stamps, search
         # text, dates) are managed by save_question(), never by this form —
         # excluding them keeps a bound instance from having them wiped to None.
+        # all_power is rendered as a plain checkbox in the template and read
+        # straight from POST (a nullable BooleanField would otherwise render as
+        # a three-way select).
         exclude = ['question_set', 'subtype', 'time_period', 'location', 'question_number',
                    'search_question_content', 'search_question_answers', 'question_history',
                    'editor', 'edited_date', 'proofreader', 'proofread_date',
-                   'created_date', 'last_changed_date']
+                   'created_date', 'last_changed_date', 'all_power']
 
     def __init__(self, *args, **kwargs):
         qset_id = kwargs.pop('qset_id', None)

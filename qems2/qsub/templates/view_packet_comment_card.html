@@ -11,11 +11,11 @@
         <div class="doc-comment-kind">On the whole question</div>
         {% endif %}
         <div class="doc-comment-author">{{ c.user }} <span class="doc-comment-date">{{ c.date|date:"m/d/y H:i" }}</span></div>
-        {% autoescape off %}<div class="doc-comment-text">{{ c.text|safe|comment_html|linebreaks }}</div>{% endautoescape %}
+        {% autoescape off %}<div class="doc-comment-text"><span class="comment-strikeable" data-comment-id="{{ c.id }}">{{ c.text|safe|comment_html|linebreaks }}</span></div>{% endautoescape %}
         {% for r in c.replies %}
         <div class="doc-comment doc-comment-reply">
             <div class="doc-comment-author"><i class="fa fa-reply"></i> {{ r.user }} <span class="doc-comment-date">{{ r.date|date:"m/d/y H:i" }}</span></div>
-            {% autoescape off %}<div class="doc-comment-text">{{ r.text|safe|comment_html|linebreaks }}</div>{% endautoescape %}
+            {% autoescape off %}<div class="doc-comment-text"><span class="comment-strikeable" data-comment-id="{{ r.id }}">{{ r.text|safe|comment_html|linebreaks }}</span></div>{% endautoescape %}
         </div>
         {% endfor %}
     </div>

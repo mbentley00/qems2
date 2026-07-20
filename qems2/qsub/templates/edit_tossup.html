@@ -13,6 +13,7 @@
 
 {% block content %}
 {% if qset %}<script>window.QEMS_QSET_ID = {{ qset.id }};</script>{% endif %}
+{% if role == "editor" %}<script>window.QEMS_CAN_STRIKE = true;</script>{% endif %}
 
 <h3 class="page-header">Edit Tossup</h3>
 {% if tossup and tossup.category %}
@@ -103,6 +104,7 @@
                 {% endif %}
                 <li><label>{{ form.proofread }} Proofread</label></li>
                 <li><label>{{ form.read_carefully }} Read Answer Carefully</label></li>
+                <li><label title="Bold the whole stem and score every correct buzz as a power. Auto-checks when the stem says &quot;for 15 points&quot; and has no (*)/(+) mark."><input type="checkbox" name="all_power" id="id_all_power" {% if tossup.is_all_power %}checked{% endif %}> All Power</label></li>
             </ul>
         </div>
 
@@ -149,7 +151,7 @@
                 <div class="comment-item{% if comment.id in thread_data.resolved %} comment-resolved{% endif %}{% if comment.is_discord %} comment-discord{% endif %}" data-comment-id="{{ comment.id }}"{% if anchor %} data-anchor-text="{{ anchor.selected_text|force_escape }}" data-anchor-prefix="{{ anchor.prefix|force_escape }}" data-anchor-suffix="{{ anchor.suffix|force_escape }}"{% endif %}>
                     {% if anchor %}<div class="comment-quote" title="Click to locate in question">{{ anchor.selected_text|force_escape }}</div>{% endif %}
                     {% if comment.id in thread_data.resolved %}<span class="label success comment-resolved-badge">Resolved</span>{% endif %}
-                    <strong>{% if comment.is_discord %}<span class="discord-badge">Discord</span>{{ comment.user_name }}{% else %}{{ comment|commenter_name }}{% endif %}:</strong> {{ comment.comment|safe|comment_html|linebreaks }} ({{ comment.submit_date }}){% if comment.is_discord and comment.discord_thread_url %} <a href="{{ comment.discord_thread_url }}" target="_blank" rel="noopener" class="discord-thread-link">Open Discord thread</a>{% endif %}
+                    <strong>{% if comment.is_discord %}<span class="discord-badge">Discord</span>{{ comment.user_name }}{% else %}{{ comment|commenter_name }}{% endif %}:</strong> <span class="comment-strikeable" data-comment-id="{{ comment.id }}">{{ comment.comment|safe|comment_html|linebreaks }}</span> ({{ comment.submit_date }}){% if comment.is_discord and comment.discord_thread_url %} <a href="{{ comment.discord_thread_url }}" target="_blank" rel="noopener" class="discord-thread-link">Open Discord thread</a>{% endif %}
                     <div class="comment-actions">
                         {% if role == "editor" %}
                             <a href="/delete_comment/{{ comment.id }}" class="delete_comment" value="{{ comment.id }}" qset="{{ qset.id }}">Delete</a>
@@ -165,7 +167,7 @@
                     <div class="comment-replies">
                         {% for reply in thread_data.replies|get_replies:comment.id %}
                             <div class="comment-item{% if reply.is_discord %} comment-discord{% endif %}" data-comment-id="{{ reply.id }}">
-                                <strong>{% if reply.is_discord %}<span class="discord-badge">Discord</span>{{ reply.user_name }}{% else %}{{ reply|commenter_name }}{% endif %}:</strong> {{ reply.comment|safe|comment_html|linebreaks }} ({{ reply.submit_date }}){% if reply.is_discord and reply.discord_thread_url %} <a href="{{ reply.discord_thread_url }}" target="_blank" rel="noopener" class="discord-thread-link">Open Discord thread</a>{% endif %}
+                                <strong>{% if reply.is_discord %}<span class="discord-badge">Discord</span>{{ reply.user_name }}{% else %}{{ reply|commenter_name }}{% endif %}:</strong> <span class="comment-strikeable" data-comment-id="{{ reply.id }}">{{ reply.comment|safe|comment_html|linebreaks }}</span> ({{ reply.submit_date }}){% if reply.is_discord and reply.discord_thread_url %} <a href="{{ reply.discord_thread_url }}" target="_blank" rel="noopener" class="discord-thread-link">Open Discord thread</a>{% endif %}
                                 <div class="comment-actions">
                                     {% if role == "editor" %}
                                         <a href="/delete_comment/{{ reply.id }}" class="delete_comment" value="{{ reply.id }}" qset="{{ qset.id }}">Delete</a>
@@ -249,6 +251,54 @@ $(function () {
     }
     $(document).on('selectionchange', function () {
         clearTimeout(selTimer); selTimer = setTimeout(updateSelection, 250);
+    });
+});
+
+// Writers sometimes bold the power section by hand. Power is applied
+// automatically from the (*) and (+) marks, so a long bold run at the start of
+// the stem is almost always a mistake. Warn once per save attempt.
+$(function () {
+    var LEADING_BOLD_CHARS = 80;
+    function leadingBoldLength() {
+        var text = $('#id_tossup_text').val() || '';
+        var m = /^\s*\\B([\s\S]*?)\\B/.exec(text);
+        return m ? m[1].length : 0;
+    }
+    $('#edit-tossup').on('submit', function (e) {
+        // Pull the latest rich-editor content into the textarea before checking.
+        var reg = window.QemsRichEditor && window.QemsRichEditor.get('id_tossup_text');
+        if (reg) { reg.syncDown(); }
+        var len = leadingBoldLength();
+        if (len < LEADING_BOLD_CHARS) { return; }
+        var ok = window.confirm(
+            'This tossup starts with ' + len + ' bolded characters.\n\n' +
+            'Power is applied automatically from the (*) and (+) marks, so you ' +
+            'usually should not bold the power section yourself. Save anyway?');
+        if (!ok) { e.preventDefault(); }
+    });
+});
+
+// "All Power" auto-detects from the stem: a tossup that says "for 15 points"
+// and carries no explicit (*)/(+) mark defaults to all-power. We keep the
+// checkbox in sync with that heuristic as the writer types, but stop once they
+// toggle it by hand so an explicit choice is never overridden.
+$(function () {
+    var $box = $('#id_all_power');
+    if (!$box.length) { return; }
+    var manual = false;
+    $box.on('change', function () { manual = true; });
+    function autoDetect() {
+        if (manual) { return; }
+        var reg = window.QemsRichEditor && window.QemsRichEditor.get('id_tossup_text');
+        if (reg) { reg.syncDown(); }
+        var text = $('#id_tossup_text').val() || '';
+        var hasMark = text.indexOf('(*)') !== -1 || text.indexOf('(+)') !== -1;
+        var isAllPower = !hasMark && /for 15 points/i.test(text);
+        $box.prop('checked', isAllPower);
+    }
+    var timer = null;
+    $(document).on('input', '.rich-editor, #id_tossup_text', function () {
+        clearTimeout(timer); timer = setTimeout(autoDetect, 350);
     });
 });
 </script>

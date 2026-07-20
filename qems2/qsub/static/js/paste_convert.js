@@ -68,6 +68,22 @@ $(function () {
         }).join('\n');
     }
 
+    /**
+     * The value of CSS property `prop` in an inline style string, or '' if it
+     * isn't set. Matches only a real declaration of that exact property — the
+     * property name must start the string or follow a ';' or whitespace — so
+     * `cssValue(style, 'font-weight')` does NOT match Word's
+     * `mso-bidi-font-weight` (preceded by '-'). Returns the last declaration
+     * when a property is repeated (later wins, as in CSS). `style` is assumed
+     * lowercased already.
+     */
+    function cssValue(style, prop) {
+        var re = new RegExp('(?:^|;|\\s)' + prop + '\\s*:\\s*([^;]*)', 'g');
+        var m, val = '';
+        while ((m = re.exec(style)) !== null) { val = m[1].trim(); }
+        return val;
+    }
+
     function walkNode(node) {
         if (node.nodeType === Node.TEXT_NODE) {
             // Newlines/tabs inside text nodes are source formatting (Word
@@ -95,15 +111,21 @@ $(function () {
         }
 
         var style = (node.getAttribute('style') || '').toLowerCase();
+        // Read the real CSS property value, NOT a substring of the style string:
+        // Word emits complex-script attributes like `mso-bidi-font-weight:bold`
+        // on runs that are visually normal weight, and a substring test for
+        // "font-weight" + "bold" would match those and bold the text falsely.
+        var fontWeight = cssValue(style, 'font-weight');
         var isBold = (tag === 'b' || tag === 'strong' ||
-                      style.indexOf('font-weight') !== -1 &&
-                      (style.indexOf('bold') !== -1 || style.indexOf('700') !== -1));
-        var isUnderline = (tag === 'u' ||
-                          style.indexOf('text-decoration') !== -1 &&
-                          style.indexOf('underline') !== -1);
+                      fontWeight === 'bold' || fontWeight === 'bolder' ||
+                      (/^\d{3}$/.test(fontWeight) && parseInt(fontWeight, 10) >= 700));
+        var textDecoration = cssValue(style, 'text-decoration') + ' ' +
+                             cssValue(style, 'text-decoration-line');
+        var isUnderline = (tag === 'u' || textDecoration.indexOf('underline') !== -1);
+        var fontStyle = cssValue(style, 'font-style');
         var isItalic = (tag === 'i' || tag === 'em' ||
-                       style.indexOf('font-style') !== -1 &&
-                       style.indexOf('italic') !== -1);
+                        fontStyle.indexOf('italic') !== -1 ||
+                        fontStyle.indexOf('oblique') !== -1);
         var isSup = (tag === 'sup');
         var isSub = (tag === 'sub');
         // Pronunciation-guide target span written by the rich editor
@@ -161,10 +183,56 @@ $(function () {
         return inner;
     }
 
+    /**
+     * How many words a pronunciation guide covers, guessed from its whitespace:
+     * one respelled chunk per spoken word, so ("zhahn-pohl SAR-truh") covers the
+     * two words of "Jean-Paul Sartre".
+     */
+    function guideWordCount(inner) {
+        var s = (inner || '').trim().replace(/^["“”'’]+|["“”'’]+$/g, '').trim();
+        return s ? s.split(/\s+/).length : 0;
+    }
+
+    /**
+     * Wrap the word(s) before each unmarked pronunciation guide in \P...\P,
+     * guessing how many words each guide covers from its word count. Guides are
+     * walked right-to-left so earlier match offsets stay valid. Power marks
+     * (*) and (+) and escaped parens are not guides.
+     * Mirrors style_checker.mark_pg_target on the server.
+     * Returns {text, changed}.
+     */
+    function autoMarkPgTargets(text) {
+        var re = /\(([^()]*)\)/g, m, guides = [];
+        while ((m = re.exec(text)) !== null) {
+            if (m.index > 0 && text.charAt(m.index - 1) === '\\') { continue; }
+            if (m[1] === '*' || m[1] === '+') { continue; }
+            guides.push(m);
+        }
+        var out = text, changed = 0;
+        for (var i = guides.length - 1; i >= 0; i--) {
+            var g = guides[i];
+            var n = guideWordCount(g[1]);
+            if (!n) { continue; }
+            var head = out.slice(0, g.index), tail = out.slice(g.index);
+            var trimmed = head.replace(/\s+$/, '');
+            var trailing = head.slice(trimmed.length);
+            if (/\\P$/.test(trimmed)) { continue; }  // already marked
+            var words = trimmed.split(' ');
+            if (words.length < n) { continue; }
+            var target = words.slice(words.length - n).join(' ');
+            if (!target.trim() || target.indexOf('\\P') !== -1) { continue; }
+            var rest = words.slice(0, words.length - n).join(' ');
+            out = (rest ? rest + ' ' : '') + '\\P' + target + '\\P' + trailing + tail;
+            changed++;
+        }
+        return {text: out, changed: changed};
+    }
+
     // Expose the converter for other scripts (e.g. rich_editor.js)
     window.QemsMarkup = {
         htmlToQems: htmlToQemsMarkup,
-        isRichHtml: function (html) { return isRichHtml(html); }
+        isRichHtml: function (html) { return isRichHtml(html); },
+        autoMarkPgTargets: autoMarkPgTargets
     };
 
     /**

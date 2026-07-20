@@ -64,6 +64,10 @@
             {% endif %}
         </div>
     </div>
+    <label class="own-toggle">
+        <input type="checkbox" name="include_own" value="1" {% if include_own %}checked{% endif %}>
+        Include questions I wrote <span class="cats-hint">(skipped by default)</span>
+    </label>
     <button type="submit" class="button">Load questions</button>
 </form>
 
@@ -91,6 +95,7 @@
         <div id="tossup-controls">
             <button id="next-clue-btn" type="button" class="button">Next Clue <span class="key-hint">(N)</span></button>
             <button id="buzz-btn" type="button" class="button alert">Buzz <span class="key-hint">(Space)</span></button>
+            <button id="dont-know-btn" type="button" class="button secondary">I don't know <span class="key-hint">(D)</span></button>
             <button id="skip-btn" type="button" class="button secondary">Skip <span class="key-hint">(Esc)</span></button>
         </div>
         <div id="buzz-panel" style="display:none;">
@@ -119,6 +124,7 @@
             <button id="next-question-btn" class="button">Next Question <span class="key-hint">(N)</span></button>
         </div>
         <div class="post-comment">
+            <ul id="post-comment-list" class="post-comment-list"></ul>
             <label>Add a comment on this question
                 <textarea id="post-comment-text" rows="2" placeholder="Leave a comment for the editors/writer..."></textarea>
             </label>
@@ -152,6 +158,7 @@
 .cat-option { display: block; margin-bottom: 0.15rem; }
 .cats-actions { margin-bottom: 0.3rem; font-size: 0.85rem; }
 .cats-hint { font-weight: normal; font-size: 0.8rem; color: #777; }
+.own-toggle { display: block; margin: 0.6rem 0 0.4rem; }
 .play-toolbar { display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap; }
 .play-toggle { margin-bottom: 0; font-weight: bold; }
 .play-toggle input { margin-bottom: 0; }
@@ -181,6 +188,9 @@
 .post-actions { margin-bottom: 0.75rem; }
 .post-comment textarea { margin-bottom: 0.4rem; }
 .post-comment-status { margin-left: 0.6rem; }
+.post-comment-list { list-style: none; margin: 0 0 0.6rem; }
+.posted-comment { background: #eef6ff; border-radius: 4px; padding: 0.4rem 0.6rem; margin-bottom: 0.3rem; font-size: 0.95rem; }
+.posted-comment-author { font-weight: bold; }
 #play-meta { font-size: 1.1rem; margin-bottom: 0.5rem; color: #555; }
 </style>
 
@@ -284,11 +294,14 @@
         revealedChunks = words.length ? 1 : 0;
         buzzed = false;
         $('#buzz-panel').hide();
+        $('.buzz-prompt').text("You buzzed. What's your answer?");
         $('#reveal-answer').hide().html('');
         $('#judge-controls').hide();
-        $('#answer-input').val('').prop('disabled', false);
+        $('#answer-input').show().val('').prop('disabled', false);
+        $('#submit-answer-btn').show();
         $('#next-clue-btn').show();
         $('#buzz-btn').show().prop('disabled', false);
+        $('#dont-know-btn').show().prop('disabled', false);
         $('#skip-btn').show();
         $tossupView.show();
         tuHeard++;
@@ -315,6 +328,37 @@
         $('#answer-input').val('').prop('disabled', false);
         $('#buzz-panel').show();
         $('#answer-input').focus();
+    }
+
+    // The player heard the question and knows they can't answer it. Recorded as
+    // a zero-value, non-neg result so editors can tell "nobody knew this" apart
+    // from "people buzzed and got it wrong".
+    function dontKnow() {
+        if (buzzed) { return; }
+        buzzed = true;
+        var q = playlist[pos].q;
+        var heard = revealedWords();
+        post('/record_buzz/', {
+            tossup_id: q.id,
+            buzz_word_index: heard,
+            total_words: words.length,
+            char_position: words.slice(0, heard).join(' ').length,
+            correct: 'false', powered: 'false', superpowered: 'false',
+            neg: 'false', dont_know: 'true', answer_given: ''
+        }, function () { updateScoreboard(); });
+
+        $('#next-clue-btn').prop('disabled', true);
+        $('#buzz-btn').prop('disabled', true);
+        $('#dont-know-btn').prop('disabled', true);
+        $('.buzz-prompt').text("You didn't know it. The answer was:");
+        $('#answer-input').hide();
+        $('#submit-answer-btn').hide();
+        $('#judge-controls').hide();
+        $('#reveal-answer').html('<strong>ANSWER:</strong> ' + q.answer_html).show();
+        $('#buzz-panel').show();
+        // Reveal the whole tossup for context.
+        revealedChunks = chunkEnds.length; renderTossupText();
+        showPostQuestion(q);
     }
 
     function submitAnswer() {
@@ -410,6 +454,7 @@
         $post.data('qtype', playlist[pos].kind).data('qid', q.id);
         $('#post-comment-text').val('');
         $('#post-comment-status').text('');
+        $('#post-comment-list').empty();
         $post.show();
         $('#next-question-btn').focus();
     }
@@ -451,6 +496,7 @@
     // (buzz) / N (next clue) keyboard shortcuts.
     $('#next-clue-btn').on('click', function () { this.blur(); nextClue(); });
     $('#buzz-btn').on('click', function () { this.blur(); doBuzz(); });
+    $('#dont-know-btn').on('click', function () { this.blur(); dontKnow(); });
     $('#skip-btn').on('click', function () { this.blur(); next(); });
     $('#submit-answer-btn').on('click', submitAnswer);
     $('#correct-btn').on('click', function () { judgeTossup(true); });
@@ -461,15 +507,28 @@
     $('#bonus-parts').on('click', '.bonus-incorrect', function () { judgeBonusPart($(this).closest('.bonus-part'), false); });
 
     $('#post-comment-btn').on('click', function () {
+        var $btn = $(this);
         var text = $.trim($('#post-comment-text').val());
         if (!text) { $('#post-comment-status').text('Enter a comment first.'); return; }
+        $btn.prop('disabled', true);
         $('#post-comment-status').text('Posting...');
         $.post('/add_question_comment/', {
             question_type: $post.data('qtype'), question_id: $post.data('qid'), comment_text: text
         }, function (resp) {
-            $('#post-comment-status').text(resp.message || 'Posted.');
-            if ((resp.message_class || '').indexOf('success') >= 0) { $('#post-comment-text').val(''); }
-        }, 'json');
+            $btn.prop('disabled', false);
+            var ok = (resp.message_class || '').indexOf('success') >= 0;
+            $('#post-comment-status').text(resp.message || (ok ? 'Posted.' : ''));
+            if (!ok) { return; }
+            // Echo the saved comment back — otherwise it looks like it vanished.
+            $('#post-comment-text').val('');
+            $('#post-comment-list').append(
+                $('<li class="posted-comment"></li>')
+                    .append($('<span class="posted-comment-author"></span>').text('You:'))
+                    .append(document.createTextNode(' ' + text)));
+        }, 'json').fail(function () {
+            $btn.prop('disabled', false);
+            $('#post-comment-status').text('Could not post that comment.');
+        });
     });
 
     // Keyboard: Space = buzz, N = next clue / next question, C/X = judge, Esc = skip.
@@ -485,6 +544,7 @@
             if ($post.is(':visible')) { e.preventDefault(); next(); return; }
             if ($tossupView.is(':visible') && !buzzed) { e.preventDefault(); nextClue(); return; }
         }
+        if (k === 'd' && $tossupView.is(':visible') && !buzzed) { e.preventDefault(); dontKnow(); return; }
         if (k === 'c' && $('#judge-controls').is(':visible')) { e.preventDefault(); judgeTossup(true); }
         else if (k === 'x' && $('#judge-controls').is(':visible')) { e.preventDefault(); judgeTossup(false); }
         else if (e.key === 'Escape' && $tossupView.is(':visible') && !buzzed) { next(); }

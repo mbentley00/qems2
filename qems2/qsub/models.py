@@ -161,6 +161,11 @@ class QuestionSet (models.Model):
     tossups_per_packet = models.PositiveIntegerField(default=20)
     bonuses_per_packet = models.PositiveIntegerField(default=20)
 
+    # When true, tossups may carry a 20-point superpower mark "(+)" (before the
+    # 15-point power "(*)"). Off by default: a stray (+) then renders as plain
+    # text and never scores 20.
+    enable_superpower = models.BooleanField(default=False)
+
     class Admin: pass
 
     def is_owner(self, writer):
@@ -749,9 +754,15 @@ class Tossup (models.Model):
     proofread = models.BooleanField(default=False)
     read_carefully = models.BooleanField(default=False)
 
+    # "All power": the whole stem is bold and every correct buzz is a power.
+    # None = auto (bold when the stem says "for 15 points" and has no explicit
+    # (*)/(+) mark); True/False = an explicit editor override. See
+    # compute_all_power() and is_all_power().
+    all_power = models.BooleanField(null=True, blank=True, default=None)
+
     #order = models.PositiveIntegerField(null=True)
     question_number = models.PositiveIntegerField(null=True)
-    
+
     search_question_content = models.TextField(default='')
     search_question_answers = models.TextField(default='')
 
@@ -826,10 +837,19 @@ class Tossup (models.Model):
         
         return output
 
+    def is_all_power(self):
+        """Effective all-power state: the stored override, or auto-detection
+        from the stem text when unset. See utils.compute_all_power."""
+        return compute_all_power(self.all_power, self.tossup_text)
+
+    def superpower_enabled(self):
+        qset = self.get_question_set()
+        return bool(qset and qset.enable_superpower)
+
     def to_html(self, include_category=False, include_character_count=False):
 
         output = ''
-        output = output + "<p>" + get_formatted_question_html(self.tossup_text, False, True, False, True) + "<br />"
+        output = output + "<p>" + get_formatted_question_html(self.tossup_text, False, True, False, True, allPower=self.is_all_power(), allowSuperpower=self.superpower_enabled()) + "<br />"
         output = output + "ANSWER: " + get_formatted_question_html(self.tossup_answer, True, True, False, False) + "</p>"
         if (include_category and self.category is not None):
             output = output + "<p><strong>Category:</strong> " + str(self.category) + "</p>"
@@ -1442,6 +1462,18 @@ class ActivitySeen(models.Model):
         unique_together = ('writer', 'question_set')
 
 
+class SetVisit(models.Model):
+    """When a writer last loaded a set's dashboard. Distinct from ActivitySeen
+    (which tracks the activity feed): this is what the first-load-of-the-day
+    "what changed while you were away" summary measures against."""
+    writer = models.ForeignKey(Writer, on_delete=models.CASCADE, related_name='set_visits')
+    question_set = models.ForeignKey(QuestionSet, on_delete=models.CASCADE)
+    last_visit = models.DateTimeField()
+
+    class Meta:
+        unique_together = ('writer', 'question_set')
+
+
 class CommentResolution(models.Model):
     """Marks a comment as resolved (a discussion that's been dealt with).
     A comment is resolved when a row exists here with resolved=True."""
@@ -1529,6 +1561,9 @@ class TossupBuzz(models.Model):
     # Whether the buzz was inside the 20-point superpower mark (before "(+)").
     # A superpowered buzz is also powered.
     superpowered = models.BooleanField(default=False)
+    # The player heard the question and knew they couldn't answer it, rather
+    # than buzzing with a wrong answer. Never correct, never a neg, worth 0.
+    dont_know = models.BooleanField(default=False)
     # Score: 20 superpower, 15 power, 10 get, -5 neg, 0 otherwise.
     value = models.IntegerField(default=0)
     answer_given = models.TextField(blank=True, default='')

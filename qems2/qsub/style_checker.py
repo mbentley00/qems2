@@ -57,6 +57,7 @@ RULE_LABELS = [
     ('power', 'Power-mark problems'),
     ('imperative', 'Interrogative giveaway'),
     ('underline', 'Answer line has no underline'),
+    ('answer_format', 'Non-standard bold/underline on an answer line'),
     ('pronunciation', 'Pronunciation-guide suggestions'),
     ('pg_span', 'Pronunciation guides without a marked target (\\P…\\P)'),
     ('answer_alts', 'Answer line missing standard alternates'),
@@ -229,32 +230,124 @@ def _pronunciation_issues(label, raw, field):
 _GUIDE_PAREN = re.compile(r'(?<!\\)\(([^()]*)\)')
 
 
+def guide_word_count(inner):
+    """How many words a guide's respelling covers, guessed from its whitespace:
+    one respelled chunk per spoken word. `("zhahn-pohl SAR-truh")` covers the two
+    words of "Jean-Paul Sartre". Returns 0 when there's nothing to count."""
+    stripped = (inner or '').strip().strip('"“”\'’')
+    return len(stripped.split())
+
+
+def mark_pg_target(text, guide_index):
+    """Wrap the word(s) preceding the `guide_index`-th pronunciation guide in
+    ``\\P...\\P``, guessing how many words the guide covers from its word count.
+    Returns `text` unchanged if the guide can't be found or there aren't enough
+    words in front of it."""
+    guides = [m for m in _GUIDE_PAREN.finditer(text or '')
+              if m.group(1) not in ('*', '+')]
+    if guide_index >= len(guides):
+        return text
+    m = guides[guide_index]
+    n = guide_word_count(m.group(1))
+    if n <= 0:
+        return text
+
+    head = text[:m.start()]
+    trailing = head[len(head.rstrip()):]  # whitespace between target and guide
+    head = head.rstrip()
+    if '\\P' in head[-2:]:
+        return text  # already marked
+
+    words = head.split(' ')
+    if len(words) < n or not all(w.strip() for w in words[-n:]):
+        return text
+    target = ' '.join(words[-n:])
+    if '\\P' in target:
+        return text
+    return '{0}\\P{1}\\P{2}{3}'.format(
+        ' '.join(words[:-n]) + (' ' if len(words) > n else ''),
+        target, trailing, text[m.start():])
+
+
 def _pg_span_issues(label, raw, field):
     """Flag a pronunciation guide ``("...")`` whose spoken word(s) aren't wrapped
     in ``\\P...\\P``. Marking the target ties the guide to exactly the word(s) it
-    covers (used for audio and rich rendering). Not auto-fixable — which word(s)
-    a hand-written guide covers is ambiguous, so the editor selects them and uses
-    the editor's "PG" button. Power marks ``(*)``/``(+)`` are not guides."""
+    covers (used for audio and rich rendering). The auto-fix guesses the target
+    from the guide's word count, so the editor should check what it picked.
+    Power marks ``(*)``/``(+)`` are not guides."""
     text = raw or ''
     issues = []
-    for idx, m in enumerate(_GUIDE_PAREN.finditer(text)):
-        if m.group(1) in ('*', '+'):  # power / superpower marks, not a guide
-            continue
+    for idx, m in enumerate(g for g in _GUIDE_PAREN.finditer(text)
+                            if g.group(1) not in ('*', '+')):
         # A \P closing the target span should sit just before the '(' (any
         # whitespace between the marked word and its guide is fine).
         if text[:m.start()].rstrip().endswith('\\P'):
             continue
         guide = m.group(0)
+        fix = None
+        if mark_pg_target(text, idx) != text:
+            fix = {'field': field, 'op': 'pg_span', 'idx': idx}
         issues.append(_issue(
             INFO,
-            '{0}: pronunciation guide {1} has no marked target — select the word(s) '
-            'it covers and mark them (\\P…\\P)'.format(label, guide),
-            'pg_span', '{0}|{1}|{2}'.format(label, idx, guide)))
+            '{0}: pronunciation guide {1} has no marked target — mark the word(s) '
+            'it covers (\\P…\\P)'.format(label, guide),
+            'pg_span', '{0}|{1}|{2}'.format(label, idx, guide), fix))
     return issues
 
 
 def _has_underline(raw):
     return '_' in (raw or '')
+
+
+# Answer-line markup, in the order the alternation must be tried: `__x__` is
+# underline-only (a prompt target), `_x_` is bold + underlined (a required or
+# acceptable answer), and `\Bx\B` is bold on its own, which has no standard
+# meaning on an answer line.
+_ANSWER_RUN_RE = re.compile(r'(?<!\\)__([^_]+)__|(?<![\\_])_([^_]+)_(?!_)|\\B(.+?)\\B')
+_ANSWER_DIRECTIVE_RE = re.compile(r'(?i)\b(anti-?prompt|prompt|accept|reject)\b')
+
+
+def _last_directive(raw, upto):
+    """The clause keyword governing the markup run at `upto` ('prompt',
+    'accept', 'reject'), or '' for the primary answer. Antiprompts follow the
+    same underline-only convention as prompts."""
+    found = _ANSWER_DIRECTIVE_RE.findall(raw[:upto])
+    if not found:
+        return ''
+    last = found[-1].lower()
+    return 'prompt' if 'prompt' in last else last
+
+
+def _answer_format_issues(label, raw):
+    """Flag answer-line formatting that departs from the convention: answers
+    that are accepted are bold + underlined, prompt targets are underlined
+    only, and nothing is bolded without being underlined."""
+    if not (raw or '').strip():
+        return []
+    issues = []
+    for n, m in enumerate(_ANSWER_RUN_RE.finditer(raw)):
+        underline_only, bold_underline, bold_only = m.group(1), m.group(2), m.group(3)
+        directive = _last_directive(raw, m.start())
+        token = '{0}|{1}'.format(label, n)
+        if bold_only is not None:
+            issues.append(_issue(
+                WARNING,
+                '{0}: "{1}" is bolded but not underlined — underline the required '
+                'portion instead (_…_ renders bold and underlined)'.format(label, bold_only),
+                'answer_format', token))
+        elif bold_underline is not None and directive == 'prompt':
+            issues.append(_issue(
+                WARNING,
+                '{0}: prompt target "{1}" is bolded — a prompt should be underlined '
+                'only (__…__)'.format(label, bold_underline),
+                'answer_format', token))
+        elif underline_only is not None and directive != 'prompt':
+            issues.append(_issue(
+                INFO,
+                '{0}: "{1}" is underlined but not bolded — an answer that is accepted '
+                'should be bold and underlined (_…_)'.format(label, underline_only),
+                'answer_format', token))
+    return issues
 
 
 def _answer_alt_issues(label, raw_answer):
@@ -370,6 +463,9 @@ def check_tossup(tu, guide=DEFAULT_GUIDE, disabled=None):
     if not _has_underline(tu.tossup_answer):
         issues.append(_issue(WARNING, 'answer not underlined', 'underline'))
 
+    if 'answer_format' in enabled:
+        issues += _answer_format_issues('Answer', tu.tossup_answer)
+
     if 'answer_alts' in enabled:
         issues += _answer_alt_issues('Answer', tu.tossup_answer)
 
@@ -415,6 +511,11 @@ def check_bonus(b, guide=DEFAULT_GUIDE, disabled=None):
         if (ans or '').strip() and not _has_underline(ans):
             issues.append(_issue(WARNING, '{0}: not underlined'.format(label),
                                  'underline', label))
+
+    if 'answer_format' in enabled:
+        for label, ans in (('Answer 1', b.part1_answer), ('Answer 2', b.part2_answer),
+                           ('Answer 3', b.part3_answer)):
+            issues += _answer_format_issues(label, ans)
 
     if 'answer_alts' in enabled:
         for label, ans in (('Answer 1', b.part1_answer), ('Answer 2', b.part2_answer), ('Answer 3', b.part3_answer)):
@@ -496,6 +597,8 @@ def apply_fix(question, fix):
         new = re.sub(fix['pattern'], fix['repl'], text)
     elif op == 'guide':
         new = _insert_guide(text, fix['term'], fix['pron'])
+    elif op == 'pg_span':
+        new = mark_pg_target(text, fix['idx'])
     else:
         return False
     if new == text:

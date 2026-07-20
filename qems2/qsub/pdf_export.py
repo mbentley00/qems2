@@ -68,10 +68,11 @@ class _RunWriter(HTMLParser):
         self.pdf.write(LINE_H, data)
 
 
-def _write_qems(pdf, text, is_answer=False, size=SIZE):
+def _write_qems(pdf, text, is_answer=False, size=SIZE, all_power=False, allow_superpower=True):
     """Render one QEMS-markup field as inline formatted runs on the PDF."""
     html_text = get_formatted_question_html(
-        _safe(text), True, True, False, not is_answer)
+        _safe(text), True, True, False, not is_answer,
+        allPower=all_power, allowSuperpower=allow_superpower)
     _RunWriter(pdf, size).feed(html_text)
 
 
@@ -122,7 +123,9 @@ def _write_meta(pdf, meta):
 def _tossup(pdf, tossup, num, opts):
     pdf.set_font(_FONT, 'B', SIZE)
     pdf.write(LINE_H, '{0}. '.format(num))
-    _write_qems(pdf, tossup.tossup_text)
+    _write_qems(pdf, tossup.tossup_text,
+                all_power=tossup.is_all_power(),
+                allow_superpower=tossup.superpower_enabled())
     pdf.ln(LINE_H)
     pdf.set_font(_FONT, 'B', SIZE)
     pdf.write(LINE_H, 'ANSWER: ')

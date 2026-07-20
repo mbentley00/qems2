@@ -10,6 +10,8 @@ secret
 anthropic_key
 nul
 db.sqlite3
+# leftover test databases from `manage.py test [--parallel]`
+default_*.sqlite3
 cookies.txt
 cookies_test.txt
 .claude/settings.local.json

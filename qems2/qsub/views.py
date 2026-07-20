@@ -566,6 +566,7 @@ def edit_question_set(request, qset_id):
         return HttpResponseRedirect('/failure.html/')
 
     new_activity = _new_activity_count(user, qset)
+    visit_summary = None
 
     if request.method == 'POST':
         if (qset.is_owner(user) or user in qset_editors):
@@ -578,6 +579,7 @@ def edit_question_set(request, qset_id):
                 qset.num_packets = form.cleaned_data['num_packets']
                 qset.char_count_ignores_pronunciation_guides = form.cleaned_data['char_count_ignores_pronunciation_guides']
                 qset.tossups_only = form.cleaned_data['tossups_only']
+                qset.enable_superpower = form.cleaned_data['enable_superpower']
                 qset.public = form.cleaned_data['public']
                 qset.max_acf_tossup_length = form.cleaned_data['max_acf_tossup_length']
                 qset.max_acf_bonus_length = form.cleaned_data['max_acf_bonus_length']
@@ -636,6 +638,8 @@ def edit_question_set(request, qset_id):
             # TODO: a better story
             return HttpResponseRedirect('/main.html')
 
+        visit_summary = _record_visit_and_summarize(user, qset)
+
         tossups, tossup_dict, bonuses, bonus_dict = get_tossup_and_bonuses_in_set(qset, question_limit=30, preview_only=True)
         
         if user not in qset_editors and not qset.is_owner(user):
@@ -675,6 +679,7 @@ def edit_question_set(request, qset_id):
                                'qset': qset,
                                'role': role,
                                'new_activity': new_activity,
+                               'visit_summary': visit_summary,
                                'read_only': read_only,
                                'all_role_groups': RoleGroup.objects.all().order_by('name'),
                                'attached_role_groups': list(
@@ -2120,6 +2125,9 @@ def edit_tossup(request, tossup_id):
 
                 tossup.tossup_text = strip_markup(form.cleaned_data['tossup_text'])
                 tossup.tossup_answer = strip_markup(form.cleaned_data['tossup_answer'])
+                # all_power is a plain checkbox (present only when checked), so
+                # every save records an explicit True/False override.
+                tossup.all_power = 'all_power' in request.POST
                 tossup.category = form.cleaned_data['category']
                 tossup.packet = form.cleaned_data['packet']
                 tossup.locked = form.cleaned_data['locked']
@@ -4240,7 +4248,8 @@ def move_bonus(request, q_set_id, bonus_id):
                                  'message': message,
                                  'message_class': message_class})
 
-def add_qems_formatted_runs(paragraph, text, bold=False, is_answer=False, smart_quotes=False):
+def add_qems_formatted_runs(paragraph, text, bold=False, is_answer=False, smart_quotes=False,
+                            all_power=False, allow_superpower=True):
     """Convert QEMS markup to python-docx runs on a paragraph.
 
     Markup rules (mirroring get_formatted_question_html in utils.py):
@@ -4280,14 +4289,19 @@ def add_qems_formatted_runs(paragraph, text, bold=False, is_answer=False, smart_
 
     if allow_powers:
         # Bold runs to the last power mark: a 20-point superpower "(+)" precedes
-        # the 15-point power "(*)"; either is optional.
-        power_index = max(text.find("(*)"), text.find("(+)"))
+        # the 15-point power "(*)"; either is optional. (+) is only honored when
+        # the set enables superpower.
+        plus_index = text.find("(+)") if allow_superpower else -1
+        power_index = max(text.find("(*)"), plus_index)
         if power_index > -1:
             power_flag = True
 
+    # All-power stem with no explicit mark: bold from end to end.
+    all_power_wrap = allow_powers and all_power and power_index == -1
+
     buf = ""
     # Current formatting state
-    cur_bold = bold or power_flag
+    cur_bold = bold or power_flag or all_power_wrap
     cur_italic = False
     cur_underline = False
     cur_sub = False
@@ -4311,7 +4325,7 @@ def add_qems_formatted_runs(paragraph, text, bold=False, is_answer=False, smart_
             buf = ""
 
     def current_state():
-        b = bold or power_flag or parens_flag or underline_flag or bold_flag
+        b = bold or power_flag or parens_flag or underline_flag or bold_flag or all_power_wrap
         i = italics_flag
         u = underline_flag or prompt_flag
         return b, i, u, sub_flag, super_flag, pg_flag
@@ -4757,7 +4771,9 @@ def export_question_set(request, qset_id, output_format):
                     p.paragraph_format.keep_together = True
                     p.paragraph_format.space_after = Pt(10)
                     p.add_run(f"{num}. ").bold = True
-                    add_qems_formatted_runs(p, safe_text(tossup.tossup_text), smart_quotes=smart_quotes)
+                    add_qems_formatted_runs(p, safe_text(tossup.tossup_text), smart_quotes=smart_quotes,
+                                            all_power=tossup.is_all_power(),
+                                            allow_superpower=tossup.superpower_enabled())
                     _line_break(p)
                     p.add_run("ANSWER: ").bold = True
                     add_qems_formatted_runs(p, safe_text(tossup.tossup_answer), is_answer=True,
@@ -7183,6 +7199,68 @@ def packet_grid_log(request, qset_id):
                    'can_edit': qset.is_owner(user) or user in qset.editor.all()})
 
 
+def _record_visit_and_summarize(user, qset):
+    """Record that `user` loaded `qset`'s dashboard, and — on the first load of
+    the day only — summarize what other people did to the set since their
+    previous visit. Returns None when there's nothing to report (no earlier
+    visit, not the first load today, or nobody else touched the set).
+
+    Your own questions/edits/comments are left out: you already know about them.
+    """
+    now = timezone.now()
+    visit = SetVisit.objects.filter(writer=user, question_set=qset).first()
+    prev = visit.last_visit if visit else None
+    SetVisit.objects.update_or_create(writer=user, question_set=qset,
+                                      defaults={'last_visit': now})
+
+    if prev is None:
+        return None  # no baseline to measure against on a first-ever visit
+    if timezone.localtime(prev).date() >= timezone.localtime(now).date():
+        return None  # already loaded the set today
+
+    new_questions = (
+        Tossup.objects.filter(question_set=qset, created_date__gt=prev).exclude(author=user).count() +
+        Bonus.objects.filter(question_set=qset, created_date__gt=prev).exclude(author=user).count())
+
+    # Only questions that already existed at the last visit can have been
+    # "edited" since — a question created after it is counted as new, and its
+    # creation history row must not also read as an edit.
+    edited_questions = 0
+    for model, hist_model in ((Tossup, TossupHistory), (Bonus, BonusHistory)):
+        hist_ids = [h for h in model.objects
+                    .filter(question_set=qset, created_date__lte=prev)
+                    .values_list('question_history_id', flat=True) if h]
+        if not hist_ids:
+            continue
+        edited_questions += (hist_model.objects
+                             .filter(question_history_id__in=hist_ids, change_date__gt=prev)
+                             .exclude(changer=user)
+                             .values('question_history_id').distinct().count())
+
+    tu_ct = ContentType.objects.get_for_model(Tossup)
+    bs_ct = ContentType.objects.get_for_model(Bonus)
+    tu_ids = [str(i) for i in qset.tossup_set.values_list('id', flat=True)]
+    bs_ids = [str(i) for i in qset.bonus_set.values_list('id', flat=True)]
+    comments = (Comment.objects.filter(is_removed=False, submit_date__gt=prev)
+                .filter(Q(content_type=tu_ct, object_pk__in=tu_ids) |
+                        Q(content_type=bs_ct, object_pk__in=bs_ids))
+                .exclude(user=user.user).count())
+
+    total = new_questions + edited_questions + comments
+    if not total:
+        return None
+    parts = [{'count': n, 'label': label}
+             for n, label in ((new_questions, 'new question'),
+                              (edited_questions, 'edited question'),
+                              (comments, 'new comment')) if n]
+    for part in parts:
+        if part['count'] != 1:
+            part['label'] += 's'
+    return {'since': prev, 'total': total, 'parts': parts,
+            'new_questions': new_questions,
+            'edited_questions': edited_questions, 'comments': comments}
+
+
 def _new_activity_count(user, qset):
     """Count activity (mentions + others' changes to your questions) newer than
     the last time the user viewed their activity feed for this set."""
@@ -7328,6 +7406,35 @@ def resolve_comment(request):
     res.save()
     cache.clear()
     return HttpResponse(json.dumps({'success': True, 'resolved': res.resolved}))
+
+
+@login_required
+def strike_comment(request):
+    """Cross out (or un-cross) part of an existing comment so an editor can show
+    which feedback has been handled. POST: comment_id, start, end (offsets into
+    the displayed comment text), strike ('true'/'false')."""
+    user = request.user.writer
+    if request.method != 'POST':
+        return HttpResponse(json.dumps({'success': False, 'message': 'Invalid request'}))
+    try:
+        comment = Comment.objects.get(id=int(request.POST['comment_id']))
+        start = int(request.POST['start'])
+        end = int(request.POST['end'])
+    except (KeyError, ValueError, Comment.DoesNotExist):
+        return HttpResponse(json.dumps({'success': False, 'message': 'Comment not found'}))
+    target = comment.content_object
+    qset = getattr(target, 'question_set', None)
+    # Only editors/owners cross out comments (a writer marking their own feedback
+    # done would be confusing); the strike is a "handled" signal from an editor.
+    if qset is None or not (qset.is_owner(user) or user in qset.editor.all()):
+        return HttpResponse(json.dumps({'success': False, 'message': 'Only editors can strike comments.'}))
+    strike = request.POST.get('strike', 'true') == 'true'
+    new_text = toggle_comment_strike(comment.comment, start, end, strike)
+    if new_text != comment.comment:
+        comment.comment = new_text
+        comment.save(update_fields=['comment'])
+        cache.clear()
+    return HttpResponse(json.dumps({'success': True}))
 
 
 def _question_issue_map(qset):
@@ -8154,12 +8261,16 @@ def _tossup_reading(tossup):
     plain = strip_markup(tossup.tossup_text or '').replace('\n', ' ').strip()
     plain = plain.replace('\\P', '')  # PG-target markers aren't read
     raw_words = [w for w in plain.split(' ') if w != '']
+    allow_superpower = tossup.superpower_enabled()
     power_index = -1
     superpower_index = -1
     words = []
     for w in raw_words:
-        if '(+)' in w and superpower_index == -1:
-            superpower_index = len(words)
+        if '(+)' in w:
+            # Only a superpower-enabled set treats (+) as a 20-point boundary;
+            # either way the marker itself is stripped so it isn't read aloud.
+            if allow_superpower and superpower_index == -1:
+                superpower_index = len(words)
             w = w.replace('(+)', '').strip()
         if '(*)' in w and power_index == -1:
             power_index = len(words)
@@ -8167,6 +8278,11 @@ def _tossup_reading(tossup):
         if w == '':
             continue
         words.append(w)
+    # An all-power tossup with no explicit mark: the whole stem is power, so
+    # every clue is bold and any correct buzz scores 15.
+    if power_index == -1 and compute_all_power(tossup.all_power, tossup.tossup_text):
+        power_index = len(words)
+        superpower_index = -1
     answer_html = get_formatted_question_html(tossup.tossup_answer, True, True, False, False)
     return {
         'id': tossup.id,
@@ -8245,6 +8361,9 @@ def play(request, qset_id):
         days = 7
     days = max(1, min(days, 365))
     selected_cat_ids = [c for c in request.GET.getlist('cats') if c.isdigit()]
+    # Playing your own questions tells you nothing about how they play, so they
+    # are skipped unless the player asks for them back.
+    include_own = request.GET.get('include_own') == '1'
 
     # Categories actually used by this set's questions, for the filter UI.
     used_cat_ids = set(Tossup.objects.filter(question_set=qset, category__isnull=False)
@@ -8261,6 +8380,8 @@ def play(request, qset_id):
             'category', 'packet', 'question_type')
         if selected_cat_ids:
             qs = qs.filter(category_id__in=selected_cat_ids)
+        if not include_own:
+            qs = qs.exclude(author=user)
         if mode == 'recent':
             qs = qs.order_by('-created_date')
             if recent_by == 'days':
@@ -8290,6 +8411,7 @@ def play(request, qset_id):
                    'recent_by': recent_by, 'days': days,
                    'categories': categories,
                    'selected_cat_ids': [int(c) for c in selected_cat_ids],
+                   'include_own': include_own,
                    'tossups_only': qset.tossups_only,
                    'questions': {'tossups': tossups, 'bonuses': bonuses}})
 
@@ -8323,11 +8445,14 @@ def record_buzz(request):
     if _member_or_403(request, qset) is None:
         return HttpResponse(json.dumps({'success': False, 'message': 'Not authorized'}))
 
-    correct = request.POST.get('correct') == 'true'
-    superpowered = request.POST.get('superpowered') == 'true'
+    dont_know = request.POST.get('dont_know') == 'true'
+    correct = not dont_know and request.POST.get('correct') == 'true'
+    # A 20-point superpower only counts when the set has enabled it.
+    superpowered = request.POST.get('superpowered') == 'true' and qset.enable_superpower
     # A superpower buzz is also inside the regular power region.
     powered = superpowered or request.POST.get('powered') == 'true'
-    neg = request.POST.get('neg') == 'true'
+    # An "I don't know" is not a wrong buzz, so it never negs.
+    neg = not dont_know and request.POST.get('neg') == 'true'
     try:
         buzz_word_index = int(request.POST.get('buzz_word_index') or 0)
         total_words = int(request.POST.get('total_words') or 0)
@@ -8347,7 +8472,7 @@ def record_buzz(request):
         tossup=tossup, session=session, player=user,
         buzz_word_index=buzz_word_index, total_words=total_words,
         char_position=char_position, correct=correct, powered=powered and correct,
-        superpowered=superpowered and correct,
+        superpowered=superpowered and correct, dont_know=dont_know,
         value=value, answer_given=request.POST.get('answer_given', '')[:1000],
         tossup_history=tossup.latest_history(), source=PLAYTEST_SOURCE_WEB)
 
@@ -8398,6 +8523,7 @@ def _question_buzz_data(question, qtype):
         powers = [b for b in correct if b.powered]
         superpowers = [b for b in correct if b.superpowered]
         negs = [b for b in buzzes if b.value < 0]
+        dont_knows = [b for b in buzzes if b.dont_know]
         fracs = [b.buzz_fraction() for b in correct]
         words = _tossup_reading(question)['words']
         rows = []
@@ -8411,13 +8537,14 @@ def _question_buzz_data(question, qtype):
             rows.append({
                 'player': b.get_player_name(), 'date': b.buzz_date,
                 'correct': b.correct, 'powered': b.powered,
-                'superpowered': b.superpowered, 'value': b.value,
+                'superpowered': b.superpowered, 'dont_know': b.dont_know, 'value': b.value,
                 'fraction': '{0:.0f}%'.format(100.0 * b.buzz_fraction()),
                 'answer_given': b.answer_given, 'heard': heard, 'heard_tail': heard_tail,
                 'source': b.source, 'history_url': b.history_url()})
         return {
             'qtype': 'tossup', 'plays': len(buzzes), 'correct': len(correct),
             'powers': len(powers), 'superpowers': len(superpowers), 'negs': len(negs),
+            'dont_knows': len(dont_knows),
             'conversion': '{0:.0f}%'.format(100.0 * len(correct) / len(buzzes)),
             'avg_buzz': '{0:.0f}%'.format(100.0 * sum(fracs) / len(fracs)) if fracs else '—',
             'rows': rows}

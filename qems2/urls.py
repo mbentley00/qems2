@@ -58,6 +58,7 @@ urlpatterns = [
     re_path(r'^api/v1/threads/?$', api_threads),
     re_path(r'^set_members/(?P<qset_id>[0-9]+)/$', set_members),
     re_path(r'^resolve_comment/$', resolve_comment),
+    re_path(r'^strike_comment/$', strike_comment),
     re_path(r'^packet_issues/(?P<packet_id>[0-9]+)/$', packet_issues),
     re_path(r'^style_check/(?P<qset_id>[0-9]+)/$', style_check),
     re_path(r'^ai_grammar_check/(?P<qset_id>[0-9]+)/$', ai_grammar_check),
