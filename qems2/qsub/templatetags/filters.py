@@ -243,9 +243,12 @@ def commenter_name(comment):
     return '{0} ("{1}")'.format(real, user.username) if real else user.username
 
 # An @mention: "@" at the start or after whitespace/an open paren, then a
-# username (letters/digits/underscore, optionally with dots/hyphens inside).
-# The leading boundary keeps email addresses ("a@b.com") from matching.
-_MENTION_RE = re.compile(r'(^|[\s(])@([A-Za-z0-9_][A-Za-z0-9_.\-]*)')
+# username. The username may itself contain "@" and "." because some usernames
+# are full email addresses (e.g. @william.t.alston@gmail.com must highlight
+# whole, not stop at the second "@"). Mirrors the mention set in signals.py.
+# The leading boundary still keeps an email written inline in prose
+# ("mail a@b.com") from matching, since its "@" follows a letter.
+_MENTION_RE = re.compile(r'(^|[\s(])@([A-Za-z0-9_][A-Za-z0-9_.\-@+]*)')
 
 
 @register.filter(name='comment_html')

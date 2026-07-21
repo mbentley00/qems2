@@ -4679,6 +4679,13 @@ class CommentMentionColorTests(TestCase):
         out = self._html('@bob hi')
         self.assertIn('class="at-mention"', out)
 
+    def test_email_username_mention_highlights_whole(self):
+        # A username that is itself an email address must highlight as one span,
+        # not stop at the second "@" and leave the domain as plain text.
+        out = self._html('ping @william.t.alston@gmail.com for this')
+        self.assertIn('class="at-mention"', out)
+        self.assertIn('@william.t.alston@gmail.com</span>', out)
+
 
 class CompareRepeatsTests(TestCase):
     """Compare a set against an uploaded previous set to flag repeats."""
