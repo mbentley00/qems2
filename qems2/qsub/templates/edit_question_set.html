@@ -29,7 +29,7 @@
     <dd class="active"><a href="#qset-info">Home</a></dd>
     <dd><a href="#questions">Recent Questions</a></dd>
     <dd><a href="#comments">Recent Comments</a></dd>
-    <dd><a href="#editors">Writers</a></dd>
+    <dd><a href="#editors">Writers and Editors</a></dd>
     <dd><a href="#packets">Packets</a></dd>
 </dl>
 
@@ -149,6 +149,17 @@
         .set-info-check input { margin: 2px 0 0; flex: 0 0 auto; }
         .set-info-check small { display: block; font-weight: 400; color: #8a8f9c; margin-top: 3px; }
         @media (max-width: 760px) { .set-info-grid { grid-template-columns: 1fr; } }
+        /* Editor category / freeform tags on the Writers and Editors tab */
+        .editor-tag-list { display: inline; }
+        .editor-tag { display: inline-block; margin: 0 4px 4px 0; padding: 2px 7px;
+            border-radius: 10px; font-size: 0.8em; background: #eef2f7; color: #2b2f3a; white-space: nowrap; }
+        .editor-tag-cat { background: #e3f0e4; color: #1b5e20; }
+        .editor-tag .editor-tag-del { margin-left: 5px; color: #99a; font-weight: bold; text-decoration: none; }
+        .editor-tag .editor-tag-del:hover { color: #c0392b; }
+        .editor-tag-add { display: block; margin-top: 5px; white-space: nowrap; }
+        .editor-tag-add select, .editor-tag-add input { display: inline-block; width: auto; height: auto;
+            margin: 0 4px 0 0; padding: 2px 4px; font-size: 0.8em; }
+        .editor-tag-add .editor-tag-free-input { max-width: 110px; }
         </style>
         <script>
         $(function () {
@@ -164,6 +175,55 @@
                         e.preventDefault();
                     }
                 }
+            });
+        });
+
+        // Editor category / freeform tags (Writers and Editors tab).
+        $(function () {
+            var qsetId = {{ qset.id }};
+            function chip(tag) {
+                var $c = $('<span class="editor-tag" data-tag-id="' + tag.id + '"></span>')
+                    .text(tag.text);
+                if (tag.is_category) { $c.addClass('editor-tag-cat'); }
+                $c.append(' ').append($('<a href="#" class="editor-tag-del" title="Remove tag">&times;</a>')
+                    .attr('data-tag-id', tag.id));
+                return $c;
+            }
+            function addTag($cell, data) {
+                data.qset_id = qsetId;
+                data.editor_id = $cell.data('editor-id');
+                $.post('/add_editor_tag/', data, function (resp) {
+                    var j = (typeof resp === 'string') ? JSON.parse(resp) : resp;
+                    if (!j || !j.success) { alert((j && j.message) || 'Could not add tag.'); return; }
+                    $cell.find('.editor-tag-list').append(chip(j));
+                });
+            }
+            $('.editor-tags-cell').on('change', '.editor-tag-cat-select', function () {
+                var val = $(this).val();
+                if (!val) { return; }
+                addTag($(this).closest('.editor-tags-cell'), { category: val });
+                this.selectedIndex = 0;
+            });
+            $('.editor-tags-cell').on('click', '.editor-tag-free-add', function (e) {
+                e.preventDefault();
+                var $cell = $(this).closest('.editor-tags-cell');
+                var $inp = $cell.find('.editor-tag-free-input');
+                var val = $.trim($inp.val());
+                if (!val) { return; }
+                addTag($cell, { label: val });
+                $inp.val('');
+            });
+            $('.editor-tags-cell').on('keydown', '.editor-tag-free-input', function (e) {
+                if (e.which === 13) { e.preventDefault(); $(this).closest('.editor-tags-cell').find('.editor-tag-free-add').click(); }
+            });
+            $('.editor-tags-cell').on('click', '.editor-tag-del', function (e) {
+                e.preventDefault();
+                var $chip = $(this).closest('.editor-tag');
+                $.post('/delete_editor_tag/', { tag_id: $(this).data('tag-id') }, function (resp) {
+                    var j = (typeof resp === 'string') ? JSON.parse(resp) : resp;
+                    if (j && j.success) { $chip.remove(); }
+                    else { alert((j && j.message) || 'Could not remove tag.'); }
+                });
             });
         });
         </script>
@@ -300,6 +360,7 @@
                     <th>Tossups Written</th>
                     <th>Bonuses Written</th>
                     <th>% of Set Written</th>
+                    <th>Categories / Tags</th>
                     <th>Actions</th>
                 </tr>
             </thead>
@@ -322,6 +383,25 @@
                     <td>{{ writer.tu_written }}</td>
                     <td>{{ writer.bonus_written }}</td>
                     <td>{{ writer.question_percent|floatformat }}%</td>
+                    <td class="editor-tags-cell" data-editor-id="{{ writer.writer.id }}">
+                    {% if writer.writer.user.username == qset.owner.user.username or writer.writer in qset.co_owners.all or writer.writer in editors %}
+                        <span class="editor-tag-list">
+                        {% with tags=editor_tags|lookup:writer.writer.id %}{% if tags %}{% for tag in tags %}
+                            <span class="editor-tag{% if tag.is_category %} editor-tag-cat{% endif %}" data-tag-id="{{ tag.id }}">{{ tag.text }}{% if not read_only %}<a href="#" class="editor-tag-del" title="Remove tag" data-tag-id="{{ tag.id }}">&times;</a>{% endif %}</span>
+                        {% endfor %}{% endif %}{% endwith %}
+                        </span>
+                        {% if not read_only %}
+                        <span class="editor-tag-add">
+                            <select class="editor-tag-cat-select">
+                                <option value="">+ category&hellip;</option>
+                                {% for c in category_options %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+                            </select>
+                            <input type="text" class="editor-tag-free-input" placeholder="+ freeform tag">
+                            <a href="#" class="button tiny secondary editor-tag-free-add">Add</a>
+                        </span>
+                        {% endif %}
+                    {% endif %}
+                    </td>
                     <td>
                         {% if writer.writer.user.username != qset.owner.user.username %}
                             {% if writer.writer in qset.co_owners.all %}

@@ -193,6 +193,29 @@ class Role(models.Model):
     can_view_others = models.BooleanField(default=False)
     can_edit_others = models.BooleanField(default=False)
 
+
+class EditorTag(models.Model):
+    """A tag on an editor of a set showing what they're responsible for. Either
+    a category tag (``category`` is a category-overview path such as "Science"
+    or "Science - Physics", so it lines up with the overview rows) or a freeform
+    tag (``label`` is arbitrary text). Exactly one of the two is set."""
+    question_set = models.ForeignKey(QuestionSet, on_delete=models.CASCADE,
+                                     related_name='editor_tags')
+    editor = models.ForeignKey(Writer, on_delete=models.CASCADE,
+                               related_name='editor_tags')
+    category = models.CharField(max_length=500, blank=True, default='')
+    label = models.CharField(max_length=200, blank=True, default='')
+    created_date = models.DateTimeField(default=timezone.now)
+
+    def is_category(self):
+        return bool(self.category)
+
+    def text(self):
+        return self.category or self.label
+
+    def __str__(self):
+        return '{0}: {1}'.format(self.editor, self.text())
+
 class Packet (models.Model):
     packet_name = models.CharField(max_length=200)
     date_submitted = models.DateField(auto_now_add=True)

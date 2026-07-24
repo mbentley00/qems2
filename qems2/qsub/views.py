@@ -524,6 +524,22 @@ def create_question_set (request):
                                'distributions': distributions,
                                'user': user})
 
+def _editor_tag_context(qset):
+    """Editor tags for the Writers & Editors tab: {editor_id: [EditorTag,...]}
+    plus the set's category paths (top-level and sub, matching the category
+    overview's row names) offered when adding a category tag."""
+    tags_by_editor = {}
+    for t in qset.editor_tags.select_related('editor__user').order_by('category', 'label'):
+        tags_by_editor.setdefault(t.editor_id, []).append(t)
+    cats = set()
+    for e in qset.setwidedistributionentry_set.select_related('dist_entry'):
+        de = e.dist_entry
+        parts = [de.category] + [s.strip() for s in (de.subcategory or '').split(' - ') if s.strip()]
+        for i in range(1, len(parts) + 1):
+            cats.add(' - '.join(parts[:i]))
+    return {'editor_tags': tags_by_editor, 'category_options': sorted(cats)}
+
+
 @login_required
 def edit_question_set(request, qset_id):
     read_only = False
@@ -619,6 +635,7 @@ def edit_question_set(request, qset_id):
                                            'new_activity': new_activity,
                                            'member_groups': member_groups,
                                            'group_granted_ids': group_granted_ids,
+                                           **_editor_tag_context(qset),
                                            'message': 'Your changes have been successfully saved.',
                                            'message_class': 'alert-success'})
             else:
@@ -686,6 +703,7 @@ def edit_question_set(request, qset_id):
                                    qset.role_group_assignments.select_related('role_group')),
                                'member_groups': member_groups,
                                'group_granted_ids': group_granted_ids,
+                               **_editor_tag_context(qset),
                                'message': message})
 
 @login_required
@@ -1370,6 +1388,30 @@ def add_writer(request, qset_id):
 
 
 @login_required
+@login_required
+def user_search(request):
+    """Find writers by username, email, or real name for the role-group member
+    picker. Every space-separated term must match somewhere (so "Aarush Kikani"
+    matches a first + last name). Returns up to 12 as JSON."""
+    q = (request.GET.get('q') or '').strip()
+    results = []
+    if len(q) >= 2:
+        qobj = Q()
+        for term in q.split():
+            qobj &= (Q(user__username__icontains=term) | Q(user__email__icontains=term) |
+                     Q(user__first_name__icontains=term) | Q(user__last_name__icontains=term))
+        matches = (Writer.objects.filter(qobj).select_related('user')
+                   .order_by('user__username')[:12])
+        for w in matches:
+            name = '{0} {1}'.format(w.user.first_name or '', w.user.last_name or '').strip()
+            label = ('{0} ({1})'.format(name, w.user.username) if name else w.user.username)
+            if w.user.email:
+                label += ' · ' + w.user.email
+            results.append({'id': w.id, 'label': label, 'username': w.user.username})
+    return HttpResponse(json.dumps({'results': results}), content_type='application/json')
+
+
+@login_required
 def role_groups(request):
     """Create and manage role groups (named groups of writers). Members added
     here propagate to every set the group is attached to."""
@@ -1389,7 +1431,10 @@ def role_groups(request):
                 elif RoleGroup.objects.filter(name__iexact=name).exists():
                     message, message_class = 'A group with that name already exists.', 'alert-box warning'
                 else:
-                    RoleGroup.objects.create(name=name, created_by=user)
+                    group = RoleGroup.objects.create(name=name, created_by=user)
+                    # The creator belongs to their own group (so it isn't
+                    # "0 members" and they get any role it grants).
+                    group.members.add(user)
                     message, message_class = 'Group "{0}" created.'.format(name), 'alert-box success'
         elif action == 'request_join':
             try:
@@ -1426,19 +1471,26 @@ def role_groups(request):
                     reconcile_group_roles(qs)
                 message, message_class = 'Group deleted.', 'alert-box success'
             elif action == 'add_member':
+                # The picker submits writer_id; a typed username still works as a
+                # fallback.
+                wid = (request.POST.get('writer_id') or '').strip()
                 uname = (request.POST.get('username') or '').strip()
-                try:
-                    w = Writer.objects.get(user__username__iexact=uname)
-                    if group.members.filter(id=w.id).exists():
-                        message, message_class = '{0} is already a member.'.format(uname), 'alert-box warning'
-                    else:
-                        group.members.add(w)
-                        RoleGroupJoinRequest.objects.filter(role_group=group, requester=w).delete()
-                        reconcile_group(group)
-                        _notify_added_to_group(w, group, user)
-                        message, message_class = 'Added {0}.'.format(uname), 'alert-box success'
-                except Writer.DoesNotExist:
-                    message, message_class = 'No user named "{0}".'.format(uname), 'alert-box warning'
+                w = None
+                if wid.isdigit():
+                    w = Writer.objects.filter(id=int(wid)).first()
+                if w is None and uname:
+                    w = Writer.objects.filter(user__username__iexact=uname).first()
+                who = w.user.username if w else (uname or 'that user')
+                if w is None:
+                    message, message_class = 'No user found for "{0}".'.format(uname), 'alert-box warning'
+                elif group.members.filter(id=w.id).exists():
+                    message, message_class = '{0} is already a member.'.format(who), 'alert-box warning'
+                else:
+                    group.members.add(w)
+                    RoleGroupJoinRequest.objects.filter(role_group=group, requester=w).delete()
+                    reconcile_group(group)
+                    _notify_added_to_group(w, group, user)
+                    message, message_class = 'Added {0}.'.format(who), 'alert-box success'
             elif action in ('approve_join', 'decline_join'):
                 try:
                     w = Writer.objects.get(id=int(request.POST.get('writer_id', 0)))
@@ -1479,6 +1531,10 @@ def role_groups(request):
         # Only a manager sees who's waiting to join.
         pending = list(g.join_requests.all()) if can_manage else []
         has_requested = any(r.requester_id == user.id for r in g.join_requests.all())
+        # Show only groups this user is involved with — ones they created, belong
+        # to, or have a pending request for — not every group in the system.
+        if not (g.created_by_id == user.id or is_member or has_requested):
+            continue
         # Membership is private: only members (and managers) see who's in a group.
         groups.append({'group': g,
                        'members': member_list if (is_member or can_manage) else None,
@@ -5517,6 +5573,17 @@ def category_overview(request, qset_id):
     set_status, total_tu_req, total_bs_req, tu_needed, bs_needed, set_pct_complete = get_questions_remaining(qset)
     overview_rows = get_category_overview(qset)
 
+    # Attach the editors tagged for each category (by matching a category tag's
+    # path to the overview row's full name).
+    editors_by_cat = {}
+    for t in qset.editor_tags.exclude(category='').select_related('editor__user'):
+        name = (t.editor.user.get_full_name() or t.editor.user.username).strip()
+        editors_by_cat.setdefault(t.category, [])
+        if name not in editors_by_cat[t.category]:
+            editors_by_cat[t.category].append(name)
+    for row in overview_rows:
+        row['editors'] = editors_by_cat.get(row['name'], [])
+
     return render(request, 'category_overview.html',
                              {'user': user,
                               'overview_rows': overview_rows,
@@ -7434,6 +7501,56 @@ def strike_comment(request):
         comment.comment = new_text
         comment.save(update_fields=['comment'])
         cache.clear()
+    # Return the re-rendered comment body so the client can swap it in place
+    # (no page reload). Mirrors the template's `comment.comment|comment_html|
+    # linebreaks` in an autoescape-off context.
+    from django.utils.html import linebreaks as _html_linebreaks
+    from .templatetags.filters import comment_html
+    rendered = _html_linebreaks(str(comment_html(comment.comment)))
+    return HttpResponse(json.dumps({'success': True, 'html': rendered}))
+
+
+@login_required
+def add_editor_tag(request):
+    """Tag an editor with a category they cover, or a freeform note. POST:
+    qset_id, editor_id, and either category=<overview path> or label=<text>.
+    Only the set's owner/editors manage tags."""
+    user = request.user.writer
+    if request.method != 'POST':
+        return HttpResponse(json.dumps({'success': False, 'message': 'Invalid request'}))
+    try:
+        qset = QuestionSet.objects.get(id=int(request.POST['qset_id']))
+        editor = Writer.objects.get(id=int(request.POST['editor_id']))
+    except (KeyError, ValueError, QuestionSet.DoesNotExist, Writer.DoesNotExist):
+        return HttpResponse(json.dumps({'success': False, 'message': 'Not found'}))
+    if not (qset.is_owner(user) or user in qset.editor.all()):
+        return HttpResponse(json.dumps({'success': False, 'message': 'Only owners/editors can manage tags.'}))
+    category = (request.POST.get('category') or '').strip()
+    label = (request.POST.get('label') or '').strip()[:200]
+    if not category and not label:
+        return HttpResponse(json.dumps({'success': False, 'message': 'Empty tag.'}))
+    tag, _created = EditorTag.objects.get_or_create(
+        question_set=qset, editor=editor, category=category, label=label)
+    cache.clear()
+    return HttpResponse(json.dumps({'success': True, 'id': tag.id, 'text': tag.text(),
+                                    'is_category': tag.is_category(), 'editor_id': editor.id}))
+
+
+@login_required
+def delete_editor_tag(request):
+    """Remove an editor tag (owner/editors only). POST: tag_id."""
+    user = request.user.writer
+    if request.method != 'POST':
+        return HttpResponse(json.dumps({'success': False, 'message': 'Invalid request'}))
+    try:
+        tag = EditorTag.objects.select_related('question_set').get(id=int(request.POST['tag_id']))
+    except (KeyError, ValueError, EditorTag.DoesNotExist):
+        return HttpResponse(json.dumps({'success': False, 'message': 'Tag not found'}))
+    qset = tag.question_set
+    if not (qset.is_owner(user) or user in qset.editor.all()):
+        return HttpResponse(json.dumps({'success': False, 'message': 'Only owners/editors can manage tags.'}))
+    tag.delete()
+    cache.clear()
     return HttpResponse(json.dumps({'success': True}))
 
 
@@ -7603,8 +7720,9 @@ def packet_style_issues(request, packet_id):
 
 
 def _is_ai_user(user):
-    """AI-assisted features are gated to the admin user for now."""
-    return user.is_authenticated and user.username == 'admin'
+    """AI-assisted features are gated to superusers (was the literal 'admin'
+    username, which broke if that account was renamed)."""
+    return user.is_authenticated and user.is_superuser
 
 
 def _clean_for_ai(text):

@@ -3695,8 +3695,9 @@ class RoleGroupJoinAndNotifyTests(TestCase):
     def test_membership_hidden_from_non_member(self):
         self.client.login(username='jn_req', password='pw')
         body = self.client.get('/role_groups/').content.decode()
+        # A non-member no longer sees groups they aren't part of at all.
         self.assertNotIn('jn_member', body)      # member's username is private
-        self.assertIn('Request to join', body)
+        self.assertNotIn('JN Group', body)       # the group itself is hidden
         self.client.logout(); self.client.login(username='jn_member', password='pw')
         body2 = self.client.get('/role_groups/').content.decode()
         self.assertIn('jn_member', body2)        # a member sees the roster
@@ -4152,6 +4153,50 @@ class RoleGroupPendingRequestTests(TestCase):
             role_group=self.group, requester=self.req).exists())
 
 
+class RoleGroupSearchTests(TestCase):
+    """Member search/picker, creator-as-member, and only-your-groups visibility."""
+
+    def setUp(self):
+        import json as _json
+        from datetime import timedelta
+        self._json = _json
+        self.ou = User.objects.create_user('rgs_owner', password='pw', email='rgso@t.com')
+        self.ou.date_joined = timezone.now() - timedelta(days=3); self.ou.save()
+        self.owner = Writer.objects.get(user=self.ou)
+        self.tu = User.objects.create_user('targetuser', password='pw', email='target@example.com',
+                                            first_name='Target', last_name='Person')
+        self.target = Writer.objects.get(user=self.tu)
+
+    def test_create_adds_creator_as_member(self):
+        self.client.login(username='rgs_owner', password='pw')
+        self.client.post('/role_groups/', {'action': 'create', 'name': 'My Group'})
+        g = RoleGroup.objects.get(name='My Group')
+        self.assertTrue(g.members.filter(id=self.owner.id).exists())
+
+    def test_user_search_matches_name_username_email(self):
+        self.client.login(username='rgs_owner', password='pw')
+        for q in ['Target', 'targetuser', 'target@example', 'Target Person']:
+            resp = self.client.get('/user_search/', {'q': q})
+            ids = [r['id'] for r in self._json.loads(resp.content)['results']]
+            self.assertIn(self.target.id, ids, msg='query=%r' % q)
+
+    def test_add_member_by_writer_id(self):
+        g = RoleGroup.objects.create(name='WID Group', created_by=self.owner)
+        self.client.login(username='rgs_owner', password='pw')
+        self.client.post('/role_groups/', {'action': 'add_member', 'group_id': g.id,
+                                           'writer_id': self.target.id})
+        self.assertTrue(g.members.filter(id=self.target.id).exists())
+
+    def test_only_own_or_member_groups_visible(self):
+        RoleGroup.objects.create(name='Mine Group', created_by=self.owner)
+        other = User.objects.create_user('rgs_other', password='pw', email='o@t.com')
+        RoleGroup.objects.create(name='Other Group', created_by=Writer.objects.get(user=other))
+        self.client.login(username='rgs_owner', password='pw')
+        body = self.client.get('/role_groups/').content.decode()
+        self.assertIn('Mine Group', body)
+        self.assertNotIn('Other Group', body)
+
+
 class SuperpowerTests(TestCase):
     """20-point superpower "(+)" marks: rendering, play reading/scoring, YAPP
     export, and the style checker."""
@@ -4422,7 +4467,11 @@ class CommentStrikeTests(TestCase):
         self.client.login(username='cs_owner', password='pw')
         resp = self.client.post('/strike_comment/',
                                 {'comment_id': c.id, 'start': 4, 'end': 15, 'strike': 'true'})
-        self.assertTrue(_json.loads(resp.content)['success'])
+        j = _json.loads(resp.content)
+        self.assertTrue(j['success'])
+        # The re-rendered comment body comes back so the client can swap it in
+        # place (no page reload).
+        self.assertIn('<del>the pronoun</del>', j['html'])
         c.refresh_from_db()
         self.assertEqual(c.comment, 'fix \\Dthe pronoun\\D here')
         # And un-striking the same range restores it.
@@ -4431,6 +4480,77 @@ class CommentStrikeTests(TestCase):
         self.assertTrue(_json.loads(resp.content)['success'])
         c.refresh_from_db()
         self.assertEqual(c.comment, 'fix the pronoun here')
+
+
+class EditorTagTests(TestCase):
+    """Category / freeform tags on editors, shown on the Writers and Editors tab
+    and the category overview."""
+
+    def setUp(self):
+        import json as _json
+        self._json = _json
+        self.ou = User.objects.create_user('et_owner', password='pw', email='eto@test.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.eu = User.objects.create_user('et_editor', password='pw', email='ete@test.com',
+                                            first_name='Ed', last_name='Itor')
+        self.editor = Writer.objects.get(user=self.eu)
+        self.dist = Distribution.objects.create(name='et dist')
+        self.qset = QuestionSet.objects.create(
+            name='ET Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.qset.editor.add(self.editor)
+        # Owners are normally editors too; a pure owner is redirected from
+        # category_overview (get_role_no_owner returns 'none').
+        self.qset.editor.add(self.owner)
+
+    def test_owner_adds_category_and_freeform_tags(self):
+        self.client.login(username='et_owner', password='pw')
+        r = self.client.post('/add_editor_tag/', {
+            'qset_id': self.qset.id, 'editor_id': self.editor.id, 'category': 'Science - Physics'})
+        j = self._json.loads(r.content)
+        self.assertTrue(j['success'])
+        self.assertTrue(j['is_category'])
+        self.assertEqual(j['text'], 'Science - Physics')
+        r = self.client.post('/add_editor_tag/', {
+            'qset_id': self.qset.id, 'editor_id': self.editor.id, 'label': 'fast turnaround'})
+        j = self._json.loads(r.content)
+        self.assertTrue(j['success'])
+        self.assertFalse(j['is_category'])
+        self.assertEqual(
+            EditorTag.objects.filter(question_set=self.qset, editor=self.editor).count(), 2)
+
+    def test_duplicate_category_tag_is_not_doubled(self):
+        self.client.login(username='et_owner', password='pw')
+        for _ in range(2):
+            self.client.post('/add_editor_tag/', {
+                'qset_id': self.qset.id, 'editor_id': self.editor.id, 'category': 'History'})
+        self.assertEqual(EditorTag.objects.filter(category='History').count(), 1)
+
+    def test_non_member_cannot_add(self):
+        User.objects.create_user('et_stranger', password='pw', email='x@test.com')
+        self.client.login(username='et_stranger', password='pw')
+        r = self.client.post('/add_editor_tag/', {
+            'qset_id': self.qset.id, 'editor_id': self.editor.id, 'category': 'Science'})
+        self.assertFalse(self._json.loads(r.content)['success'])
+        self.assertEqual(EditorTag.objects.count(), 0)
+
+    def test_delete_tag(self):
+        tag = EditorTag.objects.create(question_set=self.qset, editor=self.editor, category='History')
+        self.client.login(username='et_owner', password='pw')
+        r = self.client.post('/delete_editor_tag/', {'tag_id': tag.id})
+        self.assertTrue(self._json.loads(r.content)['success'])
+        self.assertFalse(EditorTag.objects.filter(id=tag.id).exists())
+
+    def test_pages_render_with_tags(self):
+        EditorTag.objects.create(question_set=self.qset, editor=self.editor, category='Science - Physics')
+        EditorTag.objects.create(question_set=self.qset, editor=self.editor, label='freeform note')
+        self.client.login(username='et_owner', password='pw')
+        r = self.client.get('/edit_question_set/{0}/'.format(self.qset.id))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, 'Writers and Editors')
+        self.assertContains(r, 'freeform note')
+        r = self.client.get('/category_overview/{0}/'.format(self.qset.id))
+        self.assertEqual(r.status_code, 200)
 
 
 class VisitSummaryTests(TestCase):

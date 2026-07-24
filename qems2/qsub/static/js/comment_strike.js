@@ -41,14 +41,27 @@
             return false;
         }
 
-        function post(commentId, start, end, strike) {
+        function post(root, commentId, start, end, strike) {
             $.post('/strike_comment/', {
                 comment_id: commentId, start: start, end: end,
                 strike: strike ? 'true' : 'false'
             }, function (resp) {
                 var j = (typeof resp === 'string') ? JSON.parse(resp) : resp;
-                if (j && j.success) { location.reload(); }
-                else { alert((j && j.message) || 'Could not update the comment.'); }
+                if (!j || !j.success) {
+                    alert((j && j.message) || 'Could not update the comment.');
+                    return;
+                }
+                // Swap the re-rendered comment body in place — no page reload.
+                // Delegated handlers keep working on the replaced DOM. Fall back
+                // to a reload only if the server didn't send the HTML.
+                if (root && typeof j.html === 'string') {
+                    $(root).html(j.html);
+                    var sel = window.getSelection();
+                    if (sel) { sel.removeAllRanges(); }
+                    hide();
+                } else {
+                    location.reload();
+                }
             });
         }
 
@@ -67,7 +80,7 @@
             var end = textOffset(root, range.endContainer, range.endOffset);
             if (end <= start) { hide(); return; }
             var struck = withinDel(range.startContainer, root) && withinDel(range.endContainer, root);
-            pending = { commentId: $(root).data('comment-id'), start: start, end: end, strike: !struck };
+            pending = { root: root, commentId: $(root).data('comment-id'), start: start, end: end, strike: !struck };
             $btn.text(struck ? 'Un-cross out' : 'Cross out');
             var rect = range.getBoundingClientRect();
             $btn.css({
@@ -82,7 +95,7 @@
         $btn.on('mousedown', function (e) { e.preventDefault(); });
         $btn.on('click', function () {
             if (!pending) { return; }
-            post(pending.commentId, pending.start, pending.end, pending.strike);
+            post(pending.root, pending.commentId, pending.start, pending.end, pending.strike);
         });
 
         // Plain click on a crossed-out run un-crosses that whole run.
@@ -95,7 +108,7 @@
             e.preventDefault();
             var start = textOffset(root, this, 0);
             var end = start + (this.textContent || '').length;
-            post($(root).data('comment-id'), start, end, false);
+            post(root, $(root).data('comment-id'), start, end, false);
         });
     });
 })();

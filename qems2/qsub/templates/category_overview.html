@@ -11,6 +11,11 @@
 
 {% block content %}
 
+<style>
+.cat-editors { white-space: normal; }
+.cat-editor-tag { display: inline-block; margin: 0 3px 3px 0; padding: 1px 7px; border-radius: 10px;
+    font-size: 0.8em; background: #e3f0e4; color: #1b5e20; white-space: nowrap; }
+</style>
 <h3 class="page-header">Category Overview</h3>
 <div class="panel header radius text-center">
     <div class="small-7 small-centered columns">
@@ -25,6 +30,7 @@
     <thead>
         <tr>
             <th>Category</th>
+            <th>Editors</th>
             <th>Overall Completion</th>
             <th>Tossups Remaining</th>
             <th>Tossup Completion</th>
@@ -42,6 +48,9 @@
                 {% else %}
                     <a href="/categories/{{ qset.id }}/{{ row.category_id }}">{{ row.short_name }}</a>
                 {% endif %}
+            </td>
+            <td class="cat-editors">
+                {% for name in row.editors %}<span class="cat-editor-tag">{{ name }}</span>{% endfor %}
             </td>
             <td>
                 {{ row|overall_percent }}

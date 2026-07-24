@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-07-23 — Editor tags, role-group UX, comment/mention polish
+
+- **Editor category & freeform tags** (migration 0034). Tag an editor with the
+  categories/subcategories they cover, or a freeform note, on the renamed
+  **Writers and Editors** tab; category tags also show per row on the Category
+  Overview. Owner/editor-managed.
+- **Role groups are easier to manage.** Add members by searching name, username,
+  or email (live picker) instead of typing an exact username. The page now shows
+  only groups you created, belong to, or requested — not every group. A group's
+  creator is now automatically a member (migration 0035 backfills existing ones,
+  fixing "0 members").
+- **Comment strike-through updates in place** — crossing out or un-crossing part
+  of a comment no longer reloads the page.
+- **@mentions of email-address usernames** highlight in full (no longer stop at
+  the second `@`).
+- **Comment lists show real names** (with username) instead of the bare username.
+- **AI features gate on `is_superuser`** rather than the literal `admin`
+  username, so the admin account can be safely renamed.
+
 ## 2026-07-19 — Power marks, editor tools, comment strike-through
 
 - **All-power tossups.** A tossup whose whole stem is in power now renders fully

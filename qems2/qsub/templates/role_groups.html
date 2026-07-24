@@ -99,12 +99,15 @@ them and they lose it.</p>
     </table>
 
         {% if g.can_manage %}
-        <form method="post" action="/role_groups/" class="form-inline" style="display:inline;">
+        <form method="post" action="/role_groups/" class="form-inline member-add-form">
             {% csrf_token %}
             <input type="hidden" name="action" value="add_member">
             <input type="hidden" name="group_id" value="{{ g.group.id }}">
-            <input type="text" name="username" placeholder="username to add" style="display:inline-block; width:200px; margin:0 6px 0 0;">
+            <input type="hidden" name="writer_id" class="member-writer-id" value="">
+            <input type="text" name="username" class="member-search" autocomplete="off"
+                   placeholder="Search by name, username, or email" style="display:inline-block; width:300px; margin:0 6px 0 0;">
             <button type="submit" class="button tiny primary" style="margin:0;">Add member</button>
+            <div class="member-search-results" style="display:none;"></div>
         </form>
         <form method="post" action="/role_groups/" style="display:inline; float:right;"
               onsubmit="return confirm('Delete this group? Members will lose any role it granted.');">
@@ -131,7 +134,57 @@ them and they lose it.</p>
     {% endif %}
 </div>
 {% empty %}
-<p style="color:#888;">No role groups yet. Create one above.</p>
+<p style="color:#888;">You're not in any role groups yet. Create one above.</p>
 {% endfor %}
+
+<style>
+.member-add-form { display: inline-block; position: relative; }
+.member-search-results { position: absolute; top: 100%; left: 0; z-index: 60; background: #fff;
+    border: 1px solid #ccc; border-radius: 4px; width: 320px; max-height: 240px; overflow-y: auto;
+    box-shadow: 0 2px 8px rgba(0,0,0,.18); margin-top: 2px; }
+.member-search-item { padding: 6px 9px; cursor: pointer; font-size: 0.82em; }
+.member-search-item:hover, .member-search-item.active { background: #eef2f7; }
+</style>
+<script>
+$(function () {
+    var timer = null;
+    function showResults($form, results) {
+        var $box = $form.find('.member-search-results');
+        if (!results.length) { $box.hide().empty(); return; }
+        $box.empty();
+        results.forEach(function (r) {
+            $('<div class="member-search-item"></div>').text(r.label)
+                .attr('data-id', r.id).appendTo($box);
+        });
+        $box.show();
+    }
+    $(document).on('input', '.member-search', function () {
+        var $form = $(this).closest('.member-add-form');
+        // Typing invalidates any earlier pick, so an unselected search doesn't
+        // silently add a stale user.
+        $form.find('.member-writer-id').val('');
+        var q = $.trim($(this).val());
+        clearTimeout(timer);
+        if (q.length < 2) { $form.find('.member-search-results').hide().empty(); return; }
+        timer = setTimeout(function () {
+            $.getJSON('/user_search/', { q: q }, function (resp) {
+                showResults($form, (resp && resp.results) || []);
+            });
+        }, 200);
+    });
+    // mousedown (not click) so the pick registers before the input's blur.
+    $(document).on('mousedown', '.member-search-item', function (e) {
+        e.preventDefault();
+        var $form = $(this).closest('.member-add-form');
+        $form.find('.member-writer-id').val($(this).data('id'));
+        $form.find('.member-search').val($(this).text());
+        $form.find('.member-search-results').hide().empty();
+    });
+    $(document).on('blur', '.member-search', function () {
+        var $box = $(this).closest('.member-add-form').find('.member-search-results');
+        setTimeout(function () { $box.hide(); }, 200);
+    });
+});
+</script>
 
 {% endblock %}
