@@ -6895,6 +6895,8 @@ def view_packet(request, packet_id):
                     for a in CommentAnchor.objects.filter(comment_id__in=comment_ids)}
         parent_of = {r.comment_id: r.parent_id
                      for r in CommentReply.objects.filter(comment_id__in=comment_ids)}
+        resolved = set(CommentResolution.objects.filter(
+            comment_id__in=comment_ids, resolved=True).values_list('comment_id', flat=True))
 
         def render_comment(c):
             label = ''
@@ -6904,6 +6906,8 @@ def view_packet(request, packet_id):
                 label = c.user_name or (c.user.username if c.user else 'unknown')
             return {'id': c.id, 'user': label, 'text': c.comment, 'date': c.submit_date,
                     'anchored': c.id in anchored, 'selection': anchored.get(c.id, ''),
+                    'resolved': c.id in resolved,
+                    'can_edit': c.user_id == request.user.id,
                     'replies': []}
 
         rendered = {c.id: render_comment(c) for c in comments}
@@ -7476,6 +7480,41 @@ def resolve_comment(request):
 
 
 @login_required
+def edit_comment(request):
+    """Reword your own comment. POST: comment_id, comment_text. Returns the
+    re-rendered HTML so the caller can swap it in without a reload.
+
+    Only the author edits the wording — editors have Delete and the strike-out
+    tool for someone else's feedback. Mentions added by an edit aren't
+    re-notified (the notification signals only fire on the original post)."""
+    from django.utils.html import linebreaks
+    from .templatetags.filters import comment_html
+    user = request.user.writer
+    if request.method != 'POST':
+        return HttpResponse(json.dumps({'success': False, 'message': 'Invalid request'}))
+    try:
+        comment = Comment.objects.get(id=int(request.POST['comment_id']))
+    except (KeyError, ValueError, Comment.DoesNotExist):
+        return HttpResponse(json.dumps({'success': False, 'message': 'Comment not found'}))
+    text = (request.POST.get('comment_text') or '').strip()
+    if not text:
+        return HttpResponse(json.dumps({'success': False, 'message': 'A comment cannot be empty.'}))
+    target = comment.content_object
+    qset = getattr(target, 'question_set', None)
+    if qset is None or not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+        return HttpResponse(json.dumps({'success': False, 'message': 'You are not authorized.'}))
+    if comment.user_id != request.user.id:
+        return HttpResponse(json.dumps({'success': False,
+                                        'message': 'You can only edit your own comments.'}))
+    if comment.comment != text:
+        comment.comment = text
+        comment.save(update_fields=['comment'])
+        cache.clear()
+    return HttpResponse(json.dumps({'success': True, 'text': text,
+                                    'html': linebreaks(str(comment_html(text)))}))
+
+
+@login_required
 def strike_comment(request):
     """Cross out (or un-cross) part of an existing comment so an editor can show
     which feedback has been handled. POST: comment_id, start, end (offsets into
@@ -7507,7 +7546,9 @@ def strike_comment(request):
     from django.utils.html import linebreaks as _html_linebreaks
     from .templatetags.filters import comment_html
     rendered = _html_linebreaks(str(comment_html(comment.comment)))
-    return HttpResponse(json.dumps({'success': True, 'html': rendered}))
+    # `text` keeps the in-place editor's copy of the raw markup current.
+    return HttpResponse(json.dumps({'success': True, 'html': rendered,
+                                    'text': comment.comment}))
 
 
 @login_required
@@ -7894,10 +7935,16 @@ def apply_style_fix(request):
     fix = style_checker.find_fix(question, qtype, code, token, guide)
     if not fix:
         return HttpResponse(json.dumps({'ok': False, 'error': 'Nothing to apply'}), status=400)
+    old_text = getattr(question, fix.get('field', ''), '') or ''
     if not style_checker.apply_fix(question, fix):
         return HttpResponse(json.dumps({'ok': False, 'error': 'Could not apply automatically'}), status=400)
     question.save_question(edit_type=QUESTION_EDIT, changer=user)
-    return HttpResponse(json.dumps({'ok': True}))
+    # The edit page uses these to update the field in place instead of
+    # reloading (a reload on a page rendered from a POST resubmits the stale
+    # form and overwrites the fix).
+    return HttpResponse(json.dumps({'ok': True, 'field': fix.get('field', ''),
+                                    'old_text': old_text,
+                                    'text': getattr(question, fix['field'], '') or ''}))
 
 
 @login_required

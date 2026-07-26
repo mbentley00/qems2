@@ -57,7 +57,7 @@
     <div class="doc-toolbar-group">
         <a href="?order=separate" class="button tiny {% if order == 'separate' %}primary{% else %}secondary{% endif %}">Tossups then Bonuses</a>
         <a href="?order=interleaved" class="button tiny {% if order == 'interleaved' %}primary{% else %}secondary{% endif %}">Interleaved</a>
-        {% if comment_count %}<a href="#" id="toggle-comments" class="button tiny secondary"><i class="fa fa-comment"></i> Comments ({{ comment_count }})</a>{% endif %}
+        {% if comment_count %}<a href="#" id="toggle-comments" class="button tiny secondary"><i class="fa fa-comment"></i> Comments ({{ comment_count }})</a><a href="#" id="toggle-resolved" class="button tiny secondary" title="Hide comments that have been marked resolved"><i class="fa fa-check"></i> Hide Resolved</a>{% endif %}
         <a href="#" id="toggle-issues" class="button tiny secondary" title="Show repeat-checker issues for each question"><i class="fa fa-triangle-exclamation"></i> Repeat Issues</a>
         <a href="#" id="toggle-style" class="button tiny secondary" title="Show style-check issues for each question"><i class="fa fa-spell-check"></i> Style Issues</a>
         <a href="#" id="toggle-pg-above" class="button tiny secondary" title="Show annotated pronunciation guides above the words they cover instead of inline"><i class="fa fa-arrow-up"></i> PGs Above</a>
@@ -151,6 +151,7 @@ document.addEventListener('DOMContentLoaded', function () {
         <div class="doc-list" id="doc-list-interleaved">
             {% for q in interleaved %}
             <div class="doc-question" id="q-{{ q.qtype }}-{{ q.id }}" data-qtype="{{ q.qtype }}" data-qid="{{ q.id }}" data-num="{{ q.number }}" data-edit-url="{{ q.edit_url }}">
+                {% if not read_only %}<a href="#" class="doc-swap-btn doc-swap-corner" title="Swap this question with another"><i class="fa fa-right-left"></i> Swap</a>{% endif %}
                 <span class="doc-qlabel">{% if q.qtype == 'tossup' %}Tossup{% else %}Bonus{% endif %} {{ q.number }}.{% if q.is_tiebreaker %} <span class="doc-tb">(Tiebreaker)</span>{% endif %}</span>
                 {% autoescape off %}<span class="doc-qtext">{{ q.html }}</span>{% endautoescape %}
                 {% include "view_packet_meta.html" %}
@@ -162,6 +163,7 @@ document.addEventListener('DOMContentLoaded', function () {
         <div class="doc-list" id="doc-list-tossups">
             {% for q in tossups %}
             <div class="doc-question" id="q-tossup-{{ q.id }}" data-qtype="tossup" data-qid="{{ q.id }}" data-num="{{ q.number }}" data-edit-url="{{ q.edit_url }}">
+                {% if not read_only %}<a href="#" class="doc-swap-btn doc-swap-corner" title="Swap this tossup with another"><i class="fa fa-right-left"></i> Swap</a>{% endif %}
                 <span class="doc-qlabel">{{ q.number }}.{% if q.is_tiebreaker %} <span class="doc-tb">(Tiebreaker)</span>{% endif %}</span>
                 {% autoescape off %}<span class="doc-qtext">{{ q.html }}</span>{% endautoescape %}
                 {% include "view_packet_meta.html" %}
@@ -173,6 +175,7 @@ document.addEventListener('DOMContentLoaded', function () {
         <div class="doc-list" id="doc-list-bonuses">
             {% for q in bonuses %}
             <div class="doc-question" id="q-bonus-{{ q.id }}" data-qtype="bonus" data-qid="{{ q.id }}" data-num="{{ q.number }}" data-edit-url="{{ q.edit_url }}">
+                {% if not read_only %}<a href="#" class="doc-swap-btn doc-swap-corner" title="Swap this bonus with another"><i class="fa fa-right-left"></i> Swap</a>{% endif %}
                 <span class="doc-qlabel">{{ q.number }}.{% if q.is_tiebreaker %} <span class="doc-tb">(Tiebreaker)</span>{% endif %}</span>
                 {% autoescape off %}<span class="doc-qtext">{{ q.html }}</span>{% endautoescape %}
                 {% include "view_packet_meta.html" %}
@@ -231,6 +234,16 @@ document.addEventListener('DOMContentLoaded', function () {
    faint hover-only link. a.doc-tag:hover already inverts to the accent fill. */
 .doc-swap-btn { background:#e8f4fb; color:#006f9a; font-weight:bold; white-space:nowrap; }
 .doc-reorder-mode .doc-swap-btn { display:none; }
+/* Swap sits at the top-right of its question, where the packet grid puts it —
+   the meta row at the bottom buried it among the Author/Length tags. */
+.doc-swap-corner {
+    float: right; margin: 0 0 4px 8px; padding: 1px 8px; border-radius: 3px;
+    border: 1px solid #b9dcef; font-size: 0.72em; line-height: 1.6;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+.doc-swap-corner:hover { background:#008CBA; color:#fff; border-color:#008CBA; }
+.doc-swap-corner .fa { margin-right: 3px; }
+html[data-theme="dark"] .doc-swap-corner { background:#123243; color:#7fc7e8; border-color:#1d4a61; }
 #doc-swap-candidates { max-height: 320px; overflow-y: auto; }
 .doc-swap-candidate { padding:6px 8px; border-bottom:1px solid #eee; cursor:pointer; font-size:0.85em; }
 .doc-swap-candidate:hover { background-color:#d9edf7; }
@@ -376,6 +389,31 @@ a.doc-tag:hover { background: #008CBA; color: #fff; }
 }
 .doc-comment-reply .doc-comment-author { color: #555; font-weight: 600; }
 .doc-comment-reply .doc-comment-author .fa { color: #8a7fd0; margin-right: 3px; }
+/* Per-comment actions. Kept quiet until the card is hovered/active so the
+   margin still reads as a column of comments, not a wall of links. */
+.doc-comment-actions { margin-top: 3px; font-size: 11px; visibility: hidden; }
+.doc-comment-card:hover .doc-comment-actions,
+.doc-comment-card.active .doc-comment-actions,
+.doc-comment-actions:focus-within { visibility: visible; }
+.doc-comment-actions a { color: #8a8f94; margin-right: 8px; }
+.doc-comment-actions a:hover { color: #008CBA; text-decoration: underline; }
+.doc-comment-actions a.doc-c-busy { opacity: 0.5; pointer-events: none; }
+.doc-resolved-badge {
+    font-weight: bold; font-size: 10px; color: #1c7c3e; background: #dff3e6;
+    border: 1px solid #b6e0c4; border-radius: 3px; padding: 0 4px; margin-left: 4px;
+    text-transform: uppercase; letter-spacing: .03em; white-space: nowrap;
+}
+.doc-resolved-badge .fa { margin-right: 2px; }
+/* A resolved comment stays readable but clearly settled: green rail, muted
+   text, and the Resolved chip on the author line. */
+.doc-comment.doc-comment-resolved {
+    background: #f6faf7; border-left: 3px solid #48a86b;
+    padding-left: 7px; margin-left: -10px; padding-right: 10px; margin-right: -10px;
+}
+.doc-comment-resolved > .doc-comment-text,
+.doc-comment-resolved > .doc-comment-author { color: #8a9a90; }
+.doc-comment-resolved > .doc-comment-selection { opacity: 0.6; }
+.doc-comment-resolved > .doc-comment-kind { color: #b3c2b8; }
 .doc-question.doc-commented-highlight { background-color: #fef7e0; border-color: #f4b400; }
 .doc-comment-box {
     margin-top: 8px;
@@ -588,11 +626,20 @@ $(function() {
         setTimeout(layoutComments, 400);
     }
 
-    $('.doc-comment-card').on('mouseenter', function() {
+    // Delegated so the cards keep behaving after the gutter is re-rendered
+    // (reply/resolve/edit swap in fresh markup).
+    $('#doc-gutter').on('mouseenter', '.doc-comment-card', function() {
         $('#' + $(this).data('for')).addClass('doc-commented-highlight');
-    }).on('mouseleave', function() {
+    }).on('mouseleave', '.doc-comment-card', function() {
         $('#' + $(this).data('for')).removeClass('doc-commented-highlight');
-    }).on('click', function() {
+    }).on('click', '.doc-comment-card', function(e) {
+        // The card is a shortcut to the question, but not when the click landed
+        // on one of its own controls (reply/resolve/edit, or a box in progress)
+        // or on the comment text itself — that text is selectable, and editors
+        // cross parts of it out.
+        if ($(e.target).closest('.doc-comment-actions, .doc-comment-box, .doc-comment-text, a').length) { return; }
+        var sel = window.getSelection();
+        if (sel && !sel.isCollapsed) { return; }
         window.location = $('#' + $(this).data('for')).data('edit-url');
     });
 
@@ -635,7 +682,10 @@ $(function() {
             try { json = (typeof response === 'string') ? JSON.parse(response) : response; }
             catch (err) { alert('Comment failed: unexpected response.'); $box.find('.doc-comment-post').prop('disabled', false); return; }
             if (json && (json.message_class || '').indexOf('success') >= 0) {
-                location.reload();
+                // Swap in the new card rather than reloading, so the reader
+                // keeps their place in the packet.
+                $box.remove();
+                refreshDocComments();
             } else {
                 alert((json && json.message) || 'Could not post comment.');
                 $box.find('.doc-comment-post').prop('disabled', false);
@@ -656,6 +706,161 @@ $(function() {
                 question_type: $q.data('qtype'), question_id: $q.data('qid'), comment_text: text
             }, done).fail(failed);
         }
+    });
+
+    // ---- Comment card actions: reply, resolve, and edit without leaving the
+    // page. Replies/edits post over AJAX and the gutter is re-rendered from a
+    // fresh copy of this page, so the doc keeps its scroll position. ----
+
+    // Swap in freshly rendered comment cards (used after anything that changes
+    // them). Falls back to a full reload if the fetch or the markup surprises us.
+    function refreshDocComments(done) {
+        var $gutter = $('#doc-gutter');
+        $.get(window.location.pathname + window.location.search, function(html) {
+            var $fresh = $(html).find('#doc-gutter').first();
+            if (!$fresh.length) { location.reload(); return; }
+            $gutter.html($fresh.html());
+            if (!$gutter.hasClass('open')) {
+                $gutter.addClass('open');
+                $('#toggle-comments').removeClass('secondary').addClass('primary');
+            }
+            applyResolvedFilter();
+            if (typeof done === 'function') { done(); }
+        }).fail(function() { location.reload(); });
+    }
+
+    // Hide/show resolved comments (remembered across packets). A card with
+    // nothing but resolved comments left disappears with them.
+    function applyResolvedFilter() {
+        var hide = $('#toggle-resolved').hasClass('primary');
+        $('.doc-comment-top.doc-comment-resolved').toggle(!hide);
+        $('.doc-comment-card').each(function() {
+            var $card = $(this);
+            $card.toggle(!!$card.find('.doc-comment-top:visible').length);
+        });
+        layoutComments();
+    }
+
+    $('#toggle-resolved').on('click', function(e) {
+        e.preventDefault();
+        var hide = !$(this).hasClass('primary');
+        $(this).toggleClass('primary', hide).toggleClass('secondary', !hide)
+               .find('i').attr('class', hide ? 'fa fa-eye' : 'fa fa-check');
+        $(this).contents().last().replaceWith(hide ? ' Show Resolved' : ' Hide Resolved');
+        try { localStorage.setItem('qx_doc_hide_resolved', hide ? '1' : '0'); } catch (err) {}
+        applyResolvedFilter();
+    });
+    try {
+        if (localStorage.getItem('qx_doc_hide_resolved') === '1') { $('#toggle-resolved').trigger('click'); }
+    } catch (err) {}
+
+    function commentBox(placeholder, saveClass, saveLabel, value) {
+        var $box = $('<div class="doc-comment-box doc-inline-box">' +
+            '<textarea rows="2"></textarea>' +
+            '<button class="button tiny primary ' + saveClass + '">' + saveLabel + '</button> ' +
+            // Its own cancel class: the new-comment box's handler just deletes
+            // the box, which would leave an edited comment's text hidden.
+            '<button class="button tiny secondary doc-inline-cancel">Cancel</button></div>');
+        $box.find('textarea').attr('placeholder', placeholder).val(value || '');
+        return $box;
+    }
+
+    // Reply — posts under the top-level comment it belongs to.
+    $(document).on('click', '.doc-c-reply', function(e) {
+        e.preventDefault();
+        var $c = $(this).closest('.doc-comment-top');
+        var $open = $c.children('.doc-reply-box');
+        if ($open.length) { $open.remove(); layoutComments(); return; }
+        var $box = commentBox('Reply…', 'doc-reply-post', 'Reply').addClass('doc-reply-box');
+        $c.append($box);
+        layoutComments();
+        $box.find('textarea').focus();
+    });
+
+    $(document).on('click', '.doc-reply-post', function(e) {
+        e.preventDefault();
+        var $box = $(this).closest('.doc-comment-box');
+        var text = $box.find('textarea').val().trim();
+        if (!text) { return; }
+        var parentId = $box.closest('.doc-comment-top').data('comment-id');
+        var $btn = $(this).prop('disabled', true);
+        $.post('/reply_to_comment/', {
+            parent_id: parentId, comment_text: text, qset_id: window.QEMS_QSET_ID
+        }, function(response) {
+            var json;
+            try { json = (typeof response === 'string') ? JSON.parse(response) : response; }
+            catch (err) { json = null; }
+            if (json && (json.message_class || '').indexOf('success') >= 0) { refreshDocComments(); }
+            else { alert((json && json.message) || 'Could not post the reply.'); $btn.prop('disabled', false); }
+        }).fail(function() { alert('Could not post the reply.'); $btn.prop('disabled', false); });
+    });
+
+    // Resolve / unresolve — updates the card in place.
+    $(document).on('click', '.doc-c-resolve', function(e) {
+        e.preventDefault();
+        var $link = $(this), $c = $link.closest('.doc-comment-top');
+        $link.addClass('doc-c-busy');
+        $.post('/resolve_comment/', { comment_id: $c.data('comment-id') }, function(response) {
+            var json;
+            try { json = (typeof response === 'string') ? JSON.parse(response) : response; }
+            catch (err) { json = null; }
+            $link.removeClass('doc-c-busy');
+            if (!json || !json.success) { alert((json && json.message) || 'Could not update the comment.'); return; }
+            $c.toggleClass('doc-comment-resolved', !!json.resolved);
+            $c.find('> .doc-comment-author .doc-resolved-badge').toggle(!!json.resolved);
+            $link.text(json.resolved ? 'Unresolve' : 'Resolve');
+            applyResolvedFilter();
+        }).fail(function() { $link.removeClass('doc-c-busy'); alert('Could not update the comment.'); });
+    });
+
+    // Edit your own comment — the raw markup is kept on the text node so the
+    // editor starts from what you typed, not the rendered HTML.
+    $(document).on('click', '.doc-c-edit', function(e) {
+        e.preventDefault();
+        var $c = $(this).closest('.doc-comment');
+        var $text = $c.children('.doc-comment-text');
+        if ($c.children('.doc-edit-box').length) { return; }
+        var $box = commentBox('Edit your comment…', 'doc-edit-save', 'Save', $text.attr('data-raw'))
+            .addClass('doc-edit-box');
+        $text.hide().after($box);
+        layoutComments();
+        $box.find('textarea').focus();
+    });
+
+    $(document).on('click', '.doc-edit-save', function(e) {
+        e.preventDefault();
+        var $box = $(this).closest('.doc-comment-box');
+        var $c = $box.closest('.doc-comment');
+        var text = $box.find('textarea').val().trim();
+        if (!text) { return; }
+        var $btn = $(this).prop('disabled', true);
+        $.post('/edit_comment/', { comment_id: $c.data('comment-id'), comment_text: text },
+            function(response) {
+                var json;
+                try { json = (typeof response === 'string') ? JSON.parse(response) : response; }
+                catch (err) { json = null; }
+                if (!json || !json.success) {
+                    alert((json && json.message) || 'Could not save the comment.');
+                    $btn.prop('disabled', false); return;
+                }
+                var $text = $c.children('.doc-comment-text');
+                $text.attr('data-raw', json.text)
+                     .html('<span class="comment-strikeable" data-comment-id="'
+                           + $c.data('comment-id') + '">' + json.html + '</span>')
+                     .show();
+                $box.remove();
+                layoutComments();
+            }).fail(function() { alert('Could not save the comment.'); $btn.prop('disabled', false); });
+    });
+
+    // Cancel inside a card: drop the box and put the original text back.
+    $(document).on('click', '.doc-inline-cancel', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var $box = $(this).closest('.doc-comment-box');
+        $box.closest('.doc-comment').children('.doc-comment-text').show();
+        $box.remove();
+        layoutComments();
     });
 
     // ---- Anchored comments: just select text in a question and a comment box

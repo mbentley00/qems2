@@ -10,7 +10,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
 
     <link rel="stylesheet" href="{% static 'css/app.min.css' %}">
-    <link rel="stylesheet" href="{% static 'css/base.css' %}?v=52">
+    <link rel="stylesheet" href="{% static 'css/base.css' %}?v=53">
     <link rel="stylesheet" href="{% static 'fontawesome/css/all.min.css' %}">
 
     {# Apply saved sidebar-collapsed + theme preferences before first paint (shared across tabs via localStorage). #}
@@ -54,13 +54,19 @@
             </nav>
             {% if nav_active %}
             <form class="app-search" id="app-search-form" method="get" action="/search/">
-                <i class="fa fa-magnifying-glass"></i>
-                <input type="search" name="q" id="app-search-input" placeholder="Search answer lines, press enter for full text search" autocomplete="off">
-                <span class="app-search-kbd">Ctrl K</span>
+                <span class="app-search-field">
+                    <i class="fa fa-magnifying-glass"></i>
+                    <input type="search" name="q" id="app-search-input" placeholder="Search answer lines, press enter for full text search" autocomplete="off">
+                    <span class="app-search-kbd">Ctrl K</span>
+                    <div class="app-search-results" id="app-search-results"></div>
+                </span>
+                <button type="button" class="app-search-newtab" id="app-search-newtab"
+                        title="Full text search in a new tab (Ctrl+Enter)" aria-label="Search in a new tab">
+                    <i class="fa fa-magnifying-glass-arrow-right"></i>
+                </button>
                 <input type="hidden" name="qset" value="{{ nav_active.id }}">
                 <input type="hidden" name="models" value="qsub.tossup">
                 <input type="hidden" name="models" value="qsub.bonus">
-                <div class="app-search-results" id="app-search-results"></div>
             </form>
             {% endif %}
             <div class="app-topbar-actions">
@@ -173,7 +179,22 @@
                     sXhr.send();
                 }, 160);
             });
-            sInput.addEventListener('keydown', function (e) { if (e.key === 'Escape') { sHide(); } });
+            // The icon button (and Ctrl/Cmd+Enter) runs the same full text search
+            // the form would, but in a new tab so you keep your place.
+            function sOpenNewTab() {
+                var q = sInput.value.trim();
+                var url = '/search/?qset=' + encodeURIComponent(sQset)
+                    + '&models=qsub.tossup&models=qsub.bonus'
+                    + (q ? '&q=' + encodeURIComponent(q) : '');
+                window.open(url, '_blank', 'noopener');
+                sHide();
+            }
+            var sNewTab = document.getElementById('app-search-newtab');
+            if (sNewTab) { sNewTab.addEventListener('click', sOpenNewTab); }
+            sInput.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape') { sHide(); }
+                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); sOpenNewTab(); }
+            });
             document.addEventListener('click', function (e) { if (!sForm.contains(e.target)) { sHide(); } });
         }
     })();
@@ -183,9 +204,9 @@
     </div>{# /row #}
 {% endif %}
 
-    <script src="{% static 'js/paste_convert.js' %}?v=22"></script>
+    <script src="{% static 'js/paste_convert.js' %}?v=23"></script>
     <script src="{% static 'js/rich_editor.js' %}?v=15"></script>
-    <script src="{% static 'js/comment_strike.js' %}?v=2"></script>
+    <script src="{% static 'js/comment_strike.js' %}?v=3"></script>
     <script src="{% static 'foundation/js/foundation.min.js' %}"></script>
     <script>
         $(document).foundation({

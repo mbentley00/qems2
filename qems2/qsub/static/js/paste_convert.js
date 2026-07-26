@@ -1003,10 +1003,13 @@ $(function () {
     // the refresh; false (no .comments panel) lets callers fall back to a full
     // GET reload — doc view, packet grid, etc. don't have this sidebar.
     function qemsRefreshComments(done) {
-        var $panel = $('.edit-comments .comments');
+        // The edit pages keep comments in a sidebar; the doc view has the same
+        // thread markup in its packet-comments panel. Either can refresh in place.
+        var SEL = '.edit-comments .comments, #packet-comments-body .comments';
+        var $panel = $(SEL).first();
         if (!$panel.length) { return false; }
         $.get(window.location.pathname + window.location.search, function (html) {
-            var $fresh = $(html).find('.edit-comments .comments').first();
+            var $fresh = $(html).find(SEL).first();
             if ($fresh.length) { $panel.html($fresh.html()); }
             else { qemsGetReload(); }
             if (typeof done === 'function') { done(); }
@@ -1043,15 +1046,20 @@ $(function () {
 
     // Ctrl/Cmd+Enter in any comment box submits it (finds the nearby Post button).
     $(document).on('keydown',
-        'textarea[name="comment"], textarea.reply-text, textarea.new-comment-text, .doc-comment-box textarea',
+        'textarea[name="comment"], textarea.reply-text, textarea.new-comment-text, textarea.edit-comment-text, .doc-comment-box textarea',
         function (e) {
             if (!(e.ctrlKey || e.metaKey)) { return; }
             if (e.key !== 'Enter' && e.keyCode !== 13) { return; }
             e.preventDefault();
             var $ta = $(this), $btn = $();
             if ($ta.closest('.add-comment-form').length) { $btn = $ta.closest('.add-comment-form').find('.comment-submit'); }
+            else if ($ta.closest('.comment-edit-form').length) { $btn = $ta.closest('.comment-edit-form').find('.save-comment-edit'); }
             else if ($ta.closest('.reply-form').length) { $btn = $ta.closest('.reply-form').find('.post-reply'); }
-            else if ($ta.closest('.doc-comment-box').length) { $btn = $ta.closest('.doc-comment-box').find('.doc-comment-post'); }
+            else if ($ta.closest('.doc-comment-box').length) {
+                // Doc view: new comment, reply, and edit boxes all share this class.
+                $btn = $ta.closest('.doc-comment-box')
+                          .find('.doc-comment-post, .doc-reply-post, .doc-edit-save');
+            }
             else { $btn = $ta.closest('form').find('input[type=submit], button[type=submit]'); }
             $btn.first().trigger('click');
         });
@@ -1084,6 +1092,60 @@ $(function () {
         $form.hide();
     });
 
+    // ---- Edit your own comment, in place ----
+    // The rendered comment carries the raw markup in data-raw, so the editor
+    // starts from what was typed rather than the formatted HTML.
+    function commentTextEl($item) {
+        return $item.find('.comment-body, .comment-strikeable').first();
+    }
+
+    $(document).on('click', '.edit-comment-toggle', function (e) {
+        e.preventDefault();
+        var $item = $(this).closest('.comment-item');
+        if ($item.find('> .comment-edit-form').length) { return; }
+        var $text = commentTextEl($item);
+        var $form = $('<div class="comment-edit-form">' +
+            '<textarea rows="3" class="edit-comment-text"></textarea>' +
+            '<button class="button small primary save-comment-edit">Save</button> ' +
+            '<button class="button small secondary cancel-comment-edit">Cancel</button></div>');
+        $form.find('textarea').val($text.attr('data-raw') || $.trim($text.text()));
+        $text.hide();
+        $(this).closest('.comment-actions').after($form);
+        $form.find('textarea').focus();
+    });
+
+    $(document).on('click', '.cancel-comment-edit', function (e) {
+        e.preventDefault();
+        var $form = $(this).closest('.comment-edit-form');
+        commentTextEl($form.closest('.comment-item')).show();
+        $form.remove();
+    });
+
+    $(document).on('click', '.save-comment-edit', function (e) {
+        e.preventDefault();
+        var $form = $(this).closest('.comment-edit-form');
+        var $item = $form.closest('.comment-item');
+        var text = $.trim($form.find('textarea').val());
+        if (!text) { return; }
+        var $btn = $(this).prop('disabled', true);
+        $.post('/edit_comment/', { comment_id: $item.data('comment-id'), comment_text: text },
+            function (response) {
+                var json;
+                try { json = (typeof response === 'string') ? JSON.parse(response) : response; }
+                catch (err) { json = null; }
+                if (!json || !json.success) {
+                    alert((json && json.message) || 'Could not save the comment.');
+                    $btn.prop('disabled', false);
+                    return;
+                }
+                commentTextEl($item).attr('data-raw', json.text).html(json.html).show();
+                $form.remove();
+            }).fail(function () {
+                alert('Could not save the comment.');
+                $btn.prop('disabled', false);
+            });
+    });
+
     // ========================================================================
     // 8. @mention autocomplete for comment boxes
     // ========================================================================
@@ -1091,7 +1153,7 @@ $(function () {
     (function () {
         var qsetId = window.QEMS_QSET_ID;
         if (!qsetId) { return; }
-        var SEL = 'textarea[name="comment"], textarea.reply-text, textarea.new-comment-text, .doc-comment-box textarea';
+        var SEL = 'textarea[name="comment"], textarea.reply-text, textarea.new-comment-text, textarea.edit-comment-text, .doc-comment-box textarea';
         var members = null, loading = false;
         var $dd = $('<div class="mention-dropdown" style="display:none;"></div>').appendTo('body');
         var activeTa = null, matchStart = -1;

@@ -2163,6 +2163,9 @@ class UnpacketizedAssignmentTests(TestCase):
         html = resp.content.decode()
         self.assertIn('doc-swap-btn', html)
         self.assertIn('doc-swap-dialog', html)
+        # It rides at the top of the question, not buried in the meta row.
+        self.assertIn('doc-swap-corner', html)
+        self.assertLess(html.index('doc-swap-corner'), html.index('doc-meta'))
 
     def test_move_packet_question_swaps_positions_not_shift(self):
         # Doc-view reorder drag now posts to move_packet_question, which must
@@ -2315,6 +2318,65 @@ class PacketCommentAndPostTests(TestCase):
         # Careful-notes heads-up for the read_carefully tossup.
         self.assertIn('read these answer lines carefully', body)
         self.assertIn('Tricky Answer', body)
+
+    def test_doc_view_comment_cards_carry_reply_resolve_edit(self):
+        self.client.post('/add_question_comment/', {
+            'question_type': 'tossup', 'question_id': self.tu.id,
+            'comment_text': 'needs a pronunciation guide'})
+        body = self.client.get('/view_packet/{0}/'.format(self.packet.id)).content.decode()
+        self.assertIn('doc-c-reply', body)
+        self.assertIn('doc-c-resolve', body)
+        self.assertIn('doc-c-edit', body)      # own comment, so it's editable
+        self.assertIn('needs a pronunciation guide', body)
+
+    def test_doc_view_marks_resolved_comments(self):
+        self.client.post('/add_question_comment/', {
+            'question_type': 'tossup', 'question_id': self.tu.id, 'comment_text': 'handled'})
+        comment = self.Comment.objects.get(comment='handled')
+        # The class on the comment itself, not the stylesheet rules for it.
+        marked = 'doc-comment-top doc-comment-resolved'
+        body = self.client.get('/view_packet/{0}/'.format(self.packet.id)).content.decode()
+        self.assertNotIn(marked, body)
+
+        resp = self.client.post('/resolve_comment/', {'comment_id': comment.id})
+        self.assertTrue(json.loads(resp.content)['resolved'])
+        body = self.client.get('/view_packet/{0}/'.format(self.packet.id)).content.decode()
+        self.assertIn(marked, body)
+        self.assertIn('Unresolve', body)       # the action flips
+
+    def test_edit_own_comment(self):
+        self.client.post('/add_question_comment/', {
+            'question_type': 'tossup', 'question_id': self.tu.id, 'comment_text': 'frist draft'})
+        comment = self.Comment.objects.get(comment='frist draft')
+        resp = self.client.post('/edit_comment/', {
+            'comment_id': comment.id, 'comment_text': 'first draft'})
+        data = json.loads(resp.content)
+        self.assertTrue(data['success'])
+        self.assertIn('first draft', data['html'])
+        comment.refresh_from_db()
+        self.assertEqual(comment.comment, 'first draft')
+
+    def test_cannot_edit_someone_elses_comment(self):
+        self.client.post('/add_question_comment/', {
+            'question_type': 'tossup', 'question_id': self.tu.id, 'comment_text': 'mine'})
+        comment = self.Comment.objects.get(comment='mine')
+        other = User.objects.create_user('pc_writer', password='pw', email='w9@test.com')
+        Writer.objects.get(user=other).question_set_writer.add(self.qset)
+        self.client.logout(); self.client.login(username='pc_writer', password='pw')
+        resp = self.client.post('/edit_comment/', {
+            'comment_id': comment.id, 'comment_text': 'not mine to change'})
+        self.assertFalse(json.loads(resp.content)['success'])
+        comment.refresh_from_db()
+        self.assertEqual(comment.comment, 'mine')
+
+    def test_edit_comment_rejects_empty_text(self):
+        self.client.post('/add_question_comment/', {
+            'question_type': 'tossup', 'question_id': self.tu.id, 'comment_text': 'keep me'})
+        comment = self.Comment.objects.get(comment='keep me')
+        resp = self.client.post('/edit_comment/', {'comment_id': comment.id, 'comment_text': '   '})
+        self.assertFalse(json.loads(resp.content)['success'])
+        comment.refresh_from_db()
+        self.assertEqual(comment.comment, 'keep me')
 
     def test_packet_status_shows_subcategories(self):
         de = DistributionEntry.objects.create(

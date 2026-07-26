@@ -59,6 +59,7 @@ urlpatterns = [
     re_path(r'^set_members/(?P<qset_id>[0-9]+)/$', set_members),
     re_path(r'^resolve_comment/$', resolve_comment),
     re_path(r'^strike_comment/$', strike_comment),
+    re_path(r'^edit_comment/$', edit_comment),
     re_path(r'^add_editor_tag/$', add_editor_tag),
     re_path(r'^delete_editor_tag/$', delete_editor_tag),
     re_path(r'^packet_issues/(?P<packet_id>[0-9]+)/$', packet_issues),

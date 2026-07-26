@@ -44,6 +44,8 @@
 .style-panel-issues .pg-context { color: #777; font-style: italic; }
 .style-panel-issues .pg-context strong { color: #333; font-style: normal; }
 .style-panel-issues .sc-dismiss:hover { color: #c0392b; text-decoration: underline; }
+/* Brief highlight on the field a style fix just landed in. */
+.sc-just-fixed { background-color: #dff3e6 !important; transition: background-color 0.7s ease; }
 .grammar-panel-top { border-top: 1px solid #e8eaec; padding-top: 0.5rem; }
 .grammar-spelling-toggle { display: inline; font-weight: normal; font-size: 0.8rem; color: #8a8f94; margin-right: 0.4em; }
 .grammar-spelling-toggle input { margin: 0 0.25em 0 0; }
@@ -62,6 +64,45 @@ $(function () {
 
     function setStatus(text) { $('#style-panel-status').text(text).show(); }
 
+    // Show an applied fix without reloading. The page may have been rendered
+    // from a POST (after a save), and location.reload() would resubmit that
+    // stale form and write the pre-fix text straight back over the fix — which
+    // looked exactly like the fix doing nothing. So the saved field is updated
+    // in place instead; 'change' pushes it into the rich editor, 'input' keeps
+    // the character counters honest.
+    function showFixed(r) {
+        var $field = r.field ? $('#id_' + r.field) : $();
+        if (!$field.length) {
+            // No such field on this page — fall back to a fresh GET of this URL
+            // (not reload(), which would resubmit a POST).
+            window.location.replace(window.location.pathname + window.location.search);
+            return;
+        }
+        // The fix was computed from the SAVED text, so if what's in the box has
+        // drifted from that, replacing it would quietly drop those edits.
+        var current = $field.val() || '';
+        if (current !== (r.old_text || '') && current !== (r.text || '')) {
+            if (!confirm('The fix was applied to the saved question, but this field has '
+                       + 'unsaved changes. Replace what\'s in the box with the fixed '
+                       + 'text? (your unsaved changes to this field would be lost)')) {
+                load();
+                return;
+            }
+        }
+        $field.val(r.text || '').trigger('change').trigger('input');
+
+        // Flash whichever of the two is actually on screen (the rich editor
+        // replaces the textarea when it's enhanced).
+        var $anchor = $field.closest('div.expanding');
+        if (!$anchor.length) { $anchor = $field; }
+        var $flash = $anchor.next('.rich-editor-wrapper').find('.rich-editor');
+        if (!$flash.length) { $flash = $field; }
+        $flash.addClass('sc-just-fixed');
+        setTimeout(function () { $flash.removeClass('sc-just-fixed'); }, 900);
+
+        load();  // the fixed issue is gone; recheck against the saved question
+    }
+
     function load() {
         setStatus('Checking…');
         $.get('/question_style_issues/', { question_type: qtype, question_id: qid }, function (resp) {
@@ -79,13 +120,17 @@ $(function () {
                 $li.append($('<span class="style-issue-msg">').html(i.message_html || esc(i.message)));
                 var $actions = $('<span class="style-issue-actions">');
                 if (i.fixable) {
-                    $('<a class="style-action sc-fix" title="Apply this fix (reloads the page; unsaved edits are lost)">Fix</a>')
+                    $('<a class="style-action sc-fix" title="Apply this fix to the saved question">Fix</a>')
                         .on('click', function () {
                             $.post('/apply_style_fix/', { question_type: qtype, question_id: qid,
                                 code: i.code, token: i.token, guide: guide }, function (r) {
                                 if (typeof r === 'string') { try { r = JSON.parse(r); } catch (e) {} }
-                                if (r && r.ok) { location.reload(); }
+                                if (r && r.ok) { showFixed(r); }
                                 else { alert((r && r.error) || 'Could not apply the fix.'); }
+                            }).fail(function (xhr) {
+                                var msg = '';
+                                try { msg = JSON.parse(xhr.responseText).error; } catch (e) {}
+                                alert(msg || 'Could not apply the fix.');
                             });
                         }).appendTo($actions);
                 }

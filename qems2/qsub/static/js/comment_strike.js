@@ -56,6 +56,9 @@
                 // to a reload only if the server didn't send the HTML.
                 if (root && typeof j.html === 'string') {
                     $(root).html(j.html);
+                    // Keep the raw markup used by the in-place comment editor in
+                    // sync, so a later edit starts from the struck text.
+                    if (typeof j.text === 'string') { $(root).attr('data-raw', j.text); }
                     var sel = window.getSelection();
                     if (sel) { sel.removeAllRanges(); }
                     hide();

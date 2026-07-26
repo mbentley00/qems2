@@ -1,8 +1,10 @@
 {% if q.comments %}
-<div class="doc-comment-card" data-for="q-{{ q.qtype }}-{{ q.id }}">
+<div class="doc-comment-card" data-for="q-{{ q.qtype }}-{{ q.id }}"
+     data-qtype="{{ q.qtype }}" data-qid="{{ q.id }}">
     <div class="doc-comment-target">{% if q.qtype == 'tossup' %}Tossup{% else %}Bonus{% endif %} {{ q.number }}</div>
     {% for c in q.comments %}
-    <div class="doc-comment doc-comment-top{% if c.anchored %} doc-comment-anchored{% endif %}">
+    <div class="doc-comment doc-comment-top{% if c.anchored %} doc-comment-anchored{% endif %}{% if c.resolved %} doc-comment-resolved{% endif %}"
+         data-comment-id="{{ c.id }}">
         {% if c.anchored %}
         <div class="doc-comment-selection" title="This comment is anchored to a selection in the question">
             <i class="fa fa-quote-left"></i> {{ c.selection|truncatechars:120 }}
@@ -10,14 +12,28 @@
         {% else %}
         <div class="doc-comment-kind">On the whole question</div>
         {% endif %}
-        <div class="doc-comment-author">{{ c.user }} <span class="doc-comment-date">{{ c.date|date:"m/d/y H:i" }}</span></div>
-        {% autoescape off %}<div class="doc-comment-text"><span class="comment-strikeable" data-comment-id="{{ c.id }}">{{ c.text|safe|comment_html|linebreaks }}</span></div>{% endautoescape %}
+        <div class="doc-comment-author">{{ c.user }} <span class="doc-comment-date">{{ c.date|date:"m/d/y H:i" }}</span>
+            <span class="doc-resolved-badge"{% if not c.resolved %} style="display:none;"{% endif %}><i class="fa fa-check"></i> Resolved</span>
+        </div>
+        {% autoescape off %}<div class="doc-comment-text" data-raw="{{ c.text|escape }}"><span class="comment-strikeable" data-comment-id="{{ c.id }}">{{ c.text|safe|comment_html|linebreaks }}</span></div>{% endautoescape %}
+        {% if not read_only %}
+        <div class="doc-comment-actions">
+            <a href="#" class="doc-c-reply" title="Reply to this comment">Reply</a>
+            <a href="#" class="doc-c-resolve" title="Mark this comment handled">{% if c.resolved %}Unresolve{% else %}Resolve{% endif %}</a>
+            {% if c.can_edit %}<a href="#" class="doc-c-edit" title="Edit your comment">Edit</a>{% endif %}
+        </div>
+        {% endif %}
+        <div class="doc-comment-replies">
         {% for r in c.replies %}
-        <div class="doc-comment doc-comment-reply">
+        <div class="doc-comment doc-comment-reply" data-comment-id="{{ r.id }}">
             <div class="doc-comment-author"><i class="fa fa-reply"></i> {{ r.user }} <span class="doc-comment-date">{{ r.date|date:"m/d/y H:i" }}</span></div>
-            {% autoescape off %}<div class="doc-comment-text"><span class="comment-strikeable" data-comment-id="{{ r.id }}">{{ r.text|safe|comment_html|linebreaks }}</span></div>{% endautoescape %}
+            {% autoescape off %}<div class="doc-comment-text" data-raw="{{ r.text|escape }}"><span class="comment-strikeable" data-comment-id="{{ r.id }}">{{ r.text|safe|comment_html|linebreaks }}</span></div>{% endautoescape %}
+            {% if r.can_edit and not read_only %}
+            <div class="doc-comment-actions"><a href="#" class="doc-c-edit" title="Edit your reply">Edit</a></div>
+            {% endif %}
         </div>
         {% endfor %}
+        </div>
     </div>
     {% endfor %}
 </div>
