@@ -345,6 +345,46 @@ $(function() {
     $(window).on('beforeunload', saveGridScroll);
     restoreGridScroll();
 
+    // --- Make browser find-in-page (Ctrl+F) work inside the grid ---
+    // The grid scrolls horizontally in its own container, and Firefox (among
+    // others) will highlight a match in there without scrolling either the page
+    // or the container to it — the hit is selected somewhere off-screen. Find
+    // moves the document selection, so watch for a selection landing inside the
+    // grid and bring its cell into view when it isn't already visible.
+    (function () {
+        if (!$('.grid-scroll').length) { return; }
+        var mouseDown = false, timer = null;
+        $(document).on('mousedown', function () { mouseDown = true; })
+                   .on('mouseup', function () { mouseDown = false; });
+
+        document.addEventListener('selectionchange', function () {
+            if (mouseDown) { return; }   // don't yank the page during a drag-select
+            clearTimeout(timer);
+            timer = setTimeout(function () {
+                var sel = window.getSelection();
+                if (!sel || !sel.rangeCount || sel.isCollapsed) { return; }
+                var node = sel.anchorNode;
+                if (node && node.nodeType === 3) { node = node.parentNode; }
+                // Both scrollers on this page: the grid, and the capped-height
+                // unpacketized lists.
+                if (!node || !$(node).closest('.grid-scroll, .unp-list').length) { return; }
+                var rect = sel.getRangeAt(0).getBoundingClientRect();
+                if (!rect.width && !rect.height) { return; }
+                // Keep clear of the sticky topbar and the sticky number column.
+                var topPad = 70, leftPad = 60;
+                if (rect.top >= topPad && rect.bottom <= window.innerHeight - 10 &&
+                    rect.left >= leftPad && rect.right <= window.innerWidth - 10) {
+                    return;              // already on screen — the browser handled it
+                }
+                var cell = $(node).closest('td, th, .unp-item')[0] || node;
+                // Scrolls every ancestor scroller, so the grid moves both ways.
+                if (cell.scrollIntoView) {
+                    cell.scrollIntoView({ block: 'center', inline: 'center' });
+                }
+            }, 60);
+        });
+    })();
+
     // --- Unpacketized panel: filter + collapse (available read-only too) ---
     function updateUnpShownCounts() {
         $('.unp-tu-shown').text($('#unp-tu-list .unp-item').not('.filtered-out').length);
