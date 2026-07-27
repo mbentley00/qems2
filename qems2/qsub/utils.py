@@ -561,6 +561,41 @@ def does_answerline_have_underlines(line):
     else:
         return False
 
+# A parenthetical that isn't already escaped as a literal "\(".
+_UNESCAPED_PAREN_RE = re.compile(r'(?<!\\)\(([^()]*)\)')
+# A pronunciation guide is a quoted respelling: ("KAM-uh-flahzh").
+_QUOTED_GUIDE_RE = re.compile(u'^\\s*["“‘\'].*["”’\']\\s*$', re.S)
+
+
+def escape_answer_note_parens(answer):
+    """Escape the parentheses around an editorial note at the end of an answer
+    line, so it renders as text rather than as a pronunciation guide.
+
+    Anything parenthesized after the closing "]" of the acceptable-answers
+    section is almost always a note — "(when witnessing a demonstration of
+    dazzle camouflage, FDR declared, ...)" — while a real guide is a quoted
+    respelling like ("KAM-uh-flahzh"). Left alone, QEMS renders the note in the
+    grey pronunciation-guide style. Guides, power marks, and parens already
+    escaped are untouched, as is an answer line with no bracket section (there
+    a guide on the primary answer is indistinguishable from a note)."""
+    if not answer:
+        return answer
+    cut = answer.rfind(']')
+    if cut == -1:
+        return answer
+    head, tail = answer[:cut + 1], answer[cut + 1:]
+
+    def _escape(match):
+        inner = match.group(1)
+        if not inner.strip() or inner.strip() in ('*', '+'):
+            return match.group(0)
+        if _QUOTED_GUIDE_RE.match(inner):
+            return match.group(0)
+        return '\\(' + inner + '\\)'
+
+    return head + _UNESCAPED_PAREN_RE.sub(_escape, tail)
+
+
 def convert_smart_quotes(line):
     return smart_str(line).translate(DOUBLE_QUOTE_MAP).translate(SINGLE_QUOTE_MAP)
 

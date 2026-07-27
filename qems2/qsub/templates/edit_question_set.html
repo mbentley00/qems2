@@ -333,19 +333,11 @@
                 {% else %}
                 <p style="color:#888;">No role groups attached.</p>
                 {% endif %}
+                {# Attaching happens on its own page: an inline dropdown here read as
+                   though the group it happened to be showing was already attached. #}
                 {% if all_role_groups %}
-                <form method="post" action="/attach_role_group/{{ qset.id }}/" class="form-inline">
-                    {% csrf_token %}
-                    <select name="role_group_id" style="display:inline-block; width:auto; margin:0 6px 0 0;">
-                        {% for g in all_role_groups %}<option value="{{ g.id }}">{{ g.name }}</option>{% endfor %}
-                    </select>
-                    as
-                    <select name="role" style="display:inline-block; width:auto; margin:0 6px;">
-                        <option value="editor">Editor</option>
-                        <option value="writer">Writer</option>
-                    </select>
-                    <button type="submit" class="button tiny primary" style="margin:0;">Attach</button>
-                </form>
+                <a href="/attach_role_group/{{ qset.id }}/" class="button tiny primary" style="margin:0;">
+                    <i class="fa fa-plus-circle"></i> Attach a role group&hellip;</a>
                 {% else %}
                 <p style="color:#888;">No role groups exist yet. <a href="/role_groups/">Create one</a>.</p>
                 {% endif %}
@@ -466,7 +458,7 @@
                             <td><a href="/edit_tossup/{{ tossup.id }}">{{ tossup.tossup_text|safe|preview|question_html }}</a></td>
                             <td><a href="/edit_tossup/{{ tossup.id }}">{{ tossup|tossup_answer }}</a></td>
                             <td><a href="/categories/{{ qset.id }}/{{ tossup.category.id }}">{{ tossup.category }}</a></td>
-                            <td>{% if tossup.packet %} {{ tossup.packet }} {% else %} Not in packet {% endif %}</td>
+                            <td>{% if tossup.packet %}<a href="/view_packet/{{ tossup.packet.id }}/" title="Open this packet">{{ tossup.packet }}</a>{% else %}Not in packet{% endif %}</td>
                             <td>{{ tossup.created_date|to_short_datetime }}</td>
                             <td>{{ tossup.last_changed_date|to_short_datetime }}</td>
                             <td>{% if tossup.edited_date %} {{ tossup.edited_date|to_short_datetime }} {% endif %}</td>
@@ -520,7 +512,7 @@
                             </td>
                             <td><a href="/edit_bonus/{{ bonus.id }}">{{ bonus|bonus_answers }}</a></td>
                             <td><a href="/categories/{{ qset.id }}/{{ bonus.category.id }}">{{ bonus.category }}</a></td>
-                            <td>{% if bonus.packet %} {{ bonus.packet }} {% else %} Not in packet {% endif %}</td>
+                            <td>{% if bonus.packet %}<a href="/view_packet/{{ bonus.packet.id }}/" title="Open this packet">{{ bonus.packet }}</a>{% else %}Not in packet{% endif %}</td>
                             <td>{{ bonus.created_date|to_short_datetime }}</td>
                             <td>{{ bonus.last_changed_date|to_short_datetime }}</td>
                             <td>{% if bonus.edited_date %} {{ bonus.edited_date|to_short_datetime }} {% endif %}</td>

@@ -61,6 +61,7 @@
         <a href="#" id="toggle-issues" class="button tiny secondary" title="Show repeat-checker issues for each question"><i class="fa fa-triangle-exclamation"></i> Repeat Issues</a>
         <a href="#" id="toggle-style" class="button tiny secondary" title="Show style-check issues for each question"><i class="fa fa-spell-check"></i> Style Issues</a>
         <a href="#" id="toggle-pg-above" class="button tiny secondary" title="Show annotated pronunciation guides above the words they cover instead of inline"><i class="fa fa-arrow-up"></i> PGs Above</a>
+        {% if not read_only %}<a href="#" id="toggle-swap-panel" class="button tiny secondary" title="Show a compact list of this packet's questions for quick swapping"><i class="fa fa-right-left"></i> Swap Panel</a>{% endif %}
         <a href="/packet_mp3/{{ packet.id }}/?order={{ order }}" id="mp3-link" class="button tiny secondary" title="Download an MP3 reading of this packet"><i class="fa fa-headphones"></i> MP3</a>
         {% if not read_only %}
         <a href="#" class="button tiny doc-mode-btn" data-mode="comment"><i class="fa fa-comment"></i> Comment</a><a href="#" class="button tiny secondary doc-mode-btn" data-mode="reorder"><i class="fa fa-arrows-up-down"></i> Reorder</a>
@@ -191,6 +192,47 @@ document.addEventListener('DOMContentLoaded', function () {
 </div>
 </div>
 
+{% if not read_only %}
+{# Compact list of this packet's questions, for swapping without scrolling the
+   document. Closed until you ask for it from the toolbar. #}
+<div class="swap-panel" id="swap-panel">
+    <div class="swap-panel-head">
+        <strong>{{ packet.packet_name }}</strong>
+        <a href="#" class="swap-panel-close" title="Close">&times;</a>
+        <div class="swap-panel-hint">Click a question, then click the one to trade places with it.
+        Use <i class="fa fa-right-left"></i> to swap with a question in another packet.</div>
+    </div>
+    <div class="swap-panel-body">
+        <div class="swap-panel-section">Tossups</div>
+        {% for q in tossups %}
+        <div class="swap-row" data-qtype="tossup" data-qid="{{ q.id }}" data-num="{{ q.number }}">
+            <span class="swap-row-num">{{ q.number }}</span>
+            <span class="swap-row-main">
+                <span class="swap-row-answer">{{ q.answer_preview }}</span>
+                <span class="swap-row-cat">{{ q.category }}</span>
+            </span>
+            <a href="#" class="swap-row-btn doc-swap-btn" data-qtype="tossup" data-qid="{{ q.id }}"
+               data-num="{{ q.number }}" title="Swap with a question in another packet"><i class="fa fa-right-left"></i></a>
+        </div>
+        {% endfor %}
+        {% if bonuses %}
+        <div class="swap-panel-section">Bonuses</div>
+        {% for q in bonuses %}
+        <div class="swap-row" data-qtype="bonus" data-qid="{{ q.id }}" data-num="{{ q.number }}">
+            <span class="swap-row-num">{{ q.number }}</span>
+            <span class="swap-row-main">
+                <span class="swap-row-answer">{{ q.answer_preview }}</span>
+                <span class="swap-row-cat">{{ q.category }}</span>
+            </span>
+            <a href="#" class="swap-row-btn doc-swap-btn" data-qtype="bonus" data-qid="{{ q.id }}"
+               data-num="{{ q.number }}" title="Swap with a question in another packet"><i class="fa fa-right-left"></i></a>
+        </div>
+        {% endfor %}
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
 {% if not packet_comment_count %}<div style="margin-top:24px;">{% include "_packet_comments.html" %}</div>{% endif %}
 
 <style>
@@ -233,7 +275,8 @@ document.addEventListener('DOMContentLoaded', function () {
 /* The per-question Swap action reads as a clear button (accent pill), not a
    faint hover-only link. a.doc-tag:hover already inverts to the accent fill. */
 .doc-swap-btn { background:#e8f4fb; color:#006f9a; font-weight:bold; white-space:nowrap; }
-.doc-reorder-mode .doc-swap-btn { display:none; }
+/* Swap stays available in reorder mode too — hiding it there just made the
+   button look missing to anyone whose saved mode was "reorder". */
 /* Swap sits at the top-right of its question, where the packet grid puts it —
    the meta row at the bottom buried it among the Author/Length tags. */
 .doc-swap-corner {
@@ -244,6 +287,36 @@ document.addEventListener('DOMContentLoaded', function () {
 .doc-swap-corner:hover { background:#008CBA; color:#fff; border-color:#008CBA; }
 .doc-swap-corner .fa { margin-right: 3px; }
 html[data-theme="dark"] .doc-swap-corner { background:#123243; color:#7fc7e8; border-color:#1d4a61; }
+/* Right-hand swap panel: the whole packet at a glance, for trading questions
+   around without scrolling the document. Hidden until asked for. */
+.swap-panel { display: none; position: fixed; top: 60px; right: 0; bottom: 0; width: 330px;
+    background: #fff; border-left: 1px solid #ddd; box-shadow: -2px 0 10px rgba(0,0,0,0.10);
+    z-index: 60; font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; }
+.swap-panel.open { display: flex; flex-direction: column; }
+.swap-panel-head { padding: 10px 14px; border-bottom: 1px solid #eee; position: relative; }
+.swap-panel-hint { color: #8a8f9c; font-size: 11px; margin-top: 4px; }
+.swap-panel-close { position: absolute; top: 6px; right: 12px; color: #9aa3ad; font-size: 1.3rem; line-height: 1; }
+.swap-panel-close:hover { color: #c0392b; }
+.swap-panel-body { flex: 1 1 auto; overflow-y: auto; padding: 6px 0 20px; }
+.swap-panel-section { font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
+    color: #999; padding: 8px 14px 3px; }
+.swap-row { display: flex; align-items: baseline; gap: 8px; padding: 5px 14px; cursor: pointer;
+    border-left: 3px solid transparent; font-size: 12.5px; }
+.swap-row:hover { background: #f2f8fd; }
+.swap-row.selected { background: #d9edf7; border-left-color: #008CBA; }
+.swap-row-num { color: #999; font-weight: bold; min-width: 1.6em; text-align: right; }
+.swap-row-main { flex: 1 1 auto; display: flex; flex-direction: column; }
+.swap-row-answer { color: #222; font-weight: 600; }
+.swap-row-cat { color: #8a8f9c; font-size: 11px; }
+.swap-row-btn { color: #bbb; flex: 0 0 auto; }
+.swap-row:hover .swap-row-btn { color: #008CBA; }
+body.swap-panel-open .doc-flex { padding-right: 340px; }
+html[data-theme="dark"] .swap-panel { background: var(--qx-card); border-left-color: var(--qx-border); }
+html[data-theme="dark"] .swap-row-answer { color: var(--qx-ink); }
+@media (max-width: 900px) {
+    .swap-panel { width: 100%; top: 0; }
+    body.swap-panel-open .doc-flex { padding-right: 0; }
+}
 #doc-swap-candidates { max-height: 320px; overflow-y: auto; }
 .doc-swap-candidate { padding:6px 8px; border-bottom:1px solid #eee; cursor:pointer; font-size:0.85em; }
 .doc-swap-candidate:hover { background-color:#d9edf7; }
@@ -962,6 +1035,46 @@ $(function() {
 
     if (readOnly) return;
 
+    // ---- Swap panel: the packet as a compact list, closed until asked for ----
+    $('#toggle-swap-panel').on('click', function(e) {
+        e.preventDefault();
+        var open = !$('#swap-panel').hasClass('open');
+        $('#swap-panel').toggleClass('open', open);
+        $('body').toggleClass('swap-panel-open', open);
+        $(this).toggleClass('primary', open).toggleClass('secondary', !open);
+        if (!open) { $('.swap-row').removeClass('selected'); }
+        layoutComments();
+    });
+    $('.swap-panel-close').on('click', function(e) {
+        e.preventDefault();
+        $('#toggle-swap-panel').trigger('click');
+    });
+
+    // Click one row, then another of the same type: the two trade places.
+    $('#swap-panel').on('click', '.swap-row', function(e) {
+        if ($(e.target).closest('.swap-row-btn').length) { return; }  // that's the dialog
+        var $row = $(this), $sel = $('.swap-row.selected');
+        if (!$sel.length || $sel[0] === $row[0]) {
+            $('.swap-row').removeClass('selected');
+            if (!$sel.length) { $row.addClass('selected'); }
+            return;
+        }
+        if ($sel.data('qtype') !== $row.data('qtype')) {
+            alert('Tossups swap with tossups and bonuses with bonuses.');
+            return;
+        }
+        $.post('/move_packet_question/', {
+            question_type: String($sel.data('qtype')),
+            question_id: $sel.data('qid'),
+            target_packet_id: packetId,
+            target_number: $row.data('num')
+        }, function(response) {
+            var json = $.parseJSON(response);
+            if (json.success) { location.reload(); }
+            else { alert(json.message); $('.swap-row').removeClass('selected'); }
+        });
+    });
+
     // ---- Swap a question with another (mirrors the packet grid) ----
     var swapSource = null;
     var $swapDialog = $('#doc-swap-dialog').dialog({ autoOpen: false, modal: true, width: 600, closeOnEscape: true });
@@ -1018,11 +1131,16 @@ $(function() {
         });
     }
 
-    $('.doc-page').on('click', '.doc-swap-btn', function(e) {
+    // Works from the question itself and from the swap panel's rows, which
+    // carry the same data attributes on the button.
+    $(document).on('click', '.doc-swap-btn', function(e) {
         e.preventDefault();
         e.stopPropagation();
-        var $q = $(this).closest('.doc-question');
-        swapSource = {
+        var $btn = $(this), $q = $btn.closest('.doc-question');
+        swapSource = $btn.data('qid') ? {
+            qtype: $btn.data('qtype'), qid: $btn.data('qid'), num: $btn.data('num'),
+            answer: $btn.closest('.swap-row').find('.swap-row-answer').text()
+        } : {
             qtype: $q.data('qtype'), qid: $q.data('qid'), num: $q.data('num'),
             answer: $q.find('.doc-qlabel').text().replace(/\s+$/, '')
         };

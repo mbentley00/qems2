@@ -4,76 +4,196 @@
 {% include "header.html" %}
 {% endblock %}
 
-{% block title %}Create Question Set- QEMS3{% endblock %}
+{% block title %}Create Question Set - QEMS3{% endblock %}
 
 {% block content %}
 {% load static %}
 
 <h3 class="page-header">Create Question Set</h3>
-<form action="" method="post">
-    {% csrf_token %}
+{% if message %}<div class="{{ message_class }}">{{ message }}</div>{% endif %}
 
-    <div class="row">
-    {% for field in form %}
-        {% if field.html_name == "name" or field.html_name == "date" %}
-            <div class="small-6 columns">
-                <div class="row collapse">
-                    <div class="small-4 columns">
-                        <span class="prefix text-left" for="{{ field.id_for_label }}">{% if field.html_name == "name" %}Set Name{% else %}Due Date{% endif %}</span>
-                    </div>
-                    <div class="small-8 columns">
-                        {{ field }}
-                    </div>
-                </div>
-                {% if field.errors %}
-                    {{ field.errors }}
-                {% endif %}
+<form action="" method="post" class="cqs-form">
+    {% csrf_token %}
+    {% if form.non_field_errors %}<div class="alert-box alert">{{ form.non_field_errors }}</div>{% endif %}
+
+    <div class="cqs-card">
+        <h4 class="cqs-heading">The basics</h4>
+        <div class="cqs-grid">
+            <div class="cqs-field">
+                <label for="{{ form.name.id_for_label }}">Set Name</label>
+                {{ form.name }}{{ form.name.errors }}
+                <small>What writers will see everywhere — e.g. "2027 NSC".</small>
             </div>
-        {% endif %}
-    {% endfor %}
-    </div>
-    <div class="row">
-    {% for field in form %}
-        {% if field.html_name == "num_packets" or field.html_name == "distribution" %}
-            <div class="small-6 columns">
-                <div class="row collapse">
-                    <div class="small-4 columns">
-                        <span class="prefix text-left" for="{{ field.id_for_label }}">{% if field.html_name == "num_packets" %}Number of Packets{% else %}Distribution{% endif %}</span>
-                    </div>
-                    <div class="small-8 columns">
-                        {{ field }}
-                    </div>
-                </div>
-                {% if field.errors %}
-                    {{ field.errors }}
-                {% endif %}
+            <div class="cqs-field">
+                <label for="{{ form.date.id_for_label }}">Due Date</label>
+                {{ form.date }}{{ form.date.errors }}
+                <small>When questions are due (mm/dd/yyyy).</small>
             </div>
-        {% endif %}
-    {% endfor %}
+            <div class="cqs-field">
+                <label for="{{ form.num_packets.id_for_label }}">Number of Packets</label>
+                {{ form.num_packets }}{{ form.num_packets.errors }}
+                <small>Per-packet category quotas are multiplied by this.</small>
+            </div>
+            <div class="cqs-field">
+                <label for="{{ form.distribution.id_for_label }}">Distribution</label>
+                {{ form.distribution }}{{ form.distribution.errors }}
+                <small>The category template for the set. <a href="/edit_distribution/" target="_blank" rel="noopener">Make a new one</a> if none fit.</small>
+            </div>
+        </div>
+
+        {# Filled in by JS from /distribution_preview/<id>/ as the picker changes. #}
+        <div class="cqs-dist-preview" id="cqs-dist-preview">
+            <div class="cqs-dist-head">
+                <strong id="cqs-dist-name">&nbsp;</strong>
+                <span class="cqs-dist-meta" id="cqs-dist-meta"></span>
+            </div>
+            <div class="cqs-dist-body" id="cqs-dist-body"></div>
+        </div>
     </div>
-    <ul class="small-block-grid-3">
-        <li>
-            <label>Max Tossup Length
-                {{ form.max_acf_tossup_length }}
-            </label>
-        </li>
-        <li>
-            <label>Max Bonus Length
-            {{ form.max_acf_bonus_length }}
-            </label>
-        </li>
-        <li>
-            <label>Character Counts Ignore Pronunciation Guides
-                {{ form.char_count_ignores_pronunciation_guides }}
-            </label>
-        </li>
-        <li>
-            <label>Tossup-Only Tournament (no bonuses)
-                {{ form.tossups_only }}
-            </label>
-        </li>
-    </ul>
-    <input type="submit" value="Create Question Set" class="button primary right" />
+
+    <div class="cqs-card">
+        <h4 class="cqs-heading">Question limits</h4>
+        <div class="cqs-grid">
+            <div class="cqs-field">
+                <label for="{{ form.max_acf_tossup_length.id_for_label }}">Max Tossup Length</label>
+                {{ form.max_acf_tossup_length }}{{ form.max_acf_tossup_length.errors }}
+                <small>Characters. Over-length questions are flagged, not blocked.</small>
+            </div>
+            <div class="cqs-field">
+                <label for="{{ form.max_acf_bonus_length.id_for_label }}">Max Bonus Length</label>
+                {{ form.max_acf_bonus_length }}{{ form.max_acf_bonus_length.errors }}
+                <small>Characters, counted across the whole bonus.</small>
+            </div>
+        </div>
+    </div>
+
+    <div class="cqs-card">
+        <h4 class="cqs-heading">Set options</h4>
+        <p class="cqs-note">All of these can be changed later from the set's page.</p>
+        <div class="cqs-checks">
+            <label class="cqs-check">{{ form.enable_superpower }}
+                <span>Enable superpowers (20-point <code>(+)</code> mark)
+                    <small>Lets tossups carry a 20-point superpower mark before the 15-point power. Off: a stray (+) is plain text and never scores 20.</small></span></label>
+            <label class="cqs-check">{{ form.char_count_ignores_pronunciation_guides }}
+                <span>Character counts ignore pronunciation guides
+                    <small>A ("pruh-nun-see-AY-shun") guide doesn't eat into the length limit.</small></span></label>
+            <label class="cqs-check">{{ form.tossups_only }}
+                <span>Tossup-only tournament (no bonuses)
+                    <small>Hides bonus requirements and quotas. Bonuses are never deleted.</small></span></label>
+            <label class="cqs-check">{{ form.public }}
+                <span>Public (listed for everyone)
+                    <small>Anyone can see this set is being written and request to join (which emails you). It grants no access by itself.</small></span></label>
+        </div>
+    </div>
+
+    <div class="cqs-actions">
+        <a href="/question_sets/" class="button secondary">Cancel</a>
+        <input type="submit" value="Create Question Set" class="button primary" />
+    </div>
 </form>
+
+<style>
+.cqs-card { background: #fff; border: 1px solid #e9e9ef; border-radius: 12px;
+    padding: 22px 26px; margin: 0 0 1rem; box-shadow: 0 1px 2px rgba(20,20,40,.04); }
+.cqs-heading { font-family: Georgia, "Times New Roman", serif; margin: 0 0 1rem; font-size: 1.3rem; }
+.cqs-note { color: #8a8f9c; font-size: 0.85rem; margin: -0.6rem 0 1rem; }
+.cqs-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 24px; }
+.cqs-field { display: flex; flex-direction: column; gap: 6px; }
+.cqs-field > label { font-weight: 600; font-size: 0.82rem; color: #565b66; margin: 0; }
+.cqs-field input, .cqs-field select { margin: 0; height: 42px; width: 100%; }
+.cqs-field small { color: #8a8f9c; font-size: 0.78rem; }
+.cqs-checks { display: flex; flex-direction: column; gap: 14px; }
+.cqs-check { display: flex; align-items: flex-start; gap: 10px;
+    font-weight: 600; color: #2b2f3a; cursor: pointer; }
+.cqs-check input { margin: 2px 0 0; flex: 0 0 auto; }
+.cqs-check small { display: block; font-weight: 400; color: #8a8f9c; margin-top: 3px; }
+.cqs-actions { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-bottom: 2rem; }
+.cqs-actions .button { margin: 0; }
+/* Distribution preview: what you're about to build the set on. */
+.cqs-dist-preview { margin-top: 18px; padding-top: 16px; border-top: 1px solid #f0f0f3; }
+.cqs-dist-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+.cqs-dist-meta { color: #8a8f9c; font-size: 0.82rem; }
+.cqs-dist-table { width: 100%; font-size: 0.82rem; border-collapse: collapse; }
+.cqs-dist-table th { text-align: left; font-weight: 600; color: #565b66;
+    border-bottom: 1px solid #ececf0; padding: 3px 8px 5px 0; }
+.cqs-dist-table td { padding: 3px 8px 3px 0; border-bottom: 1px solid #f6f6f8; }
+.cqs-dist-table td.num, .cqs-dist-table th.num { text-align: right; padding-right: 14px; white-space: nowrap; }
+.cqs-dist-empty { color: #8a8f9c; font-size: 0.85rem; }
+.cqs-dist-scroll { max-height: 260px; overflow-y: auto; }
+@media (max-width: 760px) { .cqs-grid { grid-template-columns: 1fr; } }
+html[data-theme="dark"] .cqs-card { background: var(--qx-card); border-color: var(--qx-border); }
+html[data-theme="dark"] .cqs-heading, html[data-theme="dark"] .cqs-check { color: var(--qx-ink); }
+html[data-theme="dark"] .cqs-dist-table th { border-bottom-color: var(--qx-border); }
+html[data-theme="dark"] .cqs-dist-table td { border-bottom-color: var(--qx-border); }
+</style>
+
+<script>
+$(function () {
+    var $select = $('#{{ form.distribution.id_for_label }}'),
+        $name = $('#cqs-dist-name'), $meta = $('#cqs-dist-meta'), $body = $('#cqs-dist-body');
+    if (!$select.length) { return; }
+    var packets = function () { return parseInt($('#{{ form.num_packets.id_for_label }}').val(), 10) || 0; };
+    var current = null, seq = 0;
+
+    function esc(s) { return $('<div>').text(s == null ? '' : s).html(); }
+
+    function render(d) {
+        current = d;
+        $name.text(d.name);
+        var bits = [];
+        bits.push(d.created_by ? 'created by ' + d.created_by : 'creator unknown');
+        if (d.created_date) { bits.push('on ' + d.created_date); }
+        bits.push(d.category_count + ' categor' + (d.category_count === 1 ? 'y' : 'ies')
+                  + ', ' + d.entry_count + ' subcategor' + (d.entry_count === 1 ? 'y' : 'ies'));
+        if (d.in_use_by) { bits.push('used by ' + d.in_use_by + ' set' + (d.in_use_by === 1 ? '' : 's')); }
+        $meta.text(bits.join(' · '));
+
+        if (!d.categories.length) {
+            $body.html('<div class="cqs-dist-empty">This distribution has no categories yet.</div>');
+            return;
+        }
+        var n = packets();
+        var rows = d.categories.map(function (r) {
+            return '<tr><td>' + esc(r.category) + '</td>'
+                + '<td class="num">' + r.subcategories + '</td>'
+                + '<td class="num">' + r.min_tossups + (r.max_tossups !== r.min_tossups ? '–' + r.max_tossups : '') + '</td>'
+                + '<td class="num">' + r.min_bonuses + (r.max_bonuses !== r.min_bonuses ? '–' + r.max_bonuses : '') + '</td>'
+                + '<td class="num">' + (n ? r.min_tossups * n : '—') + '</td></tr>';
+        }).join('');
+        $body.html(
+            '<div class="cqs-dist-scroll"><table class="cqs-dist-table">'
+            + '<thead><tr><th>Category</th><th class="num">Subcats</th>'
+            + '<th class="num">Tossups / packet</th><th class="num">Bonuses / packet</th>'
+            + '<th class="num">Tossups in set</th></tr></thead><tbody>' + rows
+            + '<tr><td><strong>Total</strong></td><td class="num">' + d.entry_count + '</td>'
+            + '<td class="num"><strong>' + d.total_min_tossups + '</strong></td>'
+            + '<td class="num"><strong>' + d.total_min_bonuses + '</strong></td>'
+            + '<td class="num"><strong>' + (n ? d.total_min_tossups * n : '—') + '</strong></td></tr>'
+            + '</tbody></table></div>');
+    }
+
+    function load() {
+        var id = $select.val();
+        if (!id) { $name.text(''); $meta.text(''); $body.empty(); return; }
+        var mine = ++seq;
+        $meta.text('Loading…');
+        $.getJSON('/distribution_preview/' + id + '/', function (d) {
+            if (mine !== seq) { return; }   // a newer pick superseded this one
+            if (d && d.ok) { render(d); }
+            else { $meta.text('Could not load this distribution.'); $body.empty(); }
+        }).fail(function () {
+            if (mine !== seq) { return; }
+            $meta.text('Could not load this distribution.'); $body.empty();
+        });
+    }
+
+    $select.on('change', load);
+    // The "in set" column depends on the packet count, so redraw when it changes.
+    $('#{{ form.num_packets.id_for_label }}').on('input change', function () {
+        if (current) { render(current); }
+    });
+    load();
+});
+</script>
 
 {% endblock %}

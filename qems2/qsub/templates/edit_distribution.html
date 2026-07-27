@@ -31,8 +31,9 @@
             {{ form.name.errors }}
         {% endif %}
     </div>
-    <table class="table-striped table-hover" id="distribution-table">
+    <table class="table-striped table-hover sticky-head" id="distribution-table">
         <thead>
+        <tr>
         <th>Category</th>
         <th>Subcategory</th>
         <th>Minimum Tossups</th>
@@ -42,6 +43,7 @@
         {% if formset.can_delete %}
             <th>Delete?</th>
         {% endif %}
+        </tr>
         </thead>
         <tbody>
         {% for form in formset %}

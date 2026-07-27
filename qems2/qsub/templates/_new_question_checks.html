@@ -1,0 +1,82 @@
+{% comment %}
+One-time report shown at the top of a question's edit page right after it was
+created (?new=1 from Add a Tossup/Bonus or a one-question Type Questions). It
+runs the same style check as the sidebar panel plus the duplicate-answer scan.
+Context: new_checks = {'style_issues': [...], 'dup_matches': [...]}.
+Reload without ?new=1 and it's gone — the sidebar panel is the ongoing view.
+{% endcomment %}
+{% if new_checks %}
+<div class="nq-checks">
+    <div class="nq-checks-head">
+        <strong><i class="fa fa-circle-check"></i> Question saved.</strong>
+        {% if not new_checks.style_issues and not new_checks.dup_matches %}
+            Nothing flagged by the style or repeat checks.
+        {% else %}
+            Here's what the style and repeat checks found — shown once, on this visit.
+        {% endif %}
+        <a href="#" class="nq-checks-close" title="Hide">&times;</a>
+    </div>
+
+    {% if new_checks.style_issues %}
+    <div class="nq-section">
+        <div class="nq-section-title">Style check &mdash; {{ new_checks.style_issues|length }} suggestion{{ new_checks.style_issues|length|pluralize }}</div>
+        <ul class="nq-list">
+            {% for i in new_checks.style_issues %}
+            <li class="nq-sev-{{ i.severity }}">{% if i.message_html %}{{ i.message_html|safe }}{% else %}{{ i.message }}{% endif %}</li>
+            {% endfor %}
+        </ul>
+        <div class="nq-hint">Fix buttons for these live in the Style Check panel further down the page.</div>
+    </div>
+    {% endif %}
+
+    {% if new_checks.dup_matches %}
+    <div class="nq-section">
+        <div class="nq-section-title">Repeat check &mdash; this answer also appears on {{ new_checks.dup_matches|length }} other question{{ new_checks.dup_matches|length|pluralize }}</div>
+        <ul class="nq-list">
+            {% autoescape off %}
+            {% for m in new_checks.dup_matches %}
+            <li class="nq-sev-warning">
+                {% if m.type == 'tossup' %}
+                    <a href="/edit_tossup/{{ m.id }}/" target="_blank" rel="noopener">Tossup</a>
+                {% else %}
+                    <a href="/edit_bonus/{{ m.id }}/" target="_blank" rel="noopener">Bonus {{ m.part_label }}</a>
+                {% endif %}
+                &mdash; <strong>{{ m.answer_html }}</strong>
+                <small>({{ m.category_str|default:"uncategorized" }}{% if m.packet %}, {{ m.packet }}{% endif %} &mdash; {{ m.author }})</small>
+            </li>
+            {% endfor %}
+            {% endautoescape %}
+        </ul>
+    </div>
+    {% endif %}
+</div>
+
+<style>
+.nq-checks { border: 1px solid #cfe0f5; border-left: 4px solid #008CBA; background: #f5f9ff;
+    border-radius: 6px; padding: 10px 14px; margin-bottom: 1rem; position: relative; }
+.nq-checks-head { margin-bottom: 2px; }
+.nq-checks-head .fa-circle-check { color: #1c7c3e; margin-right: 4px; }
+.nq-checks-close { position: absolute; top: 6px; right: 10px; color: #9aa3ad;
+    font-size: 1.2rem; line-height: 1; text-decoration: none; }
+.nq-checks-close:hover { color: #c0392b; }
+.nq-section { margin-top: 8px; }
+.nq-section-title { font-weight: 600; font-size: 0.85rem; color: #565b66; }
+.nq-list { list-style: none; margin: 4px 0 0; }
+.nq-list li { padding: 2px 0 2px 8px; border-left: 3px solid transparent; font-size: 0.9rem; }
+.nq-list .nq-sev-error { border-left-color: #c0392b; }
+.nq-list .nq-sev-warning { border-left-color: #d4870c; }
+.nq-list .nq-sev-info { border-left-color: #b9c6d4; }
+.nq-hint { color: #8a8f9c; font-size: 0.78rem; margin-top: 3px; }
+html[data-theme="dark"] .nq-checks { background: var(--qx-elevate); border-color: var(--qx-border); }
+</style>
+<script>
+$(function () {
+    $('.nq-checks-close').on('click', function (e) { e.preventDefault(); $('.nq-checks').remove(); });
+    // Drop ?new=1 from the URL so a refresh doesn't re-show this panel.
+    if (window.history && history.replaceState && /[?&]new=1/.test(location.search)) {
+        var clean = location.pathname + location.search.replace(/([?&])new=1&?/, '$1').replace(/[?&]$/, '');
+        history.replaceState(null, '', clean);
+    }
+});
+</script>
+{% endif %}

@@ -246,7 +246,8 @@ class Command(BaseCommand):
     # -- tournament builder ---------------------------------------------------
 
     def _build_tournament(self, name, owner, writers, authors, seed_offset):
-        distribution = Distribution.objects.create(name='{0} Distribution'.format(name))
+        distribution = Distribution.objects.create(
+            name='{0} Distribution'.format(name), created_date=timezone.now())
 
         # One DistributionEntry per (category, subcategory) seen in the content.
         cat_pairs = []

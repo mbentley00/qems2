@@ -56,7 +56,7 @@
                     <td><a href="/edit_tossup/{{ tossup.id }}">{{ tossup.tossup_text|safe|preview|question_html }}</a></td>
                     <td><a href="/edit_tossup/{{ tossup.id }}">{{ tossup|tossup_answer }}</a></td>
                     <td>{{ tossup.category }}</td>
-                    <td>{% if tossup.packet %} {{ tossup.packet }} {% else %} Not in packet {% endif %}</td>
+                    <td>{% if tossup.packet %}<a href="/view_packet/{{ tossup.packet.id }}/" title="Open this packet">{{ tossup.packet }}</a>{% else %}Not in packet{% endif %}</td>
                     <td>{{ tossup.created_date|to_short_datetime }}</td>
                     <td>{{ tossup.last_changed_date|to_short_datetime }}</td>
                     <td>{% if tossup.edited_date %} {{ tossup.edited_date|to_short_datetime }} {% endif %}</td>
@@ -101,7 +101,7 @@
                     <td><a href="/edit_bonus/{{ bonus.id }}/">{{ bonus|bonus_leadin }}</a></td>
                     <td><a href="/edit_bonus/{{ bonus.id }}/">{{ bonus|bonus_answers }}</a></td>
                     <td>{{ bonus.category }}</td>
-                    <td>{% if bonus.packet %} {{ bonus.packet }} {% else %} Not in packet {% endif %}</td>
+                    <td>{% if bonus.packet %}<a href="/view_packet/{{ bonus.packet.id }}/" title="Open this packet">{{ bonus.packet }}</a>{% else %}Not in packet{% endif %}</td>
                     <td>{{ bonus.created_date|to_short_datetime }}</td>
                     <td>{{ bonus.last_changed_date|to_short_datetime }}</td>
                     <td>{% if bonus.edited_date %} {{ bonus.edited_date|to_short_datetime }} {% endif %}</td>

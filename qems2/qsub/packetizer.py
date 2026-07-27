@@ -560,11 +560,15 @@ def auto_packetize(qset, num_packets, tossups_per_packet, bonuses_per_packet,
     tu_left = _deal_questions(tossups, 'tu', targets, tossups_per_packet, quotas, rnd)
     bs_left = _deal_questions(bonuses, 'bs', targets, bonuses_per_packet, quotas, rnd)
 
-    # Second chance for leftovers blocked only by category caps: packets with
-    # free regular slots take them before they become tiebreakers
+    # Second chance for leftovers the budget pass set aside: a packet takes one
+    # only if it can do so LEGALLY — free regular slot and within every category
+    # cap on the question's path. (This pass used to look at the slot count
+    # alone, which is how a 5th Literature tossup landed in a packet capped at
+    # 4.) Anything with no legal home falls through to Extras below.
     still_tu = []
     for question, parts in tu_left:
-        open_targets = [t for t in targets if len(t.tossups) < tossups_per_packet]
+        open_targets = [t for t in targets
+                        if t.can_take(parts, 'tu', tossups_per_packet, quotas)]
         if open_targets:
             open_targets.sort(key=lambda t: (len(t.tossups), t.combined_count(parts[:1]) if parts else 0, rnd.random()))
             open_targets[0].take(question, parts, 'tu')
@@ -572,7 +576,8 @@ def auto_packetize(qset, num_packets, tossups_per_packet, bonuses_per_packet,
             still_tu.append((question, parts))
     still_bs = []
     for question, parts in bs_left:
-        open_targets = [t for t in targets if len(t.bonuses) < bonuses_per_packet]
+        open_targets = [t for t in targets
+                        if t.can_take(parts, 'bs', bonuses_per_packet, quotas)]
         if open_targets:
             open_targets.sort(key=lambda t: (len(t.bonuses), t.combined_count(parts[:1]) if parts else 0, rnd.random()))
             open_targets[0].take(question, parts, 'bs')

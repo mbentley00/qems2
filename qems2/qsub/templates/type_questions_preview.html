@@ -37,13 +37,25 @@
             {% endfor %}
             {% endif %}
 
+            {% if category_errors %}
+            <div class="alert-box alert">
+                <strong>These questions can't be submitted yet — every question needs a
+                category tag from this set's distribution.</strong>
+                <ul style="margin: 0.5rem 0 0 1.2rem;">
+                    {% for err in category_errors %}<li>{{ err }}</li>{% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+
             <h4>Submitted Tossups</h4>
             {% autoescape off %}
                 {% for tossup in tossups %}
                 <p>{{ tossup.tossup_text|safe|question_html }}<br>
-                    {{ tossup.tossup_answer|safe|answer_html }} 
-                    {% if tossup.category != '' %}
+                    {{ tossup.tossup_answer|safe|answer_html }}
+                    {% if tossup.category %}
                         &#123;{{ tossup.category|safe}}&#125;
+                    {% else %}
+                        <span class="label alert">no category</span>
                     {% endif %}<br>
                     Type: {{ tossup.question_type|safe}}
                 </p>
@@ -58,7 +70,8 @@
             {% autoescape off %}
                 {% for bonus in bonuses %}
                 {{ bonus|bonus_html_verbose }}
-                
+                {% if not bonus.category %}<p><span class="label alert">no category</span></p>{% endif %}
+
 
                 <input type="hidden" name="bonus-leadin-{{ forloop.counter0 }}" value="{{ bonus.leadin|force_escape }}">
                 <input type="hidden" name="bonus-category-{{ forloop.counter0 }}" value="{{ bonus.category|force_escape }}">
@@ -79,8 +92,13 @@
             <input type="hidden" name="num-tossups" value="{{ tossups|length }}" />
             <input type="hidden" name="num-bonuses" value="{{ bonuses|length }}" />
             <input type="hidden" name="qset-id" value="{{ qset.id }}" />
+            {# Type Questions requires a category on every question; complete_upload checks it. #}
+            <input type="hidden" name="require-categories" value="1" />
             <ul class="button-group right">
+                {# No Submit while a question is missing its category — the server refuses it anyway. #}
+                {% if not category_errors %}
                 <li><input type="submit" class="button primary" value="Submit" /></li>
+                {% endif %}
                 <li><a href="#" onclick="history.back(); return false;" class="button secondary">Back to Editing</a></li>
             </ul>
         </div>

@@ -31,6 +31,8 @@
     {% endif %}
     {% include "_dup_warning.html" %}
 {% endautoescape %}
+{# One-time style/repeat report when arriving straight from creating the question. #}
+{% include "_new_question_checks.html" %}
 
 <div class="edit-layout">
 <div class="edit-main">

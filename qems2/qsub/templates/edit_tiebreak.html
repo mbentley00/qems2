@@ -22,13 +22,15 @@
 <form action="" method="post">
     {% csrf_token %}
     <label for="id_name">Distribution name:</label> {{ form.name}}
-    <table class="table table-striped" id="dist-table">
+    <table class="table table-striped sticky-head" id="dist-table">
         <thead>
+        <tr>
         <th>Category</th>
         <th>Subcategory</th>
         <th>Tossups</th>
         <th>Bonuses</th>
         <th>Delete?</th>
+        </tr>
         </thead>
         <tbody>
         {% for entry in formset %}

@@ -762,7 +762,9 @@ def import_packets_from_files(uploaded_files, set_name=None, owner=None, existin
     try:
         with transaction.atomic():
             if existing_qset is None:
-                distribution = Distribution.objects.create(name='{0} (imported)'.format(set_name)[:100])
+                distribution = Distribution.objects.create(
+                    name='{0} (imported)'.format(set_name)[:100],
+                    created_by=owner, created_date=timezone.now())
                 qset = QuestionSet.objects.create(
                     name=set_name, date=timezone.now().date(), host='', address='',
                     owner=owner, num_packets=len([p for p in prepared if 'error' not in p]) or 1,

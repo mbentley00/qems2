@@ -63,7 +63,11 @@
                     {{ entry.tu_req }}
                 </td>
                 <td>
-                    {{ entry.tu_in_cat|check_mark_if_100_pct:entry.tu_req }} {{ entry.tu_in_cat|percent:entry.tu_req }}
+                    {% if entry.state == 'flex' %}
+                        <span class="status-optional" title="{{ entry.note }}">&ndash; optional here</span>
+                    {% else %}
+                        {{ entry.tu_in_cat|check_mark_if_100_pct:entry.tu_req }} {{ entry.tu_in_cat|percent:entry.tu_req }}
+                    {% endif %}
                 </td>
             </tr>
             {% endfor %}
@@ -92,7 +96,11 @@
                     {{ entry.bs_req }}
                 </td>
                 <td>
-                    {{ entry.bs_in_cat|check_mark_if_100_pct:entry.bs_req }} {{ entry.bs_in_cat|percent:entry.bs_req }}
+                    {% if entry.state == 'flex' %}
+                        <span class="status-optional" title="{{ entry.note }}">&ndash; optional here</span>
+                    {% else %}
+                        {{ entry.bs_in_cat|check_mark_if_100_pct:entry.bs_req }} {{ entry.bs_in_cat|percent:entry.bs_req }}
+                    {% endif %}
                 </td>
             </tr>
             {% endfor %}
@@ -105,6 +113,9 @@
         #packet-status-tossup-table .status-subcat td:first-child,
         #packet-status-bonus-table .status-subcat td:first-child { padding-left: 1.5rem; color: #555; }
         .status-sub-indent { color: #999; }
+        /* A subcategory this packet doesn't owe anything to — its quota is an
+           average across the set, so it isn't a shortfall. */
+        .status-optional { color: #8a8f9c; font-style: italic; cursor: help; }
         </style>
         <div class="panel header radius text-center"><strong>Packet Comments</strong></div>
         <div class="row">

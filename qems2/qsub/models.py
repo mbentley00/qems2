@@ -452,9 +452,28 @@ class Distribution(models.Model):
     created_by = models.ForeignKey('Writer', null=True, blank=True,
                                    on_delete=models.SET_NULL,
                                    related_name='created_distributions')
+    # Null on distributions that predate this field — shown as unknown rather
+    # than backfilled with a misleading migration timestamp.
+    created_date = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return '{0!s}'.format(self.name)
+
+    def entry_summary(self):
+        """Per-top-level-category totals of the per-packet minimums/maximums,
+        for the distribution preview. Returns rows sorted by category."""
+        totals = {}
+        for e in self.distributionentry_set.all():
+            row = totals.setdefault(e.category or 'Uncategorized',
+                                    {'category': e.category or 'Uncategorized',
+                                     'subcategories': 0, 'min_tossups': 0, 'max_tossups': 0,
+                                     'min_bonuses': 0, 'max_bonuses': 0})
+            row['subcategories'] += 1
+            row['min_tossups'] += e.min_tossups or 0
+            row['max_tossups'] += e.max_tossups or 0
+            row['min_bonuses'] += e.min_bonuses or 0
+            row['max_bonuses'] += e.max_bonuses or 0
+        return sorted(totals.values(), key=lambda r: r['category'].lower())
 
 # This class represents a category (i.e. History - European - British)
 # It contains no distribution or set specific information

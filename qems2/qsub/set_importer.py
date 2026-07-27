@@ -318,7 +318,9 @@ def import_set_from_file(uploaded_file, set_name, owner):
     # fields (set in save_question), so there's nothing to index here.
     try:
         with transaction.atomic():
-            distribution = Distribution.objects.create(name='{0} (imported)'.format(set_name)[:100])
+            distribution = Distribution.objects.create(
+                name='{0} (imported)'.format(set_name)[:100],
+                created_by=owner, created_date=timezone.now())
             qset = QuestionSet.objects.create(
                 name=set_name, date=timezone.now().date(), host='', address='',
                 owner=owner, num_packets=0, distribution=distribution)

@@ -488,24 +488,13 @@ def create_question_set (request):
                 tiebreak_entry.dist_entry = entry
                 tiebreak_entry.save()
 
-            set_distro_formset = create_set_distro_formset(question_set)
-            tiebreak_formset = create_tiebreak_formset(question_set)
-            comment_tab_list = []
-
-            return render(request, 'edit_question_set.html',
-                                      {'message': 'Your question set has been successfully created!',
-                                       'message_class': 'alert-box success',
-                                       'qset': question_set,
-                                       'user': user,
-                                       'form': form,
-                                       'set_distro_formset': set_distro_formset,
-                                       'tiebreak_formset': tiebreak_formset,
-                                       'editors': [ed for ed in question_set.editor.all() if ed != question_set.owner],
-                                       'writers': question_set.writer.all(),
-                                       'tossups': Tossup.objects.filter(question_set=question_set),
-                                       'bonuses': Bonus.objects.filter(question_set=question_set),
-                                       'comment_tab_list': comment_tab_list,
-                                       'packets': sorted_packets(question_set),})
+            # Redirect rather than render: the set page's own URL is what tells
+            # the shell which set is active (rendering here left the sidebar's
+            # active set on whatever you had before), and it stops a refresh
+            # from re-submitting the form.
+            request.session['nav_active_set'] = question_set.id
+            return HttpResponseRedirect(
+                '/edit_question_set/{0}/?created=1'.format(question_set.id))
         else:
             print(form.errors)
             distributions = Distribution.objects.all()
@@ -544,6 +533,7 @@ def _editor_tag_context(qset):
 def edit_question_set(request, qset_id):
     read_only = False
     message = ''
+    message_class = ''
     tossups = []
     bonuses = []
     
@@ -658,11 +648,15 @@ def edit_question_set(request, qset_id):
         visit_summary = _record_visit_and_summarize(user, qset)
 
         tossups, tossup_dict, bonuses, bonus_dict = get_tossup_and_bonuses_in_set(qset, question_limit=30, preview_only=True)
-        
+
+        # create_question_set redirects here after a successful create.
+        if request.GET.get('created'):
+            message = 'Your question set has been successfully created!'
+            message_class = 'alert-box success'
+
         if user not in qset_editors and not qset.is_owner(user):
             form = QuestionSetForm(instance=qset, read_only=True)
             read_only = True
-            message = ''
         else:
             if qset.is_owner(user):
                 read_only = False
@@ -704,7 +698,8 @@ def edit_question_set(request, qset_id):
                                'member_groups': member_groups,
                                'group_granted_ids': group_granted_ids,
                                **_editor_tag_context(qset),
-                               'message': message})
+                               'message': message,
+                               'message_class': message_class})
 
 @login_required
 def categories(request, qset_id, category_id):
@@ -850,6 +845,27 @@ def _dup_fingerprint(qset):
 
 def _dup_render_answer(raw):
     return get_formatted_question_html(get_primary_answer(raw or ''), True, True, False, False).strip()
+
+
+def _new_question_checks(qset, question, qtype):
+    """Style-check and repeat-check results for a question that was just
+    created, for the one-time panel on its edit page. Same rules as the sidebar
+    style panel (honoring the set's disabled rules and dismissals) plus the
+    duplicate-answer scan the add pages used to show."""
+    from . import style_checker
+    disabled = qset.disabled_style_rule_set()
+    found = (style_checker.check_tossup(question, style_checker.DEFAULT_GUIDE, disabled)
+             if qtype == 'tossup'
+             else style_checker.check_bonus(question, style_checker.DEFAULT_GUIDE, disabled))
+    dismissed = set(StyleIssueDismissal.objects.filter(
+        question_type=qtype, question_id=question.id).values_list('code', 'token'))
+    rule_dismissed = set(StyleRuleDismissal.objects.filter(
+        question_set=qset).values_list('code', 'token'))
+    issues = [i for i in found
+              if (i['code'], i.get('token', '')) not in dismissed
+              and (i['code'], i.get('token', '')) not in rule_dismissed]
+    return {'style_issues': issues,
+            'dup_matches': _post_submit_dup_matches(qset, question, qtype)}
 
 
 def _post_submit_dup_matches(qset, question, qtype):
@@ -1550,10 +1566,18 @@ def role_groups(request):
 
 @login_required
 def attach_role_group(request, qset_id):
-    """Attach a role group to a set with a role (owner only); members gain the role."""
+    """Attach a role group to a set with a role (owner only); members gain the
+    role. GET shows a dedicated confirmation page — an inline dropdown on the
+    set page read as though the group it happened to be showing was already
+    attached, so attaching is now a deliberate two-step."""
     user = request.user.writer
     qset = QuestionSet.objects.get(id=qset_id)
-    if request.method == 'POST' and qset.is_owner(user):
+    if not qset.is_owner(user):
+        return render(request, 'failure.html',
+                      {'message': 'Only the set owner can attach role groups.',
+                       'message_class': 'alert-box alert'})
+
+    if request.method == 'POST':
         role = request.POST.get('role', 'writer')
         role = role if role in ('editor', 'writer') else 'writer'
         try:
@@ -1562,9 +1586,23 @@ def attach_role_group(request, qset_id):
                 question_set=qset, role_group=group, defaults={'role': role})
             reconcile_group_roles(qset)
             cache.clear()
+            messages.success(
+                request,
+                '{0} attached as {1}s — its {2} member(s) now have that role on this set.'.format(
+                    group.name, role, group.members.count()),
+                extra_tags='alert-box success')
         except (ValueError, RoleGroup.DoesNotExist):
-            pass
-    return HttpResponseRedirect('/edit_question_set/{0}/#editors'.format(qset_id))
+            messages.error(request, 'Pick a role group to attach.',
+                           extra_tags='alert-box warning')
+            return HttpResponseRedirect('/attach_role_group/{0}/'.format(qset_id))
+        return HttpResponseRedirect('/edit_question_set/{0}/#editors'.format(qset_id))
+
+    attached_ids = set(SetRoleGroupAssignment.objects
+                       .filter(question_set=qset).values_list('role_group_id', flat=True))
+    groups = [{'group': g, 'attached': g.id in attached_ids, 'members': list(g.members.all())}
+              for g in RoleGroup.objects.all().order_by('name')]
+    return render(request, 'attach_role_group.html',
+                  {'qset': qset, 'groups': groups, 'user': user})
 
 
 @login_required
@@ -1638,6 +1676,23 @@ def edit_packet(request, packet_id):
             for swde in entries:
                 by_top.setdefault(swde.dist_entry.category, []).append(swde)
 
+            def _sub_status(in_cat, req, parent_met):
+                """How to mark a subcategory row.
+
+                A per-packet quota below 1 (or one carried by a category whose
+                own total this packet already meets) is an average across the
+                set, not a promise about this packet: with "Other" needing 2
+                and its subcategories needing 0.5/1/0.5, a packet can be
+                complete with no Geography at all. Those rows read as optional
+                here rather than as a 0% failure."""
+                if req <= 0 or in_cat >= req:
+                    return '', ''
+                if parent_met:
+                    return 'flex', 'This packet already meets the category total, so this subcategory is optional here.'
+                if req < 1:
+                    return 'flex', 'Less than one per packet — this subcategory rotates between packets.'
+                return '', ''
+
             tossup_status = []
             bonus_status = []
             for top, swdes in by_top.items():
@@ -1645,24 +1700,34 @@ def edit_packet(request, packet_id):
                 bs_total = sum(s.num_bonuses or 0 for s in swdes)
                 tu_in_top = Tossup.objects.filter(packet=packet, category__category=top).count()
                 bs_in_top = Bonus.objects.filter(packet=packet, category__category=top).count()
+                tu_top_req = _req(top, tu_total, 'min_tossups')
+                bs_top_req = _req(top, bs_total, 'min_bonuses')
+                tu_top_met = tu_in_top >= tu_top_req
+                bs_top_met = bs_in_top >= bs_top_req
                 tossup_status.append({'label': top, 'is_sub': False,
-                                      'tu_req': _req(top, tu_total, 'min_tossups'), 'tu_in_cat': tu_in_top})
+                                      'tu_req': tu_top_req, 'tu_in_cat': tu_in_top})
                 bonus_status.append({'label': top, 'is_sub': False,
-                                     'bs_req': _req(top, bs_total, 'min_bonuses'), 'bs_in_cat': bs_in_top})
+                                     'bs_req': bs_top_req, 'bs_in_cat': bs_in_top})
                 # Subcategory detail rows (only when the category has subcategories).
                 for swde in swdes:
                     de = swde.dist_entry
                     if not de.subcategory:
                         continue
                     path = '{0} - {1}'.format(de.category, de.subcategory)
+                    tu_req = _req(path, swde.num_tossups or 0, 'min_tossups')
+                    tu_in = Tossup.objects.filter(packet=packet, category=de).count()
+                    tu_state, tu_note = _sub_status(tu_in, tu_req, tu_top_met)
                     tossup_status.append({
                         'label': de.subcategory, 'is_sub': True,
-                        'tu_req': _req(path, swde.num_tossups or 0, 'min_tossups'),
-                        'tu_in_cat': Tossup.objects.filter(packet=packet, category=de).count()})
+                        'tu_req': tu_req, 'tu_in_cat': tu_in,
+                        'state': tu_state, 'note': tu_note})
+                    bs_req = _req(path, swde.num_bonuses or 0, 'min_bonuses')
+                    bs_in = Bonus.objects.filter(packet=packet, category=de).count()
+                    bs_state, bs_note = _sub_status(bs_in, bs_req, bs_top_met)
                     bonus_status.append({
                         'label': de.subcategory, 'is_sub': True,
-                        'bs_req': _req(path, swde.num_bonuses or 0, 'min_bonuses'),
-                        'bs_in_cat': Bonus.objects.filter(packet=packet, category=de).count()})
+                        'bs_req': bs_req, 'bs_in_cat': bs_in,
+                        'state': bs_state, 'note': bs_note})
 
 
         else:
@@ -1735,7 +1800,10 @@ def add_tossups(request, qset_id, packet_id=None):
                     tossup.author = user
                 tossup.question_set = qset
                 tossup.tossup_text = strip_markup(tossup.tossup_text)
-                tossup.tossup_answer = strip_markup(tossup.tossup_answer)
+                # A trailing "(note)" after the [...] section is an editorial
+                # aside, not a pronunciation guide — escape it so it renders as
+                # text. New questions only; an edit leaves the answer as typed.
+                tossup.tossup_answer = escape_answer_note_parens(strip_markup(tossup.tossup_answer))
                 tossup.locked = False
 
                 try:
@@ -1754,20 +1822,9 @@ def add_tossups(request, qset_id, packet_id=None):
 
                     tossup.save_question(edit_type=QUESTION_CREATE, changer=user)
                     cache.clear()
-                    message = 'Your tossup has been added to the set.'
-                    message_class = 'alert-box info radius'
-
-                    # In the success case, don't return the whole tossup object so as to clear the fields
-                    return render(request, 'add_tossups.html',
-                             {'form': TossupForm(qset_id=qset.id, packet_id=packet_id, initial={'question_type': question_type_id}, writer=user.user.username),
-                             'message': message,
-                             'message_class': message_class,
-                             'tossup' : None,
-                             'tossup_id': tossup.id,
-                             'dup_matches': _post_submit_dup_matches(qset, tossup, 'tossup'),
-                             'read_only': read_only,
-                             'user': user,
-                             'qset': qset})
+                    # Straight to the new question's edit page, where a one-time
+                    # panel reports its style and repeat checks (?new=1).
+                    return HttpResponseRedirect('/edit_tossup/{0}/?new=1'.format(tossup.id))
 
                 except InvalidTossup as ex:
                     message = str(ex)
@@ -1857,11 +1914,13 @@ def add_bonuses(request, qset_id, bonus_type, packet_id=None):
                 bonus.question_set = qset
                 bonus.leadin = strip_markup(bonus.leadin)
                 bonus.part1_text = strip_markup(bonus.part1_text)
-                bonus.part1_answer = strip_markup(bonus.part1_answer)
                 bonus.part2_text = strip_markup(bonus.part2_text)
-                bonus.part2_answer = strip_markup(bonus.part2_answer)
                 bonus.part3_text = strip_markup(bonus.part3_text)
-                bonus.part3_answer = strip_markup(bonus.part3_answer)
+                # See add_tossups: a trailing "(note)" after the [...] section
+                # is an aside, not a pronunciation guide. New bonuses only.
+                bonus.part1_answer = escape_answer_note_parens(strip_markup(bonus.part1_answer))
+                bonus.part2_answer = escape_answer_note_parens(strip_markup(bonus.part2_answer))
+                bonus.part3_answer = escape_answer_note_parens(strip_markup(bonus.part3_answer))
                 bonus.locked = False
 
                 if packet_id is None or packet_id == '':
@@ -1879,21 +1938,8 @@ def add_bonuses(request, qset_id, bonus_type, packet_id=None):
                     bonus.is_valid()
                     bonus.save_question(edit_type=QUESTION_CREATE, changer=user)
                     cache.clear()
-                    message = 'Your bonus has been added to the set.'
-                    message_class = 'alert-box success'
-
-                    # On success case, don't return the full bonus so that field gets cleared
-                    return render(request, 'add_bonuses.html',
-                             {'form': BonusForm(qset_id=qset.id, packet_id=packet_id, initial={'question_type': question_type_id}, writer=user.user.username, question_type=bonus_type),
-                             'message': message,
-                             'message_class': message_class,
-                             'bonus': None,
-                             'bonus_id': bonus.id,
-                             'dup_matches': _post_submit_dup_matches(qset, bonus, 'bonus'),
-                             'read_only': read_only,
-                             'question_type': bonus_type,
-                             'user': user,
-                             'qset': qset})
+                    # As with tossups: land on the new question with its checks.
+                    return HttpResponseRedirect('/edit_bonus/{0}/?new=1'.format(bonus.id))
 
                 except InvalidBonus as ex:
                     message = str(ex)
@@ -2124,6 +2170,12 @@ def edit_tossup(request, tossup_id):
             message = 'You are not authorized to view or edit this question!'
             message_class = 'alert-box alert'
 
+        # Arrived straight from Add a Tossup / a one-question Type Questions:
+        # report the style and repeat checks once, at the top of the page.
+        new_checks = None
+        if request.GET.get('new') and tossup is not None:
+            new_checks = _new_question_checks(qset, tossup, 'tossup')
+
         if request.GET.get('suggested') is not None and tossup is not None:
             if request.GET.get('suggested') != '0':
                 message = '{0} change(s) saved as suggestions for the author/editors to review.'.format(request.GET.get('suggested'))
@@ -2145,6 +2197,7 @@ def edit_tossup(request, tossup_id):
              'role': role,
              'playtest': _question_buzz_data(tossup, 'tossup'),
              'discord_threads': tossup.discord_threads.order_by('created_date'),
+             'new_checks': new_checks,
              'user': user,
              **_suggestion_render_ctx(user, tossup, 'tossup', qset)})
 
@@ -2294,6 +2347,11 @@ def edit_bonus(request, bonus_id):
             message = 'You are not authorized to view or edit this question!'
             message_class = 'alert-box alert'
 
+        # Arrived straight from Add a Bonus / a one-question Type Questions.
+        new_checks = None
+        if request.GET.get('new') and bonus is not None:
+            new_checks = _new_question_checks(qset, bonus, 'bonus')
+
         if request.GET.get('suggested') is not None and bonus is not None:
             if request.GET.get('suggested') != '0':
                 message = '{0} change(s) saved as suggestions for the author/editors to review.'.format(request.GET.get('suggested'))
@@ -2304,6 +2362,7 @@ def edit_bonus(request, bonus_id):
 
         return render(request, 'edit_bonus.html',
             {'bonus': bonus,
+             'new_checks': new_checks,
              'char_count': char_count,
              'question_type': question_type,
              'form': form,
@@ -3162,6 +3221,42 @@ _ACCOUNT_TOO_NEW_MSG = ('New accounts can\'t create question sets or distributio
                         'until 2 days after sign-up. Please try again later.')
 
 
+@login_required
+def distribution_preview(request, dist_id):
+    """JSON summary of a distribution for the picker on the create-set page:
+    who made it, when, and the per-packet category breakdown. Every
+    distribution is selectable when creating a set (a brand-new writer has no
+    sets yet, so there's nothing to scope the list to), so this is readable for
+    any of them — it exposes no question content."""
+    try:
+        dist = Distribution.objects.get(id=dist_id)
+    except Distribution.DoesNotExist:
+        return HttpResponse(json.dumps({'ok': False, 'error': 'No such distribution'}), status=404)
+
+    creator = ''
+    if dist.created_by is not None and dist.created_by.user is not None:
+        u = dist.created_by.user
+        creator = '{0} {1}'.format(u.first_name, u.last_name).strip() or u.username
+
+    rows = dist.entry_summary()
+    return HttpResponse(json.dumps({
+        'ok': True,
+        'id': dist.id,
+        'name': dist.name,
+        'created_by': creator,
+        'created_date': (timezone.localtime(dist.created_date).strftime('%b %d, %Y')
+                         if dist.created_date else ''),
+        'entry_count': sum(r['subcategories'] for r in rows),
+        'category_count': len(rows),
+        'total_min_tossups': sum(r['min_tossups'] for r in rows),
+        'total_max_tossups': sum(r['max_tossups'] for r in rows),
+        'total_min_bonuses': sum(r['min_bonuses'] for r in rows),
+        'total_max_bonuses': sum(r['max_bonuses'] for r in rows),
+        'in_use_by': QuestionSet.objects.filter(distribution=dist).count(),
+        'categories': rows,
+    }))
+
+
 def _writer_distribution_ids(writer):
     """Distribution ids for the sets a writer belongs to (owner, co-owner,
     editor or writer) — the distributions they're allowed to see and edit."""
@@ -3205,6 +3300,7 @@ def clone_distribution(request, dist_id):
     new_dist = Distribution()
     new_dist.name = source.name + ' (Copy)'
     new_dist.created_by = user
+    new_dist.created_date = timezone.now()
     new_dist.acf_tossup_per_period_count = source.acf_tossup_per_period_count
     new_dist.acf_bonus_per_period_count = source.acf_bonus_per_period_count
     new_dist.vhsl_bonus_per_period_count = source.vhsl_bonus_per_period_count
@@ -3259,6 +3355,7 @@ def edit_distribution(request, dist_id=None):
                     new_dist = Distribution()
                     new_dist.name = dist_form.cleaned_data['name']
                     new_dist.created_by = user
+                    new_dist.created_date = timezone.now()
                     new_dist.save()
 
                     for form in formset:
@@ -3570,11 +3667,26 @@ def type_questions(request, qset_id=None):
                 question_data = request.POST['questions'].splitlines()
                 tossups, bonuses, tossup_errors, bonus_errors = parse_packet_data(question_data, qset)
 
+                # Preview what will actually be saved: complete_upload escapes
+                # a trailing "(note)" on an answer line, so do it here too.
+                for tu in tossups:
+                    tu.tossup_answer = escape_answer_note_parens(tu.tossup_answer)
+                for bs in bonuses:
+                    bs.part1_answer = escape_answer_note_parens(bs.part1_answer)
+                    bs.part2_answer = escape_answer_note_parens(bs.part2_answer)
+                    bs.part3_answer = escape_answer_note_parens(bs.part3_answer)
+
+                # Every question needs a category from this set's distribution.
+                # Uncategorized questions used to sail through and land in the
+                # set with no category, which nothing downstream can count.
+                category_errors = _uncategorized_errors(tossups, bonuses)
+
                 return render(request, 'type_questions_preview.html',
                                          {'tossups': tossups,
                                           'bonuses': bonuses,
                                           'tossup_errors': tossup_errors,
                                           'bonus_errors': bonus_errors,
+                                          'category_errors': category_errors,
                                           'message': 'Please verify that these questions have been correctly parsed. Hitting "Submit" will '\
                                           'commit these questions to the database. If you see any mistakes, hit "Cancel" and correct your mistakes.',
                                           'qset': qset,
@@ -3671,6 +3783,29 @@ def type_questions_edit(request, question_type, question_id):
                                      {'qset': qset,
                                       'user': user})
 
+def _answer_preview(text, limit=60):
+    """Short, markup-free answer for an error message."""
+    plain = strip_markup(text or '').strip()
+    return (plain[:limit] + '…') if len(plain) > limit else (plain or '(no answer)')
+
+
+def _uncategorized_errors(tossups, bonuses):
+    """Messages for parsed questions whose {Category - Subcategory} tag is
+    missing or doesn't match the set's distribution. Empty list = all good."""
+    errors = []
+    for i, tu in enumerate(tossups or [], start=1):
+        if tu.category is None:
+            errors.append('Tossup {0} ("{1}") has no valid category tag. Add a '
+                          '{{Category - Subcategory}} tag from this set\'s distribution '
+                          'to the end of the answer line.'.format(i, _answer_preview(tu.tossup_answer)))
+    for i, bs in enumerate(bonuses or [], start=1):
+        if bs.category is None:
+            errors.append('Bonus {0} ("{1}") has no valid category tag. Add a '
+                          '{{Category - Subcategory}} tag from this set\'s distribution '
+                          'to one of its answer lines.'.format(i, _answer_preview(bs.part1_answer)))
+    return errors
+
+
 @login_required
 def complete_upload(request):
     user = request.user.writer
@@ -3687,6 +3822,32 @@ def complete_upload(request):
         categories = DistributionEntry.objects.filter(distribution=qset.distribution)
         questionTypes = QuestionType.objects.all()
 
+        # Type Questions requires every question to carry a category from this
+        # set's distribution — an uncategorized question counts toward nothing
+        # and is easy to lose track of. Enforced here as well as on the preview
+        # so hiding the button isn't the only thing standing in the way. The
+        # flag comes from the Type Questions preview only: a whole-packet file
+        # upload still goes through (it just flags the untagged questions),
+        # since refusing an entire packet over one tag would be worse.
+        if request.POST.get('require-categories'):
+            valid_categories = {'{0} - {1}'.format(c.category, c.subcategory) for c in categories}
+            missing = []
+            for tu_num in range(num_tossups):
+                if request.POST.get('tossup-category-{0}'.format(tu_num), '') not in valid_categories:
+                    missing.append('Tossup {0} ("{1}")'.format(
+                        tu_num + 1, _answer_preview(request.POST.get('tossup-answer-{0}'.format(tu_num), ''))))
+            for bs_num in range(num_bonuses):
+                if request.POST.get('bonus-category-{0}'.format(bs_num), '') not in valid_categories:
+                    missing.append('Bonus {0} ("{1}")'.format(
+                        bs_num + 1, _answer_preview(request.POST.get('bonus-answer1-{0}'.format(bs_num), ''))))
+            if missing:
+                return render(request, 'failure.html', {
+                    'message': 'Nothing was submitted. These questions have no valid '
+                               '{Category - Subcategory} tag from this set\'s distribution: '
+                               + '; '.join(missing)
+                               + '. Go back, add the tags, and submit again.',
+                    'message_class': 'alert-box alert'})
+
         new_tossups = []
         new_bonuses = []
 
@@ -3698,7 +3859,7 @@ def complete_upload(request):
             tu_type_name = 'tossup-type-{0}'.format(tu_num)
 
             tu_text = strip_markup(request.POST[tu_text_name])
-            tu_ans = strip_markup(request.POST[tu_ans_name])
+            tu_ans = escape_answer_note_parens(strip_markup(request.POST[tu_ans_name]))
             tu_cat = request.POST[tu_cat_name]
             tu_type = request.POST[tu_type_name]
 
@@ -3745,11 +3906,11 @@ def complete_upload(request):
             new_bonus.locked = False
             new_bonus.leadin = strip_markup(request.POST[bs_leadin_name])
             new_bonus.part1_text = strip_markup(request.POST[bs_part1_name])
-            new_bonus.part1_answer = strip_markup(request.POST[bs_ans1_name])
+            new_bonus.part1_answer = escape_answer_note_parens(strip_markup(request.POST[bs_ans1_name]))
             new_bonus.part2_text = strip_markup(request.POST[bs_part2_name])
-            new_bonus.part2_answer = strip_markup(request.POST[bs_ans2_name])
+            new_bonus.part2_answer = escape_answer_note_parens(strip_markup(request.POST[bs_ans2_name]))
             new_bonus.part3_text = strip_markup(request.POST[bs_part3_name])
-            new_bonus.part3_answer = strip_markup(request.POST[bs_ans3_name])
+            new_bonus.part3_answer = escape_answer_note_parens(strip_markup(request.POST[bs_ans3_name]))
             new_bonus.part1_difficulty = request.POST.get('bonus-difficulty1-{0}'.format(bs_num), '')
             new_bonus.part2_difficulty = request.POST.get('bonus-difficulty2-{0}'.format(bs_num), '')
             new_bonus.part3_difficulty = request.POST.get('bonus-difficulty3-{0}'.format(bs_num), '')
@@ -3770,7 +3931,14 @@ def complete_upload(request):
             new_bonuses.append(new_bonus)
 
         cache.clear()
-        messages.success(request, 'Your questions have been uploaded.', extra_tags='alert-box success')        
+        # A single question typed in goes straight to its own edit page with the
+        # one-time style/repeat checks, same as Add a Tossup / Add a Bonus.
+        if len(new_tossups) + len(new_bonuses) == 1:
+            only = (new_tossups or new_bonuses)[0]
+            kind = 'tossup' if new_tossups else 'bonus'
+            return HttpResponseRedirect('/edit_{0}/{1}/?new=1'.format(kind, only.id))
+
+        messages.success(request, 'Your questions have been uploaded.', extra_tags='alert-box success')
         for tossup in new_tossups:
             messages.success(request, u'View your tossup on <a href="/edit_tossup/{0}">{1}.</a>'.format(tossup.id, get_answer_no_formatting(tossup.tossup_answer)), extra_tags='safe alert-box info')
 
@@ -6329,6 +6497,25 @@ def _grid_answer_preview(text, limit=45):
         answer = answer[:limit].rstrip() + '...'
     return answer
 
+def _per_packet_target(qset, qtype):
+    """How many rows a packet should have room for in the grid.
+
+    The distribution's per-packet quota total is the truest statement of how
+    many questions belong in a packet — usually 20, or 21/22/24 when the set
+    carries tiebreakers — so prefer it, ignoring implausible totals (an
+    imported distribution can hold whole-set counts). Otherwise fall back to
+    the set's packetization setting, then to 20."""
+    field = 'min_tossups' if qtype == 'tossup' else 'min_bonuses'
+    total = 0
+    if qset.distribution_id:
+        total = sum(getattr(e, field) or 0
+                    for e in qset.distribution.distributionentry_set.all())
+    if 1 <= total <= 60:
+        return total
+    configured = qset.tossups_per_packet if qtype == 'tossup' else qset.bonuses_per_packet
+    return configured or 20
+
+
 @login_required
 def packet_grid(request, qset_id):
     user = request.user.writer
@@ -6346,7 +6533,12 @@ def packet_grid(request, qset_id):
 
     packet_name_by_id = {p.id: p.packet_name for p in packets}
 
-    def build_rows(question_model, preview_func, edit_url):
+    # How many rows to lay out per packet, even where nothing is assigned yet —
+    # an empty set showed an empty grid with nowhere to drop a question.
+    tu_per_packet = _per_packet_target(qset, 'tossup')
+    bs_per_packet = 0 if qset.tossups_only else _per_packet_target(qset, 'bonus')
+
+    def build_rows(question_model, preview_func, edit_url, target_rows=0):
         qtype = 'tossup' if question_model is Tossup else 'bonus'
         vacancies = {(v.packet_id, v.question_number): v.category
                      for v in PacketSlotVacancy.objects.filter(question_set=qset, question_type=qtype)}
@@ -6379,7 +6571,7 @@ def packet_grid(request, qset_id):
             max_num = max(max_num, number)
             cells_by_packet.setdefault(question.packet_id, {})[number] = cell
         rows = []
-        for number in range(1, max_num + 1):
+        for number in range(1, max(max_num, target_rows) + 1):
             cells = []
             for p in packets:
                 cell = cells_by_packet.get(p.id, {}).get(number)
@@ -6393,12 +6585,14 @@ def packet_grid(request, qset_id):
         return rows, unplaced
 
     tossup_rows, unplaced_tu = build_rows(
-        Tossup, lambda t: _grid_answer_preview(t.tossup_answer), '/edit_tossup/')
+        Tossup, lambda t: _grid_answer_preview(t.tossup_answer), '/edit_tossup/',
+        target_rows=tu_per_packet)
     bonus_rows, unplaced_bs = build_rows(
         Bonus, lambda b: ' / '.join(filter(None, [
             _grid_answer_preview(b.part1_answer, 20),
             _grid_answer_preview(b.part2_answer, 20),
-            _grid_answer_preview(b.part3_answer, 20)])), '/edit_bonus/')
+            _grid_answer_preview(b.part3_answer, 20)])), '/edit_bonus/',
+        target_rows=bs_per_packet)
 
     def build_unpacketized(question_model, preview_func):
         items = []
@@ -6429,8 +6623,10 @@ def packet_grid(request, qset_id):
                               'bonus_rows': bonus_rows,
                               'unplaced_tu': unplaced_tu,
                               'unplaced_bs': unplaced_bs,
-                              'tossups_per_packet': qset.tossups_per_packet,
-                              'bonuses_per_packet': qset.bonuses_per_packet,
+                              # The same numbers the rows were laid out from, so
+                              # the "(TB)" marking matches the grid you see.
+                              'tossups_per_packet': tu_per_packet,
+                              'bonuses_per_packet': bs_per_packet,
                               'unassigned_tu': len(unpacketized_tu),
                               'unassigned_bs': len(unpacketized_bs),
                               'unpacketized_tu': unpacketized_tu,
@@ -6814,6 +7010,10 @@ def view_packet(request, packet_id):
             'max_length': max_length,
             'changed_date': question.last_changed_date,
             'changed_by': changers.get(question.question_history_id, ''),
+            # Short answer line for the swap panel's compact list.
+            'answer_preview': (_grid_answer_preview(question.tossup_answer, 44)
+                               if qtype == 'tossup'
+                               else _grid_answer_preview(question.part1_answer, 44)),
         }
 
     packet_tossups = list(packet.tossup_set.order_by('question_number')

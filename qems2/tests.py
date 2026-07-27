@@ -1030,6 +1030,39 @@ class AutoPacketizeTests(TestCase):
     def _extras_packet(self):
         return Packet.objects.get(question_set=self.qset, packet_name=EXTRAS_PACKET_NAME)
 
+    def test_auto_packetize_never_exceeds_a_category_cap(self):
+        # Literature is capped at 1 tossup per packet but the set has 8 of
+        # them across 4 packets. The overflow must go to Extras, not become a
+        # 2nd Literature tossup in a packet that allows one.
+        for i in range(4):
+            self._add_tossup(self.entries[('History', 'European')], 'HE tu {0}'.format(i))
+            self._add_tossup(self.entries[('Science', 'Biology')], 'SB tu {0}'.format(i))
+        for i in range(8):
+            self._add_tossup(self.entries[('Literature', 'American')], 'LA tu {0}'.format(i))
+
+        PacketizationEntry.objects.create(
+            question_set=self.qset, path='Literature', depth=0,
+            min_tossups=1, max_tossups=1, min_bonuses=0, max_bonuses=0)
+        PacketizationEntry.objects.create(
+            question_set=self.qset, path='History', depth=0,
+            min_tossups=1, max_tossups=1, min_bonuses=0, max_bonuses=0)
+        PacketizationEntry.objects.create(
+            question_set=self.qset, path='Science', depth=0,
+            min_tossups=1, max_tossups=1, min_bonuses=0, max_bonuses=0)
+        quotas = build_quota_dict(self.qset)
+        auto_packetize(self.qset, 4, 6, 6, quotas, created_by=self.writer, seed=7)
+
+        packets = list(Packet.objects.filter(question_set=self.qset)
+                       .exclude(packet_name=EXTRAS_PACKET_NAME))
+        for packet in packets:
+            lit = Tossup.objects.filter(packet=packet, category__category='Literature').count()
+            self.assertLessEqual(lit, 1, 'packet {0} got {1} Literature tossups'.format(
+                packet.packet_name, lit))
+        # The other 4 Literature tossups sit in Extras.
+        extras = self._extras_packet()
+        self.assertEqual(
+            Tossup.objects.filter(packet=extras, category__category='Literature').count(), 4)
+
     def test_auto_packetize_basic_structure(self):
         self._create_questions()
         report, packets = self._packetize()
@@ -2560,7 +2593,7 @@ class AccountAgeAndDistributionPermissionTests(TestCase):
             'distribution': self.my_dist.id, 'num_packets': 2,
             'max_acf_tossup_length': 750, 'max_acf_bonus_length': 400,
         })
-        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.status_code, 302)   # redirects to the new set
         qset = QuestionSet.objects.get(name='Swap Check')
         by_cat = {e.dist_entry.category: e for e in qset.setwidedistributionentry_set.all()}
         self.assertEqual(by_cat['Science'].num_tossups, 4)      # 2 packets x 2 min
@@ -2607,6 +2640,69 @@ class AccountAgeAndDistributionPermissionTests(TestCase):
             ('History', 'American'), ('History', 'World'),
             ('literature', 'European'),      # case-insensitive: sorts under L
             ('Science', 'Biology'), ('Science', 'Physics')])
+
+    def test_create_set_redirects_and_makes_the_new_set_active(self):
+        # Rendering the set page straight from the POST left the shell's active
+        # set on whatever you had before, since the URL was still the create page.
+        self.client.login(username='old_u', password='pw')
+        resp = self.client.post('/create_question_set/', {
+            'name': 'Active Check', 'date': '2026-08-01',
+            'distribution': self.my_dist.id, 'num_packets': 1,
+            'max_acf_tossup_length': 750, 'max_acf_bonus_length': 400,
+        })
+        qset = QuestionSet.objects.get(name='Active Check')
+        self.assertRedirects(resp, '/edit_question_set/{0}/?created=1'.format(qset.id))
+        self.assertEqual(self.client.session.get('nav_active_set'), qset.id)
+        body = self.client.get('/edit_question_set/{0}/?created=1'.format(qset.id)).content.decode()
+        self.assertIn('successfully created', body)
+
+    def test_create_set_page_offers_superpower_and_public(self):
+        self.client.login(username='old_u', password='pw')
+        body = self.client.get('/create_question_set/').content.decode()
+        self.assertIn('enable_superpower', body)
+        self.assertIn('id_public', body)
+
+    def test_create_set_saves_superpower_and_public(self):
+        self.client.login(username='old_u', password='pw')
+        self.client.post('/create_question_set/', {
+            'name': 'Flags Check', 'date': '2026-08-01',
+            'distribution': self.my_dist.id, 'num_packets': 1,
+            'max_acf_tossup_length': 750, 'max_acf_bonus_length': 400,
+            'enable_superpower': 'on', 'public': 'on',
+        })
+        qset = QuestionSet.objects.get(name='Flags Check')
+        self.assertTrue(qset.enable_superpower)
+        self.assertTrue(qset.public)
+
+    def test_distribution_preview_reports_provenance_and_categories(self):
+        DistributionEntry.objects.create(
+            distribution=self.my_dist, category='Science', subcategory='Biology',
+            min_tossups=2, max_tossups=3, min_bonuses=1, max_bonuses=1)
+        DistributionEntry.objects.create(
+            distribution=self.my_dist, category='Science', subcategory='Physics',
+            min_tossups=1, max_tossups=1, min_bonuses=1, max_bonuses=2)
+        self.my_dist.created_by = self.old
+        self.my_dist.created_date = timezone.now()
+        self.my_dist.save()
+
+        self.client.login(username='old_u', password='pw')
+        data = json.loads(self.client.get(
+            '/distribution_preview/{0}/'.format(self.my_dist.id)).content)
+        self.assertTrue(data['ok'])
+        self.assertEqual(data['created_by'], 'old_u')     # no first/last name set
+        self.assertTrue(data['created_date'])
+        self.assertEqual(data['category_count'], 1)       # one top-level category
+        self.assertEqual(data['entry_count'], 2)          # two subcategories
+        self.assertEqual(data['total_min_tossups'], 3)    # 2 + 1 per packet
+        self.assertEqual(data['categories'][0]['max_bonuses'], 3)
+        self.assertEqual(data['in_use_by'], 1)            # self.qset uses it
+
+    def test_clone_stamps_creator_and_date(self):
+        self.client.login(username='old_u', password='pw')
+        self.client.post('/clone_distribution/{0}/'.format(self.my_dist.id))
+        clone = Distribution.objects.get(name='Mine (Copy)')
+        self.assertEqual(clone.created_by, self.old)
+        self.assertIsNotNone(clone.created_date)
 
     def test_clone_copies_every_entry_and_its_numbers(self):
         DistributionEntry.objects.create(
@@ -5192,3 +5288,156 @@ class PacketTiebreakerVisibilityTests(TestCase):
         self._tu('regular2', 2)
         body = self.client.get('/view_packet/{0}/'.format(self.p1.id)).content.decode()
         self.assertNotIn('callout-extras', body)
+
+
+class PostSubmitFlowTests(TestCase):
+    """A newly written question lands on its own edit page with a one-time
+    style/repeat report; Type Questions refuses questions with no category; the
+    packet grid lays out a full packet's worth of rows."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        self.acf_tu = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.acf_bs = QuestionType.objects.get(question_type=ACF_STYLE_BONUS)
+        self.ou = User.objects.create_user('ps_own', password='pw', email='p@test.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='ps dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='History', subcategory='European',
+            min_tossups=2, max_tossups=2, min_bonuses=2, max_bonuses=2)
+        self.qset = QuestionSet.objects.create(
+            name='PS Set', date=timezone.now(), host='', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.owner.question_set_editor.add(self.qset)
+        self.packet = Packet.objects.create(
+            question_set=self.qset, packet_name='Packet 01', created_by=self.owner)
+        self.client.login(username='ps_own', password='pw')
+
+    def _add_tossup(self, answer='_a fresh answer_'):
+        return self.client.post('/add_tossups/{0}/'.format(self.qset.id), {
+            'tossup_text': 'This person did a thing and then did (*) another. '
+                           'For 10 points, name this person.',
+            'tossup_answer': answer, 'category': self.de.id,
+            'question_type': self.acf_tu.id, 'author': self.owner.id,
+            'packet': self.packet.id})
+
+    def test_add_tossup_lands_on_the_new_question(self):
+        resp = self._add_tossup()
+        tu = Tossup.objects.get(question_set=self.qset)
+        self.assertRedirects(resp, '/edit_tossup/{0}/?new=1'.format(tu.id))
+
+    def test_new_question_page_reports_its_checks_once(self):
+        self._add_tossup()
+        tu = Tossup.objects.get(question_set=self.qset)
+        body = self.client.get('/edit_tossup/{0}/?new=1'.format(tu.id)).content.decode()
+        self.assertIn('nq-checks', body)
+        self.assertIn('Question saved', body)
+        # Same page without the flag: no panel (it is a one-time report).
+        plain = self.client.get('/edit_tossup/{0}/'.format(tu.id)).content.decode()
+        self.assertNotIn('nq-checks', plain)
+
+    def test_new_question_panel_shows_a_repeat(self):
+        self._add_tossup(answer='_Napoleon_')
+        self._add_tossup(answer='_Napoleon_')
+        newest = Tossup.objects.filter(question_set=self.qset).order_by('-id').first()
+        body = self.client.get('/edit_tossup/{0}/?new=1'.format(newest.id)).content.decode()
+        self.assertIn('Repeat check', body)
+
+    def test_add_bonus_lands_on_the_new_question(self):
+        resp = self.client.post('/add_bonuses/{0}/{1}/'.format(self.qset.id, ACF_STYLE_BONUS), {
+            'leadin': 'For 10 points each, name these things:',
+            'part1_text': 'This is part one.', 'part1_answer': '_answer one_', 'part1_difficulty': 'e',
+            'part2_text': 'This is part two.', 'part2_answer': '_answer two_', 'part2_difficulty': 'm',
+            'part3_text': 'This is part three.', 'part3_answer': '_answer three_', 'part3_difficulty': 'h',
+            'category': self.de.id, 'question_type': self.acf_bs.id,
+            'author': self.owner.id, 'packet': self.packet.id})
+        bs = Bonus.objects.get(question_set=self.qset)
+        self.assertRedirects(resp, '/edit_bonus/{0}/?new=1'.format(bs.id))
+
+    def _upload(self, count, category='History - European'):
+        data = {'qset-id': self.qset.id, 'num-tossups': count, 'num-bonuses': 0,
+                'require-categories': '1'}
+        for n in range(count):
+            data['tossup-text-{0}'.format(n)] = 'Typed (*) question. For 10 points, name this.'
+            data['tossup-answer-{0}'.format(n)] = '_typed {0}_'.format(n)
+            data['tossup-category-{0}'.format(n)] = category
+            data['tossup-type-{0}'.format(n)] = 'ACF-style tossup'
+        return self.client.post('/complete_upload/', data)
+
+    def test_single_typed_question_lands_on_its_edit_page(self):
+        resp = self._upload(1)
+        tu = Tossup.objects.get(question_set=self.qset)
+        self.assertRedirects(resp, '/edit_tossup/{0}/?new=1'.format(tu.id))
+
+    def test_several_typed_questions_still_go_to_the_set(self):
+        resp = self._upload(2)
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn('/edit_question_set/', resp['Location'])
+
+    def test_typed_question_without_a_category_is_refused(self):
+        resp = self._upload(1, category='')
+        self.assertEqual(Tossup.objects.filter(question_set=self.qset).count(), 0)
+        self.assertIn('Nothing was submitted', resp.content.decode())
+
+    def test_typed_question_with_an_unknown_category_is_refused(self):
+        resp = self._upload(1, category='Nonsense - Nope')
+        self.assertEqual(Tossup.objects.filter(question_set=self.qset).count(), 0)
+        self.assertIn('Nothing was submitted', resp.content.decode())
+
+    def test_type_questions_preview_blocks_submit_without_a_category(self):
+        untagged = ('1. This is a typed tossup about a thing that is (*) notable. '
+                    'For 10 points, name this test.\nANSWER: _the test_\n')
+        body = self.client.post('/type_questions/{0}/'.format(self.qset.id), {
+            'questions': untagged, 'qset_id': self.qset.id}).content.decode()
+        self.assertIn('be submitted yet', body)
+        self.assertNotIn('value="Submit"', body)
+
+    def test_type_questions_preview_allows_a_tagged_question(self):
+        tagged = ('1. This is a typed tossup about a thing that is (*) notable. '
+                  'For 10 points, name this test.\n'
+                  'ANSWER: _the test_ {History - European}\n')
+        body = self.client.post('/type_questions/{0}/'.format(self.qset.id), {
+            'questions': tagged, 'qset_id': self.qset.id}).content.decode()
+        self.assertNotIn('be submitted yet', body)
+        self.assertIn('value="Submit"', body)
+
+    def test_packet_grid_lays_out_a_full_packet_of_rows(self):
+        # The distribution asks for 2 tossups and 2 bonuses per packet, so the
+        # grid offers those rows even though nothing is assigned yet.
+        body = self.client.get('/packet_grid/{0}/'.format(self.qset.id)).content.decode()
+        self.assertEqual(body.count('<td class="num-col">'), 4)   # 2 tossup + 2 bonus rows
+
+    def test_packet_grid_falls_back_to_twenty_rows(self):
+        # An implausible per-packet total (an imported distribution holding
+        # whole-set counts) falls back to the set's configured count.
+        self.de.min_tossups = 500
+        self.de.min_bonuses = 500
+        self.de.save()
+        body = self.client.get('/packet_grid/{0}/'.format(self.qset.id)).content.decode()
+        self.assertEqual(body.count('<td class="num-col">'), 40)  # 20 + 20
+
+    def test_packet_status_marks_covered_subcategories_optional(self):
+        # Two subcategories at 1 tossup each; the packet has 2 questions, both
+        # in the first. The category total is met, so the empty subcategory is
+        # not a shortfall.
+        other = DistributionEntry.objects.create(
+            distribution=self.dist, category='History', subcategory='American',
+            min_tossups=1, max_tossups=1, min_bonuses=0, max_bonuses=0)
+        self.de.min_tossups = 1
+        self.de.save()
+        for entry in (self.de, other):
+            swde, _ = SetWideDistributionEntry.objects.get_or_create(
+                question_set=self.qset, dist_entry=entry,
+                defaults={'num_tossups': 1, 'num_bonuses': 0})
+            swde.num_tossups = 1
+            swde.num_bonuses = 0
+            swde.save()
+        for n in (1, 2):
+            Tossup.objects.create(
+                author=self.owner, question_set=self.qset, packet=self.packet,
+                question_number=n, question_type=self.acf_tu, category=self.de,
+                tossup_text='Stem (*) end.', tossup_answer='_a{0}_'.format(n),
+                created_date=datetime.now(), last_changed_date=datetime.now())
+        body = self.client.get('/edit_packet/{0}/'.format(self.packet.id)).content.decode()
+        self.assertIn('optional here', body)
