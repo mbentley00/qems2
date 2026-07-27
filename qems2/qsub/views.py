@@ -3210,8 +3210,14 @@ def clone_distribution(request, dist_id):
     new_dist.vhsl_bonus_per_period_count = source.vhsl_bonus_per_period_count
     new_dist.save()
 
-    for entry in DistributionEntry.objects.filter(distribution=source):
-        DistributionEntry.objects.create(
+    # Entries have no ordering field — they display in the order they were
+    # created — so copy them alphabetically by category, then subcategory. A
+    # clone of a distribution built up piecemeal then starts out tidy.
+    source_entries = sorted(
+        DistributionEntry.objects.filter(distribution=source),
+        key=lambda e: ((e.category or '').lower(), (e.subcategory or '').lower()))
+    DistributionEntry.objects.bulk_create([
+        DistributionEntry(
             distribution=new_dist,
             category=entry.category,
             subcategory=entry.subcategory,
@@ -3220,6 +3226,7 @@ def clone_distribution(request, dist_id):
             max_tossups=entry.max_tossups,
             max_bonuses=entry.max_bonuses,
         )
+        for entry in source_entries])
 
     return HttpResponseRedirect('/edit_distribution/' + str(new_dist.id) + '/')
 
@@ -3344,7 +3351,9 @@ def edit_distribution(request, dist_id=None):
                                             new_set_wide_entry.num_bonuses = qset.num_packets * entry.min_bonuses
                                             new_set_wide_entry.save()
 
-                        entries = dist.distributionentry_set.all()
+                        # By creation order — the only order these have. Clones
+                        # are written alphabetically, so they list that way.
+                        entries = dist.distributionentry_set.order_by('id')
                         initial_data = []
                         for entry in entries:
                             initial_data.append({'entry_id': entry.id,
@@ -3370,7 +3379,7 @@ def edit_distribution(request, dist_id=None):
         else:
             if dist_id is not None:
                 dist = Distribution.objects.get(id=dist_id)
-                entries = dist.distributionentry_set.all()
+                entries = dist.distributionentry_set.order_by('id')
                 initial_data = []
                 for entry in entries:
                     initial_data.append({'entry_id': entry.id,

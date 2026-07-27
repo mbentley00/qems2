@@ -2586,6 +2586,40 @@ class AccountAgeAndDistributionPermissionTests(TestCase):
         resp = self.client.get('/edit_distribution/{0}/'.format(self.my_dist.id))
         self.assertNotContains(resp, 'only view or edit distributions for your own sets')
 
+    def test_clone_sorts_entries_alphabetically(self):
+        # Added in a jumbled order; the clone should come out sorted by
+        # category then subcategory (entries have no ordering field, so the
+        # order they're created in IS the order they list in).
+        for cat, sub in [('Science', 'Physics'), ('literature', 'European'),
+                         ('History', 'World'), ('Science', 'Biology'),
+                         ('History', 'American')]:
+            DistributionEntry.objects.create(
+                distribution=self.my_dist, category=cat, subcategory=sub,
+                min_tossups=1, max_tossups=1, min_bonuses=1, max_bonuses=1)
+        self.client.login(username='old_u', password='pw')
+        resp = self.client.post('/clone_distribution/{0}/'.format(self.my_dist.id))
+        self.assertEqual(resp.status_code, 302)
+
+        clone = Distribution.objects.get(name='Mine (Copy)')
+        pairs = [(e.category, e.subcategory)
+                 for e in clone.distributionentry_set.order_by('id')]
+        self.assertEqual(pairs, [
+            ('History', 'American'), ('History', 'World'),
+            ('literature', 'European'),      # case-insensitive: sorts under L
+            ('Science', 'Biology'), ('Science', 'Physics')])
+
+    def test_clone_copies_every_entry_and_its_numbers(self):
+        DistributionEntry.objects.create(
+            distribution=self.my_dist, category='Science', subcategory='Physics',
+            min_tossups=2, max_tossups=4, min_bonuses=1, max_bonuses=3)
+        self.client.login(username='old_u', password='pw')
+        self.client.post('/clone_distribution/{0}/'.format(self.my_dist.id))
+        clone = Distribution.objects.get(name='Mine (Copy)')
+        entry = clone.distributionentry_set.get()
+        self.assertEqual(
+            (entry.min_tossups, entry.max_tossups, entry.min_bonuses, entry.max_bonuses),
+            (2, 4, 1, 3))
+
 
 class PublicSetAndJoinRequestTests(TestCase):
     """Public sets are listed for non-members, who can request to join (email)."""
