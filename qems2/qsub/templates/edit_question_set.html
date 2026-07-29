@@ -162,6 +162,10 @@
         .editor-tag-add select, .editor-tag-add input { display: inline-block; width: auto; height: auto;
             margin: 0 4px 0 0; padding: 2px 4px; font-size: 0.8em; }
         .editor-tag-add .editor-tag-free-input { max-width: 110px; }
+        /* Join link (Writers and Editors tab, owners only) */
+        .join-link-row { display: flex; gap: 6px; align-items: center; max-width: 620px; }
+        .join-link-row input { margin: 0; font-family: monospace; font-size: 0.85em; background: #f7f8fa; }
+        .join-link-off { color: #b45309; font-size: 0.85em; margin: 6px 0 0; }
         </style>
         <script>
         $(function () {
@@ -176,6 +180,26 @@
                         + 'them back). Continue?')) {
                         e.preventDefault();
                     }
+                }
+            });
+        });
+
+        // Copy the join link. Falls back to select-and-execCommand where the
+        // async clipboard API isn't available (it needs a secure context).
+        $(function () {
+            $(document).on('click', '#copy-join-link', function (e) {
+                e.preventDefault();
+                var $btn = $(this), input = document.getElementById('join-link-url');
+                if (!input) { return; }
+                function done() { $btn.text('Copied!'); setTimeout(function () { $btn.text('Copy'); }, 1500); }
+                input.select();
+                input.setSelectionRange(0, input.value.length);
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(input.value).then(done, function () {
+                        if (document.execCommand('copy')) { done(); }
+                    });
+                } else if (document.execCommand('copy')) {
+                    done();
                 }
             });
         });
@@ -340,6 +364,115 @@
                     <i class="fa fa-plus-circle"></i> Attach a role group&hellip;</a>
                 {% else %}
                 <p style="color:#888;">No role groups exist yet. <a href="/role_groups/">Create one</a>.</p>
+                {% endif %}
+            </div>
+        {% endif %}
+
+        {% if is_set_owner %}
+            {% if pending_join_requests %}
+            <div class="panel radius" style="background:#fff8e1; border:1px solid #f0d99b;">
+                <h5 style="margin-top:0;">Pending access requests ({{ pending_join_requests|length }})</h5>
+                <table class="table-striped" style="margin:0;">
+                    <tbody>
+                    {% for r in pending_join_requests %}
+                        <tr>
+                            <td>
+                                {{ r.requester.user.first_name }} {{ r.requester.user.last_name }}
+                                <span style="color:#888;">"{{ r.requester.user.username }}"</span>
+                                {% if r.requester.user.email %}<span style="color:#aaa;">&middot; {{ r.requester.user.email }}</span>{% endif %}
+                                {% if r.via_link %}<small style="color:#888;">(via join link)</small>{% endif %}
+                                {% if r.message %}<br><small style="color:#555;">&ldquo;{{ r.message }}&rdquo;</small>{% endif %}
+                            </td>
+                            <td style="text-align:right; white-space:nowrap;">
+                                <form method="post" action="/set_join_request/{{ qset.id }}/" style="display:inline;">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="action" value="approve">
+                                    <input type="hidden" name="writer_id" value="{{ r.requester.id }}">
+                                    <button type="submit" name="role" value="writer" class="button tiny success" style="margin:0;">Approve as writer</button>
+                                    <button type="submit" name="role" value="editor" class="button tiny secondary" style="margin:0;">as editor</button>
+                                </form>
+                                <form method="post" action="/set_join_request/{{ qset.id }}/" style="display:inline;">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="action" value="decline">
+                                    <input type="hidden" name="writer_id" value="{{ r.requester.id }}">
+                                    <button type="submit" class="button tiny alert" style="margin:0;">Decline</button>
+                                </form>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+
+            <div class="panel radius">
+                <h5 style="margin-top:0;">Join link</h5>
+                <p style="color:#555; margin-bottom:6px;">Share this link with people who should be on the set.
+                Anyone logged in who opens it can <em>request</em> access &mdash; the link never grants a role on
+                its own, so every request still waits for your approval here.</p>
+
+                {% if join_link %}
+                <div class="join-link-row">
+                    <input type="text" id="join-link-url" readonly
+                           value="{{ request.scheme }}://{{ request.get_host }}/join/{{ join_link.token }}/">
+                    <a href="#" class="button tiny primary" id="copy-join-link" style="margin:0;">Copy</a>
+                </div>
+                {% if not join_link.active %}
+                <p class="join-link-off"><i class="fa fa-ban"></i> This link is currently disabled &mdash; opening it does nothing.</p>
+                {% endif %}
+
+                <form method="post" action="/set_join_link/{{ qset.id }}/" class="form-inline" style="margin-top:8px;">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="set_role">
+                    <label style="display:inline-block; margin-right:6px;">Suggested role on approval
+                        <select name="default_role" style="display:inline-block; width:auto; margin:0 4px;">
+                            <option value="writer" {% if join_link.default_role == "writer" %}selected{% endif %}>Writer</option>
+                            <option value="editor" {% if join_link.default_role == "editor" %}selected{% endif %}>Editor</option>
+                        </select>
+                    </label>
+                    <button type="submit" class="button tiny secondary" style="margin:0;">Save</button>
+                </form>
+
+                <div style="margin-top:8px;">
+                    {% if join_link.active %}
+                    <form method="post" action="/set_join_link/{{ qset.id }}/" style="display:inline;">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="disable">
+                        <button type="submit" class="button tiny secondary" style="margin:0;">Disable link</button>
+                    </form>
+                    {% else %}
+                    <form method="post" action="/set_join_link/{{ qset.id }}/" style="display:inline;">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="enable">
+                        <button type="submit" class="button tiny primary" style="margin:0;">Enable link</button>
+                    </form>
+                    {% endif %}
+                    <form method="post" action="/set_join_link/{{ qset.id }}/" style="display:inline;"
+                          onsubmit="return confirm('Generate a new link? The current link will stop working for anyone who has it.');">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="regenerate">
+                        <button type="submit" class="button tiny secondary" style="margin:0;">Generate new link</button>
+                    </form>
+                    <form method="post" action="/set_join_link/{{ qset.id }}/" style="display:inline;"
+                          onsubmit="return confirm('Delete this join link? Anyone holding it loses the ability to request access.');">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="delete">
+                        <button type="submit" class="button tiny alert" style="margin:0;">Delete link</button>
+                    </form>
+                </div>
+                {% else %}
+                <form method="post" action="/set_join_link/{{ qset.id }}/" class="form-inline">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="create">
+                    <label style="display:inline-block; margin-right:6px;">Suggested role on approval
+                        <select name="default_role" style="display:inline-block; width:auto; margin:0 4px;">
+                            <option value="writer">Writer</option>
+                            <option value="editor">Editor</option>
+                        </select>
+                    </label>
+                    <button type="submit" class="button tiny primary" style="margin:0;">
+                        <i class="fa fa-link"></i> Create a join link</button>
+                </form>
                 {% endif %}
             </div>
         {% endif %}

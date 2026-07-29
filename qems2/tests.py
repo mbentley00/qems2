@@ -3933,6 +3933,159 @@ class RoleGroupJoinAndNotifyTests(TestCase):
         self.assertTrue(RoleGroup.objects.filter(name='Aged Group').exists())
 
 
+@override_settings(EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend',
+                   BASE_URL='https://test.example')
+class SetJoinLinkTests(TestCase):
+    """Owner-created join links: who can make one, what following it does (only
+    ever creates a pending request), and that approval stays with the owner."""
+
+    def setUp(self):
+        self.ou = User.objects.create_user('jl_owner', password='pw', email='owner@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.eu = User.objects.create_user('jl_editor', password='pw', email='ed@t.com')
+        self.editor = Writer.objects.get(user=self.eu)
+        self.ru = User.objects.create_user('jl_req', password='pw', email='req@t.com')
+        self.req = Writer.objects.get(user=self.ru)
+        self.dist = Distribution.objects.create(name='jl dist')
+        self.qset = QuestionSet.objects.create(
+            name='JL Set', date=timezone.now(), host='', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.qset.editor.add(self.editor)
+
+    def _make_link(self):
+        self.client.login(username='jl_owner', password='pw')
+        self.client.post('/set_join_link/%d/' % self.qset.id,
+                         {'action': 'create', 'default_role': 'writer'})
+        self.client.logout()
+        return SetJoinLink.objects.get(question_set=self.qset)
+
+    def test_owner_creates_link(self):
+        link = self._make_link()
+        self.assertTrue(link.active)
+        self.assertTrue(len(link.token) >= 8)
+
+    def test_editor_cannot_create_link(self):
+        self.client.login(username='jl_editor', password='pw')
+        self.client.post('/set_join_link/%d/' % self.qset.id, {'action': 'create'})
+        self.assertFalse(SetJoinLink.objects.filter(question_set=self.qset).exists())
+
+    def test_following_link_grants_nothing(self):
+        link = self._make_link()
+        self.client.login(username='jl_req', password='pw')
+        resp = self.client.get('/join/%s/' % link.token)
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('JL Set', resp.content.decode())
+        # A GET is not a request, and neither ever grants a role.
+        self.assertFalse(SetJoinRequest.objects.filter(question_set=self.qset).exists())
+        self.assertNotIn(self.req, self.qset.writer.all())
+        self.assertNotIn(self.req, self.qset.editor.all())
+
+    def test_request_creates_pending_and_emails_owner(self):
+        link = self._make_link()
+        self.client.login(username='jl_req', password='pw')
+        mail.outbox = []
+        self.client.post('/join/%s/' % link.token, {'message': 'let me in'})
+        r = SetJoinRequest.objects.get(question_set=self.qset, requester=self.req)
+        self.assertEqual(r.message, 'let me in')
+        self.assertTrue(r.via_link)
+        # Still no access until an owner approves.
+        self.assertNotIn(self.req, self.qset.writer.all())
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn('owner@t.com', mail.outbox[0].to)
+
+    def test_repeat_request_is_not_duplicated(self):
+        link = self._make_link()
+        self.client.login(username='jl_req', password='pw')
+        self.client.post('/join/%s/' % link.token, {'message': 'first'})
+        self.client.post('/join/%s/' % link.token, {'message': 'second'})
+        reqs = SetJoinRequest.objects.filter(question_set=self.qset, requester=self.req)
+        self.assertEqual(reqs.count(), 1)
+        self.assertEqual(reqs.first().message, 'second')
+
+    def test_disabled_and_regenerated_links_stop_working(self):
+        link = self._make_link()
+        self.client.login(username='jl_owner', password='pw')
+        self.client.post('/set_join_link/%d/' % self.qset.id, {'action': 'disable'})
+        self.client.logout()
+        self.client.login(username='jl_req', password='pw')
+        self.client.post('/join/%s/' % link.token, {'message': 'hi'})
+        self.assertFalse(SetJoinRequest.objects.filter(question_set=self.qset).exists())
+        self.client.logout()
+
+        self.client.login(username='jl_owner', password='pw')
+        self.client.post('/set_join_link/%d/' % self.qset.id, {'action': 'regenerate'})
+        new_token = SetJoinLink.objects.get(question_set=self.qset).token
+        self.assertNotEqual(new_token, link.token)
+        self.client.logout()
+        self.client.login(username='jl_req', password='pw')
+        self.client.post('/join/%s/' % link.token, {'message': 'hi'})
+        self.assertFalse(SetJoinRequest.objects.filter(question_set=self.qset).exists())
+        self.client.post('/join/%s/' % new_token, {'message': 'hi'})
+        self.assertTrue(SetJoinRequest.objects.filter(question_set=self.qset).exists())
+
+    def test_editor_cannot_approve_request(self):
+        link = self._make_link()
+        self.client.login(username='jl_req', password='pw')
+        self.client.post('/join/%s/' % link.token, {'message': 'hi'})
+        self.client.logout()
+        self.client.login(username='jl_editor', password='pw')
+        self.client.post('/set_join_request/%d/' % self.qset.id,
+                         {'action': 'approve', 'writer_id': self.req.id, 'role': 'writer'})
+        self.assertNotIn(self.req, self.qset.writer.all())
+        self.assertTrue(SetJoinRequest.objects.filter(question_set=self.qset).exists())
+
+    def test_owner_approves_request(self):
+        link = self._make_link()
+        self.client.login(username='jl_req', password='pw')
+        self.client.post('/join/%s/' % link.token, {'message': 'hi'})
+        self.client.logout()
+        self.client.login(username='jl_owner', password='pw')
+        self.client.post('/set_join_request/%d/' % self.qset.id,
+                         {'action': 'approve', 'writer_id': self.req.id, 'role': 'writer'})
+        self.assertIn(self.req, self.qset.writer.all())
+        self.assertFalse(SetJoinRequest.objects.filter(question_set=self.qset).exists())
+
+    def test_owner_declines_request(self):
+        link = self._make_link()
+        self.client.login(username='jl_req', password='pw')
+        self.client.post('/join/%s/' % link.token, {'message': 'hi'})
+        self.client.logout()
+        self.client.login(username='jl_owner', password='pw')
+        self.client.post('/set_join_request/%d/' % self.qset.id,
+                         {'action': 'decline', 'writer_id': self.req.id})
+        self.assertFalse(SetJoinRequest.objects.filter(question_set=self.qset).exists())
+        self.assertNotIn(self.req, self.qset.writer.all())
+        self.assertNotIn(self.req, self.qset.editor.all())
+
+    def test_anonymous_visitor_is_sent_to_login(self):
+        link = self._make_link()
+        resp = self.client.get('/join/%s/' % link.token)
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn('login', resp['Location'])
+
+    def test_existing_member_sees_no_request_form(self):
+        link = self._make_link()
+        self.client.login(username='jl_editor', password='pw')
+        body = self.client.get('/join/%s/' % link.token).content.decode()
+        self.assertIn('already have access', body)
+
+    def test_owner_sees_pending_request_on_set_page(self):
+        link = self._make_link()
+        self.client.login(username='jl_req', password='pw')
+        self.client.post('/join/%s/' % link.token, {'message': 'pick me'})
+        self.client.logout()
+        self.client.login(username='jl_owner', password='pw')
+        body = self.client.get('/edit_question_set/%d/' % self.qset.id).content.decode()
+        self.assertIn('Pending access requests', body)
+        self.assertIn('pick me', body)
+        # Editors don't get the link controls or the approval queue.
+        self.client.logout()
+        self.client.login(username='jl_editor', password='pw')
+        ed_body = self.client.get('/edit_question_set/%d/' % self.qset.id).content.decode()
+        self.assertNotIn('Pending access requests', ed_body)
+        self.assertNotIn(link.token, ed_body)
+
+
 class AIGrammarCheckTests(TestCase):
     """AI grammar check runs over the whole set (batched), persists findings so
     they survive a reload, and lets a finding be dismissed or replaced on rerun."""

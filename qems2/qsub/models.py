@@ -370,6 +370,59 @@ class GroupRoleGrant(models.Model):
             self.role, self.writer_id, self.question_set_id)
 
 
+class SetJoinLink(models.Model):
+    """A shareable invite link for a question set. Anyone logged in who opens it
+    can *request* access; the link never grants a role by itself — an owner still
+    has to approve every request. One link per set; regenerating replaces the
+    token so the old URL stops working."""
+    ROLE_CHOICES = (('writer', 'Writer'), ('editor', 'Editor'))
+    question_set = models.OneToOneField(QuestionSet, on_delete=models.CASCADE,
+                                        related_name='join_link')
+    token = models.CharField(max_length=64, unique=True, db_index=True)
+    # The role pre-selected on the approval screen. A suggestion only — the
+    # approving owner picks the actual role.
+    default_role = models.CharField(max_length=10, default='writer', choices=ROLE_CHOICES)
+    active = models.BooleanField(default=True)
+    created_by = models.ForeignKey('Writer', on_delete=models.SET_NULL, null=True,
+                                   related_name='created_join_links')
+    created_date = models.DateTimeField(auto_now_add=True)
+
+    @staticmethod
+    def new_token():
+        import secrets
+        return secrets.token_urlsafe(18)
+
+    def url(self):
+        from django.conf import settings
+        return '{0}/join/{1}/'.format(settings.BASE_URL.rstrip('/'), self.token)
+
+    def __str__(self):
+        return 'join link for set {0}'.format(self.question_set_id)
+
+
+class SetJoinRequest(models.Model):
+    """A pending request from a writer for access to a question set. Recorded so
+    an owner can approve or decline it on the set's page (email is a convenience,
+    not the system of record). Deleted once resolved."""
+    question_set = models.ForeignKey(QuestionSet, on_delete=models.CASCADE,
+                                     related_name='join_requests')
+    requester = models.ForeignKey('Writer', on_delete=models.CASCADE,
+                                  related_name='set_join_requests')
+    message = models.TextField(blank=True, default='')
+    # True when the request came in through a join link rather than the public
+    # set list, so the owner can see how the person found the set.
+    via_link = models.BooleanField(default=False)
+    created_date = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('question_set', 'requester')
+        ordering = ['created_date']
+
+    def __str__(self):
+        return 'join request: writer {0} -> set {1}'.format(
+            self.requester_id, self.question_set_id)
+
+
 class SuggestedEdit(models.Model):
     """A proposed change to one field of a question (track-changes style). Any
     set member can suggest, even on questions they didn't write; the question's

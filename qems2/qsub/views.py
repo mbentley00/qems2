@@ -160,38 +160,200 @@ def request_to_join(request):
         return HttpResponse(json.dumps({'success': False, 'message': 'Set not found.'}))
     if not qset.public:
         return HttpResponse(json.dumps({'success': False, 'message': 'This set is not public.'}))
-    if qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all():
+    if _is_set_member(user, qset):
         return HttpResponse(json.dumps({'success': False, 'message': 'You are already part of this set.'}))
 
     note = (request.POST.get('message') or '').strip()[:1000]
-    requester_name = user.get_real_name().strip() or user.user.username
-    requester_email = user.user.email
+    _record_join_request(qset, user, note, via_link=False)
+    sent = _notify_set_join_request(qset, user, note, via_link=False)
+    return HttpResponse(json.dumps({'success': True,
+        'message': ('Your request has been emailed to the set owner.' if sent else
+                    'Your request is pending. (The owner has no email on file, but they '
+                    'will see it on the set page.)')}))
+
+
+def _record_join_request(qset, requester, note, via_link):
+    """Persist a pending access request so an owner can act on it from the set
+    page. Re-requesting refreshes the note rather than creating a duplicate."""
+    req, created = SetJoinRequest.objects.get_or_create(
+        question_set=qset, requester=requester,
+        defaults={'message': note, 'via_link': via_link})
+    if not created and note and req.message != note:
+        req.message = note
+        req.save(update_fields=['message'])
+    return req
+
+
+def _notify_set_join_request(qset, requester, note, via_link):
+    """Email the set's owners that someone wants access, with a direct approve
+    link. Returns False if no owner has an email on file (the request is still
+    recorded and visible on the set page)."""
+    from django.core.mail import EmailMessage
+    from django.conf import settings as dj_settings
+    requester_name = _actor_name(requester)
+    requester_email = requester.user.email or ''
     recipients = [o.user.email for o in qset.all_owners() if o.user and o.user.email]
     if not recipients:
-        return HttpResponse(json.dumps({'success': False,
-            'message': 'The set owner has no email on file, so the request could not be sent.'}))
+        return False
 
-    from django.core.mail import EmailMessage
-    from django.conf import settings
     approve_url = '{0}/approve_join/{1}/{2}/'.format(
-        settings.BASE_URL.rstrip('/'), qset.id, user.id)
+        dj_settings.BASE_URL.rstrip('/'), qset.id, requester.id)
     subject = 'QEMS3: {0} requests to join "{1}"'.format(requester_name, qset.name)
-    body = ('{0} (@{1}{2}) has requested to join your question set "{3}" on QEMS3.\n\n'
-            '{4}\n\n'
-            'Approve this request (add them as a writer or editor):\n{5}\n\n'
-            'You can also open the set on QEMS3 and use "Add Writer" or "Add Editor".').format(
-        requester_name, user.user.username,
+    body = ('{0} (@{1}{2}) has requested to join your question set "{3}" on QEMS3{4}.\n\n'
+            '{5}\n\n'
+            'Approve this request (add them as a writer or editor):\n{6}\n\n'
+            'You can also open the set on QEMS3 and review pending requests on the '
+            '"Writers and Editors" tab:\n{7}/edit_question_set/{8}/').format(
+        requester_name, requester.user.username,
         ', ' + requester_email if requester_email else '', qset.name,
+        ' using your join link' if via_link else '',
         ('Their message: ' + note) if note else '(No message included.)',
-        approve_url)
+        approve_url, dj_settings.BASE_URL.rstrip('/'), qset.id)
     try:
-        EmailMessage(subject, body, settings.DEFAULT_FROM_EMAIL, recipients,
+        EmailMessage(subject, body, dj_settings.DEFAULT_FROM_EMAIL, recipients,
                      reply_to=[requester_email] if requester_email else None).send(fail_silently=False)
     except Exception as ex:
-        return HttpResponse(json.dumps({'success': False,
-            'message': 'Could not send the request email ({0}).'.format(ex)}))
-    return HttpResponse(json.dumps({'success': True,
-        'message': 'Your request has been emailed to the set owner.'}))
+        print('Could not send join-request mail:', ex)
+        return False
+    return True
+
+
+@login_required
+def manage_join_link(request, qset_id):
+    """Owner-only: create, regenerate, disable, re-enable, or delete the set's
+    shareable join link. Always a POST that redirects back to the set page."""
+    user = request.user.writer
+    try:
+        qset = QuestionSet.objects.get(id=int(qset_id))
+    except (ValueError, QuestionSet.DoesNotExist):
+        return render(request, 'failure.html',
+                      {'message': 'That set no longer exists.',
+                       'message_class': 'alert-box alert'})
+    if not qset.is_owner(user):
+        return render(request, 'failure.html',
+                      {'message': 'Only an owner of this set can manage its join link.',
+                       'message_class': 'alert-box alert'})
+
+    back = '/edit_question_set/{0}/#editors'.format(qset.id)
+    if request.method != 'POST':
+        return HttpResponseRedirect(back)
+
+    action = request.POST.get('action', '')
+    link = SetJoinLink.objects.filter(question_set=qset).first()
+    role = 'editor' if request.POST.get('default_role') == 'editor' else 'writer'
+
+    if action == 'create':
+        if link is None:
+            SetJoinLink.objects.create(question_set=qset, token=SetJoinLink.new_token(),
+                                       default_role=role, created_by=user)
+            messages.success(request, 'Join link created. Anyone with the link can request '
+                                      'access, which you still have to approve.')
+        else:
+            link.active = True
+            link.default_role = role
+            link.save()
+            messages.success(request, 'Join link is active.')
+    elif link is None:
+        messages.error(request, 'This set has no join link yet.')
+    elif action == 'regenerate':
+        link.token = SetJoinLink.new_token()
+        link.active = True
+        link.save()
+        messages.success(request, 'A new join link was generated. The old link no longer works.')
+    elif action == 'disable':
+        link.active = False
+        link.save()
+        messages.success(request, 'Join link disabled. It can be turned back on at any time.')
+    elif action == 'enable':
+        link.active = True
+        link.save()
+        messages.success(request, 'Join link enabled.')
+    elif action == 'delete':
+        link.delete()
+        messages.success(request, 'Join link deleted.')
+    elif action == 'set_role':
+        link.default_role = role
+        link.save()
+        messages.success(request, 'Join link updated.')
+
+    cache.clear()
+    return HttpResponseRedirect(back)
+
+
+@login_required
+def join_set(request, token):
+    """The page a join link opens. Shows the set and lets a logged-in user ask
+    for access; the request always waits on an owner's approval — following the
+    link never grants a role."""
+    user = request.user.writer
+    link = SetJoinLink.objects.filter(token=token).select_related('question_set').first()
+    if link is None or not link.active:
+        return render(request, 'join_set.html', {'user': user, 'invalid': True})
+
+    qset = link.question_set
+    ctx = {'user': user, 'qset': qset, 'link': link,
+           'already': _is_set_member(user, qset)}
+
+    if ctx['already']:
+        SetJoinRequest.objects.filter(question_set=qset, requester=user).delete()
+        return render(request, 'join_set.html', ctx)
+
+    existing = SetJoinRequest.objects.filter(question_set=qset, requester=user).first()
+
+    if request.method == 'POST':
+        note = (request.POST.get('message') or '').strip()[:1000]
+        _record_join_request(qset, user, note, via_link=True)
+        sent = _notify_set_join_request(qset, user, note, via_link=True)
+        ctx.update({'requested': True, 'emailed': sent})
+        return render(request, 'join_set.html', ctx)
+
+    ctx['pending'] = existing is not None
+    return render(request, 'join_set.html', ctx)
+
+
+@login_required
+def resolve_join_request(request, qset_id):
+    """Owner-only approve/decline of a pending access request, from the set's
+    "Writers and Editors" tab."""
+    user = request.user.writer
+    try:
+        qset = QuestionSet.objects.get(id=int(qset_id))
+    except (ValueError, QuestionSet.DoesNotExist):
+        return render(request, 'failure.html',
+                      {'message': 'That set no longer exists.',
+                       'message_class': 'alert-box alert'})
+    if not qset.is_owner(user):
+        return render(request, 'failure.html',
+                      {'message': 'Only an owner of this set can approve join requests.',
+                       'message_class': 'alert-box alert'})
+
+    back = '/edit_question_set/{0}/#editors'.format(qset.id)
+    if request.method != 'POST':
+        return HttpResponseRedirect(back)
+
+    try:
+        requester = Writer.objects.get(id=int(request.POST.get('writer_id', '')))
+    except (ValueError, Writer.DoesNotExist):
+        messages.error(request, 'That user no longer exists.')
+        return HttpResponseRedirect(back)
+
+    # The set page renders messages with autoescape off, so escape the name here.
+    from django.utils.html import escape
+    name = escape(_actor_name(requester))
+    action = request.POST.get('action', '')
+    if action == 'decline':
+        SetJoinRequest.objects.filter(question_set=qset, requester=requester).delete()
+        messages.success(request, 'Request from {0} declined.'.format(name))
+    elif action == 'approve':
+        if _is_set_member(requester, qset):
+            SetJoinRequest.objects.filter(question_set=qset, requester=requester).delete()
+            messages.error(request, '{0} is already part of this set.'.format(name))
+        else:
+            role = 'editor' if request.POST.get('role') == 'editor' else 'writer'
+            _grant_set_role(qset, requester, role, user)
+            messages.success(request, '{0} was added as {1} {2}.'.format(
+                name, 'an' if role == 'editor' else 'a', role))
+    return HttpResponseRedirect(back)
 
 
 @login_required
@@ -213,29 +375,40 @@ def approve_join(request, qset_id, writer_id):
                       {'message': 'Only an owner of this set can approve join requests.',
                        'message_class': 'alert-box alert'})
 
-    already = (qset.is_owner(requester) or requester in qset.editor.all()
-               or requester in qset.writer.all())
+    already = _is_set_member(requester, qset)
 
     if request.method == 'POST' and not already:
         role = 'editor' if request.POST.get('role') == 'editor' else 'writer'
-        if role == 'editor':
-            qset.editor.add(requester)
-            GroupRoleGrant.objects.filter(
-                question_set=qset, writer=requester, role='editor').delete()
-            if qset.writer.filter(id=requester.id).exists():
-                qset.writer.remove(requester)
-        else:
-            qset.writer.add(requester)
-            GroupRoleGrant.objects.filter(
-                question_set=qset, writer=requester, role='writer').delete()
-        qset.save()
-        _notify_added_to_set(requester, qset, role, user)
-        cache.clear()
+        _grant_set_role(qset, requester, role, user)
         return render(request, 'approve_join.html',
                       {'qset': qset, 'requester': requester, 'added_role': role, 'user': user})
 
+    if already:
+        SetJoinRequest.objects.filter(question_set=qset, requester=requester).delete()
+
+    link = SetJoinLink.objects.filter(question_set=qset).first()
     return render(request, 'approve_join.html',
-                  {'qset': qset, 'requester': requester, 'already': already, 'user': user})
+                  {'qset': qset, 'requester': requester, 'already': already, 'user': user,
+                   'default_role': link.default_role if link else 'writer'})
+
+
+def _grant_set_role(qset, requester, role, by_writer):
+    """Add a writer to a set as editor or writer, clear any pending join request,
+    and email them. Shared by every approval path."""
+    if role == 'editor':
+        qset.editor.add(requester)
+        GroupRoleGrant.objects.filter(
+            question_set=qset, writer=requester, role='editor').delete()
+        if qset.writer.filter(id=requester.id).exists():
+            qset.writer.remove(requester)
+    else:
+        qset.writer.add(requester)
+        GroupRoleGrant.objects.filter(
+            question_set=qset, writer=requester, role='writer').delete()
+    qset.save()
+    SetJoinRequest.objects.filter(question_set=qset, requester=requester).delete()
+    _notify_added_to_set(requester, qset, role, by_writer)
+    cache.clear()
 
 
 @login_required
@@ -529,6 +702,19 @@ def _editor_tag_context(qset):
     return {'editor_tags': tags_by_editor, 'category_options': sorted(cats)}
 
 
+def _join_link_context(qset, user):
+    """Join-link controls and pending access requests for the Writers & Editors
+    tab. Both are owner-only: editors can add members directly but don't hand out
+    links or approve requests."""
+    is_set_owner = qset.is_owner(user)
+    if not is_set_owner:
+        return {'is_set_owner': False, 'join_link': None, 'pending_join_requests': []}
+    return {'is_set_owner': True,
+            'join_link': SetJoinLink.objects.filter(question_set=qset).first(),
+            'pending_join_requests': list(
+                qset.join_requests.select_related('requester__user'))}
+
+
 @login_required
 def edit_question_set(request, qset_id):
     read_only = False
@@ -626,6 +812,7 @@ def edit_question_set(request, qset_id):
                                            'member_groups': member_groups,
                                            'group_granted_ids': group_granted_ids,
                                            **_editor_tag_context(qset),
+                                           **_join_link_context(qset, user),
                                            'message': 'Your changes have been successfully saved.',
                                            'message_class': 'alert-success'})
             else:
@@ -698,6 +885,7 @@ def edit_question_set(request, qset_id):
                                'member_groups': member_groups,
                                'group_granted_ids': group_granted_ids,
                                **_editor_tag_context(qset),
+                               **_join_link_context(qset, user),
                                'message': message,
                                'message_class': message_class})
 

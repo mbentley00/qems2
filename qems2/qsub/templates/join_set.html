@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% block title %}{% if qset %}Join {{ qset.name }}{% else %}Join Link{% endif %} - QEMS3{% endblock %}
+
+{% block content %}
+{% load filters %}
+
+{% if invalid %}
+    <h3 class="page-header">This join link isn't valid</h3>
+    <div class="alert-box alert">
+        This link is no longer active. It may have been regenerated or turned off by the
+        set's owner &mdash; ask them for a current link.
+    </div>
+    <p><a href="/question_sets/" class="button small secondary">Your question sets</a></p>
+{% else %}
+    <h3 class="page-header">Join {{ qset.name }}</h3>
+
+    <div class="panel radius">
+        <p style="margin-bottom:4px;"><strong>{{ qset.name }}</strong></p>
+        <p style="color:#555; margin-bottom:0;">
+            {{ qset.date }}{% if qset.host %} &middot; hosted by {{ qset.host }}{% endif %}<br>
+            Owner: {{ qset.owner|verbose_username }}
+        </p>
+    </div>
+
+    {% if already %}
+        <div class="alert-box info">
+            You already have access to <strong>{{ qset.name }}</strong>.
+        </div>
+        <p><a href="/edit_question_set/{{ qset.id }}/" class="button small primary">Go to set</a></p>
+    {% elif requested %}
+        <div class="alert-box success">
+            Your request has been sent. An owner of <strong>{{ qset.name }}</strong> has to
+            approve it before you get access{% if not emailed %} &mdash; they have no email
+            address on file, but your request is waiting for them on the set's page{% endif %}.
+            You'll be emailed once you're added.
+        </div>
+        <p><a href="/question_sets/" class="button small secondary">Your question sets</a></p>
+    {% elif pending %}
+        <div class="alert-box info">
+            You've already requested access to <strong>{{ qset.name }}</strong>. It's waiting
+            on an owner's approval.
+        </div>
+        <p><a href="/question_sets/" class="button small secondary">Your question sets</a></p>
+    {% else %}
+        <div class="panel">
+            <p>Following this link doesn't add you to the set &mdash; it lets you ask for access.
+            An owner has to approve your request before you can see or write questions.</p>
+            <form action="" method="post">
+                {% csrf_token %}
+                <label>Message for the owner <span style="color:#888;">(optional)</span>
+                    <textarea name="message" rows="3" maxlength="1000"
+                              placeholder="e.g. who you are, what you'd like to write"></textarea>
+                </label>
+                <button type="submit" class="button primary">Request access</button>
+            </form>
+        </div>
+    {% endif %}
+{% endif %}
+
+{% endblock %}
