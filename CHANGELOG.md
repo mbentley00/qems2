@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-07-29 — Set join links, YAPP2 packet format
+
+- **Join links for question sets** (migration 0037). A set owner can create a
+  shareable link on the **Writers and Editors** tab; anyone logged in who opens
+  it can *request* access. The link never grants a role on its own — every
+  request still waits for an owner's approval, now shown as a pending-requests
+  queue on the same tab (previously a join request existed only as an email, so
+  it was lost if the owner had no address on file). Owners can regenerate the
+  link (killing the old URL), disable, or delete it. Link management and
+  approval are owner-only; editors can still add members directly.
+- **YAPP2 export** — a backward-compatible superset of YAPP JSON that carries
+  pronunciation-guide *anchoring*: which words each guide covers. QEMS tracks
+  this with `\P` markers, and a plain-YAPP export had to discard it. YAPP2 keeps
+  the canonical YAPP fields byte-identical (so existing readers are unaffected)
+  and puts `<pg>`-tagged copies in a parallel `anchored` object. Available as
+  "Export Packetized YAPP2 JSON"; the importer reads it back, so a
+  QEMS → YAPP2 → QEMS round trip is lossless. Spec in `YAPP2_FORMAT.md`;
+  reader support added to the MODAQ fork.
+
 ## 2026-07-23 — Editor tags, role-group UX, comment/mention polish
 
 - **Editor category & freeform tags** (migration 0034). Tag an editor with the

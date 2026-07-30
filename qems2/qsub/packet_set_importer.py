@@ -71,9 +71,13 @@ def _strip_num_prefix(s):
 def _has_num_prefix(s):
     return bool(_NUM_PREFIX_RE.match(_strip_markup(s)))
 
-# HTML tag -> formatting flag it sets while in scope.
+# HTML tag -> formatting flag it sets while in scope. "pg" is YAPP2's
+# pronunciation-guide anchor (see YAPP2_FORMAT.md); plain YAPP never emits it.
 _TAG_FLAGS = {'b': 'bold', 'strong': 'bold', 'u': 'ul', 'em': 'ital',
-              'i': 'ital', 'sup': 'sup', 'sub': 'sub'}
+              'i': 'ital', 'sup': 'sup', 'sub': 'sub', 'pg': 'pgt'}
+
+_EMPTY_FMT = {'bold': False, 'ul': False, 'ital': False, 'sup': False,
+              'sub': False, 'pgt': False}
 
 
 class PacketImportError(Exception):
@@ -112,8 +116,11 @@ def _wrap(text, fmt, is_answer):
     i_o = i_c = '~' if fmt['ital'] else ''
     sup_o = sup_c = '\\S' if fmt['sup'] else ''
     sub_o = sub_c = '\\s' if fmt['sub'] else ''
+    # YAPP2 anchor: outermost, since \P brackets whole words.
+    pg_o = pg_c = '\\P' if fmt.get('pgt') else ''
 
-    return lead + u_o + i_o + sup_o + sub_o + core + sub_c + sup_c + i_c + u_c + trail
+    return (lead + pg_o + u_o + i_o + sup_o + sub_o + core
+            + sub_c + sup_c + i_c + u_c + pg_c + trail)
 
 
 def _walk(node, fmt, out, is_answer):
@@ -130,6 +137,49 @@ def _walk(node, fmt, out, is_answer):
         _walk(child, child_fmt, out, is_answer)
 
 
+def _resolve_yapp2_anchors(payload):
+    """Fold a YAPP2 packet's ``anchored`` fields over the canonical ones.
+
+    A YAPP2 file (top-level ``version`` starting "yapp2/") keeps its
+    ``question``/``answer``/``leadin``/``parts``/``answers`` byte-identical to
+    plain YAPP and puts the ``<pg>``-tagged variants in a per-question
+    ``anchored`` object, so plain-YAPP readers are unaffected. We understand the
+    tag, so prefer the anchored text and let the rest of the importer run
+    unchanged. Non-YAPP2 payloads are returned untouched.
+
+    Only same-shaped values are taken: an ``anchored`` array whose length
+    doesn't match the canonical one is ignored rather than trusted, since parts
+    and answers are matched up by index."""
+    if not isinstance(payload, dict):
+        return payload
+    version = payload.get('version')
+    if not (isinstance(version, str) and version.lower().startswith('yapp2/')):
+        return payload
+
+    def merge(question):
+        anchored = question.get('anchored')
+        if not isinstance(anchored, dict):
+            return question
+        merged = dict(question)
+        for key, value in anchored.items():
+            current = question.get(key)
+            if isinstance(value, str) and isinstance(current, str):
+                merged[key] = value
+            elif (isinstance(value, list) and isinstance(current, list)
+                    and len(value) == len(current)
+                    and all(isinstance(v, str) for v in value)):
+                merged[key] = value
+        merged.pop('anchored', None)
+        return merged
+
+    out = dict(payload)
+    for key in ('tossups', 'bonuses'):
+        items = payload.get(key)
+        if isinstance(items, list):
+            out[key] = [merge(q) if isinstance(q, dict) else q for q in items]
+    return out
+
+
 def _html_to_qems(html, is_answer):
     """Convert YAPP's sanitized HTML to QEMS markup.
 
@@ -143,8 +193,7 @@ def _html_to_qems(html, is_answer):
         return ''
     soup = BeautifulSoup(html, 'html.parser')
     out = []
-    _walk(soup, {'bold': False, 'ul': False, 'ital': False, 'sup': False, 'sub': False},
-          out, is_answer)
+    _walk(soup, dict(_EMPTY_FMT), out, is_answer)
     text = re.sub(r'\s+', ' ', ''.join(out)).strip()
     return text.replace('<', '&lt;').replace('>', '&gt;')
 
@@ -696,6 +745,7 @@ def _prepare_files(uploaded_files):
             except Exception as ex:
                 prepared.append({'name': name, 'ext': ext, 'error': 'invalid JSON ({0})'.format(ex)})
                 continue
+            payload = _resolve_yapp2_anchors(payload)
             json_payloads.append(payload)
             prepared.append({'name': name, 'ext': ext, 'payload': payload})
         else:

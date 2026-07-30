@@ -263,7 +263,7 @@
         {% endif %}
         {% if role == "editor" %}
             <div class="panel header radius text-center">
-                <strong><a href="/export_question_set/{{ qset.id }}/csv/">Export Question Set to CSV</a></strong> | <strong><a href="/export_question_set/{{ qset.id }}/tsv/">Export to TSV</a></strong> | <strong><a href="/export_question_set/{{ qset.id }}/docx/">Export to Word</a></strong> | <strong><a href="/export_question_set/{{ qset.id }}/docx-by-category/">Export to Word by Category</a></strong> | <strong><a href="/export_question_set/{{ qset.id }}/yapp-json/">Export Packetized YAPP JSON</a></strong>
+                <strong><a href="/export_question_set/{{ qset.id }}/csv/">Export Question Set to CSV</a></strong> | <strong><a href="/export_question_set/{{ qset.id }}/tsv/">Export to TSV</a></strong> | <strong><a href="/export_question_set/{{ qset.id }}/docx/">Export to Word</a></strong> | <strong><a href="/export_question_set/{{ qset.id }}/docx-by-category/">Export to Word by Category</a></strong> | <strong><a href="/export_question_set/{{ qset.id }}/yapp-json/">Export Packetized YAPP JSON</a></strong> | <strong><a href="/export_question_set/{{ qset.id }}/yapp2-json/" title="YAPP JSON plus pronunciation-guide anchoring; plain YAPP readers see the same questions.">Export Packetized YAPP2 JSON</a></strong>
             </div>
             <form method="get" action="/export_question_set/{{ qset.id }}/docx-packetized/" class="panel radius" style="text-align:center;">
                 <input type="hidden" name="opts" value="1">

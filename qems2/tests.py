@@ -4388,6 +4388,205 @@ class YappJsonExportTests(TestCase):
         self.assertEqual(data['tossups'][0]['answer'], '<b><u>Loose</u></b>')
 
 
+class Yapp2AnchorTests(TestCase):
+    """YAPP2: pronunciation-guide anchoring (\\P -> <pg>) survives export, the
+    canonical YAPP fields stay tag-free so plain-YAPP readers are unaffected, and
+    the whole thing round-trips back through the importer. See YAPP2_FORMAT.md."""
+
+    ANCHORED = 'Denis \\PDiderot\\P ("DID-er-OW") edited this work.'
+    PLAIN = 'Denis Diderot ("DID-er-OW") edited this work.'
+    TAGGED = 'Denis <pg>Diderot</pg> ("DID-er-OW") edited this work.'
+
+    def _c(self, text, anchors=False):
+        from qems2.qsub.yapp_export import qems_to_yapp_html
+        return qems_to_yapp_html(text, anchors=anchors)
+
+    # --- conversion ------------------------------------------------------
+    def test_plain_yapp_drops_the_anchor(self):
+        self.assertEqual(self._c(self.ANCHORED), self.PLAIN)
+
+    def test_yapp2_keeps_the_anchor_as_pg(self):
+        self.assertEqual(self._c(self.ANCHORED, anchors=True), self.TAGGED)
+
+    def test_anchor_combines_with_other_markup(self):
+        self.assertEqual(self._c('a \\P~Faust~\\P b', anchors=True), 'a <pg><em>Faust</em></pg> b')
+
+    def test_unclosed_anchor_is_closed(self):
+        self.assertEqual(self._c('a \\PDiderot', anchors=True), 'a <pg>Diderot</pg>')
+
+    def test_text_without_anchors_is_identical_either_way(self):
+        for text in ('plain', '_France_', 'a (*) b', '~Hamlet~', 'a (guide) b'):
+            self.assertEqual(self._c(text), self._c(text, anchors=True))
+
+    # --- packet payload --------------------------------------------------
+    def _packet(self, version):
+        from qems2.qsub import yapp_export
+
+        class Cat:
+            category, subcategory = 'Literature', 'European'
+
+        class Author:
+            def get_real_name(self):
+                return 'Pat Writer'
+
+        class TU:
+            question_number = 1
+            tossup_text = Yapp2AnchorTests.ANCHORED
+            tossup_answer = '_Diderot_'
+            category, author = Cat(), Author()
+
+        class PlainTU(TU):
+            question_number = 2
+            tossup_text = 'No anchor here.'
+
+        class BN:
+            question_number = 1
+            leadin = 'Answer these.'
+            part1_text = 'A \\Ppart\\P ("PART") here.'
+            part1_answer = '_Alpha_'
+            part1_difficulty = 'e'
+            part2_text = 'No anchor.'
+            part2_answer = '_Beta_'
+            part2_difficulty = 'm'
+            part3_text = ''
+            part3_answer = ''
+            part3_difficulty = ''
+            category, author = Cat(), Author()
+
+        return yapp_export.packet_to_yapp([TU(), PlainTU()], [BN()], version=version)
+
+    def test_version_marker_only_on_yapp2(self):
+        self.assertNotIn('version', self._packet(1))
+        self.assertEqual(self._packet(2)['version'], 'yapp2/1.0')
+
+    def test_canonical_fields_are_identical_between_versions(self):
+        v1, v2 = self._packet(1), self._packet(2)
+        for key in ('tossups', 'bonuses'):
+            for a, b in zip(v1[key], v2[key]):
+                stripped = {k: v for k, v in b.items() if k != 'anchored'}
+                self.assertEqual(a, stripped)
+
+    def test_anchored_only_present_where_there_is_an_anchor(self):
+        tossups = self._packet(2)['tossups']
+        self.assertEqual(tossups[0]['anchored'], {'question': self.TAGGED})
+        # The answer has no anchor, so it isn't duplicated...
+        self.assertNotIn('answer', tossups[0]['anchored'])
+        # ...and a question with no anchor at all carries no object.
+        self.assertNotIn('anchored', tossups[1])
+
+    def test_bonus_anchored_arrays_are_full_length(self):
+        bonus = self._packet(2)['bonuses'][0]
+        self.assertEqual(len(bonus['anchored']['parts']), len(bonus['parts']))
+        self.assertEqual(bonus['anchored']['parts'],
+                         ['A <pg>part</pg> ("PART") here.', 'No anchor.'])
+        # Leadin and answers have no anchors.
+        self.assertNotIn('leadin', bonus['anchored'])
+        self.assertNotIn('answers', bonus['anchored'])
+
+    # --- import / round trip --------------------------------------------
+    def test_pg_converts_back_to_qems_markers(self):
+        from qems2.qsub.packet_set_importer import _html_to_qems
+        self.assertEqual(_html_to_qems(self.TAGGED, is_answer=False), self.ANCHORED)
+
+    def test_round_trip_is_lossless(self):
+        from qems2.qsub.packet_set_importer import _html_to_qems
+        for src in (self.ANCHORED,
+                    'The \\PMahabharata\\P ("m") names \\PArjuna\\P ("a").',
+                    'A \\Pterm\\P with (*) power and _an answer_.',
+                    'No anchors, just (a guide) and ~italics~.'):
+            self.assertEqual(_html_to_qems(self._c(src, anchors=True), is_answer=False), src)
+
+    def test_importer_prefers_anchored_fields(self):
+        from qems2.qsub.packet_set_importer import _resolve_yapp2_anchors
+        out = _resolve_yapp2_anchors({
+            'version': 'yapp2/1.0',
+            'tossups': [{'question': self.PLAIN, 'answer': 'a',
+                         'anchored': {'question': self.TAGGED}}]})
+        self.assertEqual(out['tossups'][0]['question'], self.TAGGED)
+        self.assertEqual(out['tossups'][0]['answer'], 'a')
+        self.assertNotIn('anchored', out['tossups'][0])
+
+    def test_importer_ignores_anchored_without_the_version_marker(self):
+        from qems2.qsub.packet_set_importer import _resolve_yapp2_anchors
+        payload = {'tossups': [{'question': self.PLAIN,
+                                'anchored': {'question': self.TAGGED}}]}
+        self.assertEqual(_resolve_yapp2_anchors(payload)['tossups'][0]['question'], self.PLAIN)
+
+    def test_importer_ignores_mismatched_anchored_arrays(self):
+        from qems2.qsub.packet_set_importer import _resolve_yapp2_anchors
+        out = _resolve_yapp2_anchors({
+            'version': 'yapp2/1.0',
+            'bonuses': [{'parts': ['p1', 'p2'], 'answers': ['a1', 'a2'],
+                         'anchored': {'parts': ['<pg>p1</pg>'],
+                                      'answers': ['<pg>a1</pg>', 'a2']}}]})
+        bonus = out['bonuses'][0]
+        self.assertEqual(bonus['parts'], ['p1', 'p2'])              # wrong length, ignored
+        self.assertEqual(bonus['answers'], ['<pg>a1</pg>', 'a2'])   # right length, used
+
+
+class Yapp2ExportViewTests(TestCase):
+    """The /yapp2-json/ export route: same packets as /yapp-json/, plus anchors."""
+
+    def setUp(self):
+        import io as _io, zipfile as _zip, json as _json
+        self._io, self._zip, self._json = _io, _zip, _json
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf_tu = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('y2_owner', password='pw', email='y2@test.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='y2 dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='Literature', subcategory='European')
+        self.qset = QuestionSet.objects.create(
+            name='Y2 Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.owner.question_set_editor.add(self.qset)
+        self.packet = Packet.objects.create(
+            question_set=self.qset, packet_name='Packet 1', created_by=self.owner)
+        Tossup.objects.create(
+            author=self.owner, question_set=self.qset, packet=self.packet,
+            question_type=self.acf_tu, category=self.de,
+            tossup_text='Denis \\PDiderot\\P ("DID-er-OW") edited this.',
+            tossup_answer='_Encyclopedie_',
+            created_date=datetime.now(), last_changed_date=datetime.now(), question_number=1)
+        self.client.login(username='y2_owner', password='pw')
+
+    def _payload(self, fmt):
+        resp = self.client.get('/export_question_set/{0}/{1}/'.format(self.qset.id, fmt))
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp['Content-Type'], 'application/zip')
+        zf = self._zip.ZipFile(self._io.BytesIO(resp.content))
+        self.assertIn('Packet 1.json', zf.namelist())
+        return self._json.loads(zf.read('Packet 1.json').decode('utf-8'))
+
+    def test_yapp2_route_marks_version_and_anchors(self):
+        data = self._payload('yapp2-json')
+        self.assertEqual(data['version'], 'yapp2/1.0')
+        self.assertEqual(data['name'], 'Packet 1')
+        t = data['tossups'][0]
+        self.assertNotIn('<pg>', t['question'])
+        self.assertIn('<pg>Diderot</pg>', t['anchored']['question'])
+
+    def test_yapp1_route_is_unchanged(self):
+        data = self._payload('yapp-json')
+        self.assertNotIn('version', data)
+        self.assertNotIn('name', data)
+        t = data['tossups'][0]
+        self.assertNotIn('anchored', t)
+        self.assertNotIn('<pg>', t['question'])
+
+    def test_both_routes_agree_on_the_questions(self):
+        v1, v2 = self._payload('yapp-json'), self._payload('yapp2-json')
+        self.assertEqual(v1['tossups'][0]['question'], v2['tossups'][0]['question'])
+        self.assertEqual(v1['tossups'][0]['answer'], v2['tossups'][0]['answer'])
+
+    def test_filename_distinguishes_the_formats(self):
+        r1 = self.client.get('/export_question_set/{0}/yapp-json/'.format(self.qset.id))
+        r2 = self.client.get('/export_question_set/{0}/yapp2-json/'.format(self.qset.id))
+        self.assertIn('YAPP JSON.zip', r1['Content-Disposition'])
+        self.assertIn('YAPP2 JSON.zip', r2['Content-Disposition'])
+
+
 class RoleGroupPendingRequestTests(TestCase):
     """Requesting to join a role group creates a pending request the manager can
     approve/decline, with a direct-approve link in the notification email."""

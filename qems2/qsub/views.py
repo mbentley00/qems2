@@ -5513,10 +5513,14 @@ def export_question_set(request, qset_id, output_format):
                     filename = f"{qset.name} - Packets.zip" if qset.name else "packets.zip"
                     response['Content-Disposition'] = f'attachment; filename="{filename}"'
                     return response
-            elif output_format == "yapp-json":
+            elif output_format in ("yapp-json", "yapp2-json"):
                 # Export each packet as a YAPP (YetAnotherPacketParser) JSON file,
                 # readable by MODAQ. One .json per packet, zipped for the set.
+                # "yapp2-json" additionally carries pronunciation-guide anchoring
+                # (see yapp_export and YAPP2_FORMAT.md); the questions themselves
+                # are identical, so a plain-YAPP reader is unaffected.
                 from . import yapp_export
+                yapp_version = 2 if output_format == "yapp2-json" else 1
 
                 def _packet_sort_key(pk):
                     nums = re.findall(r'\d+', pk.packet_name or '')
@@ -5550,7 +5554,9 @@ def export_question_set(request, qset_id, output_format):
                 with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
                     used_names = set()
                     for name, tus, bos in groups:
-                        payload = yapp_export.packet_to_yapp(tus, bos)
+                        payload = yapp_export.packet_to_yapp(
+                            tus, bos, version=yapp_version,
+                            name=name if yapp_version >= 2 else None)
                         base = _safe_filename(name)
                         fname = base
                         n = 2
@@ -5562,7 +5568,9 @@ def export_question_set(request, qset_id, output_format):
                                     json.dumps(payload, ensure_ascii=False, indent=2))
 
                 response = HttpResponse(zip_buf.getvalue(), content_type='application/zip')
-                filename = f"{qset.name} - YAPP JSON.zip" if qset.name else "packets-yapp-json.zip"
+                label = 'YAPP2 JSON' if yapp_version >= 2 else 'YAPP JSON'
+                filename = (f"{qset.name} - {label}.zip" if qset.name
+                            else f"packets-{output_format}.zip")
                 response['Content-Disposition'] = f'attachment; filename="{filename}"'
                 return response
             elif output_format == "pdf":
