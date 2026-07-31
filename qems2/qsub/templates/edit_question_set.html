@@ -12,9 +12,9 @@
 {% load filters %}
 {% load comments %}
 
-{# First load of the day: what everyone else did while you were away. The link
+{% comment %} First load of the day: what everyone else did while you were away. The link
    goes to Recent Changes windowed to the same moment, so the page lists exactly
-   the questions, edits and comments this banner is counting. #}
+   the questions, edits and comments this banner is counting. {% endcomment %}
 {% if visit_summary %}
 <a class="visit-summary" href="/recap/{{ qset.id }}/?since={{ visit_summary.since_ts }}"
    title="See what changed since your last visit">
@@ -359,8 +359,8 @@
                 {% else %}
                 <p style="color:#888;">No role groups attached.</p>
                 {% endif %}
-                {# Attaching happens on its own page: an inline dropdown here read as
-                   though the group it happened to be showing was already attached. #}
+                {% comment %} Attaching happens on its own page: an inline dropdown here read as
+                   though the group it happened to be showing was already attached. {% endcomment %}
                 {% if all_role_groups %}
                 <a href="/attach_role_group/{{ qset.id }}/" class="button tiny primary" style="margin:0;">
                     <i class="fa fa-plus-circle"></i> Attach a role group&hellip;</a>

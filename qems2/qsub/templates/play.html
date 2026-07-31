@@ -10,8 +10,8 @@
 
 {% block content %}
 
-{# Forces Django to set the csrftoken cookie so qsub.js's global ajaxSetup can
-   attach the X-CSRFToken header to the buzz/bonus/comment POSTs below. #}
+{% comment %} Forces Django to set the csrftoken cookie so qsub.js's global ajaxSetup can
+   attach the X-CSRFToken header to the buzz/bonus/comment POSTs below. {% endcomment %}
 {% csrf_token %}
 
 <h3 class="page-header">Play</h3>

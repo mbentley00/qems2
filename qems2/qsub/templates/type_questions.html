@@ -26,8 +26,8 @@
             {% csrf_token %}
             {{ form }}
             {% if dist_entries %}
-            {# Sits directly under the entry box (where it's used), and above
-               Submit — floating Submit over it left a dead top-right corner. #}
+            {% comment %} Sits directly under the entry box (where it's used), and above
+               Submit — floating Submit over it left a dead top-right corner. {% endcomment %}
             <div class="category-tag-panel">
                 <label>Insert category tag</label>
                 <div class="category-tag-tree">

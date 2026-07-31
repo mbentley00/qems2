@@ -6072,3 +6072,38 @@ class ReferenceDataAdminTests(TestCase):
         self.client.post('/reference_data/pron/save/', {
             'term': 'Sneaky', 'value': 'SNEE-kee', 'q': ''})
         self.assertFalse(ReferenceDataOverride.objects.exists())
+
+
+
+class TemplateCommentTests(TestCase):
+    """Django's {# #} comment is single-line only. A multi-line one is not a
+    comment at all — it renders as literal text on the page, which is exactly
+    how three of these reached production."""
+
+    def _template_paths(self):
+        import os
+        base = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            'qems2', 'qsub', 'templates')
+        for root, _dirs, files in os.walk(base):
+            for name in files:
+                if name.endswith('.html'):
+                    yield os.path.join(root, name)
+
+    def test_no_multiline_hash_comments(self):
+        import io
+        import os
+        import re
+        offenders = []
+        for path in self._template_paths():
+            with io.open(path, encoding='utf-8') as fh:
+                src = fh.read()
+            for m in re.finditer(r'\{#', src):
+                rest = src[m.start():]
+                end = rest.find('#}')
+                if end == -1 or '\n' in rest[:end]:
+                    offenders.append('{0}:{1}'.format(
+                        os.path.basename(path), src[:m.start()].count('\n') + 1))
+        self.assertEqual(
+            offenders, [],
+            'Multi-line {# #} renders as visible text; use a comment block instead: '
+            + ', '.join(offenders))

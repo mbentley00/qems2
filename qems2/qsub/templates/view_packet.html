@@ -193,8 +193,8 @@ document.addEventListener('DOMContentLoaded', function () {
 </div>
 
 {% if not read_only %}
-{# Compact list of this packet's questions, for swapping without scrolling the
-   document. Closed until you ask for it from the toolbar. #}
+{% comment %} Compact list of this packet's questions, for swapping without scrolling the
+   document. Closed until you ask for it from the toolbar. {% endcomment %}
 <div class="swap-panel" id="swap-panel">
     <div class="swap-panel-head">
         <strong>{{ packet.packet_name }}</strong>
