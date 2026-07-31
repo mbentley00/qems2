@@ -25,10 +25,11 @@
         <form action="/type_questions/" method="post" id="type-questions">
             {% csrf_token %}
             {{ form }}
-            <input type="submit" class="button primary right" value="Submit">
             {% if dist_entries %}
+            {# Sits directly under the entry box (where it's used), and above
+               Submit — floating Submit over it left a dead top-right corner. #}
             <div class="category-tag-panel">
-                <label>Insert category tag:</label>
+                <label>Insert category tag</label>
                 <div class="category-tag-tree">
                 {% regroup dist_entries by dist_entry.category as category_groups %}
                 {% for group in category_groups %}
@@ -48,6 +49,7 @@
                 </div>
             </div>
             {% endif %}
+            <input type="submit" class="button primary right" value="Submit">
             <input type="hidden" name="qset_id" value="{{ qset.id }}">
         </form>
     </div>

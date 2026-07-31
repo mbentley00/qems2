@@ -15,10 +15,11 @@
 <table class="tablesorter table-striped table-hover" id="distributions-table">
     <thead>
         <th>Distribution Name</th>
+        <th>Visibility</th>
     </thead>
     <tbody>
         {% if not dists %}
-            <td>No distributions available. Create one!</td>
+            <tr><td colspan="2">No distributions available. Create one!</td></tr>
         {% else %}
         {% for dist in dists %}
         <tr>
@@ -31,10 +32,51 @@
                     <button type="submit" class="button tiny secondary">Clone</button>
                 </form>
             </td>
+            <td>
+                {% if dist.public %}
+                    <span class="dist-visibility is-public"><i class="fa fa-globe"></i> Public</span>
+                {% else %}
+                    <span class="dist-visibility"><i class="fa fa-lock"></i> Private</span>
+                {% endif %}
+            </td>
         </tr>
         {% endfor %}
         {% endif %}
     </tbody>
 </table>
+
+{# Distributions other people have published. Read-only here: copy one to get
+   your own editable version. #}
+{% if public_dists %}
+<h4 class="page-header" style="margin-top:1.5rem;">Public Distributions</h4>
+<p class="dist-public-note">Published by other people. Make a copy to use or change one.</p>
+<table class="tablesorter table-striped table-hover" id="public-distributions-table">
+    <thead>
+        <th>Distribution Name</th>
+        <th>Created by</th>
+    </thead>
+    <tbody>
+        {% for dist in public_dists %}
+        <tr>
+            <td>
+                {{ dist.name }}
+                <form method="post" action="/clone_distribution/{{ dist.id }}/" style="display:inline; margin-left:10px;">
+                    {% csrf_token %}
+                    <button type="submit" class="button tiny secondary">Copy</button>
+                </form>
+            </td>
+            <td>{% if dist.created_by %}{{ dist.created_by }}{% else %}&mdash;{% endif %}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
+<style>
+.dist-visibility { font-size: 0.85em; color: #8a8f9c; }
+.dist-visibility .fa { margin-right: 0.3em; }
+.dist-visibility.is-public { color: #2b7a3d; }
+.dist-public-note { font-size: 0.9em; color: #8a8f9c; margin-bottom: 0.5rem; }
+</style>
 
 {% endblock %}

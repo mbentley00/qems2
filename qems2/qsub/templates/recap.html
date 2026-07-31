@@ -16,6 +16,14 @@
     <li class="current">Recent Changes</li>
 </ul>
 
+{% if since_visit %}
+<div class="recap-since-visit">
+    <i class="fa fa-bell"></i>
+    What other people did since your last visit on {{ since|to_short_datetime }}. Your own
+    questions, edits and comments aren't listed.
+</div>
+{% endif %}
+
 <div class="recap-controls">
     <span>Show changes from the last:</span>
     <ul class="button-group">
@@ -97,6 +105,9 @@
 {% endif %}
 
 <style>
+.recap-since-visit { margin-bottom: 1rem; padding: 0.6rem 0.9rem; border-left: 4px solid #2980b9;
+                     background: #eef6fb; border-radius: 3px; }
+.recap-since-visit .fa { margin-right: 0.4rem; color: #2980b9; }
 .recap-controls { margin-bottom: 1rem; display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
 .recap-controls .button-group { margin-bottom: 0; }
 .recap-summary { margin-bottom: 1.5rem; }

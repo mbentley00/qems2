@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% block title %}Reference Data - QEMS3{% endblock %}
+
+{% block content %}
+
+<h3 class="page-header">Reference Data</h3>
+<p class="refdata-intro">
+    The pronunciation dictionary and standard answer lines the style checker reads. Both ship as
+    generated data files; corrections you save here are stored separately and layered on top, so
+    they survive a rebuild of the bundled data.
+    {% if override_count %}<strong>{{ override_count }}</strong> correction{{ override_count|pluralize }} in this dataset.{% endif %}
+</p>
+
+{% if messages %}
+    {% for message in messages %}
+    <div class="alert-box {% if message.tags == 'error' %}alert{% else %}success{% endif %}">{{ message }}</div>
+    {% endfor %}
+{% endif %}
+
+<dl class="tabs">
+    <dd class="{% if is_pron %}active{% endif %}"><a href="/reference_data/pron/">Pronunciation Guides</a></dd>
+    <dd class="{% if not is_pron %}active{% endif %}"><a href="/reference_data/answer/">Answer Lines</a></dd>
+</dl>
+
+<form method="get" action="/reference_data/{{ dataset }}/" class="refdata-search">
+    <div class="row collapse">
+        <div class="small-9 columns">
+            <input type="text" name="q" value="{{ query }}"
+                   placeholder="{% if is_pron %}Search the dictionary, e.g. Goethe{% else %}Search answers, e.g. France{% endif %}">
+        </div>
+        <div class="small-3 columns">
+            <button type="submit" class="button postfix">Search</button>
+        </div>
+    </div>
+</form>
+
+{% if query %}
+    <p class="refdata-count">
+        {% if result_total %}
+            Showing {{ shown }} of {{ result_total }} match{{ result_total|pluralize:"es" }}.
+        {% else %}
+            No entry matches &ldquo;{{ query }}&rdquo;. You can add one below.
+        {% endif %}
+    </p>
+{% endif %}
+
+{% for row in rows %}
+<form method="post" action="/reference_data/{{ dataset }}/save/" class="refdata-row">
+    {% csrf_token %}
+    <input type="hidden" name="key" value="{{ row.key }}">
+    <input type="hidden" name="q" value="{{ query }}">
+    <div class="refdata-row-head">
+        <input type="text" name="term" value="{{ row.term }}" class="refdata-term">
+        <span class="refdata-source refdata-source-{{ row.source }}">{{ row.source }}</span>
+        {% if row.override and row.override.changed_by %}
+            <span class="refdata-meta">last fixed by {{ row.override.changed_by }}</span>
+        {% endif %}
+    </div>
+    {% if is_pron %}
+        <input type="text" name="value" value="{{ row.value }}" class="refdata-value"
+               placeholder="Respelling, e.g. GUR-tuh">
+    {% else %}
+        <textarea name="value" rows="2" class="refdata-value"
+                  placeholder="Standard line, e.g. France [or the French Republic or République française]">{{ row.value }}</textarea>
+    {% endif %}
+    <div class="refdata-actions">
+        <button type="submit" class="button tiny primary">Save</button>
+        <button type="submit" class="button tiny secondary"
+                formaction="/reference_data/{{ dataset }}/suppress/">Withdraw</button>
+        {% if row.override %}
+        <button type="submit" class="button tiny secondary" name="restore" value="1"
+                formaction="/reference_data/{{ dataset }}/suppress/">Revert to bundled</button>
+        {% endif %}
+    </div>
+</form>
+{% endfor %}
+
+<div class="panel callout radius refdata-add-head"><strong>Add an entry</strong></div>
+<form method="post" action="/reference_data/{{ dataset }}/save/" class="refdata-row">
+    {% csrf_token %}
+    <input type="hidden" name="q" value="{{ query }}">
+    <div class="refdata-row-head">
+        <input type="text" name="term" class="refdata-term"
+               placeholder="{% if is_pron %}Headword, e.g. Goethe{% else %}Answer, e.g. France{% endif %}">
+    </div>
+    {% if is_pron %}
+        <input type="text" name="value" class="refdata-value" placeholder="Respelling, e.g. GUR-tuh">
+    {% else %}
+        <textarea name="value" rows="2" class="refdata-value"
+                  placeholder="Standard line, e.g. France [or the French Republic or République française]"></textarea>
+    {% endif %}
+    <div class="refdata-actions">
+        <button type="submit" class="button tiny primary">Add</button>
+    </div>
+</form>
+
+{% if suppressed %}
+<div class="panel callout radius refdata-add-head"><strong>Withdrawn entries</strong></div>
+<p class="refdata-count">These no longer fire in the style checker. Restoring one hands it back to the bundled data.</p>
+<table class="table-striped table-hover refdata-table">
+    <thead><tr><th>Entry</th><th>Withdrawn by</th><th></th></tr></thead>
+    <tbody>
+    {% for o in suppressed %}
+    <tr>
+        <td>{{ o.term|default:o.key }}</td>
+        <td>{% if o.changed_by %}{{ o.changed_by }}{% else %}&mdash;{% endif %}</td>
+        <td>
+            <form method="post" action="/reference_data/{{ dataset }}/suppress/">
+                {% csrf_token %}
+                <input type="hidden" name="key" value="{{ o.key }}">
+                <input type="hidden" name="term" value="{{ o.term }}">
+                <input type="hidden" name="q" value="{{ query }}">
+                <button type="submit" class="button tiny secondary" name="restore" value="1">Restore</button>
+            </form>
+        </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
+<style>
+.refdata-intro { color: #6b7080; max-width: 60em; }
+.refdata-search { max-width: 34em; margin-bottom: 0.5rem; }
+.refdata-count { color: #8a8f9c; font-size: 0.9em; }
+.refdata-row { padding: 0.5rem 0.7rem; border: 1px solid var(--qx-border, #e9e9ef);
+               border-radius: 4px; margin-bottom: 0.5rem; background: var(--qx-card, #fff); }
+.refdata-row-head { display: flex; align-items: center; gap: 0.6em; margin-bottom: 0.35rem; }
+.refdata-row input.refdata-term { margin: 0; font-weight: bold; max-width: 22em; }
+.refdata-row .refdata-value { margin: 0 0 0.4rem; }
+.refdata-source { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em;
+                  padding: 0.1em 0.5em; border-radius: 2px; background: #f1f1f5; color: #6b7080; }
+.refdata-source-edited { background: #efe6fb; color: #5b21b6; }
+.refdata-source-added { background: #e3f4e8; color: #2b7a3d; }
+.refdata-meta { font-size: 0.8rem; color: #8a8f9c; }
+.refdata-actions .button { margin: 0 0.4em 0 0; }
+.refdata-add-head { margin-top: 1.25rem; }
+.refdata-table td, .refdata-table th { vertical-align: middle; }
+.refdata-table form { margin: 0; }
+</style>
+
+{% endblock %}

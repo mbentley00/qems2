@@ -7,7 +7,8 @@ missing — e.g. an answer of ``France`` whose line omits ``French Republic`` /
 ``République française``.
 
 The data file (``qsub/data/answer_alternates.jsonl``) is built offline from the
-local ``answer_database`` project. Loaded lazily and cached.
+local ``answer_database`` project. Loaded lazily and cached, with any admin
+corrections (``ReferenceDataOverride``) merged in on top of it.
 """
 
 import html as _html
@@ -16,10 +17,14 @@ import os
 import re
 import unicodedata
 
+from . import reference_overrides as overrides
+
 DATA_PATH = os.path.join(os.path.dirname(__file__), 'data', 'answer_alternates.jsonl')
 
-# Cache: {norm_key: {'answer': str, 'alts': [(display, norm_key), ...]}}. Built once.
+# Cache: {norm_key: {'answer', 'line', 'alts': [(display, norm_key), ...], 'source'}},
+# built once and rebuilt when the admin overrides change (_STAMP tracks them).
 _DB = None
+_STAMP = None
 
 # Separators between names inside an answer line / bracket.
 _SPLIT_RE = re.compile(r'\s*(?:;|,|\bor\b)\s*', re.IGNORECASE)
@@ -78,9 +83,21 @@ def _names(line):
     return out
 
 
+def _record(answer, line, source):
+    """One database row: the head answer, the standard line it came from, and
+    the alternates parsed out of that line. None when the line has no alternate
+    (a head with nothing to add can't produce a suggestion)."""
+    names = _names(_plain(line))
+    if len(names) < 2:  # need a head plus at least one alternate
+        return None
+    return {'answer': answer or names[0][0], 'line': line,
+            'alts': names[1:], 'source': source}
+
+
 def _load():
-    global _DB
-    if _DB is not None:
+    global _DB, _STAMP
+    current = overrides.stamp(overrides.ANSWER_LINE)
+    if _DB is not None and _STAMP == current:
         return _DB
     db = {}
     if os.path.exists(DATA_PATH):
@@ -93,19 +110,50 @@ def _load():
                     r = json.loads(line)
                 except ValueError:
                     continue
-                names = _names(_plain(r.get('best_core', '')))
-                if len(names) < 2:  # need a head plus at least one alternate
+                core = r.get('best_core', '')
+                rec = _record(r.get('answer', ''), _plain(core), 'bundled')
+                if rec is None:
                     continue
-                key = r.get('key') or names[0][1]
-                db[key] = {'answer': r.get('answer', names[0][0]), 'alts': names[1:]}
+                db[r.get('key') or norm_key(rec['answer'])] = rec
+
+    # Admin corrections layered on top: a suppressed key drops out entirely,
+    # anything else replaces (or adds) the standard line for that answer.
+    for key, term, value, suppressed in overrides.rows(overrides.ANSWER_LINE):
+        if suppressed:
+            db.pop(key, None)
+            continue
+        rec = _record(term, _plain(value), 'edited' if key in db else 'added')
+        if rec is not None:
+            db[key] = rec
+
     _DB = db
+    _STAMP = current
     return _DB
 
 
 def reset_cache():
-    """Drop the cached database (used by tests)."""
-    global _DB
+    """Drop the cached database (used by tests, and by the admin screens right
+    after an override is saved)."""
+    global _DB, _STAMP
     _DB = None
+    _STAMP = None
+    overrides.reset_stamp()
+
+
+def search(query, limit=50):
+    """Entries whose key or head answer contains `query`, for the admin
+    reference-data screen. Returns (rows, total_matches)."""
+    q = norm_key(query)
+    db = _load()
+    matched = [dict(rec, key=key) for key, rec in db.items() if not q or q in key]
+    matched.sort(key=lambda r: r['key'])
+    return matched[:limit], len(matched)
+
+
+def get_entry(key):
+    """One entry by key, or None."""
+    rec = _load().get(key)
+    return dict(rec, key=key) if rec else None
 
 
 def missing_alternates(raw_answer):

@@ -630,7 +630,7 @@ def create_question_set (request):
                       {'message': _ACCOUNT_TOO_NEW_MSG, 'message_class': 'alert-box alert'})
 
     if request.method == 'POST':
-        form = QuestionSetForm(data=request.POST)
+        form = QuestionSetForm(data=request.POST, writer=user)
         if form.is_valid():
             # for the moment, just use the default ACF Distribution
             #dist = Distribution.objects.get(id=1)
@@ -670,7 +670,7 @@ def create_question_set (request):
                 '/edit_question_set/{0}/?created=1'.format(question_set.id))
         else:
             print(form.errors)
-            distributions = Distribution.objects.all()
+            distributions = Distribution.visible_to(user)
             return render(request, 'create_question_set.html',
                                       {'message': 'There was an error in creating your question set!',
                                        'message_class': 'alert-box warning',
@@ -678,8 +678,8 @@ def create_question_set (request):
                                        'distributions': distributions,
                                        'user': user})
     else:
-        form = QuestionSetForm()
-        distributions = Distribution.objects.all()
+        form = QuestionSetForm(writer=user)
+        distributions = Distribution.visible_to(user)
 
     return render(request, 'create_question_set.html',
                               {'form': form,
@@ -762,7 +762,7 @@ def edit_question_set(request, qset_id):
 
     if request.method == 'POST':
         if (qset.is_owner(user) or user in qset_editors):
-            form = QuestionSetForm(data=request.POST)
+            form = QuestionSetForm(data=request.POST, writer=user)
             if form.is_valid():
                 qset = QuestionSet.objects.get(id=qset_id)
                 qset.name = form.cleaned_data['name']
@@ -842,14 +842,14 @@ def edit_question_set(request, qset_id):
             message_class = 'alert-box success'
 
         if user not in qset_editors and not qset.is_owner(user):
-            form = QuestionSetForm(instance=qset, read_only=True)
+            form = QuestionSetForm(instance=qset, read_only=True, writer=user)
             read_only = True
         else:
             if qset.is_owner(user):
                 read_only = False
             elif user in qset.writer.all() or user in qset.editor.all():
                 read_only = True
-            form = QuestionSetForm(instance=qset)
+            form = QuestionSetForm(instance=qset, writer=user)
 
         set_status, total_tu_req, total_bs_req, tu_needed, bs_needed, set_pct_complete = get_questions_remaining(qset)
         writer_stats = get_writer_questions_remaining(qset, total_tu_req, total_bs_req)
@@ -3412,12 +3412,11 @@ _ACCOUNT_TOO_NEW_MSG = ('New accounts can\'t create question sets or distributio
 @login_required
 def distribution_preview(request, dist_id):
     """JSON summary of a distribution for the picker on the create-set page:
-    who made it, when, and the per-packet category breakdown. Every
-    distribution is selectable when creating a set (a brand-new writer has no
-    sets yet, so there's nothing to scope the list to), so this is readable for
-    any of them — it exposes no question content."""
+    who made it, when, and the per-packet category breakdown. Limited to the
+    distributions the viewer can pick — public ones plus their own — since a
+    private distribution's category breakdown is its author's to share."""
     try:
-        dist = Distribution.objects.get(id=dist_id)
+        dist = Distribution.visible_to(request.user.writer).get(id=dist_id)
     except Distribution.DoesNotExist:
         return HttpResponse(json.dumps({'ok': False, 'error': 'No such distribution'}), status=404)
 
@@ -3447,27 +3446,26 @@ def distribution_preview(request, dist_id):
 
 def _writer_distribution_ids(writer):
     """Distribution ids for the sets a writer belongs to (owner, co-owner,
-    editor or writer) — the distributions they're allowed to see and edit."""
-    sets = (QuestionSet.objects.filter(owner=writer)
-            | writer.question_set_editor.all()
-            | writer.question_set_writer.all()
-            | writer.co_owned_sets.all())
-    ids = set(sets.values_list('distribution_id', flat=True))
-    # Also include distributions this writer created but hasn't yet attached
-    # to one of their sets.
-    ids |= set(Distribution.objects.filter(created_by=writer).values_list('id', flat=True))
-    ids.discard(None)
-    return ids
+    editor or writer), plus any they created — the ones they may edit. Public
+    distributions made by other people are *not* included: those are readable
+    and clonable (see Distribution.visible_to) but not editable."""
+    return Distribution.member_ids(writer)
 
 
 @login_required
 def distributions (request):
-    # Only show distributions for sets this user is part of.
+    # Yours (editable) first; public ones from other people are listed
+    # separately below and can only be previewed and copied.
     user = request.user.writer
-    dists = Distribution.objects.filter(id__in=_writer_distribution_ids(user))
+    mine_ids = _writer_distribution_ids(user)
+    dists = Distribution.objects.filter(id__in=mine_ids)
+    public_dists = (Distribution.objects.filter(public=True)
+                    .exclude(id__in=mine_ids)
+                    .select_related('created_by__user').order_by('name'))
 
     return render(request, 'distributions.html',
                              {'dists': dists,
+                              'public_dists': public_dists,
                               'user': user})
 
 @login_required
@@ -3476,9 +3474,11 @@ def clone_distribution(request, dist_id):
         return HttpResponseRedirect('/distributions/')
 
     user = request.user.writer
-    if int(dist_id) not in _writer_distribution_ids(user):
+    # Cloning reads the source and writes a new distribution, so a public one is
+    # fair game — that's the point of publishing it. Editing still isn't.
+    if not Distribution.visible_to(user).filter(id=dist_id).exists():
         return render(request, 'failure.html',
-                      {'message': 'You can only clone distributions for your own sets.',
+                      {'message': 'You can only clone your own distributions or public ones.',
                        'message_class': 'alert-box alert'})
     if not _account_can_create(request.user):
         return render(request, 'failure.html',
@@ -3487,6 +3487,9 @@ def clone_distribution(request, dist_id):
     source = Distribution.objects.get(id=dist_id)
     new_dist = Distribution()
     new_dist.name = source.name + ' (Copy)'
+    # A copy starts private regardless of the source: publishing is the new
+    # owner's call to make.
+    new_dist.public = False
     new_dist.created_by = user
     new_dist.created_date = timezone.now()
     new_dist.acf_tossup_per_period_count = source.acf_tossup_per_period_count
@@ -3542,6 +3545,7 @@ def edit_distribution(request, dist_id=None):
                 if dist_form.is_valid() and formset.is_valid():
                     new_dist = Distribution()
                     new_dist.name = dist_form.cleaned_data['name']
+                    new_dist.public = dist_form.cleaned_data['public']
                     new_dist.created_by = user
                     new_dist.created_date = timezone.now()
                     new_dist.save()
@@ -3589,6 +3593,7 @@ def edit_distribution(request, dist_id=None):
                     if dist_form.is_valid() and formset.is_valid():
                         dist = Distribution.objects.get(id=dist_id)
                         dist.name = dist_form.cleaned_data['name']
+                        dist.public = dist_form.cleaned_data['public']
                         dist.save()
 
                         qsets = dist.questionset_set.all()
@@ -7732,7 +7737,7 @@ def _record_visit_and_summarize(user, qset):
     for part in parts:
         if part['count'] != 1:
             part['label'] += 's'
-    return {'since': prev, 'total': total, 'parts': parts,
+    return {'since': prev, 'since_ts': int(prev.timestamp()), 'total': total, 'parts': parts,
             'new_questions': new_questions,
             'edited_questions': edited_questions, 'comments': comments}
 
@@ -8733,14 +8738,30 @@ def recap(request, qset_id):
                       {'message': 'You are not authorized to view this set!',
                        'message_class': 'alert-box alert'})
 
+    # `?since=<epoch>` is how the "since your last visit" banner links here: the
+    # window starts at that visit instead of a fixed number of days, and — like
+    # the banner — the user's own activity is left out, so the counts match.
+    from datetime import datetime as dt, timedelta, timezone as dt_timezone
+    now = timezone.now()
+    days = None
+    since = None
     try:
-        days = int(request.GET.get('days', 7))
-    except ValueError:
-        days = 7
-    if days not in (1, 3, 7, 14, 30):
-        days = 7
-    from datetime import timedelta
-    since = timezone.now() - timedelta(days=days)
+        stamp = int(request.GET.get('since', ''))
+        candidate = dt.fromtimestamp(stamp, dt_timezone.utc)
+    except (ValueError, OverflowError, OSError):
+        candidate = None
+    if candidate is not None and now - timedelta(days=365) <= candidate <= now:
+        since = candidate
+    since_visit = since is not None
+
+    if since is None:
+        try:
+            days = int(request.GET.get('days', 7))
+        except ValueError:
+            days = 7
+        if days not in (1, 3, 7, 14, 30):
+            days = 7
+        since = now - timedelta(days=days)
 
     def location(q):
         if q.packet_id and q.question_number:
@@ -8753,6 +8774,9 @@ def recap(request, qset_id):
               .select_related('packet', 'author__user', 'category').order_by('-created_date'))
     new_bs = (Bonus.objects.filter(question_set=qset, created_date__gte=since)
               .select_related('packet', 'author__user', 'category').order_by('-created_date'))
+    if since_visit:
+        new_tu = new_tu.exclude(author=user)
+        new_bs = new_bs.exclude(author=user)
     for t in new_tu:
         new_questions.append({
             'date': t.created_date, 'qtype': 'tossup',
@@ -8780,7 +8804,10 @@ def recap(request, qset_id):
             continue
         histories = (hist_model.objects.filter(question_history_id__in=hist_to_q.keys(),
                                                change_date__gte=since)
-                     .select_related('changer__user').order_by('-change_date')[:200])
+                     .select_related('changer__user'))
+        if since_visit:
+            histories = histories.exclude(changer=user)
+        histories = histories.order_by('-change_date')[:200]
         for h in histories:
             q = hist_to_q.get(h.question_history_id)
             # Skip the very first history row (creation) so this is edits only.
@@ -8802,7 +8829,10 @@ def recap(request, qset_id):
     comments = (Comment.objects.filter(is_removed=False, submit_date__gte=since)
                 .filter(Q(content_type=tu_ct, object_pk__in=tu_ids) |
                         Q(content_type=bs_ct, object_pk__in=bs_ids))
-                .select_related('user', 'content_type').order_by('-submit_date')[:200])
+                .select_related('user', 'content_type'))
+    if since_visit:
+        comments = comments.exclude(user=user.user)
+    comments = comments.order_by('-submit_date')[:200]
     comment_items = []
     for c in comments:
         is_tu = c.content_type_id == tu_ct.id
@@ -8815,6 +8845,7 @@ def recap(request, qset_id):
 
     return render(request, 'recap.html',
                   {'qset': qset, 'user': user, 'days': days,
+                   'since_visit': since_visit, 'since': since,
                    'new_questions': new_questions,
                    'edit_items': edit_items,
                    'comment_items': comment_items,
@@ -9177,3 +9208,150 @@ def generate_set_api_key(request):
         api_key.save()
         messages.success(request, 'A new API key has been generated.')
     return HttpResponseRedirect('/api_access/{0}/'.format(qset.id))
+
+
+# ---------------------------------------------------------------------------
+# Reference data (admin only): the bundled pronunciation dictionary and standard
+# answer lines the style checker reads. Both ship as generated data files, so
+# corrections are stored as ReferenceDataOverride rows layered on top — see
+# qsub/reference_overrides.py.
+# ---------------------------------------------------------------------------
+
+from urllib.parse import quote
+
+
+def _reference_admin_only(request):
+    """None if the caller may manage reference data, else a response to return."""
+    if not request.user.is_superuser:
+        messages.error(request, 'Only an admin account may manage reference data.')
+        return HttpResponseRedirect('/failure.html/')
+    return None
+
+
+def _reference_override_map(dataset):
+    """{key: ReferenceDataOverride} for one dataset, to mark up search results."""
+    return {o.key: o for o in ReferenceDataOverride.objects.filter(dataset=dataset)
+            .select_related('changed_by__user')}
+
+
+@login_required
+def reference_data(request, dataset='pron'):
+    """Admin screen for searching and fixing the bundled reference datasets."""
+    from . import pron_dict, answer_db
+
+    denied = _reference_admin_only(request)
+    if denied is not None:
+        return denied
+
+    if dataset not in (ReferenceDataOverride.PRONUNCIATION, ReferenceDataOverride.ANSWER_LINE):
+        dataset = ReferenceDataOverride.PRONUNCIATION
+
+    query = (request.GET.get('q') or '').strip()
+    overrides_by_key = _reference_override_map(dataset)
+
+    rows = []
+    total = 0
+    if dataset == ReferenceDataOverride.PRONUNCIATION:
+        # A blank search would walk 5,800 entries into the page; ask for a term.
+        if query:
+            found, total = pron_dict.search(query)
+            for e in found:
+                rows.append({'key': e['key'], 'term': e['term'], 'value': e['pron'],
+                             'source': e['source'], 'override': overrides_by_key.get(e['key'])})
+    else:
+        if query:
+            found, total = answer_db.search(query)
+            for e in found:
+                rows.append({'key': e['key'], 'term': e['answer'], 'value': e['line'],
+                             'source': e['source'], 'override': overrides_by_key.get(e['key'])})
+
+    # Suppressed entries have no bundled row to attach to, so list them on their
+    # own — otherwise a withdrawn entry would be invisible and unrecoverable.
+    suppressed = [o for o in overrides_by_key.values() if o.suppressed]
+    suppressed.sort(key=lambda o: o.key)
+
+    return render(request, 'reference_data.html',
+                  {'user': request.user.writer,
+                   'dataset': dataset,
+                   'is_pron': dataset == ReferenceDataOverride.PRONUNCIATION,
+                   'query': query,
+                   'rows': rows,
+                   'result_total': total,
+                   'shown': len(rows),
+                   'suppressed': suppressed,
+                   'override_count': len(overrides_by_key)})
+
+
+def _reference_key(dataset, term):
+    """The dataset's own lookup key for a headword, so an override lines up with
+    the bundled entry it corrects."""
+    from . import pron_dict, answer_db
+    if dataset == ReferenceDataOverride.PRONUNCIATION:
+        return pron_dict.normalize_term(term)
+    return answer_db.norm_key(answer_db._plain(term))
+
+
+def _reference_reset_caches():
+    from . import pron_dict, answer_db
+    pron_dict.reset_cache()
+    answer_db.reset_cache()
+
+
+@login_required
+def reference_data_save(request, dataset):
+    """Add or correct one reference entry. `key` is supplied when editing an
+    existing entry; otherwise it's derived from the headword."""
+    denied = _reference_admin_only(request)
+    if denied is not None:
+        return denied
+    if request.method != 'POST':
+        return HttpResponseRedirect('/reference_data/{0}/'.format(dataset))
+
+    term = (request.POST.get('term') or '').strip()
+    value = (request.POST.get('value') or '').strip()
+    key = (request.POST.get('key') or '').strip() or _reference_key(dataset, term)
+
+    if not key or not term or not value:
+        messages.error(request, 'A term and its replacement text are both required.')
+    else:
+        ReferenceDataOverride.objects.update_or_create(
+            dataset=dataset, key=key,
+            defaults={'term': term, 'value': value, 'suppressed': False,
+                      'note': (request.POST.get('note') or '').strip(),
+                      'changed_by': request.user.writer})
+        _reference_reset_caches()
+        messages.success(request, 'Saved "{0}".'.format(term))
+
+    return HttpResponseRedirect('/reference_data/{0}/?q={1}'.format(
+        dataset, quote(request.POST.get('q') or term)))
+
+
+@login_required
+def reference_data_suppress(request, dataset):
+    """Withdraw a bundled entry so it stops firing, or restore one."""
+    denied = _reference_admin_only(request)
+    if denied is not None:
+        return denied
+    if request.method != 'POST':
+        return HttpResponseRedirect('/reference_data/{0}/'.format(dataset))
+
+    key = (request.POST.get('key') or '').strip()
+    term = (request.POST.get('term') or '').strip()
+    if key:
+        if request.POST.get('restore'):
+            # Dropping the row hands the entry back to the bundled file. An
+            # entry that was *added* here has nothing to fall back to, so it
+            # simply goes away — which is what restoring it should mean.
+            ReferenceDataOverride.objects.filter(dataset=dataset, key=key).delete()
+            messages.success(request, 'Restored "{0}" to the bundled data.'.format(term or key))
+        else:
+            ReferenceDataOverride.objects.update_or_create(
+                dataset=dataset, key=key,
+                defaults={'term': term, 'value': '', 'suppressed': True,
+                          'note': (request.POST.get('note') or '').strip(),
+                          'changed_by': request.user.writer})
+            messages.success(request, 'Withdrew "{0}".'.format(term or key))
+        _reference_reset_caches()
+
+    return HttpResponseRedirect('/reference_data/{0}/?q={1}'.format(
+        dataset, quote(request.POST.get('q') or '')))

@@ -62,8 +62,14 @@ class QuestionSetForm(forms.ModelForm):
         exclude = ['owner', 'address', 'host', 'max_vhsl_bonus_length',
                    'tossups_per_packet', 'bonuses_per_packet']
 
-    def __init__(self, read_only=False, *args, **kwargs):
+    def __init__(self, read_only=False, writer=None, *args, **kwargs):
         super(QuestionSetForm, self).__init__(*args, **kwargs)
+
+        # Only offer the distributions this writer may use: the public ones and
+        # their own. (A set's current distribution always qualifies — belonging
+        # to the set is what makes it theirs — so editing a set never loses it.)
+        if writer is not None:
+            self.fields['distribution'].queryset = Distribution.visible_to(writer)
 
         self.fields['date'].widget.attrs.update({'placeholder': 'mm/dd/yyyy'})
 
@@ -293,9 +299,16 @@ class DistributionForm(forms.ModelForm):
     acf_bonus_per_period_count = forms.CharField(widget=forms.HiddenInput, required=False)
     vhsl_bonus_per_period_count = forms.CharField(widget=forms.HiddenInput, required=False)
 
+    public = forms.BooleanField(
+        required=False, label='Publicly viewable',
+        help_text=('Anyone can find this distribution when creating a set, see its '
+                   'categories, and make a copy. Editing stays with you and the '
+                   'people on your sets.'))
+
     class Meta:
         model = Distribution
-        fields = ['name', 'acf_tossup_per_period_count', 'acf_bonus_per_period_count', 'vhsl_bonus_per_period_count']
+        fields = ['name', 'public', 'acf_tossup_per_period_count',
+                  'acf_bonus_per_period_count', 'vhsl_bonus_per_period_count']
         
 class TieBreakDistributionForm(forms.ModelForm):
 

@@ -12,16 +12,18 @@
 {% load filters %}
 {% load comments %}
 
-{# First load of the day: what everyone else did while you were away. #}
+{# First load of the day: what everyone else did while you were away. The link
+   goes to Recent Changes windowed to the same moment, so the page lists exactly
+   the questions, edits and comments this banner is counting. #}
 {% if visit_summary %}
-<a class="visit-summary" href="/activity/{{ qset.id }}/"
-   title="See the details on your Activity page">
+<a class="visit-summary" href="/recap/{{ qset.id }}/?since={{ visit_summary.since_ts }}"
+   title="See what changed since your last visit">
     <i class="fa fa-bell"></i>
     <span class="visit-summary-text">
         Since your last visit on {{ visit_summary.since|to_short_datetime }}:
         {% for part in visit_summary.parts %}{% if not forloop.first %}, {% endif %}<strong>{{ part.count }}</strong> {{ part.label }}{% endfor %}
     </span>
-    <span class="visit-summary-cta">View activity <i class="fa fa-arrow-right"></i></span>
+    <span class="visit-summary-cta">View changes <i class="fa fa-arrow-right"></i></span>
 </a>
 {% endif %}
 

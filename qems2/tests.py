@@ -1,3 +1,5 @@
+import json
+
 from django.test import TestCase, override_settings
 from django.core import mail
 from django.contrib.auth.models import AnonymousUser, User
@@ -5202,16 +5204,41 @@ class VisitSummaryTests(TestCase):
         self.assertEqual(summary['comments'], 1)
         self.assertEqual(summary['new_questions'], 0)
 
-    def test_banner_renders_and_links_to_activity(self):
+    def test_banner_renders_and_links_to_the_matching_recap_window(self):
         self._visit_yesterday()
         self._add_tossup(self.writer)
         self.client.login(username='vs_owner', password='pw')
         resp = self.client.get('/edit_question_set/{0}/'.format(self.qset.id))
         self.assertContains(resp, 'Since your last visit')
-        self.assertContains(resp, '/activity/{0}/'.format(self.qset.id))
+        # The banner links to Recent Changes windowed to the previous visit, so
+        # the page it opens lists the activity the banner just counted.
+        self.assertContains(resp, '/recap/{0}/?since='.format(self.qset.id))
         # Reloading the same day drops the banner.
         resp = self.client.get('/edit_question_set/{0}/'.format(self.qset.id))
         self.assertNotContains(resp, 'Since your last visit')
+
+    def test_recap_since_a_visit_lists_what_the_banner_counted(self):
+        self._visit_yesterday()
+        theirs = self._add_tossup(self.writer)
+        mine = self._add_tossup(self.owner)
+        summary = self._summary()
+        self.assertEqual(summary['new_questions'], 1)
+        self.client.login(username='vs_owner', password='pw')
+        resp = self.client.get('/recap/{0}/?since={1}'.format(
+            self.qset.id, summary['since_ts']))
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(resp.context['new_questions']), summary['new_questions'])
+        self.assertContains(resp, 'since your last visit')
+        self.assertContains(resp, '/edit_tossup/{0}/'.format(theirs.id))
+        self.assertNotContains(resp, '/edit_tossup/{0}/'.format(mine.id))
+
+    def test_recap_ignores_a_nonsense_since_value(self):
+        self.client.login(username='vs_owner', password='pw')
+        for bad in ('banana', '', '99999999999'):
+            resp = self.client.get('/recap/{0}/?since={1}'.format(self.qset.id, bad))
+            self.assertEqual(resp.status_code, 200)
+            self.assertFalse(resp.context['since_visit'])
+            self.assertEqual(resp.context['days'], 7)
 
 
 class PlaySelectionTests(TestCase):
@@ -5793,3 +5820,255 @@ class PostSubmitFlowTests(TestCase):
                 created_date=datetime.now(), last_changed_date=datetime.now())
         body = self.client.get('/edit_packet/{0}/'.format(self.packet.id)).content.decode()
         self.assertIn('optional here', body)
+
+
+
+class BonusDifficultyTagTests(TestCase):
+    """The "(emh)" shorthand at the end of a bonus's last answer line, which
+    sets every part's difficulty at once."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        self.ou = User.objects.create_user('bd_owner', password='pw', email='bd@test.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='bd dist')
+        DistributionEntry.objects.create(
+            distribution=self.dist, category='History', subcategory='American',
+            min_tossups=1, max_tossups=1, min_bonuses=1, max_bonuses=1)
+        self.qset = QuestionSet.objects.create(
+            name='BD Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+
+    def _parse(self, text):
+        tossups, bonuses, tu_errors, bs_errors = parse_packet_data(text.splitlines(), self.qset)
+        self.assertEqual(bs_errors, [], 'bonus failed to parse')
+        self.assertEqual(len(bonuses), 1)
+        return bonuses[0]
+
+    def _bonus_text(self, last_answer):
+        return ('Name these things related to a test. For 10 points each:\n'
+                '[10] Name this first thing.\n'
+                'ANSWER: _Spain_\n'
+                '[10] Name this second thing.\n'
+                'ANSWER: _Acadian_s\n'
+                '[10] Name this third thing.\n'
+                '{0}\n'.format(last_answer))
+
+    def test_tag_sets_each_part_in_order(self):
+        bonus = self._parse(self._bonus_text('ANSWER: Andrew _Jackson_ (emh)'))
+        self.assertEqual(
+            [bonus.part1_difficulty, bonus.part2_difficulty, bonus.part3_difficulty],
+            ['e', 'm', 'h'])
+
+    def test_tag_is_stripped_from_the_answer(self):
+        bonus = self._parse(self._bonus_text('ANSWER: Andrew _Jackson_ (emh)'))
+        self.assertEqual(bonus.part3_answer, 'Andrew _Jackson_')
+
+    def test_tag_works_alongside_a_category(self):
+        bonus = self._parse(self._bonus_text(
+            'ANSWER: Andrew _Jackson_ (emh) {History - American}'))
+        self.assertEqual(
+            [bonus.part1_difficulty, bonus.part2_difficulty, bonus.part3_difficulty],
+            ['e', 'm', 'h'])
+        self.assertEqual(bonus.part3_answer, 'Andrew _Jackson_')
+
+    def test_per_part_markers_win_over_the_tag(self):
+        text = ('Name these things related to a test. For 10 points each:\n'
+                '[10h] Name this first thing.\n'
+                'ANSWER: _Spain_\n'
+                '[10] Name this second thing.\n'
+                'ANSWER: _Acadian_s\n'
+                '[10] Name this third thing.\n'
+                'ANSWER: Andrew _Jackson_ (emh)\n')
+        bonus = self._parse(text)
+        self.assertEqual(
+            [bonus.part1_difficulty, bonus.part2_difficulty, bonus.part3_difficulty],
+            ['h', 'm', 'h'])
+
+    def test_an_ordinary_parenthetical_is_left_alone(self):
+        bonus = self._parse(self._bonus_text('ANSWER: Andrew _Jackson_ (1767-1845)'))
+        self.assertEqual(
+            [bonus.part1_difficulty, bonus.part2_difficulty, bonus.part3_difficulty],
+            ['', '', ''])
+        self.assertEqual(bonus.part3_answer, 'Andrew _Jackson_ (1767-1845)')
+
+    def test_a_bonus_without_the_tag_keeps_blank_difficulties(self):
+        bonus = self._parse(self._bonus_text('ANSWER: Andrew _Jackson_'))
+        self.assertEqual(
+            [bonus.part1_difficulty, bonus.part2_difficulty, bonus.part3_difficulty],
+            ['', '', ''])
+
+
+class DistributionVisibilityTests(TestCase):
+    """Distributions are private unless published: only public ones (and your
+    own) show up in the create-a-set picker, preview, or clone."""
+
+    def setUp(self):
+        from datetime import timedelta
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.mine_user = User.objects.create_user('dv_mine', password='pw', email='dv1@test.com')
+        self.mine = Writer.objects.get(user=self.mine_user)
+        self.other_user = User.objects.create_user('dv_other', password='pw', email='dv2@test.com')
+        self.other = Writer.objects.get(user=self.other_user)
+        # Accounts must be 2 days old to create sets or distributions.
+        old = timezone.now() - timedelta(days=5)
+        User.objects.filter(id__in=[self.mine_user.id, self.other_user.id]).update(date_joined=old)
+
+        self.own_dist = Distribution.objects.create(name='dv own', created_by=self.mine)
+        self.other_private = Distribution.objects.create(name='dv other private',
+                                                         created_by=self.other, public=False)
+        self.other_public = Distribution.objects.create(name='dv other public',
+                                                        created_by=self.other, public=True)
+        self.client.login(username='dv_mine', password='pw')
+
+    def test_visible_to_covers_own_and_public_only(self):
+        names = set(Distribution.visible_to(self.mine).values_list('name', flat=True))
+        self.assertIn('dv own', names)
+        self.assertIn('dv other public', names)
+        self.assertNotIn('dv other private', names)
+
+    def test_create_set_picker_hides_other_peoples_private_distributions(self):
+        body = self.client.get('/create_question_set/').content.decode()
+        self.assertIn('dv other public', body)
+        self.assertNotIn('dv other private', body)
+
+    def test_preview_of_a_private_distribution_is_refused(self):
+        ok = self.client.get('/distribution_preview/{0}/'.format(self.other_public.id))
+        self.assertEqual(json.loads(ok.content.decode())['ok'], True)
+        denied = self.client.get('/distribution_preview/{0}/'.format(self.other_private.id))
+        self.assertEqual(denied.status_code, 404)
+
+    def test_a_public_distribution_can_be_copied_but_not_edited(self):
+        resp = self.client.post('/clone_distribution/{0}/'.format(self.other_public.id))
+        self.assertEqual(resp.status_code, 302)
+        copy = Distribution.objects.get(name='dv other public (Copy)')
+        self.assertEqual(copy.created_by, self.mine)
+        # A copy is the copier's to publish, so it starts private.
+        self.assertFalse(copy.public)
+        # The source itself stays off-limits for editing.
+        body = self.client.get('/edit_distribution/{0}/'.format(self.other_public.id)).content.decode()
+        self.assertIn('You can only view or edit distributions', body)
+
+    def test_a_private_distribution_cannot_be_cloned(self):
+        resp = self.client.post('/clone_distribution/{0}/'.format(self.other_private.id))
+        self.assertIn('You can only clone', resp.content.decode())
+        self.assertFalse(Distribution.objects.filter(name__contains='(Copy)').exists())
+
+    def test_new_distributions_default_to_private(self):
+        self.client.post('/edit_distribution/', {
+            'name': 'dv brand new',
+            'distentry-TOTAL_FORMS': '1', 'distentry-INITIAL_FORMS': '0',
+            'distentry-MIN_NUM_FORMS': '0', 'distentry-MAX_NUM_FORMS': '1000',
+            'distentry-0-category': 'History', 'distentry-0-subcategory': 'American',
+            'distentry-0-min_tossups': '1', 'distentry-0-max_tossups': '1',
+            'distentry-0-min_bonuses': '1', 'distentry-0-max_bonuses': '1',
+        })
+        new_dist = Distribution.objects.get(name='dv brand new')
+        self.assertFalse(new_dist.public)
+
+    def test_publishing_a_distribution_shows_it_to_everyone(self):
+        self.own_dist.public = True
+        self.own_dist.save()
+        self.client.logout()
+        self.client.login(username='dv_other', password='pw')
+        names = set(Distribution.visible_to(self.other).values_list('name', flat=True))
+        self.assertIn('dv own', names)
+
+
+
+class ReferenceDataAdminTests(TestCase):
+    """Admin management of the bundled pronunciation dictionary and standard
+    answer lines: corrections are stored as overrides and the loaders pick them
+    up without the data files changing."""
+
+    def setUp(self):
+        from qems2.qsub import pron_dict, answer_db
+        self.admin_user = User.objects.create_superuser(
+            'rd_admin', password='pw', email='rd@test.com')
+        self.plain_user = User.objects.create_user(
+            'rd_plain', password='pw', email='rdp@test.com')
+        pron_dict.reset_cache()
+        answer_db.reset_cache()
+
+    def tearDown(self):
+        from qems2.qsub import pron_dict, answer_db
+        pron_dict.reset_cache()
+        answer_db.reset_cache()
+
+    def test_page_is_admin_only(self):
+        self.client.login(username='rd_plain', password='pw')
+        resp = self.client.get('/reference_data/pron/')
+        self.assertEqual(resp.status_code, 302)
+        self.client.login(username='rd_admin', password='pw')
+        self.assertEqual(self.client.get('/reference_data/pron/').status_code, 200)
+
+    def test_search_finds_a_bundled_pronunciation(self):
+        self.client.login(username='rd_admin', password='pw')
+        body = self.client.get('/reference_data/pron/?q=aachen').content.decode()
+        self.assertIn('AH-khen', body)
+
+    def test_fixing_a_pronunciation_changes_what_the_checker_suggests(self):
+        from qems2.qsub.pron_dict import suggest_guides
+        self.client.login(username='rd_admin', password='pw')
+        self.client.post('/reference_data/pron/save/', {
+            'key': 'aachen', 'term': 'Aachen', 'value': 'AH-ken', 'q': 'aachen'})
+        found = dict(suggest_guides('This city is Aachen and it is old.'))
+        self.assertEqual(found.get('Aachen'), 'AH-ken')
+
+    def test_adding_a_pronunciation_makes_it_suggestable(self):
+        from qems2.qsub.pron_dict import suggest_guides
+        self.client.login(username='rd_admin', password='pw')
+        self.client.post('/reference_data/pron/save/', {
+            'term': 'Qemsopolis', 'value': 'KEMZ-oh-poll-iss', 'q': ''})
+        found = dict(suggest_guides('They founded Qemsopolis in the spring.'))
+        self.assertEqual(found.get('Qemsopolis'), 'KEMZ-oh-poll-iss')
+
+    def test_withdrawing_a_pronunciation_stops_it_firing(self):
+        from qems2.qsub.pron_dict import suggest_guides
+        text = 'This city is Aachen and it is old.'
+        self.assertIn('Aachen', dict(suggest_guides(text)))
+        self.client.login(username='rd_admin', password='pw')
+        self.client.post('/reference_data/pron/suppress/', {
+            'key': 'aachen', 'term': 'Aachen', 'q': 'aachen'})
+        self.assertNotIn('Aachen', dict(suggest_guides(text)))
+
+    def test_restoring_hands_the_entry_back_to_the_bundled_data(self):
+        from qems2.qsub.pron_dict import suggest_guides
+        self.client.login(username='rd_admin', password='pw')
+        self.client.post('/reference_data/pron/save/', {
+            'key': 'aachen', 'term': 'Aachen', 'value': 'WRONG', 'q': 'aachen'})
+        self.assertEqual(dict(suggest_guides('Aachen is old.')).get('Aachen'), 'WRONG')
+        self.client.post('/reference_data/pron/suppress/', {
+            'key': 'aachen', 'term': 'Aachen', 'restore': '1', 'q': 'aachen'})
+        self.assertEqual(dict(suggest_guides('Aachen is old.')).get('Aachen'), 'AH-khen')
+        self.assertFalse(ReferenceDataOverride.objects.filter(key='aachen').exists())
+
+    def test_fixing_an_answer_line_changes_the_alternates_offered(self):
+        from qems2.qsub.answer_db import missing_alternates
+        self.client.login(username='rd_admin', password='pw')
+        self.client.post('/reference_data/answer/save/', {
+            'key': 'france', 'term': 'France',
+            'value': 'France [or the Hexagon]', 'q': 'france'})
+        head, missing = missing_alternates('_France_')
+        self.assertEqual(head, 'france')
+        self.assertEqual(missing, ['the Hexagon'])
+
+    def test_withdrawing_an_answer_line_stops_it_firing(self):
+        from qems2.qsub.answer_db import missing_alternates
+        self.assertTrue(missing_alternates('_France_')[1])
+        self.client.login(username='rd_admin', password='pw')
+        self.client.post('/reference_data/answer/suppress/', {
+            'key': 'france', 'term': 'France', 'q': 'france'})
+        self.assertEqual(missing_alternates('_France_'), ('', []))
+
+    def test_a_save_without_a_value_is_rejected(self):
+        self.client.login(username='rd_admin', password='pw')
+        self.client.post('/reference_data/pron/save/', {'term': 'Nothing', 'value': '', 'q': ''})
+        self.assertFalse(ReferenceDataOverride.objects.filter(term='Nothing').exists())
+
+    def test_a_plain_user_cannot_save_an_override(self):
+        self.client.login(username='rd_plain', password='pw')
+        self.client.post('/reference_data/pron/save/', {
+            'term': 'Sneaky', 'value': 'SNEE-kee', 'q': ''})
+        self.assertFalse(ReferenceDataOverride.objects.exists())

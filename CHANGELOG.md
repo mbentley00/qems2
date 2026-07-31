@@ -1,5 +1,38 @@
 # Changelog
 
+## 2026-07-31 — Distribution visibility, reference data admin, writing-flow fixes
+
+- **The "since your last visit" banner now opens the right page.** It counted
+  set-wide activity but linked to **My Activity**, which only ever lists your
+  own @mentions and changes to questions you wrote — so a correct banner could
+  land you on an empty page. It now opens **Recent Changes** windowed to that
+  visit (`/recap/<set>/?since=…`), which leaves out your own questions, edits
+  and comments exactly as the banner does, so the listing matches the count.
+- **Distributions can be public or private** (migration 0038). A new
+  *Publicly viewable* checkbox on the distribution page: a public distribution
+  is offered to everyone creating a set and can be previewed and copied by
+  anyone; a private one is visible only to people on a set that uses it, and to
+  whoever made it. Editing is always restricted to the latter group. New
+  distributions start private; the ones that already existed stay public, since
+  every distribution used to be offered to everyone. Public distributions from
+  other people are listed on the Distributions page and can be copied — a copy
+  starts private.
+- **Bonus part difficulties in one tag.** Ending a bonus's last answer line with
+  `(emh)` marks part 1 easy, part 2 medium and part 3 hard, instead of writing
+  `[10e]`/`[10m]`/`[10h]` per part. The tag is stripped from the answer, works
+  alongside a `{Category}` tag, and a per-part marker still wins where you've
+  written one. An ordinary parenthetical (`(1767-1845)`) is left alone.
+- **Reference data admin** (migration 0039). A new admin-only **Reference Data**
+  page manages the two bundled datasets the style checker reads — the verified
+  pronunciation dictionary and the standard answer lines. Search an entry, fix
+  it, add one that's missing, or withdraw one that shouldn't fire. Those files
+  are generated offline, so corrections are stored separately and layered on
+  top; they survive a rebuild of the bundled data and can be reverted per entry.
+- **Category tag picker on Type Questions is compact.** Each category is now one
+  row — heading on the left, its subcategories flowing beside it — instead of
+  three, and the tags read as labels rather than buttons that look like they
+  submit the form.
+
 ## 2026-07-29 — Set join links, YAPP2 packet format
 
 - **Join links for question sets** (migration 0037). A set owner can create a

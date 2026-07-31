@@ -508,9 +508,36 @@ class Distribution(models.Model):
     # Null on distributions that predate this field — shown as unknown rather
     # than backfilled with a misleading migration timestamp.
     created_date = models.DateTimeField(null=True, blank=True)
+    # A public distribution is offered to everyone in the create-a-set picker
+    # and can be previewed and cloned by any logged-in user; a private one is
+    # visible only to people on a set that uses it, and to whoever made it.
+    # Editing is always restricted to the latter group either way.
+    # Distributions that predate this field were all effectively public, so the
+    # migration that adds it leaves them public.
+    public = models.BooleanField(default=False)
 
     def __str__(self):
         return '{0!s}'.format(self.name)
+
+    @staticmethod
+    def member_ids(writer):
+        """Ids of the distributions `writer` may view *and edit*: those attached
+        to a set they belong to (owner, co-owner, editor or writer), plus any
+        they created but haven't attached to a set yet."""
+        sets = (QuestionSet.objects.filter(owner=writer)
+                | writer.question_set_editor.all()
+                | writer.question_set_writer.all()
+                | writer.co_owned_sets.all())
+        ids = set(sets.values_list('distribution_id', flat=True))
+        ids |= set(Distribution.objects.filter(created_by=writer).values_list('id', flat=True))
+        ids.discard(None)
+        return ids
+
+    @classmethod
+    def visible_to(cls, writer):
+        """Distributions `writer` may pick, preview or clone: their own plus
+        every public one."""
+        return cls.objects.filter(models.Q(public=True) | models.Q(id__in=cls.member_ids(writer)))
 
     def entry_summary(self):
         """Per-top-level-category totals of the per-packet minimums/maximums,
@@ -1799,3 +1826,48 @@ class DiscordThread(models.Model):
     def __str__(self):
         return 'Discord thread {0!s}'.format(self.url)
 
+
+
+class ReferenceDataOverride(models.Model):
+    """An admin correction to one of the bundled reference datasets — the
+    verified pronunciation dictionary (``qsub/data/pronunciations.json``) and the
+    standard answer lines (``qsub/data/answer_alternates.jsonl``) that the style
+    checker reads.
+
+    Those files are generated offline and shipped with the app, so they can't be
+    edited in place. A row here layers on top of one: it adds an entry the file
+    doesn't have, replaces a wrong one, or (with ``suppressed``) withdraws a
+    bundled entry that shouldn't fire at all. The loaders in ``pron_dict`` and
+    ``answer_db`` merge these in and notice new edits within a minute.
+
+    ``key`` is the dataset's own lookup key — ``pron_dict.normalize_term(term)``
+    for pronunciations, ``answer_db.norm_key(answer)`` for answer lines — so an
+    override lines up with the bundled entry it is correcting.
+    """
+
+    PRONUNCIATION = 'pron'
+    ANSWER_LINE = 'answer'
+    DATASET_CHOICES = ((PRONUNCIATION, 'Pronunciation guide'),
+                       (ANSWER_LINE, 'Answer line'))
+
+    dataset = models.CharField(max_length=10, choices=DATASET_CHOICES)
+    key = models.CharField(max_length=300)
+    # Pronunciations: the headword as it should display, and its respelling.
+    # Answer lines: the head answer, and the full standard line in `value`
+    # ("France [or the French Republic or ...]") — the same shape as the
+    # bundled file's best_core, so the parsing is shared.
+    term = models.CharField(max_length=300, blank=True, default='')
+    value = models.TextField(blank=True, default='')
+    # A suppressed row hides the bundled entry instead of replacing it.
+    suppressed = models.BooleanField(default=False)
+    note = models.TextField(blank=True, default='')
+    changed_by = models.ForeignKey('Writer', on_delete=models.SET_NULL, null=True, blank=True,
+                                   related_name='reference_data_edits')
+    changed_date = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('dataset', 'key')
+        ordering = ['dataset', 'key']
+
+    def __str__(self):
+        return '{0} override: {1}'.format(self.get_dataset_display(), self.term or self.key)

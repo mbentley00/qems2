@@ -31,6 +31,12 @@
             {{ form.name.errors }}
         {% endif %}
     </div>
+    <div class="dist-visibility-field">
+        <label for="{{ form.public.id_for_label }}">
+            {{ form.public }} {{ form.public.label }}
+        </label>
+        <p class="dist-visibility-help">{{ form.public.help_text }}</p>
+    </div>
     <table class="table-striped table-hover sticky-head" id="distribution-table">
         <thead>
         <tr>
@@ -68,5 +74,12 @@
         <input type="submit" value="Submit Changes" class="button primary right" />
     </div>
 </form>
+
+<style>
+.dist-visibility-field { margin: 0.6rem 0 1rem; }
+.dist-visibility-field label { font-weight: bold; display: inline-block; margin: 0; }
+.dist-visibility-field input[type="checkbox"] { margin: 0 0.35em 0 0; vertical-align: baseline; }
+.dist-visibility-help { margin: 0.15rem 0 0 1.6em; font-size: 0.85em; color: #8a8f9c; }
+</style>
 
 {% endblock %}

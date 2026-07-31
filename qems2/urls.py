@@ -30,6 +30,11 @@ urlpatterns = [
     re_path(r'^question_sets/$', question_sets),
     re_path(r'^import_set/$', import_set),
     re_path(r'^import_packets/$', import_packets),
+    # Admin-only management of the bundled pronunciation / answer-line data
+    re_path(r'^reference_data/$', reference_data),
+    re_path(r'^reference_data/(?P<dataset>pron|answer)/$', reference_data),
+    re_path(r'^reference_data/(?P<dataset>pron|answer)/save/$', reference_data_save),
+    re_path(r'^reference_data/(?P<dataset>pron|answer)/suppress/$', reference_data_suppress),
     re_path(r'^create_question_set/$', create_question_set),
     re_path(r'^edit_question_set/(?P<qset_id>[0-9]+)/$', edit_question_set),
     re_path(r'^packetize_set/(?P<qset_id>[0-9]+)/$', packetize_set),

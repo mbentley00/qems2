@@ -25,6 +25,11 @@ vhsl_bpart_regex = r'^\[V\d+\]'
 category_regex = r'\{(.+)}'
 bonus_value_regex = r'\[|\]|\(|\)'
 difficulty_regex = r'\[(\d+)([emh]?)\]'
+# A shorthand for a whole bonus's part difficulties, written at the end of the
+# last answer line: "(emh)" means part 1 easy, part 2 medium, part 3 hard. Two
+# letters minimum so an ordinary parenthetical at the end of an answer (a note,
+# a date) isn't mistaken for one.
+bonus_difficulty_tag_regex = r'\(([emh]{2,3})\)\s*$'
 
 def is_answer(line):
 
@@ -70,7 +75,18 @@ def get_bonus_part_difficulty(line):
     match = re.search(difficulty_regex, line)
     if match:
         return match.group(2)
-    return ''     
+    return ''
+
+def get_bonus_difficulty_tag(line):
+    """The "(emh)" shorthand at the end of an answer line, as the string 'emh',
+    or '' when there isn't one."""
+
+    match = re.search(bonus_difficulty_tag_regex, line.rstrip())
+    return match.group(1) if match else ''
+
+def remove_bonus_difficulty_tag(line):
+
+    return re.sub(bonus_difficulty_tag_regex, '', line.rstrip()).rstrip()
 
 def parse_packet_data(data, question_set):
 
@@ -153,6 +169,7 @@ def parse_packet_data(data, question_set):
             difficulties = []
             leadin = ''
             category = ''
+            difficulty_tag = ''
             while question_stack != []:
                 bonus_line = question_stack.pop()
                 # print "Bonus Line from question stack: " + bonus_line
@@ -173,7 +190,17 @@ def parse_packet_data(data, question_set):
                     if (tempCategory != ''):
                         category = tempCategory
                         answer = remove_category(answer)
-                    
+
+                    # "(emh)" at the end of an answer line gives every part's
+                    # difficulty at once. The stack pops bottom-up, so the first
+                    # one seen is the one on the last answer line — where it's
+                    # meant to go — and it wins if someone tagged more than one.
+                    tag = get_bonus_difficulty_tag(answer)
+                    if tag:
+                        answer = remove_bonus_difficulty_tag(answer)
+                        if not difficulty_tag:
+                            difficulty_tag = tag
+
                     answers.append(answer)
                 else:
                     # print "Is Leadin"
@@ -182,6 +209,14 @@ def parse_packet_data(data, question_set):
             values.reverse()
             answers.reverse()
             difficulties.reverse()
+
+            # Fill in from the "(emh)" shorthand, one letter per part in order.
+            # A per-part marker ([10e]) is more specific, so it stays put.
+            for idx, letter in enumerate(difficulty_tag):
+                while len(difficulties) <= idx:
+                    difficulties.append('')
+                if not difficulties[idx]:
+                    difficulties[idx] = letter
 
             # print leadin
             # print parts

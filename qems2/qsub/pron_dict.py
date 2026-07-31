@@ -11,6 +11,8 @@ import json
 import os
 import re
 
+from . import reference_overrides as overrides
+
 DATA_PATH = os.path.join(os.path.dirname(__file__), 'data', 'pronunciations.json')
 
 # A word token: a run of (unicode) letters, allowing internal apostrophes and
@@ -46,16 +48,31 @@ def _load_raw():
         return json.load(fh)
 
 
+def _load_entries():
+    """The dictionary the matcher and the admin screens work from: the bundled
+    file with any admin overrides applied ({key: {'term', 'pron', 'source'}}).
+    `source` is 'bundled', 'edited' (an override replacing a bundled entry) or
+    'added'. Suppressed entries are dropped."""
+    entries = {k: dict(v, source='bundled') for k, v in _load_raw().items()}
+    for key, term, value, suppressed in overrides.rows(overrides.PRONUNCIATION):
+        if suppressed:
+            entries.pop(key, None)
+        else:
+            entries[key] = {'term': term, 'pron': value,
+                            'source': 'edited' if key in entries else 'added'}
+    return entries
+
+
 def _matcher():
     """Build (and cache) the phrase matcher: first-token -> list of
     (phrase_token_tuple, term, pron), each list sorted longest-phrase-first so a
     greedy scan prefers the most specific match."""
     global _MATCHER
-    if _MATCHER is not None:
+    if _MATCHER is not None and _MATCHER[2] == overrides.stamp(overrides.PRONUNCIATION):
         return _MATCHER
     by_first = {}
     max_len = 1
-    for key, info in _load_raw().items():
+    for key, info in _load_entries().items():
         tokens = tuple(normalize_term(tok) for tok in _WORD_RE.findall(key))
         if not tokens:
             continue
@@ -63,14 +80,33 @@ def _matcher():
         by_first.setdefault(tokens[0], []).append((tokens, info['term'], info['pron']))
     for lst in by_first.values():
         lst.sort(key=lambda x: len(x[0]), reverse=True)
-    _MATCHER = (by_first, max_len)
+    _MATCHER = (by_first, max_len, overrides.stamp(overrides.PRONUNCIATION))
     return _MATCHER
 
 
 def reset_cache():
-    """Drop the cached matcher (used by tests after regenerating data)."""
+    """Drop the cached matcher (used by tests after regenerating data, and by
+    the admin screens right after an override is saved)."""
     global _MATCHER
     _MATCHER = None
+    overrides.reset_stamp()
+
+
+def search(query, limit=50):
+    """Dictionary entries whose headword contains `query`, for the admin
+    reference-data screen. Returns dicts with key/term/pron/source, headword
+    order, plus the total number of matches (which may exceed `limit`)."""
+    q = normalize_term(query)
+    entries = _load_entries()
+    matched = [dict(info, key=key) for key, info in entries.items() if not q or q in key]
+    matched.sort(key=lambda e: e['key'])
+    return matched[:limit], len(matched)
+
+
+def get_entry(key):
+    """One dictionary entry by key, or None."""
+    info = _load_entries().get(key)
+    return dict(info, key=key) if info else None
 
 
 def guide_opener_at(text, pos):
@@ -94,7 +130,7 @@ def _iter_guide_matches(text):
     `text` that do not already carry a pronunciation guide. Each term is yielded
     at most once. start/end are character offsets into `text`. `text` should be
     readable plain text (markup/HTML stripped)."""
-    by_first, max_len = _matcher()
+    by_first, max_len, _stamp = _matcher()
     if not by_first:
         return
 
