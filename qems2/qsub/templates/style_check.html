@@ -141,6 +141,11 @@
             margin-bottom:0.6rem; display:flex; align-items:center; flex-wrap:wrap; gap:0.4rem; }
 .bulk-bar .sc-bulk-label { color:#777; font-size:0.8rem; margin-left:0.3rem; }
 .bulk-bar .button { margin:0; }
+/* Foundation gives checkboxes a 1rem bottom margin, which lifted the box above
+   the "Select all" text it belongs to. Pair them in their own flex row so the
+   box and its label are centered on each other, at the bar's own text size. */
+.bulk-bar .sc-inline { display:flex; align-items:center; gap:0.35em; margin:0; font-size:0.85rem; }
+.bulk-bar input[type="checkbox"] { margin:0; }
 
 .sc-q { border:1px solid #e8e8e8; border-radius:4px; padding:0.35rem 0.6rem; margin-bottom:0.3rem; }
 .sc-q-head { font-size:0.9rem; line-height:1.3; }

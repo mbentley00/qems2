@@ -1084,3 +1084,20 @@ html[data-theme="dark"] .category-tag-btn:focus {
 }
 html[data-theme="dark"] .category-tree-arrow,
 html[data-theme="dark"] .category-tree-count { color: var(--qx-muted); }
+
+/* A commenter's editor tags for the set, shown beside their name in a thread so
+   it's clear when the person asking for a change is that category's editor. */
+.commenter-tag {
+    display: inline-block;
+    margin-left: 0.4em;
+    padding: 0.05em 0.45em;
+    font-size: 0.7rem;
+    font-weight: normal;
+    letter-spacing: 0.02em;
+    line-height: 1.5;
+    vertical-align: 0.08em;
+    color: #5b21b6;
+    background: #efe6fb;
+    border-radius: 9px;
+}
+html[data-theme="dark"] .commenter-tag { background: #2a2147; color: #c4b5fd; }

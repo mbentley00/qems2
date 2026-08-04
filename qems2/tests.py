@@ -2083,21 +2083,28 @@ class UnpacketizedAssignmentTests(TestCase):
         self.assertIsNone(self.placed.packet_id)
         self.assertIsNone(self.placed.question_number)
 
+    def _grid_tables(self):
+        """Just the grid tables. The page's CSS and its live-refresh JS both
+        mention the tag classes, so a whole-page substring check would always
+        match — only the rendered cells answer "is this question tagged?"."""
+        body = self.client.get('/packet_grid/{0}/'.format(self.qset.id)).content.decode()
+        return ''.join(chunk.split('</table>')[0]
+                       for chunk in body.split('<table class="packet-grid"')[1:])
+
     def test_grid_shows_edited_and_proofread_tags(self):
         self.placed.edited = True
         self.placed.proofread = True
         self.placed.save()
-        body = self.client.get('/packet_grid/{0}/'.format(self.qset.id)).content.decode()
-        # The rendered spans (the bare class names also appear in the page CSS).
-        self.assertIn('cell-tag tag-edited', body)
-        self.assertIn('cell-tag tag-proofread', body)
+        tables = self._grid_tables()
+        self.assertIn('cell-tag tag-edited', tables)
+        self.assertIn('cell-tag tag-proofread', tables)
         # An untouched question shows neither tag.
         self.placed.edited = False
         self.placed.proofread = False
         self.placed.save()
-        body = self.client.get('/packet_grid/{0}/'.format(self.qset.id)).content.decode()
-        self.assertNotIn('cell-tag tag-edited', body)
-        self.assertNotIn('cell-tag tag-proofread', body)
+        tables = self._grid_tables()
+        self.assertNotIn('cell-tag tag-edited', tables)
+        self.assertNotIn('cell-tag tag-proofread', tables)
 
     def test_grid_shows_unpacketized(self):
         self._tu('lonely')
@@ -3502,13 +3509,20 @@ class PgAnnotationTests(TestCase):
 
     def test_docx_runs_color_target_words(self):
         from docx import Document
-        from qems2.qsub.views import add_qems_formatted_runs
+        from docx.shared import RGBColor
+        from qems2.qsub.views import (add_qems_formatted_runs, PRONUNCIATION_GUIDE_COLOR)
         doc = Document()
         p = add_qems_formatted_runs(doc.add_paragraph(), 'Denis \\PDiderot\\P ("DID-er-OW") wrote.')
         texts = ''.join(r.text for r in p.runs)
         self.assertNotIn('\\P', texts)
-        colored = [r for r in p.runs if r.font.color and r.font.color.rgb is not None]
-        self.assertEqual([r.text for r in colored], ['Diderot'])
+        # The anchored word is teal; the guide beside it is the gray aside. Both
+        # are colored, so match on the color rather than on "is colored at all".
+        teal = [r.text for r in p.runs
+                if r.font.color and r.font.color.rgb == RGBColor(0x0B, 0x72, 0x85)]
+        self.assertEqual(teal, ['Diderot'])
+        gray = [r.text for r in p.runs
+                if r.font.color and r.font.color.rgb == PRONUNCIATION_GUIDE_COLOR]
+        self.assertEqual(gray, ['("DID-er-OW")'])
 
     def test_style_checker_plain_strips_markers(self):
         from qems2.qsub.style_checker import _plain
@@ -4458,8 +4472,12 @@ class Yapp2AnchorTests(TestCase):
         return yapp_export.packet_to_yapp([TU(), PlainTU()], [BN()], version=version)
 
     def test_version_marker_only_on_yapp2(self):
+        from qems2.qsub import yapp_export
         self.assertNotIn('version', self._packet(1))
-        self.assertEqual(self._packet(2)['version'], 'yapp2/1.0')
+        # Asserted against the constant, not a literal: minor bumps are routine
+        # (readers match on the prefix), and this test isn't about the number.
+        self.assertEqual(self._packet(2)['version'], yapp_export.YAPP2_VERSION)
+        self.assertTrue(yapp_export.YAPP2_VERSION.startswith('yapp2/'))
 
     def test_canonical_fields_are_identical_between_versions(self):
         v1, v2 = self._packet(1), self._packet(2)
@@ -4562,8 +4580,9 @@ class Yapp2ExportViewTests(TestCase):
         return self._json.loads(zf.read('Packet 1.json').decode('utf-8'))
 
     def test_yapp2_route_marks_version_and_anchors(self):
+        from qems2.qsub import yapp_export
         data = self._payload('yapp2-json')
-        self.assertEqual(data['version'], 'yapp2/1.0')
+        self.assertEqual(data['version'], yapp_export.YAPP2_VERSION)
         self.assertEqual(data['name'], 'Packet 1')
         t = data['tossups'][0]
         self.assertNotIn('<pg>', t['question'])
@@ -6107,3 +6126,612 @@ class TemplateCommentTests(TestCase):
             offenders, [],
             'Multi-line {# #} renders as visible text; use a comment block instead: '
             + ', '.join(offenders))
+
+
+
+class CommentHistoryTests(TestCase):
+    """Deleting a comment only hides it from the editing page; the question's
+    History page keeps the whole discussion, deleted comments included."""
+
+    def setUp(self):
+        from django.contrib.sites.models import Site
+        from django_comments.models import Comment as _C
+        self.Comment = _C
+        self.site = Site.objects.get_current()
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        self.acf_tu = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.acf_bn = QuestionType.objects.get(question_type=ACF_STYLE_BONUS)
+        self.ou = User.objects.create_user('ch_owner', password='pw', email='ch@test.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='ch dist')
+        self.qset = QuestionSet.objects.create(
+            name='CH Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.owner.question_set_editor.add(self.qset)
+        self.tu = Tossup(
+            author=self.owner, question_set=self.qset, question_type=self.acf_tu,
+            tossup_text='A stem. (*) The end.', tossup_answer='_Photosynthesis_',
+            question_number=1)
+        self.tu.save_question(edit_type=QUESTION_CREATE, changer=self.owner)
+        self.bn = Bonus(
+            author=self.owner, question_set=self.qset, question_type=self.acf_bn,
+            leadin='Name these.', part1_text='P1', part1_answer='_Alpha_',
+            part2_text='P2', part2_answer='_Beta_', part3_text='P3', part3_answer='_Gamma_',
+            question_number=1)
+        self.bn.save_question(edit_type=QUESTION_CREATE, changer=self.owner)
+        self.tu_ct = ContentType.objects.get_for_model(Tossup)
+        self.client.login(username='ch_owner', password='pw')
+
+    def _comment(self, text, removed=False, obj=None):
+        obj = obj or self.tu
+        return self.Comment.objects.create(
+            content_type=ContentType.objects.get_for_model(obj), object_pk=str(obj.id),
+            site=self.site, user=self.ou, comment=text,
+            is_public=True, is_removed=removed)
+
+    def test_history_shows_a_deleted_comment(self):
+        self._comment('still here')
+        self._comment('deleted but remembered', removed=True)
+        body = self.client.get('/tossup_history/{0}/'.format(self.tu.id)).content.decode()
+        self.assertIn('still here', body)
+        self.assertIn('deleted but remembered', body)
+        self.assertIn('Deleted', body)
+
+    def test_the_edit_page_still_hides_deleted_comments(self):
+        self._comment('deleted but remembered', removed=True)
+        body = self.client.get('/edit_tossup/{0}/'.format(self.tu.id)).content.decode()
+        self.assertNotIn('deleted but remembered', body)
+
+    def test_deleting_through_the_view_keeps_the_text(self):
+        c = self._comment('say something')
+        self.client.post('/delete_comment/', {'comment_id': c.id, 'qset_id': self.qset.id})
+        c.refresh_from_db()
+        self.assertTrue(c.is_removed)
+        self.assertEqual(c.comment, 'say something')
+        body = self.client.get('/tossup_history/{0}/'.format(self.tu.id)).content.decode()
+        self.assertIn('say something', body)
+
+    def test_bonus_history_shows_deleted_comments_too(self):
+        self._comment('bonus talk', removed=True, obj=self.bn)
+        body = self.client.get('/bonus_history/{0}/'.format(self.bn.id)).content.decode()
+        self.assertIn('bonus talk', body)
+
+    def test_a_question_with_no_comments_says_so(self):
+        body = self.client.get('/tossup_history/{0}/'.format(self.tu.id)).content.decode()
+        self.assertIn('No one has commented', body)
+
+
+class GridAnswerPreviewTests(TestCase):
+    """Compact answer previews (packet grid, activity, search) drop
+    parentheticals — pronunciation guides above all — which would otherwise
+    crowd out the answer in a narrow cell."""
+
+    def test_pronunciation_guide_is_dropped(self):
+        from qems2.qsub.views import _grid_answer_preview
+        self.assertEqual(
+            _grid_answer_preview('_Johann Wolfgang von Goethe_ ("GUR-tuh")'),
+            'Johann Wolfgang von Goethe')
+
+    def test_trailing_note_is_dropped(self):
+        from qems2.qsub.views import _grid_answer_preview
+        self.assertEqual(_grid_answer_preview('Andrew _Jackson_ (1767-1845)'),
+                         'Andrew Jackson')
+
+    def test_escaped_parentheses_are_kept_as_characters(self):
+        from qems2.qsub.utils import strip_parentheticals
+        self.assertEqual(strip_parentheticals(r'the \(Great\) Gatsby'),
+                         'the (Great) Gatsby')
+
+    def test_nested_guides_go_too(self):
+        from qems2.qsub.utils import strip_parentheticals
+        self.assertEqual(strip_parentheticals('Ceuta (SAY-oo-tah (or SEW-tah))'), 'Ceuta')
+
+    def test_spacing_and_punctuation_are_tidied(self):
+        from qems2.qsub.utils import strip_parentheticals
+        self.assertEqual(strip_parentheticals('Milan (mi-LAHN), Italy'), 'Milan, Italy')
+
+    def test_an_answer_without_parens_is_untouched(self):
+        from qems2.qsub.views import _grid_answer_preview
+        self.assertEqual(_grid_answer_preview('_Photosynthesis_'), 'Photosynthesis')
+
+
+class InterlacedExportTests(TestCase):
+    """The Word/PDF export can interlace tossups and bonuses — tossup 1,
+    bonus 1, tossup 2 … — the order they're read at a tournament."""
+
+    def setUp(self):
+        import io as _io
+        import zipfile as _zip
+        from docx import Document as _Doc
+        self._io, self._zip, self._Doc = _io, _zip, _Doc
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        self.acf_tu = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.acf_bn = QuestionType.objects.get(question_type=ACF_STYLE_BONUS)
+        self.ou = User.objects.create_user('il_owner', password='pw', email='il@test.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='il dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='Science', subcategory='Biology')
+        self.qset = QuestionSet.objects.create(
+            name='IL Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.owner.question_set_editor.add(self.qset)
+        self.packet = Packet.objects.create(
+            question_set=self.qset, packet_name='Packet 1', created_by=self.owner)
+        for n in (1, 2):
+            Tossup.objects.create(
+                author=self.owner, question_set=self.qset, packet=self.packet,
+                question_type=self.acf_tu, category=self.de, question_number=n,
+                tossup_text='Tossup {0} stem. (*) end.'.format(n),
+                tossup_answer='_TossupAnswer{0}_'.format(n),
+                created_date=datetime.now(), last_changed_date=datetime.now())
+            Bonus.objects.create(
+                author=self.owner, question_set=self.qset, packet=self.packet,
+                question_type=self.acf_bn, category=self.de, question_number=n,
+                leadin='Bonus {0} leadin.'.format(n),
+                part1_text='P1', part1_answer='_BonusAnswer{0}_'.format(n),
+                part2_text='P2', part2_answer='_Beta_', part3_text='P3', part3_answer='_Gamma_',
+                created_date=datetime.now(), last_changed_date=datetime.now())
+        self.client.login(username='il_owner', password='pw')
+
+    def _packet_text(self, query):
+        resp = self.client.get(
+            '/export_question_set/{0}/docx-packetized/{1}'.format(self.qset.id, query))
+        self.assertEqual(resp.status_code, 200)
+        zf = self._zip.ZipFile(self._io.BytesIO(resp.content))
+        doc = self._Doc(self._io.BytesIO(zf.read('Packet 1.docx')))
+        return [p.text for p in doc.paragraphs]
+
+    def _order(self, paragraphs, needles):
+        return [min(i for i, p in enumerate(paragraphs) if n in p) for n in needles]
+
+    def test_default_export_keeps_tossups_then_bonuses(self):
+        paras = self._packet_text('')
+        joined = '\n'.join(paras)
+        self.assertIn('Tossups', joined)
+        self.assertIn('Bonuses', joined)
+        t1, t2, b1 = self._order(paras, ['Tossup 1 stem', 'Tossup 2 stem', 'Bonus 1 leadin'])
+        self.assertLess(t2, b1)   # every tossup precedes every bonus
+
+    def test_interlaced_export_alternates(self):
+        paras = self._packet_text('?opts=1&interlace=1')
+        t1, b1, t2, b2 = self._order(
+            paras, ['Tossup 1 stem', 'Bonus 1 leadin', 'Tossup 2 stem', 'Bonus 2 leadin'])
+        self.assertLess(t1, b1)
+        self.assertLess(b1, t2)
+        self.assertLess(t2, b2)
+        joined = '\n'.join(paras)
+        self.assertIn('Questions', joined)
+        self.assertNotIn('Tossups', joined)
+
+    def test_interlaced_pdf_renders(self):
+        resp = self.client.get(
+            '/export_question_set/{0}/pdf/?opts=1&interlace=1'.format(self.qset.id))
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.content.startswith(b'%PDF'))
+
+    def test_uneven_counts_still_export_everything(self):
+        # One extra tossup with no bonus to pair with: it still gets written.
+        Tossup.objects.create(
+            author=self.owner, question_set=self.qset, packet=self.packet,
+            question_type=self.acf_tu, category=self.de, question_number=3,
+            tossup_text='Tossup 3 stem. (*) end.', tossup_answer='_TossupAnswer3_',
+            created_date=datetime.now(), last_changed_date=datetime.now())
+        joined = '\n'.join(self._packet_text('?opts=1&interlace=1'))
+        for needle in ('Tossup 1 stem', 'Tossup 2 stem', 'Tossup 3 stem',
+                       'Bonus 1 leadin', 'Bonus 2 leadin'):
+            self.assertIn(needle, joined)
+
+
+class EditPacketTitleTests(TestCase):
+    """The Edit Packet tab/title names the packet, so several open packets are
+    tellable apart."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('ep_owner', password='pw', email='ep@test.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='ep dist')
+        self.qset = QuestionSet.objects.create(
+            name='EP Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.owner.question_set_editor.add(self.qset)
+        self.packet = Packet.objects.create(
+            question_set=self.qset, packet_name='Rutgers A', created_by=self.owner)
+        self.client.login(username='ep_owner', password='pw')
+
+    def test_title_has_the_packet_name(self):
+        body = self.client.get('/edit_packet/{0}/'.format(self.packet.id)).content.decode()
+        self.assertIn('<title>Rutgers A - Edit Packet - QEMS3</title>', body)
+
+
+
+class Yapp2ReadingOrderTests(TestCase):
+    """YAPP2 1.1's `readingOrder`: an optional top-level list saying the packet
+    interlaces tossups and bonuses. It only points at the canonical arrays, so a
+    reader that ignores it still gets every question."""
+
+    def setUp(self):
+        import io as _io
+        import json as _json
+        import zipfile as _zip
+        self._io, self._json, self._zip = _io, _json, _zip
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        self.acf_tu = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.acf_bn = QuestionType.objects.get(question_type=ACF_STYLE_BONUS)
+        self.ou = User.objects.create_user('ro_owner', password='pw', email='ro@test.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='ro dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='Science', subcategory='Biology')
+        self.qset = QuestionSet.objects.create(
+            name='RO Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.owner.question_set_editor.add(self.qset)
+        self.packet = Packet.objects.create(
+            question_set=self.qset, packet_name='Packet 1', created_by=self.owner)
+        for n in (1, 2):
+            Tossup.objects.create(
+                author=self.owner, question_set=self.qset, packet=self.packet,
+                question_type=self.acf_tu, category=self.de, question_number=n,
+                tossup_text='Tossup {0} stem. (*) end.'.format(n),
+                tossup_answer='_Answer{0}_'.format(n),
+                created_date=datetime.now(), last_changed_date=datetime.now())
+            Bonus.objects.create(
+                author=self.owner, question_set=self.qset, packet=self.packet,
+                question_type=self.acf_bn, category=self.de, question_number=n,
+                leadin='Bonus {0} leadin.'.format(n),
+                part1_text='P1', part1_answer='_Alpha_',
+                part2_text='P2', part2_answer='_Beta_',
+                part3_text='P3', part3_answer='_Gamma_',
+                created_date=datetime.now(), last_changed_date=datetime.now())
+        self.client.login(username='ro_owner', password='pw')
+
+    def _payload(self, query=''):
+        resp = self.client.get(
+            '/export_question_set/{0}/yapp2-json/{1}'.format(self.qset.id, query))
+        self.assertEqual(resp.status_code, 200)
+        zf = self._zip.ZipFile(self._io.BytesIO(resp.content))
+        return self._json.loads(zf.read('Packet 1.json').decode('utf-8'))
+
+    def test_order_helper_alternates(self):
+        from qems2.qsub.yapp_export import interlaced_reading_order
+        self.assertEqual(
+            interlaced_reading_order(2, 2),
+            [{'type': 'tossup', 'index': 0}, {'type': 'bonus', 'index': 0},
+             {'type': 'tossup', 'index': 1}, {'type': 'bonus', 'index': 1}])
+
+    def test_order_helper_covers_uneven_counts_exactly_once(self):
+        from qems2.qsub.yapp_export import interlaced_reading_order
+        order = interlaced_reading_order(3, 1)
+        self.assertEqual(len(order), 4)
+        self.assertEqual(sorted((e['type'], e['index']) for e in order),
+                         [('bonus', 0), ('tossup', 0), ('tossup', 1), ('tossup', 2)])
+
+    def test_absent_by_default(self):
+        self.assertNotIn('readingOrder', self._payload())
+
+    def test_present_when_interlacing_is_asked_for(self):
+        data = self._payload('?opts=1&interlace=1')
+        self.assertEqual(
+            data['readingOrder'],
+            [{'type': 'tossup', 'index': 0}, {'type': 'bonus', 'index': 0},
+             {'type': 'tossup', 'index': 1}, {'type': 'bonus', 'index': 1}])
+
+    def test_it_only_reorders_the_questions_are_untouched(self):
+        plain = self._payload()
+        interlaced = self._payload('?opts=1&interlace=1')
+        self.assertEqual(plain['tossups'], interlaced['tossups'])
+        self.assertEqual(plain['bonuses'], interlaced['bonuses'])
+
+    def test_every_question_is_referenced_exactly_once(self):
+        data = self._payload('?opts=1&interlace=1')
+        refs = sorted((e['type'], e['index']) for e in data['readingOrder'])
+        expected = sorted([('tossup', i) for i in range(len(data['tossups']))] +
+                          [('bonus', i) for i in range(len(data['bonuses']))])
+        self.assertEqual(refs, expected)
+
+    def test_plain_yapp_never_carries_it(self):
+        # Version 1 has no way to express reading order, so the option is ignored
+        # rather than written into a file that doesn't declare YAPP2.
+        resp = self.client.get(
+            '/export_question_set/{0}/yapp-json/?opts=1&interlace=1'.format(self.qset.id))
+        zf = self._zip.ZipFile(self._io.BytesIO(resp.content))
+        data = self._json.loads(zf.read('Packet 1.json').decode('utf-8'))
+        self.assertNotIn('readingOrder', data)
+        self.assertNotIn('version', data)
+
+
+
+class CommenterTagTests(TestCase):
+    """A commenter's editor tags for the set show next to their name in comment
+    threads, so it's clear when the person asking for a change edits that
+    category."""
+
+    def setUp(self):
+        from django.contrib.sites.models import Site
+        from django_comments.models import Comment as _C
+        self.Comment = _C
+        self.site = Site.objects.get_current()
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf_tu = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('ct_owner', password='pw', email='ct@test.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.eu = User.objects.create_user('ct_editor', password='pw', email='cte@test.com')
+        self.editor = Writer.objects.get(user=self.eu)
+        self.dist = Distribution.objects.create(name='ct dist')
+        self.qset = QuestionSet.objects.create(
+            name='CT Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.owner.question_set_editor.add(self.qset)
+        self.editor.question_set_editor.add(self.qset)
+        self.other_set = QuestionSet.objects.create(
+            name='CT Other', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.tu = Tossup(
+            author=self.owner, question_set=self.qset, question_type=self.acf_tu,
+            tossup_text='A stem. (*) The end.', tossup_answer='_Photosynthesis_',
+            question_number=1)
+        self.tu.save_question(edit_type=QUESTION_CREATE, changer=self.owner)
+        self.client.login(username='ct_owner', password='pw')
+
+    def _comment(self, user, text='look at this'):
+        return self.Comment.objects.create(
+            content_type=ContentType.objects.get_for_model(Tossup),
+            object_pk=str(self.tu.id), site=self.site, user=user, comment=text,
+            is_public=True, is_removed=False)
+
+    def test_tag_shows_next_to_the_commenter(self):
+        EditorTag.objects.create(question_set=self.qset, editor=self.editor,
+                                 category='Science - Biology')
+        self._comment(self.eu)
+        body = self.client.get('/edit_tossup/{0}/'.format(self.tu.id)).content.decode()
+        self.assertIn('class="commenter-tag">Science - Biology<', body)
+
+    def test_freeform_tags_show_too(self):
+        EditorTag.objects.create(question_set=self.qset, editor=self.editor,
+                                 label='Head editor')
+        self._comment(self.eu)
+        body = self.client.get('/edit_tossup/{0}/'.format(self.tu.id)).content.decode()
+        self.assertIn('class="commenter-tag">Head editor<', body)
+
+    def test_all_of_a_commenters_tags_show(self):
+        EditorTag.objects.create(question_set=self.qset, editor=self.editor, category='Science')
+        EditorTag.objects.create(question_set=self.qset, editor=self.editor, label='Head editor')
+        self._comment(self.eu)
+        body = self.client.get('/edit_tossup/{0}/'.format(self.tu.id)).content.decode()
+        self.assertIn('>Science<', body)
+        self.assertIn('>Head editor<', body)
+
+    def test_a_tag_on_another_set_is_not_shown(self):
+        EditorTag.objects.create(question_set=self.other_set, editor=self.editor,
+                                 label='Elsewhere')
+        self._comment(self.eu)
+        body = self.client.get('/edit_tossup/{0}/'.format(self.tu.id)).content.decode()
+        self.assertNotIn('Elsewhere', body)
+
+    def test_an_untagged_commenter_gets_no_chip(self):
+        self._comment(self.eu)
+        body = self.client.get('/edit_tossup/{0}/'.format(self.tu.id)).content.decode()
+        self.assertNotIn('commenter-tag', body)
+
+    def test_tag_text_is_escaped(self):
+        EditorTag.objects.create(question_set=self.qset, editor=self.editor,
+                                 label='<script>x</script>')
+        self._comment(self.eu)
+        body = self.client.get('/edit_tossup/{0}/'.format(self.tu.id)).content.decode()
+        self.assertNotIn('<script>x</script>', body)
+        self.assertIn('&lt;script&gt;', body)
+
+    def test_the_whole_set_is_fetched_once_for_a_thread(self):
+        from qems2.qsub.templatetags.filters import commenter_tags
+        EditorTag.objects.create(question_set=self.qset, editor=self.editor, category='Science')
+        comments = [self._comment(self.eu, 'c{0}'.format(i)) for i in range(5)]
+        qset = QuestionSet.objects.get(id=self.qset.id)
+        with self.assertNumQueries(1):
+            for c in comments:
+                commenter_tags(c, qset)
+
+
+class PacketGridTitleTests(TestCase):
+    """The Packet Grid tab/title names the set."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('pg_owner', password='pw', email='pg@test.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='pg dist')
+        self.qset = QuestionSet.objects.create(
+            name='Prison Bowl', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.owner.question_set_editor.add(self.qset)
+        self.client.login(username='pg_owner', password='pw')
+
+    def test_title_has_the_set_name(self):
+        body = self.client.get('/packet_grid/{0}/'.format(self.qset.id)).content.decode()
+        self.assertIn('<title>Prison Bowl - Packet Grid - QEMS3</title>', body)
+
+
+
+class WordFormattingTests(TestCase):
+    """Typography of the exported Word packets: an unbolded ANSWER label, guides
+    set apart in gray sans-serif, and single line spacing."""
+
+    def setUp(self):
+        import io as _io
+        import zipfile as _zip
+        from docx import Document as _Doc
+        self._io, self._zip, self._Doc = _io, _zip, _Doc
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        self.acf_tu = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.acf_bn = QuestionType.objects.get(question_type=ACF_STYLE_BONUS)
+        self.ou = User.objects.create_user('wf_owner', password='pw', email='wf@test.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='wf dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='Science', subcategory='Biology')
+        self.qset = QuestionSet.objects.create(
+            name='WF Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.owner.question_set_editor.add(self.qset)
+        self.packet = Packet.objects.create(
+            question_set=self.qset, packet_name='Packet 1', created_by=self.owner)
+        # A guide before the power mark (inside the bolded region) and one after.
+        Tossup.objects.create(
+            author=self.owner, question_set=self.qset, packet=self.packet,
+            question_type=self.acf_tu, category=self.de, question_number=1,
+            tossup_text='This author Goethe (GUR-tuh) wrote it. (*) Name him, Nietzsche (NEE-chuh).',
+            tossup_answer='_Goethe_',
+            created_date=datetime.now(), last_changed_date=datetime.now())
+        Bonus.objects.create(
+            author=self.owner, question_set=self.qset, packet=self.packet,
+            question_type=self.acf_bn, category=self.de, question_number=1,
+            leadin='Name these.', part1_text='P1', part1_answer='_Alpha_',
+            part2_text='P2', part2_answer='_Beta_', part3_text='P3', part3_answer='_Gamma_',
+            created_date=datetime.now(), last_changed_date=datetime.now())
+        self.client.login(username='wf_owner', password='pw')
+
+    def _doc(self):
+        resp = self.client.get(
+            '/export_question_set/{0}/docx-packetized/'.format(self.qset.id))
+        self.assertEqual(resp.status_code, 200)
+        zf = self._zip.ZipFile(self._io.BytesIO(resp.content))
+        return self._Doc(self._io.BytesIO(zf.read('Packet 1.docx')))
+
+    def _runs(self):
+        return [r for p in self._doc().paragraphs for r in p.runs]
+
+    def test_answer_label_is_not_bold(self):
+        labels = [r for r in self._runs() if r.text.strip() == 'ANSWER:']
+        self.assertTrue(labels, 'no ANSWER label found')
+        for run in labels:
+            self.assertFalse(run.bold, 'ANSWER label should not be bold')
+
+    def test_guides_are_gray_sans_serif_and_unbolded(self):
+        from qems2.qsub.views import PRONUNCIATION_GUIDE_COLOR, PRONUNCIATION_GUIDE_FONT
+        guides = [r for r in self._runs() if 'GUR-tuh' in r.text or 'NEE-chuh' in r.text]
+        self.assertEqual(len(guides), 2, 'expected both guides as their own runs')
+        for run in guides:
+            self.assertEqual(run.font.name, PRONUNCIATION_GUIDE_FONT)
+            self.assertEqual(run.font.color.rgb, PRONUNCIATION_GUIDE_COLOR)
+            self.assertFalse(run.bold)
+
+    def test_the_power_mark_stays_bold(self):
+        marks = [r for r in self._runs() if r.text.strip() == '(*)']
+        self.assertTrue(marks)
+        for run in marks:
+            self.assertTrue(run.bold)
+
+    def test_text_inside_the_power_region_is_still_bold(self):
+        # The guide is unbolded, but the clue words around it keep the power bold.
+        stem = [r for r in self._runs() if 'This author Goethe' in r.text]
+        self.assertTrue(stem)
+        self.assertTrue(stem[0].bold)
+
+    def test_body_is_single_spaced(self):
+        doc = self._doc()
+        self.assertEqual(doc.styles['Normal'].paragraph_format.line_spacing, 1.0)
+
+
+
+class PacketGridLiveRefreshTests(TestCase):
+    """The grid polls /packet_grid_state/ so it keeps up with moves other people
+    make, instead of two editors overwriting each other from stale grids."""
+
+    def setUp(self):
+        import json as _json
+        self._json = _json
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        self.acf_tu = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.acf_bn = QuestionType.objects.get(question_type=ACF_STYLE_BONUS)
+        self.ou = User.objects.create_user('gl_owner', password='pw', email='gl@test.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.outsider_user = User.objects.create_user(
+            'gl_outsider', password='pw', email='glo@test.com')
+        self.dist = Distribution.objects.create(
+            name='gl dist', acf_tossup_per_period_count=2, acf_bonus_per_period_count=2)
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='Science', subcategory='Biology',
+            min_tossups=2, max_tossups=2, min_bonuses=2, max_bonuses=2)
+        self.qset = QuestionSet.objects.create(
+            name='GL Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.owner.question_set_editor.add(self.qset)
+        self.packet = Packet.objects.create(
+            question_set=self.qset, packet_name='Packet 1', created_by=self.owner)
+        self.tu = Tossup.objects.create(
+            author=self.owner, question_set=self.qset, packet=self.packet,
+            question_type=self.acf_tu, category=self.de, question_number=1,
+            tossup_text='A stem. (*) end.', tossup_answer='_Photosynthesis_',
+            created_date=datetime.now(), last_changed_date=datetime.now())
+        self.client.login(username='gl_owner', password='pw')
+
+    def _state(self):
+        resp = self.client.get('/packet_grid_state/{0}/'.format(self.qset.id))
+        self.assertEqual(resp.status_code, 200)
+        return self._json.loads(resp.content.decode())
+
+    def test_state_reports_what_occupies_each_slot(self):
+        data = self._state()
+        self.assertTrue(data['ok'])
+        key = 'tossup|{0}|1'.format(self.packet.id)
+        self.assertIn(key, data['cells'])
+        self.assertEqual(data['cells'][key]['id'], self.tu.id)
+        self.assertEqual(data['cells'][key]['answer'], 'Photosynthesis')
+        self.assertEqual(data['cells'][key]['edit_url'],
+                         '/edit_tossup/{0}/'.format(self.tu.id))
+
+    def test_a_move_by_someone_else_shows_in_the_next_poll(self):
+        before = self._state()
+        self.tu.question_number = 2
+        self.tu.save()
+        after = self._state()
+        self.assertIn('tossup|{0}|1'.format(self.packet.id), before['cells'])
+        self.assertNotIn('tossup|{0}|1'.format(self.packet.id), after['cells'])
+        self.assertIn('tossup|{0}|2'.format(self.packet.id), after['cells'])
+
+    def test_unassigning_empties_the_slot(self):
+        self.tu.packet = None
+        self.tu.save()
+        data = self._state()
+        self.assertNotIn('tossup|{0}|1'.format(self.packet.id), data['cells'])
+        self.assertEqual(data['shape']['unpacketized_tossup'], 1)
+
+    def test_shape_tracks_packets_and_rows(self):
+        data = self._state()
+        self.assertEqual(data['shape']['packets'], [self.packet.id])
+        self.assertGreaterEqual(data['shape']['tossup_rows'], 1)
+        second = Packet.objects.create(
+            question_set=self.qset, packet_name='Packet 2', created_by=self.owner)
+        self.assertEqual(self._state()['shape']['packets'], [self.packet.id, second.id])
+
+    def test_a_tiebreaker_beyond_the_target_extends_the_rows(self):
+        Tossup.objects.create(
+            author=self.owner, question_set=self.qset, packet=self.packet,
+            question_type=self.acf_tu, category=self.de, question_number=9,
+            tossup_text='TB stem. (*) end.', tossup_answer='_Tiebreak_',
+            created_date=datetime.now(), last_changed_date=datetime.now())
+        self.assertEqual(self._state()['shape']['tossup_rows'], 9)
+
+    def test_state_matches_what_the_page_rendered(self):
+        # The page and the poller must agree about who holds a slot, or the
+        # first poll would "fix" cells that were already right.
+        body = self.client.get('/packet_grid/{0}/'.format(self.qset.id)).content.decode()
+        self.assertIn('data-qid="{0}"'.format(self.tu.id), body)
+        key = 'tossup|{0}|1'.format(self.packet.id)
+        self.assertEqual(self._state()['cells'][key]['id'], self.tu.id)
+
+    def test_outsiders_are_refused(self):
+        self.client.logout()
+        self.client.login(username='gl_outsider', password='pw')
+        resp = self.client.get('/packet_grid_state/{0}/'.format(self.qset.id))
+        self.assertEqual(resp.status_code, 403)
+
+    def test_the_grid_page_polls(self):
+        body = self.client.get('/packet_grid/{0}/'.format(self.qset.id)).content.decode()
+        self.assertIn('/packet_grid_state/{0}/'.format(self.qset.id), body)

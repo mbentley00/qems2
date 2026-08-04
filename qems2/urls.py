@@ -50,6 +50,7 @@ urlpatterns = [
     re_path(r'^reorder_packet_questions/$', reorder_packet_questions),
     re_path(r'^undo_packet_grid_change/$', undo_packet_grid_change),
     re_path(r'^packet_grid_log/(?P<qset_id>[0-9]+)/$', packet_grid_log),
+    re_path(r'^packet_grid_state/(?P<qset_id>[0-9]+)/$', packet_grid_state),
     re_path(r'^activity/(?P<qset_id>[0-9]+)/$', activity),
     re_path(r'^recap/(?P<qset_id>[0-9]+)/$', recap),
     re_path(r'^play/(?P<qset_id>[0-9]+)/$', play),

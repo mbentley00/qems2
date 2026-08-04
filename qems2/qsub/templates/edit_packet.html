@@ -4,7 +4,7 @@
 {% include "header.html" %}
 {% endblock %}
 
-{% block title %}Edit Packet - QEMS3{% endblock %}
+{% block title %}{% if packet %}{{ packet.packet_name }} - Edit Packet{% else %}Edit Packet{% endif %} - QEMS3{% endblock %}
 
 {% block content %}
 {% load static %}

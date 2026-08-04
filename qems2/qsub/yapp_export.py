@@ -28,12 +28,15 @@ styling), and a YAPP export has to throw it away. YAPP2 is a backward-compatible
 superset that keeps it. See ``YAPP2_FORMAT.md`` at the repo root for the spec; in
 brief:
 
-* a top-level ``"version": "yapp2/1.0"`` marks the file;
+* a top-level ``"version": "yapp2/<major>.<minor>"`` marks the file;
 * the canonical YAPP fields are **unchanged** — byte-identical to what a plain
   YAPP export writes, so every existing consumer reads a YAPP2 file correctly;
 * each question may carry an ``"anchored"`` object holding the same fields with
   ``<pg>...</pg>`` around the anchored word(s). Readers that understand YAPP2
   prefer those; readers that don't never see the tag.
+* an optional top-level ``"readingOrder"`` (1.1) says the packet is read
+  interlaced — tossup, bonus, tossup, bonus — rather than all tossups then all
+  bonuses. It only points at the canonical arrays; it never moves a question.
 
 ``<pg>`` marks question *words*, not a guide: they are read aloud, count as
 words, and are buzzable. Only the parenthesized guide itself is non-word text.
@@ -41,8 +44,11 @@ words, and are buzzable. Only the parenthesized guide itself is non-word text.
 
 import html as _html
 
-#: Value of the top-level ``version`` field on a YAPP2 packet.
-YAPP2_VERSION = 'yapp2/1.0'
+#: Value of the top-level ``version`` field on a YAPP2 packet. Minor bumps only
+#: add optional fields, and readers match on the ``yapp2/`` prefix, so raising
+#: this doesn't strand anything that read the previous version.
+#: 1.1 added ``readingOrder``.
+YAPP2_VERSION = 'yapp2/1.1'
 
 
 # QEMS markup (see utils.get_formatted_question_html) mapped to YAPP's HTML tags:
@@ -241,14 +247,34 @@ def bonus_to_yapp(bonus, number, version=1):
     })
 
 
-def packet_to_yapp(tossups, bonuses, version=1, name=None):
+def interlaced_reading_order(tossup_count, bonus_count):
+    """A YAPP2 ``readingOrder``: tossup 1, bonus 1, tossup 2, bonus 2 … as
+    ``{'type', 'index'}`` entries pointing into the canonical arrays. Whichever
+    kind runs out first, the rest of the other simply follows, and every
+    question appears exactly once — a reader that drops the field still sees
+    them all, just grouped the plain-YAPP way."""
+    order = []
+    for i in range(max(tossup_count, bonus_count)):
+        if i < tossup_count:
+            order.append({'type': 'tossup', 'index': i})
+        if i < bonus_count:
+            order.append({'type': 'bonus', 'index': i})
+    return order
+
+
+def packet_to_yapp(tossups, bonuses, version=1, name=None, interlace=False):
     """Build a YAPP packet dict from ordered tossup and bonus lists. Question
     numbers come from each question's ``question_number`` (falling back to
     position) so the reader shows the packet's own numbering.
 
     ``version=2`` emits YAPP2: the same packet plus a ``version`` marker and
     per-question ``anchored`` fields carrying pronunciation-guide anchoring. The
-    canonical fields are identical either way."""
+    canonical fields are identical either way.
+
+    ``interlace`` (YAPP2 only) adds a ``readingOrder`` saying the packet is read
+    tossup/bonus/tossup/bonus rather than all tossups then all bonuses. It only
+    reorders — the questions themselves are untouched, so a reader that ignores
+    it still gets the whole packet."""
     packet = {
         'tossups': [tossup_to_yapp(t, t.question_number or i, version=version)
                     for i, t in enumerate(tossups, 1)],
@@ -258,6 +284,9 @@ def packet_to_yapp(tossups, bonuses, version=1, name=None):
     if name:
         packet['name'] = name
     if version >= 2:
+        if interlace:
+            packet['readingOrder'] = interlaced_reading_order(
+                len(packet['tossups']), len(packet['bonuses']))
         # Leading key: a reader (or a human opening the file) sees the version
         # before the questions.
         packet = {'version': YAPP2_VERSION, **packet}

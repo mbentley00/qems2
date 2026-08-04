@@ -123,6 +123,25 @@ def get_answer_no_formatting(line):
     output = output.replace('\\_', '_').replace('\\~', '~')
     return output
 
+def strip_parentheticals(text):
+    """Drop parenthesized runs from an answer line — pronunciation guides and
+    short asides — for compact previews like the packet grid, where they crowd
+    out the answer itself. Escaped ``\\(`` / ``\\)`` are literal parentheses in
+    QEMS markup, so those are kept (and unescaped). Nested groups go
+    innermost-first, and the spacing left behind is tidied up."""
+    if not text:
+        return text
+    # Park escaped parens somewhere the paren regex can't see them.
+    out = text.replace('\\(', '\x00').replace('\\)', '\x01')
+    prev = None
+    while prev != out:
+        prev = out
+        out = re.sub(r'\([^()]*\)', '', out)
+    out = out.replace('\x00', '(').replace('\x01', ')')
+    out = re.sub(r'\s+([,;:.!?])', r'\1', out)
+    return re.sub(r'\s{2,}', ' ', out).strip()
+
+
 # Figure out if there's an "["
 def get_primary_answer(line):
     if line is None:

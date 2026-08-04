@@ -1,0 +1,54 @@
+{% comment %}
+Every comment ever left on a question, deleted ones included, for the History
+page. Read-only — no reply/resolve/delete controls, since this is the record of
+what was said, not the working thread.
+
+Required context: `question` (a Tossup or Bonus).
+{% endcomment %}
+{% load filters %}
+
+{% get_comment_history question as comment_history %}
+<div class="panel header radius text-center"><strong>Comments</strong></div>
+
+{% if not comment_history.count %}
+    <p class="comment-history-empty">No one has commented on this question.</p>
+{% else %}
+    {% if comment_history.removed %}
+    <p class="comment-history-note">
+        Deleted comments are kept here. Deleting one only hides it from the editing
+        page &mdash; the discussion stays on the record.
+    </p>
+    {% endif %}
+    <div class="comment-history">
+    {% autoescape off %}
+        {% for comment in comment_history.top_level %}
+        <div class="comment-item{% if comment.id in comment_history.removed %} comment-deleted{% endif %}">
+            {% if comment.id in comment_history.removed %}<span class="label alert comment-deleted-badge">Deleted</span>{% endif %}
+            {% if comment.id in comment_history.resolved %}<span class="label success comment-resolved-badge">Resolved</span>{% endif %}
+            <strong>{% if comment.is_discord %}<span class="discord-badge">Discord</span>{{ comment.user_name }}{% else %}{{ comment|commenter_name }}{% endif %}{{ comment|commenter_tags:qset }}:</strong>
+            <span class="comment-body">{{ comment.comment|safe|comment_html|linebreaks }}</span>
+            ({{ comment.submit_date }})
+            <div class="comment-replies">
+                {% for reply in comment_history.replies|get_replies:comment.id %}
+                <div class="comment-item{% if reply.id in comment_history.removed %} comment-deleted{% endif %}">
+                    {% if reply.id in comment_history.removed %}<span class="label alert comment-deleted-badge">Deleted</span>{% endif %}
+                    <strong>{{ reply|commenter_name }}{{ reply|commenter_tags:qset }}:</strong>
+                    <span class="comment-body">{{ reply.comment|safe|comment_html|linebreaks }}</span>
+                    ({{ reply.submit_date }})
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endfor %}
+    {% endautoescape %}
+    </div>
+{% endif %}
+
+<style>
+.comment-history-empty, .comment-history-note { color: #8a8f9c; font-size: 0.9em; }
+.comment-history .comment-item { padding: 0.35rem 0.5rem; }
+/* A deleted comment stays legible but visibly withdrawn — dimmed, not struck
+   through (strike-through already means "an editor crossed out this part"). */
+.comment-history .comment-deleted { opacity: 0.65; border-left: 3px solid #d0d3da; }
+.comment-deleted-badge { margin-right: 0.35em; }
+</style>

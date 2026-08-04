@@ -4674,6 +4674,12 @@ def move_bonus(request, q_set_id, bonus_id):
                                  'message': message,
                                  'message_class': message_class})
 
+#: How a pronunciation guide is set in exported Word documents: a gray
+#: sans-serif aside, distinct from the serif question text around it.
+PRONUNCIATION_GUIDE_FONT = 'Source Sans Pro'
+PRONUNCIATION_GUIDE_COLOR = RGBColor(0x80, 0x80, 0x80)
+
+
 def add_qems_formatted_runs(paragraph, text, bold=False, is_answer=False, smart_quotes=False,
                             all_power=False, allow_superpower=True):
     """Convert QEMS markup to python-docx runs on a paragraph.
@@ -4682,10 +4688,14 @@ def add_qems_formatted_runs(paragraph, text, bold=False, is_answer=False, smart_
       _text_   → bold + underline (answer line)
       __text__ → underline only (prompt)
       ~text~   → italic
-      (text)   → bold (pronunciation guide)
+      (text)   → pronunciation guide: gray, sans-serif, never bold
       (*)      → bold (power mark)
       \\s / \\S  → subscript / superscript (approximated with smaller font)
       \\Ptext\\P → pronunciation-guide target word(s): rendered in a teal color
+
+    A guide keeps its own look even inside a bolded power region — it's an aside
+    to the moderator, not part of what's read for points, and bolding it made it
+    compete with the clue text.
     """
     if text is None:
         return paragraph
@@ -4733,28 +4743,34 @@ def add_qems_formatted_runs(paragraph, text, bold=False, is_answer=False, smart_
     cur_sub = False
     cur_super = False
 
-    def flush(b=cur_bold, i=cur_italic, u=cur_underline, sub=cur_sub, sup=cur_super, pg=False):
+    def flush(b=cur_bold, i=cur_italic, u=cur_underline, sub=cur_sub, sup=cur_super,
+              pg=False, guide=False):
         nonlocal buf
         if buf:
             run = paragraph.add_run(buf)
-            run.bold = b
+            run.bold = False if guide else b
             run.italic = i
             run.underline = u
             if sub:
                 run.font.subscript = True
             if sup:
                 run.font.superscript = True
-            if pg:
+            if guide:
+                # The parenthesized guide itself: a gray sans-serif aside, set
+                # apart from the question text a moderator actually reads.
+                run.font.name = PRONUNCIATION_GUIDE_FONT
+                run.font.color.rgb = PRONUNCIATION_GUIDE_COLOR
+            elif pg:
                 # Pronunciation-guide target word(s): a teal tint, matching the
                 # web view's .pg-target color.
                 run.font.color.rgb = RGBColor(0x0B, 0x72, 0x85)
             buf = ""
 
     def current_state():
-        b = bold or power_flag or parens_flag or underline_flag or bold_flag or all_power_wrap
+        b = bold or power_flag or underline_flag or bold_flag or all_power_wrap
         i = italics_flag
         u = underline_flag or prompt_flag
-        return b, i, u, sub_flag, super_flag, pg_flag
+        return b, i, u, sub_flag, super_flag, pg_flag, parens_flag
 
     index = 0
     prev = ""
@@ -4764,11 +4780,11 @@ def add_qems_formatted_runs(paragraph, text, bold=False, is_answer=False, smart_
         c = text[index]
         next_c = text[index + 1] if index < len(text) - 1 else ""
 
-        new_bold, new_italic, new_underline, new_sub, new_sup, new_pg = current_state()
+        new_bold, new_italic, new_underline, new_sub, new_sup, new_pg, new_guide = current_state()
 
         # Power mark ((*) or (+))
         if index == power_index and power_flag:
-            flush(new_bold, new_italic, new_underline, new_sub, new_sup, new_pg)
+            flush(new_bold, new_italic, new_underline, new_sub, new_sup, new_pg, new_guide)
             run = paragraph.add_run(text[index:index + 3])
             run.bold = True
             power_flag = False
@@ -4778,20 +4794,32 @@ def add_qems_formatted_runs(paragraph, text, bold=False, is_answer=False, smart_
 
         # Tildes → italic toggle
         if c == "~":
-            flush(new_bold, new_italic, new_underline, new_sub, new_sup, new_pg)
+            flush(new_bold, new_italic, new_underline, new_sub, new_sup, new_pg, new_guide)
             italics_flag = not italics_flag
             index += 1
             prev2, prev = prev, c
             continue
 
+        # A power/superpower mark that isn't the one `power_index` points at
+        # (a stem can carry both "(+)" and "(*)"; power_index is the later one).
+        # It's a scoring mark, not a guide, so it stays bold.
+        if (c == "(" and allow_parens and prev != "\\"
+                and text[index:index + 3] in ("(*)", "(+)")):
+            flush(new_bold, new_italic, new_underline, new_sub, new_sup, new_pg, new_guide)
+            paragraph.add_run(text[index:index + 3]).bold = True
+            index += 3
+            prev2, prev = prev, ")"
+            continue
+
         # Open paren (pronunciation guide)
         if c == "(" and allow_parens and prev != "\\":
-            flush(new_bold, new_italic, new_underline, new_sub, new_sup, new_pg)
+            flush(new_bold, new_italic, new_underline, new_sub, new_sup, new_pg, new_guide)
             if italics_flag:
                 need_restore_italics = True
                 italics_flag = False
-            if not power_flag:
-                parens_flag = True
+            # Set even inside a power region: a guide is styled as a guide
+            # wherever it falls, rather than inheriting the region's bold.
+            parens_flag = True
             buf = "("
             index += 1
             prev2, prev = prev, c
@@ -4810,10 +4838,9 @@ def add_qems_formatted_runs(paragraph, text, bold=False, is_answer=False, smart_
         # Close paren
         if c == ")" and allow_parens and prev != "\\":
             buf += ")"
-            new_b, new_i, new_u, new_sub2, new_sup2, new_pg2 = current_state()
-            flush(new_b, new_i, new_u, new_sub2, new_sup2, new_pg2)
-            if not power_flag:
-                parens_flag = False
+            new_b, new_i, new_u, new_sub2, new_sup2, new_pg2, new_guide2 = current_state()
+            flush(new_b, new_i, new_u, new_sub2, new_sup2, new_pg2, new_guide2)
+            parens_flag = False
             if need_restore_italics:
                 italics_flag = True
                 need_restore_italics = False
@@ -5038,6 +5065,9 @@ def export_question_set(request, qset_id, output_format):
                 include_ids = _export_opt('ids', True)
                 include_credits = _export_opt('credits', False)
                 smart_quotes = _export_opt('smartq', False)
+                # Interlaced: tossup 1, bonus 1, tossup 2, bonus 2 … the reading
+                # order at a tournament, instead of all tossups then all bonuses.
+                interlace = _export_opt('interlace', False)
 
                 def question_meta(q):
                     """Attribution line in the standard QEMS packet format:
@@ -5167,6 +5197,10 @@ def export_question_set(request, qset_id, output_format):
                     normal.font.name = 'Times New Roman'
                     normal.paragraph_format.space_before = Pt(0)
                     normal.paragraph_format.space_after = Pt(0)
+                    # Single-spaced: python-docx's default template ships 1.15
+                    # line spacing, which stretched a packet over extra pages.
+                    # (The gap *between* questions is set per-paragraph below.)
+                    normal.paragraph_format.line_spacing = 1.0
 
                     h1 = document.styles['Heading 1']  # packet/round title
                     h1.font.name = 'Times New Roman'
@@ -5201,7 +5235,9 @@ def export_question_set(request, qset_id, output_format):
                                             all_power=tossup.is_all_power(),
                                             allow_superpower=tossup.superpower_enabled())
                     _line_break(p)
-                    p.add_run("ANSWER: ").bold = True
+                    # Not bolded: the label is scaffolding, and bolding it drew the eye
+                    # away from the underlined required answer next to it.
+                    p.add_run("ANSWER: ")
                     add_qems_formatted_runs(p, safe_text(tossup.tossup_answer), is_answer=True,
                                             smart_quotes=smart_quotes)
                     meta = question_meta(tossup)
@@ -5229,7 +5265,7 @@ def export_question_set(request, qset_id, output_format):
                             p.add_run(f"[10{diff_tag}] ").bold = True
                             add_qems_formatted_runs(p, safe_text(part_text), smart_quotes=smart_quotes)
                             _line_break(p)
-                            p.add_run("ANSWER: ").bold = True
+                            p.add_run("ANSWER: ")
                             add_qems_formatted_runs(p, safe_text(part_answer), is_answer=True,
                                                     smart_quotes=smart_quotes)
                     meta = question_meta(bonus)
@@ -5269,8 +5305,12 @@ def export_question_set(request, qset_id, output_format):
                     return buf.getvalue()
 
                 def write_all_questions_to_doc(document, tossup_qs, bonus_qs):
-                    """Write tossups then bonuses to a document. Accepts a
-                    queryset or a list."""
+                    """Write a packet's questions to a document: tossups then
+                    bonuses, or interlaced (tossup 1, bonus 1, tossup 2, …) when
+                    the export asked for it. Accepts a queryset or a list."""
+                    if interlace:
+                        write_interlaced_to_doc(document, tossup_qs, bonus_qs)
+                        return
                     if tossup_qs:
                         document.add_heading('Tossups', level=2)
                         for i, tossup in enumerate(tossup_qs, 1):
@@ -5281,6 +5321,25 @@ def export_question_set(request, qset_id, output_format):
                         for i, bonus in enumerate(bonus_qs, 1):
                             num = bonus.question_number if bonus.question_number else i
                             add_bonus_to_doc(document, bonus, num)
+
+                def write_interlaced_to_doc(document, tossup_qs, bonus_qs):
+                    """Tossup 1, bonus 1, tossup 2, bonus 2 … — the order they're
+                    read at a tournament. Pairs by position, and once one kind
+                    runs out the rest of the other simply follow."""
+                    tossups = list(tossup_qs)
+                    bonuses = list(bonus_qs)
+                    if not tossups and not bonuses:
+                        return
+                    document.add_heading('Questions', level=2)
+                    for i in range(max(len(tossups), len(bonuses))):
+                        if i < len(tossups):
+                            tossup = tossups[i]
+                            add_tossup_to_doc(document, tossup,
+                                              tossup.question_number or i + 1)
+                        if i < len(bonuses):
+                            bonus = bonuses[i]
+                            add_bonus_to_doc(document, bonus,
+                                             bonus.question_number or i + 1)
 
                 if output_format == "docx":
                     document = new_docx()
@@ -5471,16 +5530,7 @@ def export_question_set(request, qset_id, output_format):
                             if include_credits and pkt_i == 0:
                                 add_credits_to_doc(document)
                             add_careful_notes_to_doc(document, tus, bos)
-                            if tus:
-                                document.add_heading('Tossups', level=2)
-                                for i, tossup in enumerate(tus, 1):
-                                    add_tossup_to_doc(
-                                        document, tossup, tossup.question_number or i)
-                            if bos:
-                                document.add_heading('Bonuses', level=2)
-                                for i, bonus in enumerate(bos, 1):
-                                    add_bonus_to_doc(
-                                        document, bonus, bonus.question_number or i)
+                            write_all_questions_to_doc(document, tus, bos)
                             base = _safe_filename(packet.packet_name)
                             fname = base
                             n = 2
@@ -5494,16 +5544,7 @@ def export_question_set(request, qset_id, output_format):
                             document = new_docx()
                             document.add_heading(
                                 '{0} Unpacketed'.format(qset.name), level=1)
-                            if unpacketed_tus:
-                                document.add_heading('Tossups', level=2)
-                                for i, tossup in enumerate(unpacketed_tus, 1):
-                                    add_tossup_to_doc(
-                                        document, tossup, tossup.question_number or i)
-                            if unpacketed_bos:
-                                document.add_heading('Bonuses', level=2)
-                                for i, bonus in enumerate(unpacketed_bos, 1):
-                                    add_bonus_to_doc(
-                                        document, bonus, bonus.question_number or i)
+                            write_all_questions_to_doc(document, unpacketed_tus, unpacketed_bos)
                             zf.writestr("Unpacketed.docx", save_docx_bytes(document))
 
                         # Add answer matrix
@@ -5526,6 +5567,10 @@ def export_question_set(request, qset_id, output_format):
                 # are identical, so a plain-YAPP reader is unaffected.
                 from . import yapp_export
                 yapp_version = 2 if output_format == "yapp2-json" else 1
+                # Interlacing is a YAPP2 `readingOrder`; plain YAPP has no way to
+                # say it, so the option is quietly ignored there.
+                yapp_interlace = (request.GET.get('opts') == '1'
+                                  and request.GET.get('interlace') == '1')
 
                 def _packet_sort_key(pk):
                     nums = re.findall(r'\d+', pk.packet_name or '')
@@ -5561,7 +5606,8 @@ def export_question_set(request, qset_id, output_format):
                     for name, tus, bos in groups:
                         payload = yapp_export.packet_to_yapp(
                             tus, bos, version=yapp_version,
-                            name=name if yapp_version >= 2 else None)
+                            name=name if yapp_version >= 2 else None,
+                            interlace=yapp_interlace)
                         base = _safe_filename(name)
                         fname = base
                         n = 2
@@ -5588,7 +5634,8 @@ def export_question_set(request, qset_id, output_format):
                     return (request.GET.get(name) == '1') if _explicit else default
 
                 pdf_opts = {'writers': _o('writers', True), 'editors': _o('editors', True),
-                            'ids': _o('ids', True), 'credits': _o('credits', False)}
+                            'ids': _o('ids', True), 'credits': _o('credits', False),
+                            'interlace': _o('interlace', False)}
 
                 def _packet_sort_key(pk):
                     nums = re.findall(r'\d+', pk.packet_name or '')
@@ -6693,10 +6740,34 @@ def packetize_set(request, qset_id):
 def _grid_answer_preview(text, limit=45):
     # Decode HTML entities (imported answers store apostrophes as &#x27; etc.);
     # the template re-escapes safely, so the grid shows real characters.
+    # Parentheticals — pronunciation guides above all — go too: in a 45-character
+    # cell they push the actual answer out of view.
     answer = html.unescape(get_answer_no_formatting(get_primary_answer(text or ''))).strip()
+    answer = strip_parentheticals(answer)
     if len(answer) > limit:
         answer = answer[:limit].rstrip() + '...'
     return answer
+
+def _grid_cell_payload(question, qtype):
+    """What the packet grid shows in one occupied slot. Shared by the page
+    render and the live-refresh endpoint, so a cell repainted in place looks
+    exactly like a freshly loaded one."""
+    if qtype == 'tossup':
+        answer = _grid_answer_preview(question.tossup_answer)
+    else:
+        answer = ' / '.join(filter(None, [
+            _grid_answer_preview(question.part1_answer, 20),
+            _grid_answer_preview(question.part2_answer, 20),
+            _grid_answer_preview(question.part3_answer, 20)]))
+    return {
+        'id': question.id,
+        'answer': answer,
+        'category': html.unescape(str(question.category)) if question.category else '',
+        'edit_url': '/edit_{0}/{1}/'.format(qtype, question.id),
+        'edited': question.edited,
+        'proofread': question.proofread,
+    }
+
 
 def _per_packet_target(qset, qtype):
     """How many rows a packet should have room for in the grid.
@@ -6751,14 +6822,7 @@ def packet_grid(request, qset_id):
         for question in (question_model.objects.filter(question_set=qset, packet__in=packets)
                          .select_related('category', 'packet').order_by('question_number', 'id')):
             number = question.question_number or 0
-            cell = {
-                'id': question.id,
-                'answer': preview_func(question),
-                'category': html.unescape(str(question.category)) if question.category else '',
-                'edit_url': '{0}{1}/'.format(edit_url, question.id),
-                'edited': question.edited,
-                'proofread': question.proofread,
-            }
+            cell = _grid_cell_payload(question, qtype)
             # A question with no number, or a duplicate number within its packet,
             # can't be placed in the number-keyed grid — surfacing it here keeps
             # it from silently vanishing (this is how a tiebreaker could "not
@@ -7662,6 +7726,62 @@ def undo_packet_grid_change(request):
         success = True
         message = 'Undid: {0}'.format(log.description)
     return HttpResponse(json.dumps({'success': success, 'message': message}))
+
+
+@login_required
+def packet_grid_state(request, qset_id):
+    """A snapshot of what currently occupies every grid slot, polled by the
+    packet grid so it keeps up with what other people are doing.
+
+    Two sets of writers rearranging the same packets used to clobber each
+    other's work: each was acting on a grid that had gone stale minutes ago.
+    The page repaints changed cells from this, so a move someone else made shows
+    up instead of being silently overwritten by the next drag.
+
+    `shape` describes the grid's structure (which packets, how many rows, how
+    many loose questions). A change there can't be patched cell-by-cell — a new
+    packet is a whole new column — so the page reloads instead.
+    """
+    user = request.user.writer
+    qset = QuestionSet.objects.get(id=qset_id)
+    if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+        return JsonResponse({'ok': False, 'error': 'Not authorized for this set.'}, status=403)
+
+    packets = sorted_packets(qset)
+    cells = {}
+    max_num = {'tossup': 0, 'bonus': 0}
+    unplaced = 0
+    unpacketized = {}
+    for model, qtype in ((Tossup, 'tossup'), (Bonus, 'bonus')):
+        # Same ordering as the page build, so a duplicate number resolves to the
+        # same winner and the two views never disagree about who holds a slot.
+        for question in (model.objects.filter(question_set=qset, packet__in=packets)
+                         .select_related('category', 'packet')
+                         .order_by('question_number', 'id')):
+            number = question.question_number or 0
+            key = '{0}|{1}|{2}'.format(qtype, question.packet_id, number)
+            if number <= 0 or key in cells:
+                unplaced += 1
+                continue
+            max_num[qtype] = max(max_num[qtype], number)
+            cells[key] = _grid_cell_payload(question, qtype)
+        unpacketized[qtype] = model.objects.filter(question_set=qset, packet=None).count()
+
+    tu_rows = max(max_num['tossup'], _per_packet_target(qset, 'tossup'))
+    bs_rows = 0 if qset.tossups_only else max(max_num['bonus'],
+                                              _per_packet_target(qset, 'bonus'))
+    return JsonResponse({
+        'ok': True,
+        'cells': cells,
+        'shape': {
+            'packets': [p.id for p in packets],
+            'tossup_rows': tu_rows,
+            'bonus_rows': bs_rows,
+            'unplaced': unplaced,
+            'unpacketized_tossup': unpacketized['tossup'],
+            'unpacketized_bonus': unpacketized['bonus'],
+        },
+    })
 
 
 @login_required

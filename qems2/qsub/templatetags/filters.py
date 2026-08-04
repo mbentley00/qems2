@@ -1,5 +1,6 @@
 import re
 from django.template.defaultfilters import register
+from django.utils.html import escape
 from django.utils.safestring import mark_safe
 from qems2.qsub.models import *
 from qems2.qsub.utils import sanitize_html, strip_markup, get_formatted_question_html, get_answer_no_formatting
@@ -242,6 +243,34 @@ def commenter_name(comment):
     real = '{0} {1}'.format(user.first_name or '', user.last_name or '').strip()
     return '{0} ("{1}")'.format(real, user.username) if real else user.username
 
+@register.filter(name='commenter_tags')
+def commenter_tags(comment, qset):
+    """The commenter's editor tags on this set, as small chips to sit beside
+    their name — so it's clear at a glance that the person asking for a change
+    is, say, the Science editor.
+
+    Usage: ``{{ comment|commenter_tags:qset }}``. The whole set's tags are
+    fetched once and cached on the `qset` object, which is the same instance for
+    every comment in a page render, so a long thread is still one query.
+    """
+    if comment is None or qset is None:
+        return ''
+    tags_by_user = getattr(qset, '_commenter_tag_cache', None)
+    if tags_by_user is None:
+        tags_by_user = {}
+        for tag in EditorTag.objects.filter(question_set=qset).select_related('editor'):
+            text = (tag.text() or '').strip()
+            if text:
+                tags_by_user.setdefault(tag.editor.user_id, []).append(text)
+        qset._commenter_tag_cache = tags_by_user
+    user = getattr(comment, 'user', None)
+    if user is None:
+        return ''
+    tags = tags_by_user.get(user.id) or []
+    return mark_safe(''.join(
+        '<span class="commenter-tag">{0}</span>'.format(escape(t)) for t in tags))
+
+
 # An @mention: "@" at the start or after whitespace/an open paren, then a
 # username. The username may itself contain "@" and "." because some usernames
 # are full email addresses (e.g. @william.t.alston@gmail.com must highlight
@@ -349,13 +378,28 @@ def get_threaded_comments(obj):
     Returns a dict with 'top_level' (list of comments) and 'replies' (dict of parent_id -> [comments]).
     Usage: {% get_threaded_comments obj as thread_data %}
     """
+    return _threaded_comments(obj)
+
+
+@register.simple_tag
+def get_comment_history(obj):
+    """Every comment ever left on `obj`, deleted ones included, threaded the same
+    way as the live view. Deleting a comment only sets ``is_removed``, so the
+    text survives — this is what the question's History page shows, so a
+    discussion isn't lost when someone clears it off the editing page.
+
+    Usage: {% get_comment_history question as comment_history %}
+    """
+    return _threaded_comments(obj, include_removed=True)
+
+
+def _threaded_comments(obj, include_removed=False):
     from qems2.qsub.model_utils import mark_discord_comments
     content_type = ContentType.objects.get_for_model(obj)
-    all_comments = list(Comment.objects.filter(
-        content_type=content_type,
-        object_pk=str(obj.pk),
-        is_removed=False,
-    ).order_by('submit_date'))
+    comment_filter = {'content_type': content_type, 'object_pk': str(obj.pk)}
+    if not include_removed:
+        comment_filter['is_removed'] = False
+    all_comments = list(Comment.objects.filter(**comment_filter).order_by('submit_date'))
     # Tag bot comments (.is_discord / .discord_thread_url) for the template.
     mark_discord_comments(all_comments)
 
@@ -378,8 +422,11 @@ def get_threaded_comments(obj):
     anchors = {ca.comment_id: ca for ca in CommentAnchor.objects.filter(comment__in=all_comments)}
     resolved = set(CommentResolution.objects.filter(comment__in=all_comments, resolved=True)
                    .values_list('comment_id', flat=True))
+    # Only ever non-empty for the history view; the live view filters these out.
+    removed = set(c.id for c in all_comments if c.is_removed)
 
-    return {'top_level': top_level, 'replies': replies, 'anchors': anchors, 'resolved': resolved}
+    return {'top_level': top_level, 'replies': replies, 'anchors': anchors,
+            'resolved': resolved, 'removed': removed, 'count': len(all_comments)}
 
 
 #@register.filter(name='compare_categories'):

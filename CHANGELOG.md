@@ -1,5 +1,37 @@
 # Changelog
 
+## 2026-08-04 — Live packet grid, comment history, export typography
+
+- **The packet grid keeps up with other people's changes.** It polls for what
+  currently occupies each slot and repaints only the cells someone else changed,
+  with a brief highlight. Two editors rearranging the same packets used to
+  clobber each other, each dragging on a grid that had gone stale. It never
+  repaints mid-drag, while the swap dialog is open, or in a background tab; a
+  structural change (a new packet, more rows) reloads instead, since a new
+  column can't be patched cell-by-cell.
+- **Comments are kept in a question's history even after deletion.** Deleting a
+  comment only ever hid it, so nothing was lost — but there was nowhere to see
+  it. The Tossup/Bonus History pages now list every comment ever left on the
+  question, threaded, with deleted ones dimmed and marked. The editing pages
+  still hide them. Deleting a comment no longer asks for confirmation (it's
+  recoverable); "Delete all comments" still does.
+- **Interlaced exports.** A new "Interlace tossups and bonuses" option on the
+  export form prints tossup 1, bonus 1, tossup 2, bonus 2 — the order they're
+  read — instead of all tossups then all bonuses. Word and PDF reorder directly;
+  **YAPP2 gains a `readingOrder` field** (version `yapp2/1.1`) that says the same
+  thing without moving a question, so a reader that ignores it still gets the
+  whole packet. Plain YAPP has no way to express it and is unchanged.
+- **Word export typography.** `ANSWER:` is no longer bolded, pronunciation
+  guides are set in gray Source Sans Pro and never bolded (even inside a bolded
+  power region, where they used to inherit it), and packets are single-spaced.
+- **Editor tags show in comments.** If a commenter has a tag for the set
+  ("Science", "Head editor"), it appears as a chip beside their name in every
+  comment thread.
+- **Smaller fixes.** The packet grid drops parentheses and pronunciation guides
+  from its answer previews, where they crowded out the answer; the Edit Packet
+  and Packet Grid pages name the packet and set in their titles; and the "Select
+  all" checkbox on Style Check and Category Problems lines up with its label.
+
 ## 2026-07-31 — Distribution visibility, reference data admin, writing-flow fixes
 
 - **The "since your last visit" banner now opens the right page.** It counted

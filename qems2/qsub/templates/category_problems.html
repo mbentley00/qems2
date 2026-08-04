@@ -72,7 +72,10 @@ isn't part of this set's current distribution (e.g. from before a distribution c
 .cp-bulk-bar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; flex-wrap: wrap;
     gap: 0.5rem 0.9rem; background: #fff; border: 1px solid #dcdcdc; border-radius: 4px;
     padding: 0.45rem 0.7rem; margin-bottom: 0.6rem; }
-.cp-inline { display: inline-block; margin: 0; }
+/* Same checkbox/label pairing as the style-check bulk bar: Foundation's 1rem
+   checkbox margin otherwise lifts the box off its label. */
+.cp-inline { display: flex; align-items: center; gap: 0.35em; margin: 0; font-size: 0.85rem; }
+.cp-bulk-bar input[type="checkbox"] { margin: 0; }
 .cp-bulk-bar select { margin: 0; width: auto; height: auto; padding: 0.25rem 1.6rem 0.25rem 0.5rem; }
 .cp-bulk-bar .button { margin: 0; }
 .cp-note { color: #999; font-size: 0.85rem; }

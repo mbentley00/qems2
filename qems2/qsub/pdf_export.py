@@ -184,9 +184,10 @@ def build_packetized_pdf(set_name, groups, opts, credits=None):
     """Build a packetized PDF.
 
     `groups` is an ordered list of (packet_name, tossups, bonuses). `opts` is a
-    dict with boolean writers/editors/ids/credits. `credits` is an optional
-    (writer_names, editor_names) tuple shown before the first packet's tossups.
-    Returns PDF bytes.
+    dict with boolean writers/editors/ids/credits, plus `interlace` to print
+    tossup 1, bonus 1, tossup 2, … (reading order) instead of all tossups then
+    all bonuses. `credits` is an optional (writer_names, editor_names) tuple
+    shown before the first packet's tossups. Returns PDF bytes.
     """
     pdf = FPDF(unit='pt', format='letter')
     pdf.set_margins(40, 40, 40)
@@ -200,16 +201,26 @@ def build_packetized_pdf(set_name, groups, opts, credits=None):
         pdf.ln(4)
         if gi == 0 and opts.get('credits') and credits:
             _credits(pdf, credits[0], credits[1])
-        if tossups:
-            _heading(pdf, 'Tossups', 13, gap_before=4, center=True)
-            pdf.ln(2)
-            for i, t in enumerate(tossups, 1):
-                _tossup(pdf, t, t.question_number or i, opts)
-        if bonuses:
-            _heading(pdf, 'Bonuses', 13, gap_before=6, center=True)
-            pdf.ln(2)
-            for i, b in enumerate(bonuses, 1):
-                _bonus(pdf, b, b.question_number or i, opts)
+        if opts.get('interlace'):
+            if tossups or bonuses:
+                _heading(pdf, 'Questions', 13, gap_before=4, center=True)
+                pdf.ln(2)
+                for i in range(max(len(tossups), len(bonuses))):
+                    if i < len(tossups):
+                        _tossup(pdf, tossups[i], tossups[i].question_number or i + 1, opts)
+                    if i < len(bonuses):
+                        _bonus(pdf, bonuses[i], bonuses[i].question_number or i + 1, opts)
+        else:
+            if tossups:
+                _heading(pdf, 'Tossups', 13, gap_before=4, center=True)
+                pdf.ln(2)
+                for i, t in enumerate(tossups, 1):
+                    _tossup(pdf, t, t.question_number or i, opts)
+            if bonuses:
+                _heading(pdf, 'Bonuses', 13, gap_before=6, center=True)
+                pdf.ln(2)
+                for i, b in enumerate(bonuses, 1):
+                    _bonus(pdf, b, b.question_number or i, opts)
 
     out = pdf.output()
     return bytes(out)
