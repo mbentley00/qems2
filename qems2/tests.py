@@ -6735,3 +6735,178 @@ class PacketGridLiveRefreshTests(TestCase):
     def test_the_grid_page_polls(self):
         body = self.client.get('/packet_grid/{0}/'.format(self.qset.id)).content.decode()
         self.assertIn('/packet_grid_state/{0}/'.format(self.qset.id), body)
+
+
+
+class PacketRequirementTests(TestCase):
+    """Per-packet requirements on the Edit Packet page are whole questions.
+
+    They used to be the set total divided by the packet count — 18 tossups over
+    11 packets showed as "1.6 required", which nobody can write."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        self.acf_tu = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('rq_owner', password='pw', email='rq@test.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='rq dist')
+        self.de_arch = DistributionEntry.objects.create(
+            distribution=self.dist, category='Fine Arts', subcategory='Architecture')
+        self.de_design = DistributionEntry.objects.create(
+            distribution=self.dist, category='Fine Arts', subcategory='Design')
+        self.qset = QuestionSet.objects.create(
+            name='RQ Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=11, distribution=self.dist)
+        self.owner.question_set_editor.add(self.qset)
+        # 18 Architecture and 9 Design tossups across 11 packets: neither
+        # divides evenly, which is exactly the case that produced 1.6 and 0.8.
+        self.swde_arch = SetWideDistributionEntry.objects.create(
+            question_set=self.qset, dist_entry=self.de_arch, num_tossups=18, num_bonuses=0)
+        self.swde_design = SetWideDistributionEntry.objects.create(
+            question_set=self.qset, dist_entry=self.de_design, num_tossups=9, num_bonuses=0)
+        self.packets = [Packet.objects.create(
+            question_set=self.qset, packet_name='Packet {0}'.format(i + 1),
+            created_by=self.owner) for i in range(11)]
+        self.client.login(username='rq_owner', password='pw')
+
+    def _status(self, packet):
+        resp = self.client.get('/edit_packet/{0}/'.format(packet.id))
+        self.assertEqual(resp.status_code, 200)
+        return {row['label']: row for row in resp.context['tossup_status']}
+
+    def test_requirements_are_whole_numbers(self):
+        for packet in self.packets:
+            for row in self._status(packet).values():
+                self.assertEqual(row['tu_req'], int(row['tu_req']),
+                                 'fractional requirement: {0}'.format(row))
+
+    def test_shares_add_up_to_the_set_total(self):
+        total = sum(self._status(p)['Architecture']['tu_req'] for p in self.packets)
+        self.assertEqual(total, 18)
+        total = sum(self._status(p)['Design']['tu_req'] for p in self.packets)
+        self.assertEqual(total, 9)
+
+    def test_the_remainder_goes_to_the_earliest_packets(self):
+        # 18 over 11 packets: seven packets carry 2, the rest 1.
+        reqs = [self._status(p)['Architecture']['tu_req'] for p in self.packets]
+        self.assertEqual(reqs, [2] * 7 + [1] * 4)
+
+    def test_a_category_asks_for_what_its_subcategories_add_up_to(self):
+        for packet in self.packets:
+            rows = self._status(packet)
+            self.assertEqual(rows['Fine Arts']['tu_req'],
+                             rows['Architecture']['tu_req'] + rows['Design']['tu_req'])
+
+    def test_a_packetization_quota_is_also_whole(self):
+        # A quota is a per-packet average and may be fractional by design
+        # (2.5 = "half the packets get 3"); the packet still shows an integer.
+        PacketizationEntry.objects.create(
+            question_set=self.qset, path='Fine Arts - Architecture', depth=1,
+            min_tossups=Decimal('2.5'), max_tossups=Decimal('3'),
+            min_bonuses=Decimal('0'), max_bonuses=Decimal('0'))
+        reqs = [self._status(p)['Architecture']['tu_req'] for p in self.packets]
+        for req in reqs:
+            self.assertEqual(req, int(req))
+        # 2.5 * 11 = 27.5 -> 28 across the set, so no packet is left at zero.
+        self.assertEqual(sum(reqs), 28)
+        self.assertTrue(all(r >= 2 for r in reqs))
+
+    def test_the_page_renders_whole_requirements(self):
+        import re
+        body = self.client.get(
+            '/edit_packet/{0}/'.format(self.packets[0].id)).content.decode()
+        table = body.split('Tossups Required')[1].split('</table>')[0]
+        rendered = []
+        for row in table.split('<tr')[1:]:
+            cells = [re.sub(r'<[^>]+>', '', c).strip()
+                     for c in row.split('<td>')[1:]]
+            if len(cells) >= 3:
+                rendered.append(cells[2])   # in-packet, required, percent
+        self.assertTrue(rendered)
+        for value in rendered:
+            self.assertRegex(value, r'^\d+$', 'requirement is not a whole number')
+
+
+
+class YappAllPowerTests(TestCase):
+    """An all-power tossup keeps its power region through a YAPP export.
+
+    QEMS records whole-stem power as a flag with no `(*)` in the text; YAPP has
+    no flag and a reader locates power from the literal marker, so the export
+    has to append one or every buzz scores a plain 10 in MODAQ."""
+
+    def setUp(self):
+        import io as _io
+        import json as _json
+        import zipfile as _zip
+        self._io, self._json, self._zip = _io, _json, _zip
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        self.acf_tu = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('ap_owner', password='pw', email='ap@test.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='ap dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='Literature', subcategory='European')
+        self.qset = QuestionSet.objects.create(
+            name='AP Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.owner.question_set_editor.add(self.qset)
+        self.packet = Packet.objects.create(
+            question_set=self.qset, packet_name='Packet 1', created_by=self.owner)
+        self.client.login(username='ap_owner', password='pw')
+
+    def _tossup(self, text, all_power=None, number=1):
+        return Tossup.objects.create(
+            author=self.owner, question_set=self.qset, packet=self.packet,
+            question_type=self.acf_tu, category=self.de, question_number=number,
+            tossup_text=text, tossup_answer='_Goethe_', all_power=all_power,
+            created_date=datetime.now(), last_changed_date=datetime.now())
+
+    def _payload(self, fmt='yapp-json'):
+        resp = self.client.get('/export_question_set/{0}/{1}/'.format(self.qset.id, fmt))
+        self.assertEqual(resp.status_code, 200)
+        zf = self._zip.ZipFile(self._io.BytesIO(resp.content))
+        return self._json.loads(zf.read('Packet 1.json').decode('utf-8'))
+
+    def test_flagged_all_power_gets_a_trailing_marker(self):
+        self._tossup('This author wrote Faust. For 10 points, name him.', all_power=True)
+        question = self._payload()['tossups'][0]['question']
+        self.assertTrue(question.endswith(' (*)'), question)
+
+    def test_auto_detected_all_power_gets_one_too(self):
+        # "For 15 points" with no marker is how the auto-detection fires.
+        tu = self._tossup('This author wrote Faust. For 15 points, name him.')
+        self.assertTrue(tu.is_all_power())
+        self.assertTrue(self._payload()['tossups'][0]['question'].endswith(' (*)'))
+
+    def test_an_ordinary_tossup_is_untouched(self):
+        self._tossup('This author (*) wrote Faust. For 10 points, name him.')
+        question = self._payload()['tossups'][0]['question']
+        self.assertEqual(question.count('(*)'), 1)
+        self.assertFalse(question.endswith(' (*)'))
+
+    def test_a_marked_tossup_never_gets_a_second_marker(self):
+        # all_power forced on a stem that already carries a marker: don't add another.
+        self._tossup('This author (*) wrote Faust. For 10 points, name him.', all_power=True)
+        self.assertEqual(self._payload()['tossups'][0]['question'].count('(*)'), 1)
+
+    def test_the_marker_is_the_last_thing_in_the_question(self):
+        # MODAQ scores power for buzzes before the marker's word, so it has to
+        # sit after the final word for the whole stem to be in power.
+        self._tossup('Alpha beta gamma. For 10 points, name him.', all_power=True)
+        question = self._payload()['tossups'][0]['question']
+        self.assertEqual(question.split('(*)')[1].strip(), '')
+
+    def test_yapp2_anchored_copy_matches(self):
+        self._tossup('This \\Pauthor\\P ("AWE-thur") wrote Faust. For 10 points, name him.',
+                     all_power=True)
+        tossup = self._payload('yapp2-json')['tossups'][0]
+        self.assertTrue(tossup['question'].endswith(' (*)'))
+        # The anchored twin may differ only by <pg> tags, so it carries the
+        # marker too.
+        anchored = tossup['anchored']['question']
+        self.assertTrue(anchored.endswith(' (*)'))
+        self.assertEqual(anchored.replace('<pg>', '').replace('</pg>', ''),
+                         tossup['question'])

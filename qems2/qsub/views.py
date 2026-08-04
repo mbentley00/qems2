@@ -1848,15 +1848,35 @@ def edit_packet(request, packet_id):
             # Per-packet requirements, shown per top-level category AND broken
             # out by subcategory so it's clear which subcategories are needed.
             # Use the packetization quota for a path when defined, otherwise the
-            # set-wide total for that path divided by the packet count.
+            # set-wide total for that path.
             num_packets = max(qset.num_packets, 1)
             quota_by_path = {e.path: e for e in PacketizationEntry.objects.filter(question_set=qset)}
+
+            # Where this packet falls in the set's order, so the remainder is
+            # handed out to the same packets every time this page is loaded.
+            packet_order = [p.id for p in sorted_packets(qset)]
+            packet_index = packet_order.index(packet.id) if packet.id in packet_order else 0
+
+            def _share(total, index, n):
+                """One packet's whole-number share of `total` questions.
+
+                You can't write 1.6 tossups, and showing that as the requirement
+                made the page unreadable. Split the set total into whole
+                questions instead: the first `total % n` packets carry one extra,
+                so every packet gets an integer and the shares still add up to
+                the set total exactly.
+                """
+                base, extra = divmod(int(round(total)), n)
+                return base + (1 if index < extra else 0)
 
             def _req(path, total, attr):
                 quota = quota_by_path.get(path)
                 if quota is not None and getattr(quota, attr) is not None:
-                    return float(getattr(quota, attr))
-                return round(total / float(num_packets), 1)
+                    # A packetization quota is a per-packet average, and may
+                    # itself be fractional (2.2 = "mostly 2, sometimes 3").
+                    # Scale it back to a set total and split that the same way.
+                    total = float(getattr(quota, attr)) * num_packets
+                return _share(total, packet_index, num_packets)
 
             entries = list(qset.setwidedistributionentry_set.select_related('dist_entry')
                            .order_by('dist_entry__category', 'dist_entry__subcategory'))
@@ -1867,18 +1887,19 @@ def edit_packet(request, packet_id):
             def _sub_status(in_cat, req, parent_met):
                 """How to mark a subcategory row.
 
-                A per-packet quota below 1 (or one carried by a category whose
-                own total this packet already meets) is an average across the
-                set, not a promise about this packet: with "Other" needing 2
-                and its subcategories needing 0.5/1/0.5, a packet can be
-                complete with no Geography at all. Those rows read as optional
-                here rather than as a 0% failure."""
+                A subcategory this packet doesn't cover isn't automatically a
+                failure: when the category's own total is already met, the
+                shortfall is someone else's to make up — with "Other" needing 2
+                and its subcategories 1/1/0 here, a packet can be complete with
+                no Geography at all. Those rows read as optional rather than as
+                a 0% failure.
+
+                (A subcategory that averages under one per packet needs 0 in the
+                packets it skips, so it never shows a shortfall there.)"""
                 if req <= 0 or in_cat >= req:
                     return '', ''
                 if parent_met:
                     return 'flex', 'This packet already meets the category total, so this subcategory is optional here.'
-                if req < 1:
-                    return 'flex', 'Less than one per packet — this subcategory rotates between packets.'
                 return '', ''
 
             tossup_status = []
@@ -1888,8 +1909,28 @@ def edit_packet(request, packet_id):
                 bs_total = sum(s.num_bonuses or 0 for s in swdes)
                 tu_in_top = Tossup.objects.filter(packet=packet, category__category=top).count()
                 bs_in_top = Bonus.objects.filter(packet=packet, category__category=top).count()
-                tu_top_req = _req(top, tu_total, 'min_tossups')
-                bs_top_req = _req(top, bs_total, 'min_bonuses')
+
+                # Each entry's share for this packet, worked out first: a
+                # category asks for exactly what its parts add up to, so the
+                # rows can't disagree (rounding each separately let a category
+                # ask for fewer questions than the subcategories beneath it).
+                entry_reqs = {}
+                for s in swdes:
+                    de = s.dist_entry
+                    path = ('{0} - {1}'.format(de.category, de.subcategory)
+                            if de.subcategory else de.category)
+                    entry_reqs[s.id] = (
+                        _req(path, s.num_tossups or 0, 'min_tossups'),
+                        _req(path, s.num_bonuses or 0, 'min_bonuses'))
+
+                def _top_req(attr, total, part_index):
+                    quota = quota_by_path.get(top)
+                    if quota is not None and getattr(quota, attr) is not None:
+                        return _req(top, total, attr)   # an explicit quota wins
+                    return sum(v[part_index] for v in entry_reqs.values())
+
+                tu_top_req = _top_req('min_tossups', tu_total, 0)
+                bs_top_req = _top_req('min_bonuses', bs_total, 1)
                 tu_top_met = tu_in_top >= tu_top_req
                 bs_top_met = bs_in_top >= bs_top_req
                 tossup_status.append({'label': top, 'is_sub': False,
@@ -1901,15 +1942,13 @@ def edit_packet(request, packet_id):
                     de = swde.dist_entry
                     if not de.subcategory:
                         continue
-                    path = '{0} - {1}'.format(de.category, de.subcategory)
-                    tu_req = _req(path, swde.num_tossups or 0, 'min_tossups')
+                    tu_req, bs_req = entry_reqs[swde.id]
                     tu_in = Tossup.objects.filter(packet=packet, category=de).count()
                     tu_state, tu_note = _sub_status(tu_in, tu_req, tu_top_met)
                     tossup_status.append({
                         'label': de.subcategory, 'is_sub': True,
                         'tu_req': tu_req, 'tu_in_cat': tu_in,
                         'state': tu_state, 'note': tu_note})
-                    bs_req = _req(path, swde.num_bonuses or 0, 'min_bonuses')
                     bs_in = Bonus.objects.filter(packet=packet, category=de).count()
                     bs_state, bs_note = _sub_status(bs_in, bs_req, bs_top_met)
                     bonus_status.append({

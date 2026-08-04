@@ -20,6 +20,11 @@ and leaves the power marker ``(*)`` as literal text in the question (the reader
 locates the power boundary from it). This mirrors how QEMS stores questions, so
 the export is round-trippable through this app's own YAPP importer.
 
+The one place the two models differ is an **all-power** tossup, which QEMS marks
+with a flag and no ``(*)`` at all. Written out as-is it would score no power
+anywhere, so the export appends the marker after the last word — see
+``all_power_tail``.
+
 YAPP2
 -----
 Plain YAPP has nowhere to record *which words a pronunciation guide covers* —
@@ -192,19 +197,40 @@ def _anchored(node, fields):
     return node
 
 
+def all_power_tail(tossup):
+    """``' (*)'`` for an all-power tossup that carries no marker of its own,
+    else ``''``.
+
+    QEMS records a whole-stem power as a flag, and the *absence* of a ``(*)`` is
+    part of how it's detected (a stem with a marker is by definition not
+    all-power). YAPP has no such flag: a reader finds the power boundary from
+    the literal marker, so exporting the stem as written would score every buzz
+    as a plain 10. A marker after the last word says the same thing in YAPP's
+    terms — everything before it is power, and that's the whole question.
+    """
+    is_all_power = getattr(tossup, 'is_all_power', None)
+    if not callable(is_all_power) or not is_all_power():
+        return ''
+    return '' if '(*)' in (tossup.tossup_text or '') else ' (*)'
+
+
 def tossup_to_yapp(tossup, number, version=1):
     text = tossup.tossup_text or ''
     answer = tossup.tossup_answer or ''
+    # Appended after conversion so it lands outside any markup, and to both
+    # copies alike — an anchored field may differ from its canonical twin only
+    # by <pg> tags.
+    tail = all_power_tail(tossup)
     node = {
         'number': number,
-        'question': qems_to_yapp_html(text),
+        'question': qems_to_yapp_html(text) + tail,
         'answer': qems_to_yapp_html(answer),
         'metadata': _metadata(tossup),
     }
     if version < 2:
         return node
     return _anchored(node, {
-        'question': (node['question'], qems_to_yapp_html(text, anchors=True)),
+        'question': (node['question'], qems_to_yapp_html(text, anchors=True) + tail),
         'answer': (node['answer'], qems_to_yapp_html(answer, anchors=True)),
     })
 

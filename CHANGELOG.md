@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-08-04b — Whole-number packet requirements, all-power in YAPP
+
+- **Per-packet requirements are whole questions.** The Edit Packet status table
+  divided the set total by the packet count, so 18 tossups over 11 packets read
+  as "1.6 required" — a number nobody can write to. Each packet now gets an
+  integer share (the first few packets carry the remainder), and the shares add
+  up to the set total exactly. A category asks for what its subcategories add up
+  to, so the rows can't disagree.
+- **All-power tossups keep their power in YAPP.** QEMS records a whole-stem
+  power as a flag with no `(*)` in the text — the marker's absence is part of
+  how it's detected — but YAPP readers locate the power boundary from that
+  literal marker, so MODAQ was scoring every buzz on such a tossup as a plain
+  10. The export now writes the marker after the last word, which says the same
+  thing in YAPP's terms.
+- **MODAQ reads YAPP2 1.1.** The fork validates `readingOrder` on load (keeping
+  it only when it names every question exactly once) and writes it back out, so
+  a load/export round trip no longer drops it.
+
 ## 2026-08-04 — Live packet grid, comment history, export typography
 
 - **The packet grid keeps up with other people's changes.** It polls for what
