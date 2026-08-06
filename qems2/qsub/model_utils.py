@@ -553,6 +553,16 @@ def get_tossup_and_bonuses_in_set(qset, question_limit=30, preview_only=False):
     return tossups, tossup_dict, bonuses, bonus_dict
 
 def get_comment_tab_list(tossup_dict, bonus_dict, comment_limit=60):
+    """Comments on a set's questions, newest first, for the comment lists (the
+    all-comments page and the dashboard's Recent Comments tab).
+
+    Resolved discussions are left out. Resolving a comment is how an editor says
+    it's been dealt with, so keeping it in a list of things to look at works
+    against the point of the button — and a long-running set accumulates enough
+    of them to bury what's still open. A reply is dropped along with the comment
+    it answers, since the thread is what gets resolved, not the individual
+    message. Both are still on the question itself and in its history.
+    """
     comment_tab_list = []
 
     tossup_content_type_id = ContentType.objects.get_for_model(Tossup).id
@@ -568,7 +578,13 @@ def get_comment_tab_list(tossup_dict, bonus_dict, comment_limit=60):
     if not comment_filter:
         return comment_tab_list
 
+    # Replies to a resolved comment go too: the thread is what was resolved.
+    replies_to_resolved = (CommentReply.objects
+                           .filter(parent__resolution__resolved=True)
+                           .values_list('comment_id', flat=True))
     comments = (Comment.objects.filter(comment_filter, is_removed=False)
+                .exclude(resolution__resolved=True)
+                .exclude(id__in=replies_to_resolved)
                 .select_related('user').order_by('-submit_date')[:comment_limit])
     comments = mark_discord_comments(comments)
     for comment in comments:

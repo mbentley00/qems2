@@ -1,0 +1,33 @@
+{% comment %}
+Previous/next question within this packet, so a packet can be worked through
+without opening a tab per question. The walk is the packet's reading order —
+every tossup by number, then every bonus — so it carries on across the boundary
+rather than stopping at the last tossup.
+
+Required context: `packet_nav` (see views._packet_neighbors). Renders nothing
+for an unpacketized question, which has no sequence to walk.
+{% endcomment %}
+{% if packet_nav.prev or packet_nav.next %}
+<div class="packet-nav">
+    {% if packet_nav.prev %}
+        <a href="{{ packet_nav.prev.url }}" class="packet-nav-link packet-nav-prev"
+           title="{{ packet_nav.prev.qtype|capfirst }}{% if packet_nav.prev.number %} #{{ packet_nav.prev.number }}{% endif %}: {{ packet_nav.prev.label }}"
+           accesskey="[">
+            <i class="fa fa-arrow-left"></i>
+            <span class="packet-nav-text">{{ packet_nav.prev.label }}</span>
+        </a>
+    {% else %}
+        <span class="packet-nav-link packet-nav-end">Start of packet</span>
+    {% endif %}
+    {% if packet_nav.next %}
+        <a href="{{ packet_nav.next.url }}" class="packet-nav-link packet-nav-next"
+           title="{{ packet_nav.next.qtype|capfirst }}{% if packet_nav.next.number %} #{{ packet_nav.next.number }}{% endif %}: {{ packet_nav.next.label }}"
+           accesskey="]">
+            <span class="packet-nav-text">{{ packet_nav.next.label }}</span>
+            <i class="fa fa-arrow-right"></i>
+        </a>
+    {% else %}
+        <span class="packet-nav-link packet-nav-end">End of packet</span>
+    {% endif %}
+</div>
+{% endif %}

@@ -6910,3 +6910,209 @@ class YappAllPowerTests(TestCase):
         self.assertTrue(anchored.endswith(' (*)'))
         self.assertEqual(anchored.replace('<pg>', '').replace('</pg>', ''),
                          tossup['question'])
+
+
+
+class PacketQuestionNavTests(TestCase):
+    """Previous/next links on the edit pages walk a packet in reading order —
+    every tossup by number, then every bonus — so a packet can be worked through
+    without opening a tab per question."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        self.acf_tu = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.acf_bn = QuestionType.objects.get(question_type=ACF_STYLE_BONUS)
+        self.ou = User.objects.create_user('nv_owner', password='pw', email='nv@test.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='nv dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='Science', subcategory='Biology')
+        self.qset = QuestionSet.objects.create(
+            name='NV Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.owner.question_set_editor.add(self.qset)
+        self.packet = Packet.objects.create(
+            question_set=self.qset, packet_name='Packet 1', created_by=self.owner)
+        self.other_packet = Packet.objects.create(
+            question_set=self.qset, packet_name='Packet 2', created_by=self.owner)
+        self.tus = [self._tossup(self.packet, n) for n in (1, 2, 3)]
+        self.bns = [self._bonus(self.packet, n) for n in (1, 2)]
+        self.other_tu = self._tossup(self.other_packet, 1, answer='_Elsewhere_')
+        self.loose = self._tossup(None, None, answer='_Loose_')
+        self.client.login(username='nv_owner', password='pw')
+
+    def _tossup(self, packet, number, answer=None):
+        return Tossup.objects.create(
+            author=self.owner, question_set=self.qset, packet=packet,
+            question_type=self.acf_tu, category=self.de, question_number=number,
+            tossup_text='Stem. (*) end.',
+            tossup_answer=answer or '_Tossup{0}_'.format(number),
+            created_date=datetime.now(), last_changed_date=datetime.now())
+
+    def _bonus(self, packet, number):
+        return Bonus.objects.create(
+            author=self.owner, question_set=self.qset, packet=packet,
+            question_type=self.acf_bn, category=self.de, question_number=number,
+            leadin='Lead.', part1_text='P1', part1_answer='_Bonus{0}_'.format(number),
+            part2_text='P2', part2_answer='_Beta_', part3_text='P3', part3_answer='_Gamma_',
+            created_date=datetime.now(), last_changed_date=datetime.now())
+
+    def _nav(self, url):
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        return resp.context['packet_nav']
+
+    def test_middle_tossup_links_both_ways(self):
+        nav = self._nav('/edit_tossup/{0}/'.format(self.tus[1].id))
+        self.assertEqual(nav['prev']['url'], '/edit_tossup/{0}/'.format(self.tus[0].id))
+        self.assertEqual(nav['next']['url'], '/edit_tossup/{0}/'.format(self.tus[2].id))
+
+    def test_the_first_question_has_no_previous(self):
+        nav = self._nav('/edit_tossup/{0}/'.format(self.tus[0].id))
+        self.assertIsNone(nav['prev'])
+        self.assertIsNotNone(nav['next'])
+
+    def test_the_walk_carries_on_into_the_bonuses(self):
+        # "Next question in the packet" means the next one, not the next tossup.
+        nav = self._nav('/edit_tossup/{0}/'.format(self.tus[2].id))
+        self.assertEqual(nav['next']['url'], '/edit_bonus/{0}/'.format(self.bns[0].id))
+        back = self._nav('/edit_bonus/{0}/'.format(self.bns[0].id))
+        self.assertEqual(back['prev']['url'], '/edit_tossup/{0}/'.format(self.tus[2].id))
+
+    def test_the_last_bonus_ends_the_packet(self):
+        nav = self._nav('/edit_bonus/{0}/'.format(self.bns[-1].id))
+        self.assertIsNone(nav['next'])
+        self.assertIsNotNone(nav['prev'])
+
+    def test_another_packet_is_never_linked(self):
+        for tu in self.tus:
+            nav = self._nav('/edit_tossup/{0}/'.format(tu.id))
+            for side in ('prev', 'next'):
+                if nav[side]:
+                    self.assertNotIn(str(self.other_tu.id), nav[side]['url'])
+
+    def test_an_unpacketized_question_has_no_neighbours(self):
+        nav = self._nav('/edit_tossup/{0}/'.format(self.loose.id))
+        self.assertIsNone(nav['prev'])
+        self.assertIsNone(nav['next'])
+
+    def test_the_link_says_where_it_goes(self):
+        nav = self._nav('/edit_tossup/{0}/'.format(self.tus[1].id))
+        self.assertEqual(nav['prev']['label'], 'Tossup1')
+        self.assertEqual(nav['next']['label'], 'Tossup3')
+        self.assertEqual(nav['next']['number'], 3)
+
+    def test_the_links_render(self):
+        body = self.client.get('/edit_tossup/{0}/'.format(self.tus[1].id)).content.decode()
+        self.assertIn('packet-nav-prev', body)
+        self.assertIn('packet-nav-next', body)
+        self.assertIn('/edit_tossup/{0}/'.format(self.tus[2].id), body)
+
+    def test_an_unpacketized_page_renders_no_nav(self):
+        body = self.client.get('/edit_tossup/{0}/'.format(self.loose.id)).content.decode()
+        self.assertNotIn('packet-nav-prev', body)
+        self.assertNotIn('packet-nav-next', body)
+
+
+
+class ResolvedCommentListTests(TestCase):
+    """Resolved discussions drop out of the comment lists — resolving is how an
+    editor says a comment has been dealt with, so it shouldn't keep sitting in
+    the list of things to look at."""
+
+    def setUp(self):
+        from django.contrib.sites.models import Site
+        from django_comments.models import Comment as _C
+        self.Comment = _C
+        self.site = Site.objects.get_current()
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        self.acf_tu = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('rc_owner', password='pw', email='rc@test.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='rc dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='Science', subcategory='Biology')
+        self.qset = QuestionSet.objects.create(
+            name='RC Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.owner.question_set_editor.add(self.qset)
+        self.tu = Tossup.objects.create(
+            author=self.owner, question_set=self.qset, question_type=self.acf_tu,
+            category=self.de, question_number=1,
+            tossup_text='A stem. (*) end.', tossup_answer='_Photosynthesis_',
+            created_date=datetime.now(), last_changed_date=datetime.now())
+        self.client.login(username='rc_owner', password='pw')
+
+    def _comment(self, text):
+        return self.Comment.objects.create(
+            content_type=ContentType.objects.get_for_model(Tossup),
+            object_pk=str(self.tu.id), site=self.site, user=self.ou, comment=text,
+            is_public=True, is_removed=False)
+
+    def _resolve(self, comment):
+        CommentResolution.objects.create(
+            comment=comment, resolved=True, resolved_by=self.owner)
+
+    def _all_comments_body(self):
+        resp = self.client.get('/view_all_comments/{0}/'.format(self.qset.id))
+        self.assertEqual(resp.status_code, 200)
+        return resp.content.decode()
+
+    def test_a_resolved_comment_is_hidden(self):
+        self._comment('still open')
+        self._resolve(self._comment('already handled'))
+        body = self._all_comments_body()
+        self.assertIn('still open', body)
+        self.assertNotIn('already handled', body)
+
+    def test_an_unresolved_comment_still_shows(self):
+        self._comment('please fix the power mark')
+        self.assertIn('please fix the power mark', self._all_comments_body())
+
+    def test_unresolving_brings_it_back(self):
+        comment = self._comment('came back')
+        resolution = CommentResolution.objects.create(
+            comment=comment, resolved=True, resolved_by=self.owner)
+        self.assertNotIn('came back', self._all_comments_body())
+        resolution.resolved = False
+        resolution.save()
+        self.assertIn('came back', self._all_comments_body())
+
+    def test_replies_to_a_resolved_comment_go_too(self):
+        parent = self._comment('the original point')
+        reply = self._comment('and my reply to it')
+        CommentReply.objects.create(comment=reply, parent=parent)
+        self._resolve(parent)
+        body = self._all_comments_body()
+        self.assertNotIn('the original point', body)
+        self.assertNotIn('and my reply to it', body)
+
+    def test_a_reply_on_an_open_thread_still_shows(self):
+        parent = self._comment('the original point')
+        reply = self._comment('and my reply to it')
+        CommentReply.objects.create(comment=reply, parent=parent)
+        body = self._all_comments_body()
+        self.assertIn('the original point', body)
+        self.assertIn('and my reply to it', body)
+
+    def test_the_dashboard_recent_comments_tab_matches(self):
+        # Same list, same rule — one showing resolved comments and the other not
+        # would just be confusing. Scoped to that tab's table: the Recent
+        # Questions tab on the same page lists each question's own comments,
+        # which is the question view and keeps showing them.
+        self._comment('still open')
+        self._resolve(self._comment('already handled'))
+        body = self.client.get(
+            '/edit_question_set/{0}/'.format(self.qset.id)).content.decode()
+        table = body.split('id="comments-table"')[1].split('</table>')[0]
+        self.assertIn('still open', table)
+        self.assertNotIn('already handled', table)
+
+    def test_the_question_page_still_shows_a_resolved_comment(self):
+        # Hidden from the lists, not from the question: the thread is still
+        # there, marked resolved.
+        self._resolve(self._comment('already handled'))
+        body = self.client.get('/edit_tossup/{0}/'.format(self.tu.id)).content.decode()
+        self.assertIn('already handled', body)

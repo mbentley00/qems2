@@ -355,6 +355,20 @@ html[data-theme="dark"] .rich-editor i, html[data-theme="dark"] .rich-editor em 
 .qmeta-packet { font-size: 0.95rem; }
 .qmeta-packet .qmeta-label { font-weight: 700; color: #565b66; margin-right: 6px; }
 .qmeta-gridlink { margin-left: 10px; font-size: 0.85rem; }
+/* Previous/next question in this packet, sitting with the packet name it walks.
+   Each link shows where it goes, so you can step through a packet without
+   opening a tab per question. */
+.packet-nav { display: inline-flex; align-items: center; gap: 6px; margin-left: 14px; vertical-align: baseline; }
+.packet-nav-link { display: inline-flex; align-items: center; gap: 5px; max-width: 22em;
+    padding: 2px 8px; border: 1px solid var(--qx-border, #e2e2ea); border-radius: 3px;
+    background: #f7f7fa; font-size: 0.8rem; line-height: 1.5; }
+.packet-nav-link:hover { background: #efe6fb; border-color: #d6c6f2; }
+.packet-nav-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.packet-nav-end { color: var(--qx-muted, #8a8f9c); background: none; border-color: transparent; cursor: default; }
+.packet-nav-end:hover { background: none; }
+html[data-theme="dark"] .packet-nav-link { background: var(--qx-elevate); border-color: var(--qx-border); }
+html[data-theme="dark"] .packet-nav-link:hover { background: var(--qx-hover); }
+html[data-theme="dark"] .packet-nav-end { background: none; border-color: transparent; }
 /* Action buttons + Save share one row; Save is pushed to the right. */
 .qmeta-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 16px; }
 /* Tighter padding so the row fits on one line at smaller widths. */

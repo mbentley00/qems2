@@ -160,6 +160,7 @@
                 <span class="qmeta-label">Packet</span>
                 {% if bonus.packet %}<strong>{{ bonus.packet.packet_name }}</strong>{% if bonus.question_number %} &mdash; #{{ bonus.question_number }}{% endif %}{% else %}<em>Unpacketized</em>{% endif %}
                 <a href="/packet_grid/{{ qset.id }}/" class="qmeta-gridlink">Packet grid</a>
+                {% include "_packet_nav.html" %}
             </div>
             <ul class="qmeta-flags">
                 {% if role == "editor" %}

@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-08-05 — Packet navigation, resolved comments out of the lists
+
+- **Step through a packet from the question page.** Previous/next links beside
+  the packet name walk the packet in reading order — every tossup by number,
+  then every bonus — so you can work through a packet without opening a tab per
+  question. Each link names where it goes, the ends read "Start/End of packet",
+  and `[` / `]` work as shortcuts. An unpacketized question shows none, having
+  no sequence to walk.
+- **Resolved comments drop out of the comment lists.** Resolving is how an
+  editor says a comment has been dealt with, so it no longer sits in the
+  all-comments page or the dashboard's Recent Comments tab; replies go with the
+  comment they answer, since the thread is what gets resolved. They're still on
+  the question itself, marked resolved, and in its comment history.
+
 ## 2026-08-04b — Whole-number packet requirements, all-power in YAPP
 
 - **Per-packet requirements are whole questions.** The Edit Packet status table

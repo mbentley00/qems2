@@ -98,6 +98,7 @@
                 <span class="qmeta-label">Packet</span>
                 {% if tossup.packet %}<strong>{{ tossup.packet.packet_name }}</strong>{% if tossup.question_number %} &mdash; #{{ tossup.question_number }}{% endif %}{% else %}<em>Unpacketized</em>{% endif %}
                 <a href="/packet_grid/{{ qset.id }}/" class="qmeta-gridlink">Packet grid</a>
+                {% include "_packet_nav.html" %}
             </div>
             <ul class="qmeta-flags">
                 {% if role == "editor" %}

@@ -2413,6 +2413,7 @@ def edit_tossup(request, tossup_id):
 
         return render(request, 'edit_tossup.html',
             {'tossup': tossup,
+             'packet_nav': _packet_neighbors(tossup, 'tossup'),
              'tossup_length': tossup_length,
              'form': form,
              'qset': qset,
@@ -2521,6 +2522,7 @@ def edit_tossup(request, tossup_id):
 
         return render(request, 'edit_tossup.html',
             {'tossup': tossup,
+             'packet_nav': _packet_neighbors(tossup, 'tossup'),
              'tossup_length': tossup_length,
              'form': form,
              'role': role,
@@ -2589,6 +2591,7 @@ def edit_bonus(request, bonus_id):
 
         return render(request, 'edit_bonus.html',
             {'bonus': bonus,
+             'packet_nav': _packet_neighbors(bonus, 'bonus'),
              'new_checks': new_checks,
              'char_count': char_count,
              'question_type': question_type,
@@ -2702,6 +2705,7 @@ def edit_bonus(request, bonus_id):
 
         return render(request, 'edit_bonus.html',
             {'bonus': bonus,
+             'packet_nav': _packet_neighbors(bonus, 'bonus'),
              'char_count': char_count,
              'question_type': question_type,
              'form': form,
@@ -6786,6 +6790,47 @@ def _grid_answer_preview(text, limit=45):
     if len(answer) > limit:
         answer = answer[:limit].rstrip() + '...'
     return answer
+
+def _packet_neighbors(question, qtype):
+    """The question before and after this one in its packet, so you can walk a
+    packet without opening a tab per question.
+
+    The walk is the packet's reading order: every tossup by number, then every
+    bonus. Crossing from the last tossup into the first bonus is deliberate —
+    "next question in the packet" means the next one, not the next one of the
+    same kind. Returns ``{'prev': {...}|None, 'next': {...}|None}``, empty for
+    an unpacketized question (there's no sequence to walk).
+    """
+    packet = getattr(question, 'packet', None)
+    if packet is None:
+        return {'prev': None, 'next': None}
+
+    sequence = []
+    for model, kind in ((Tossup, 'tossup'), (Bonus, 'bonus')):
+        for q in (model.objects.filter(packet=packet)
+                  .only('id', 'question_number', 'tossup_answer' if kind == 'tossup' else 'part1_answer')
+                  .order_by('question_number', 'id')):
+            sequence.append((kind, q))
+
+    position = next((i for i, (kind, q) in enumerate(sequence)
+                     if kind == qtype and q.id == question.id), None)
+    if position is None:
+        return {'prev': None, 'next': None}
+
+    def describe(index):
+        if index < 0 or index >= len(sequence):
+            return None
+        kind, q = sequence[index]
+        answer = q.tossup_answer if kind == 'tossup' else q.part1_answer
+        return {
+            'url': '/edit_{0}/{1}/'.format(kind, q.id),
+            'label': _grid_answer_preview(answer, 40) or 'Untitled',
+            'qtype': kind,
+            'number': q.question_number,
+        }
+
+    return {'prev': describe(position - 1), 'next': describe(position + 1)}
+
 
 def _grid_cell_payload(question, qtype):
     """What the packet grid shows in one occupied slot. Shared by the page
