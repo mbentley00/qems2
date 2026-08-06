@@ -152,7 +152,6 @@ document.addEventListener('DOMContentLoaded', function () {
         <div class="doc-list" id="doc-list-interleaved">
             {% for q in interleaved %}
             <div class="doc-question" id="q-{{ q.qtype }}-{{ q.id }}" data-qtype="{{ q.qtype }}" data-qid="{{ q.id }}" data-num="{{ q.number }}" data-edit-url="{{ q.edit_url }}">
-                {% if not read_only %}<a href="#" class="doc-swap-btn doc-swap-corner" title="Swap this question with another"><i class="fa fa-right-left"></i> Swap</a>{% endif %}
                 <span class="doc-qlabel">{% if q.qtype == 'tossup' %}Tossup{% else %}Bonus{% endif %} {{ q.number }}.{% if q.is_tiebreaker %} <span class="doc-tb">(Tiebreaker)</span>{% endif %}</span>
                 {% autoescape off %}<span class="doc-qtext">{{ q.html }}</span>{% endautoescape %}
                 {% include "view_packet_meta.html" %}
@@ -164,7 +163,6 @@ document.addEventListener('DOMContentLoaded', function () {
         <div class="doc-list" id="doc-list-tossups">
             {% for q in tossups %}
             <div class="doc-question" id="q-tossup-{{ q.id }}" data-qtype="tossup" data-qid="{{ q.id }}" data-num="{{ q.number }}" data-edit-url="{{ q.edit_url }}">
-                {% if not read_only %}<a href="#" class="doc-swap-btn doc-swap-corner" title="Swap this tossup with another"><i class="fa fa-right-left"></i> Swap</a>{% endif %}
                 <span class="doc-qlabel">{{ q.number }}.{% if q.is_tiebreaker %} <span class="doc-tb">(Tiebreaker)</span>{% endif %}</span>
                 {% autoescape off %}<span class="doc-qtext">{{ q.html }}</span>{% endautoescape %}
                 {% include "view_packet_meta.html" %}
@@ -176,7 +174,6 @@ document.addEventListener('DOMContentLoaded', function () {
         <div class="doc-list" id="doc-list-bonuses">
             {% for q in bonuses %}
             <div class="doc-question" id="q-bonus-{{ q.id }}" data-qtype="bonus" data-qid="{{ q.id }}" data-num="{{ q.number }}" data-edit-url="{{ q.edit_url }}">
-                {% if not read_only %}<a href="#" class="doc-swap-btn doc-swap-corner" title="Swap this bonus with another"><i class="fa fa-right-left"></i> Swap</a>{% endif %}
                 <span class="doc-qlabel">{{ q.number }}.{% if q.is_tiebreaker %} <span class="doc-tb">(Tiebreaker)</span>{% endif %}</span>
                 {% autoescape off %}<span class="doc-qtext">{{ q.html }}</span>{% endautoescape %}
                 {% include "view_packet_meta.html" %}
@@ -277,16 +274,10 @@ document.addEventListener('DOMContentLoaded', function () {
 .doc-swap-btn { background:#e8f4fb; color:#006f9a; font-weight:bold; white-space:nowrap; }
 /* Swap stays available in reorder mode too — hiding it there just made the
    button look missing to anyone whose saved mode was "reorder". */
-/* Swap sits at the top-right of its question, where the packet grid puts it —
-   the meta row at the bottom buried it among the Author/Length tags. */
-.doc-swap-corner {
-    float: right; margin: 0 0 4px 8px; padding: 1px 8px; border-radius: 3px;
-    border: 1px solid #b9dcef; font-size: 0.72em; line-height: 1.6;
-    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
-}
-.doc-swap-corner:hover { background:#008CBA; color:#fff; border-color:#008CBA; }
-.doc-swap-corner .fa { margin-right: 3px; }
-html[data-theme="dark"] .doc-swap-corner { background:#123243; color:#7fc7e8; border-color:#1d4a61; }
+/* Swap sits with Edit in the meta row: the two are the actions you take on a
+   question, so they belong together rather than at opposite ends of it. */
+.doc-swap-btn .fa { margin-right: 3px; }
+html[data-theme="dark"] .doc-swap-btn { background:#123243; color:#7fc7e8; }
 /* Right-hand swap panel: the whole packet at a glance, for trading questions
    around without scrolling the document. Hidden until asked for. */
 .swap-panel { display: none; position: fixed; top: 60px; right: 0; bottom: 0; width: 330px;

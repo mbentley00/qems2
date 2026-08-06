@@ -2199,15 +2199,21 @@ class UnpacketizedAssignmentTests(TestCase):
         self.assertNotIn(self.placed.id, ids)
 
     def test_doc_view_has_swap_buttons(self):
+        import re
         self._tu('swapme', packet=self.p1, number=1)
         resp = self.client.get('/view_packet/{0}/'.format(self.p1.id))
         self.assertEqual(resp.status_code, 200)
         html = resp.content.decode()
         self.assertIn('doc-swap-btn', html)
         self.assertIn('doc-swap-dialog', html)
-        # It rides at the top of the question, not buried in the meta row.
-        self.assertIn('doc-swap-corner', html)
-        self.assertLess(html.index('doc-swap-corner'), html.index('doc-meta'))
+        # Swap sits with Edit in the meta row: they're the two actions you take
+        # on a question, so they belong next to each other. (It used to float at
+        # the question's top-right, hence the old doc-swap-corner.)
+        self.assertNotIn('doc-swap-corner', html)
+        meta = html[html.index('<div class="doc-meta">'):]
+        anchors = re.findall(r'<a\s[^>]*class="([^"]*)"', meta)
+        edit_at = next(i for i, cls in enumerate(anchors) if 'doc-edit-link' in cls)
+        self.assertIn('doc-swap-btn', anchors[edit_at - 1])
 
     def test_move_packet_question_swaps_positions_not_shift(self):
         # Doc-view reorder drag now posts to move_packet_question, which must

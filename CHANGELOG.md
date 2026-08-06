@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-08-06 — Packet grid scrolling, doc-view Swap next to Edit
+
+- **A horizontal scrollbar you can see and reach.** The grid's own scrollbar sat
+  at the bottom of a table taller than the screen, and Firefox draws overlay
+  scrollbars that fade out — so there was often nothing to grab anywhere. Each
+  grid now has a bar we draw ourselves, stuck to the bottom of the viewport and
+  always visible, that drives the grid when you drag or click it.
+- **Packet names stay put.** The grid's header row is sticky, so ten rows in you
+  can still tell which column is which packet.
+- **Find-in-page works in Firefox.** The earlier fix hung entirely off the
+  `selectionchange` event, which Firefox doesn't fire reliably for the find bar,
+  so on Firefox it never ran at all — a match in an off-screen column was
+  selected where you couldn't see it. The selection is now polled as well as
+  watched, the container is scrolled explicitly (clearing the sticky number
+  column and top bar), and a stuck drag-guard that could silently disable the
+  whole thing is cleared on window blur.
+- **Doc view: Swap moved next to Edit.** They're the two actions you take on a
+  question, so they sit together in the meta row instead of at opposite ends.
+
 ## 2026-08-05 — Packet navigation, resolved comments out of the lists
 
 - **Step through a packet from the question page.** Previous/next links beside
