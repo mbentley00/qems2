@@ -298,7 +298,20 @@ def get_formatted_question_html(line, allowUnderlines, allowParens, allowNewLine
             output += line[index:index + 3] + u"</strong>"  # the actual mark: (*) or (+)
             index += 3 # Skip over the rest of what's in the power mark
             continue
-        
+
+        # A power/superpower mark that isn't the one powerIndex points at (a stem
+        # can carry both "(+)" and "(*)"; powerIndex is the later one, and "(+)"
+        # prints literally when the set has superpower off). It's a scoring mark,
+        # not a guide, so it renders plain instead of getting the pronunciation-
+        # guide styling below.
+        if (c == u"(" and allowParens and allowPowers and previousChar != u"\\"
+                and line[index:index + 3] in (u"(*)", u"(+)")):
+            output += line[index:index + 3]
+            secondPreviousChar = u"("
+            previousChar = u")"
+            index += 3
+            continue
+
         if (c == u"~" and previousChar != u"\\"):
             if (not italicsFlag):
                 output += u"<i>"
@@ -315,20 +328,17 @@ def get_formatted_question_html(line, allowUnderlines, allowParens, allowNewLine
                 itatlicsFlag = False
                 output += u"</i>"
             
-            if (not powerFlag):
-                output += u"<strong class=\"pronunciation-guide\">("
-                parensFlag = True
-            else:
-                output += u"("
+            # A guide keeps its own look (gray, never bold) even inside the
+            # bolded power region: it's an aside to the moderator, not part of
+            # what's read for points. The Word export does the same.
+            output += u"<strong class=\"pronunciation-guide\">("
+            parensFlag = True
         elif (c == u"(" and allowParens and previousChar == u"\\" and secondPreviousChar != u"\\"):
             output = output[:-1] # Get rid of the escape character
             output += c
         elif (c == u")" and allowParens and previousChar != u"\\" and secondPreviousChar != u"\\"):
-            if (not powerFlag):
-                output += u")</strong>"
-                parensFlag = False
-            else:
-                output += u")"
+            output += u")</strong>"
+            parensFlag = False
 
             if (needToRestoreItalicsFlag):
                 output += u"<i>"

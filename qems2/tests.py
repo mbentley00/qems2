@@ -1423,9 +1423,10 @@ class StyleCheckFixTests(TestCase):
             'code': 'pronunciation', 'token': 'Question|Goethe', 'guide': 'minkowski'})
         self.assertEqual(resp.status_code, 200)
         self.tu.refresh_from_db()
-        # The fix now annotates the target word: \PGoethe\P ("GUR-tuh")'s
-        self.assertIn('\\PGoethe\\P ("GUR-tuh")', self.tu.tossup_text)
-        self.assertIn("(\"GUR-tuh\")'s", self.tu.tossup_text)  # inserted before the 's
+        # The possessive is read as part of the word, so it goes inside the
+        # marked target and the respelling grows to cover it.
+        self.assertIn('\\PGoethe\'s\\P ("GUR-tuhz")', self.tu.tossup_text)
+        self.assertNotIn('")\'s', self.tu.tossup_text)  # never split by the guide
 
     def test_apply_is_idempotent_after_guide_present(self):
         self.client.post('/apply_style_fix/', {
@@ -3476,6 +3477,25 @@ class PgAnnotationTests(TestCase):
             'Question', 'Denis \\PDiderot\\P ("DID-er-OW") wrote things.', 'tossup_text')
         self.assertEqual(issues, [])
 
+    def test_pg_span_accepts_target_closed_inside_markup(self):
+        # The target sits inside italics, so the closing ~ (or _, or \B etc.)
+        # falls between the \P and the guide: still a marked target.
+        from qems2.qsub import style_checker
+        for text in ('~Death of the \\PDauphin\\P~ ("DOFF-in") hung there.',
+                     'the _\\PGoethe\\P_ ("GUR-tuh") one',
+                     '\\B\\PBach\\P\\B ("BAHK") wrote'):
+            issues = style_checker._pg_span_issues('Question', text, 'tossup_text')
+            self.assertEqual(issues, [], text)
+            # ...and the auto-fix won't wrap it a second time.
+            self.assertEqual(style_checker.mark_pg_target(text, 0), text)
+
+    def test_pg_span_still_flags_guide_after_unrelated_markup(self):
+        # Italics that close well before the guide don't count as a target.
+        from qems2.qsub import style_checker
+        issues = style_checker._pg_span_issues(
+            'Question', 'read ~The Wave~ and Diderot ("DID-er-OW")', 'tossup_text')
+        self.assertEqual(len(issues), 1)
+
     def test_pg_span_ignores_power_marks_and_escaped_parens(self):
         from qems2.qsub import style_checker
         issues = style_checker._pg_span_issues(
@@ -4796,6 +4816,15 @@ class SuperpowerTests(TestCase):
         html = get_formatted_question_html('a (+) b (*) c', True, True, False, True)
         self.assertEqual(html, '<strong>a (+) b (*)</strong> c')
 
+    def test_guide_inside_power_region_stays_a_guide(self):
+        # A guide within the bolded power region keeps the gray, non-bold
+        # .pronunciation-guide styling; the (+) mark itself stays plain bold.
+        from qems2.qsub.utils import get_formatted_question_html
+        html = get_formatted_question_html('a ("AY") (+) b (*) c', True, True, False, True)
+        self.assertEqual(
+            html,
+            '<strong>a <strong class="pronunciation-guide">("AY")</strong> (+) b (*)</strong> c')
+
     def test_reading_reports_both_indices(self):
         from qems2.qsub.views import _tossup_reading
         r = _tossup_reading(self.tu)
@@ -5372,6 +5401,86 @@ class PgAutoMarkTests(TestCase):
         self.assertEqual(len(issues), 1)
         self.assertEqual(issues[0]['fix'],
                          {'field': 'tossup_text', 'op': 'pg_span', 'idx': 0})
+
+
+class PronunciationPossessiveTests(TestCase):
+    """A possessive is read as part of the word, so a guide never splits one:
+    the mark covers "Saatchi's" and the respelling grows to match."""
+
+    def test_respelling_takes_the_possessive_sound(self):
+        from qems2.qsub.style_checker import possessive_respelling as p
+        self.assertEqual(p('SAH-chee'), 'SAH-cheez')     # vowel -> /z/
+        self.assertEqual(p('GUR-tuh'), 'GUR-tuhz')
+        self.assertEqual(p('BAHK'), 'BAHKS')             # voiceless -> /s/
+        self.assertEqual(p('DEE-kart'), 'DEE-karts')
+        self.assertEqual(p('boosh'), 'boosh-iz')         # sibilant -> extra syllable
+        self.assertEqual(p('BAHKS'), 'BAHKS-IZ')         # case follows the respelling
+        self.assertEqual(p('BUSH-iz'), 'BUSH-iz')        # already possessive
+
+    def test_inserted_guide_keeps_the_possessive_with_the_word(self):
+        from qems2.qsub.style_checker import _insert_guide
+        self.assertEqual(_insert_guide("Edward Saatchi's collection grew.",
+                                       'Edward Saatchi', 'SAH-chee'),
+                         '\\PEdward Saatchi\'s\\P ("SAH-cheez") collection grew.')
+
+    def test_plural_possessive_adds_no_sound(self):
+        from qems2.qsub.style_checker import _insert_guide
+        self.assertEqual(_insert_guide("Jones' letters survive.", 'Jones', 'JOHNZ'),
+                         '\\PJones\'\\P ("JOHNZ") letters survive.')
+
+    def test_non_possessive_is_unaffected(self):
+        from qems2.qsub.style_checker import _insert_guide
+        self.assertEqual(_insert_guide('Edward Saatchi collected art.',
+                                       'Edward Saatchi', 'SAH-chee'),
+                         '\\PEdward Saatchi\\P ("SAH-chee") collected art.')
+
+    def test_split_possessive_is_flagged_and_fixed(self):
+        from qems2.qsub.style_checker import _pg_possessive_issues, fix_pg_possessive
+        text = 'Edward Saatchi ("SAH-chee")\'s collection grew.'
+        issues = _pg_possessive_issues('Question', text, 'tossup_text')
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]['code'], 'pg_possessive')
+        self.assertEqual(issues[0]['fix'],
+                         {'field': 'tossup_text', 'op': 'pg_possessive', 'idx': 0})
+        self.assertEqual(fix_pg_possessive(text, 0),
+                         'Edward Saatchi\'s ("SAH-cheez") collection grew.')
+
+    def test_fix_grows_an_existing_marked_target(self):
+        from qems2.qsub.style_checker import fix_pg_possessive
+        self.assertEqual(fix_pg_possessive('\\PEdward Saatchi\\P ("SAH-chee")\'s art', 0),
+                         '\\PEdward Saatchi\'s\\P ("SAH-cheez") art')
+
+    def test_guide_without_a_possessive_is_not_flagged(self):
+        from qems2.qsub.style_checker import _pg_possessive_issues
+        self.assertEqual(_pg_possessive_issues(
+            'Question', 'Denis \\PDiderot\\P ("DID-er-OW") wrote.', 'tossup_text'), [])
+
+
+class StyleIssueContextTests(TestCase):
+    """Mechanical/prose issues carry a preview of the text they found, the same
+    way the pronunciation suggestions do."""
+
+    def _codes_to_html(self, text):
+        from qems2.qsub import style_checker as sc
+        issues = (sc._mechanical_issues('Question', text, 'tossup_text')
+                  + sc._prose_issues('Question', text, 'tossup_text'))
+        return {i['code']: i.get('message_html', '') for i in issues}
+
+    def test_preview_bolds_the_offending_text(self):
+        html = self._codes_to_html('A clue that ends here , and it reads... on.')
+        self.assertIn('<strong>here ,</strong>', html['space_before_punct'])
+        self.assertIn('<strong>reads...</strong>', html['ellipsis'])
+        self.assertIn('pg-context', html['ellipsis'])
+
+    def test_preview_widens_an_invisible_span_to_whole_words(self):
+        # A bolded double space would show nothing; the words around it do.
+        html = self._codes_to_html('one  two three')
+        self.assertIn('<strong>one  two</strong>', html['double_space'])
+
+    def test_preview_escapes_the_question_text(self):
+        html = self._codes_to_html('Smith & <b>Jones</b> wrote  it.')
+        self.assertIn('&amp;', html['ampersand'])
+        self.assertNotIn('<b>', html['double_space'])
 
 
 class CommentMentionColorTests(TestCase):
@@ -6879,13 +6988,31 @@ class YappAllPowerTests(TestCase):
     def test_flagged_all_power_gets_a_trailing_marker(self):
         self._tossup('This author wrote Faust. For 10 points, name him.', all_power=True)
         question = self._payload()['tossups'][0]['question']
-        self.assertTrue(question.endswith(' (*)'), question)
+        self.assertTrue(question.endswith(' (*)</b>'), question)
 
     def test_auto_detected_all_power_gets_one_too(self):
         # "For 15 points" with no marker is how the auto-detection fires.
         tu = self._tossup('This author wrote Faust. For 15 points, name him.')
         self.assertTrue(tu.is_all_power())
-        self.assertTrue(self._payload()['tossups'][0]['question'].endswith(' (*)'))
+        self.assertTrue(self._payload()['tossups'][0]['question'].endswith(' (*)</b>'))
+
+    def test_power_region_is_bolded_for_the_reader(self):
+        # MODAQ renders the bold it is given; the (*) only scores the buzz. A
+        # YAPP file made from a Word packet carries the region as bold runs, so
+        # ours has to as well or the question reads unpowered.
+        self._tossup('This author ~wrote~ Faust (*) and more. For 10 points, name him.')
+        question = self._payload()['tossups'][0]['question']
+        self.assertTrue(question.startswith('<b>This author '), question)
+        self.assertIn('(*)</b>', question)
+        self.assertTrue(question.endswith(' and more. For 10 points, name him.'), question)
+
+    def test_bold_power_region_keeps_tags_nested(self):
+        # Italics running across the power boundary close before the </b> and
+        # reopen after it, rather than crossing.
+        from qems2.qsub.yapp_export import bold_power_region
+        self.assertEqual(bold_power_region('a <em>b (*) c</em> d'),
+                         '<b>a <em>b (*)</em></b><em> c</em> d')
+        self.assertEqual(bold_power_region('no marker here'), 'no marker here')
 
     def test_an_ordinary_tossup_is_untouched(self):
         self._tossup('This author (*) wrote Faust. For 10 points, name him.')
@@ -6903,17 +7030,18 @@ class YappAllPowerTests(TestCase):
         # sit after the final word for the whole stem to be in power.
         self._tossup('Alpha beta gamma. For 10 points, name him.', all_power=True)
         question = self._payload()['tossups'][0]['question']
-        self.assertEqual(question.split('(*)')[1].strip(), '')
+        import re as _re
+        self.assertEqual(_re.sub(r'<[^>]+>', '', question.split('(*)')[1]).strip(), '')
 
     def test_yapp2_anchored_copy_matches(self):
         self._tossup('This \\Pauthor\\P ("AWE-thur") wrote Faust. For 10 points, name him.',
                      all_power=True)
         tossup = self._payload('yapp2-json')['tossups'][0]
-        self.assertTrue(tossup['question'].endswith(' (*)'))
+        self.assertTrue(tossup['question'].endswith(' (*)</b>'))
         # The anchored twin may differ only by <pg> tags, so it carries the
         # marker too.
         anchored = tossup['anchored']['question']
-        self.assertTrue(anchored.endswith(' (*)'))
+        self.assertTrue(anchored.endswith(' (*)</b>'))
         self.assertEqual(anchored.replace('<pg>', '').replace('</pg>', ''),
                          tossup['question'])
 

@@ -16,9 +16,12 @@ The YAPP JSON shape (camelCase keys, text fields are HTML):
     }
 
 YAPP marks bold/underline/italic/super/subscript with ``<b> <u> <em> <sup> <sub>``
-and leaves the power marker ``(*)`` as literal text in the question (the reader
-locates the power boundary from it). This mirrors how QEMS stores questions, so
-the export is round-trippable through this app's own YAPP importer.
+and keeps the power marker ``(*)`` as literal text in the question (the reader
+scores the power buzz from it). The region up to the marker is *also* written as
+bold, because that's how it comes out of a Word packet and MODAQ renders the bold
+it is given rather than inferring any — see ``bold_power_region``. The importer
+drops bold in question text (QEMS derives the power region from the marker), so
+the export still round-trips through this app's own YAPP importer.
 
 The one place the two models differ is an **all-power** tossup, which QEMS marks
 with a flag and no ``(*)`` at all. Written out as-is it would score no power
@@ -48,6 +51,7 @@ words, and are buzzable. Only the parenthesized guide itself is non-word text.
 """
 
 import html as _html
+import re as _re
 
 #: Value of the top-level ``version`` field on a YAPP2 packet. Minor bumps only
 #: add optional fields, and readers match on the ``yapp2/`` prefix, so raising
@@ -214,6 +218,40 @@ def all_power_tail(tossup):
     return '' if '(*)' in (tossup.tossup_text or '') else ' (*)'
 
 
+_TAG_RE = _re.compile(r'</?([a-z]+)>')
+
+
+def bold_power_region(html):
+    """Wrap everything through the last power marker in ``<b>``.
+
+    A YAPP file made from a Word packet carries the power region as bold runs,
+    because that's how the region is written in the document — and MODAQ renders
+    the bold it is given rather than inferring any from the ``(*)`` marker, which
+    it uses only to score the buzz. QEMS stores the marker alone and bolds at
+    render time, so an export without this reads as an unpowered question.
+
+    Inline tags still open at the marker are closed before the ``</b>`` and
+    reopened after it, so a run of italics spanning the power boundary doesn't
+    produce crossed tags."""
+    idx = max(html.rfind('(*)'), html.rfind('(+)'))
+    if idx == -1:
+        return html
+    head, tail = html[:idx + 3], html[idx + 3:]
+    open_tags = []
+    for m in _TAG_RE.finditer(head):
+        name = m.group(1)
+        if m.group(0).startswith('</'):
+            if name in open_tags:
+                open_tags.reverse()
+                open_tags.remove(name)
+                open_tags.reverse()
+        else:
+            open_tags.append(name)
+    closing = ''.join('</{0}>'.format(t) for t in reversed(open_tags))
+    reopen = ''.join('<{0}>'.format(t) for t in open_tags)
+    return '<b>{0}{1}</b>{2}{3}'.format(head, closing, reopen, tail)
+
+
 def tossup_to_yapp(tossup, number, version=1):
     text = tossup.tossup_text or ''
     answer = tossup.tossup_answer or ''
@@ -223,14 +261,15 @@ def tossup_to_yapp(tossup, number, version=1):
     tail = all_power_tail(tossup)
     node = {
         'number': number,
-        'question': qems_to_yapp_html(text) + tail,
+        'question': bold_power_region(qems_to_yapp_html(text) + tail),
         'answer': qems_to_yapp_html(answer),
         'metadata': _metadata(tossup),
     }
     if version < 2:
         return node
     return _anchored(node, {
-        'question': (node['question'], qems_to_yapp_html(text, anchors=True) + tail),
+        'question': (node['question'],
+                     bold_power_region(qems_to_yapp_html(text, anchors=True) + tail)),
         'answer': (node['answer'], qems_to_yapp_html(answer, anchors=True)),
     })
 

@@ -25,6 +25,7 @@
     <li class="current"><a href="/edit_tossup/{{ tossup.id }}/">Tossup</a></li>
 </ul>
 {% endif %}
+{% include "_packet_nav.html" with nav_class="packet-nav-top" %}
 {% autoescape off %}
     {% if message %}
         <div class="{{ message_class }}">{{ message }}</div>
@@ -98,7 +99,6 @@
                 <span class="qmeta-label">Packet</span>
                 {% if tossup.packet %}<strong>{{ tossup.packet.packet_name }}</strong>{% if tossup.question_number %} &mdash; #{{ tossup.question_number }}{% endif %}{% else %}<em>Unpacketized</em>{% endif %}
                 <a href="/packet_grid/{{ qset.id }}/" class="qmeta-gridlink">Packet grid</a>
-                {% include "_packet_nav.html" %}
             </div>
             <ul class="qmeta-flags">
                 {% if role == "editor" %}
@@ -215,12 +215,18 @@ $(function () {
     var max = parseInt($out.data('max'), 10) || 0;
     var qsetId = $out.data('qset-id');
     var timer = null;
+    function paint(count) {
+        $out.css('color', (max && count > max) ? '#c60f13' : '');
+    }
+    // The count is rendered server-side, so colour it on load: an over-length
+    // question has to read as over-length before you touch anything.
+    paint(parseInt($out.text(), 10) || 0);
     function update() {
         var text = $('#id_tossup_text').val() || '';
         $.post('/live_char_count/', { qset_id: qsetId, text: text }, function (resp) {
             if (typeof resp === 'string') { try { resp = JSON.parse(resp); } catch (e) { return; } }
             $out.text(resp.count);
-            $out.css('color', (max && resp.count > max) ? '#c60f13' : '');
+            paint(resp.count);
         });
     }
     $(document).on('input', '.rich-editor, #id_tossup_text', function () {

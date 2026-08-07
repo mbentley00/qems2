@@ -5,10 +5,12 @@ every tossup by number, then every bonus — so it carries on across the boundar
 rather than stopping at the last tossup.
 
 Required context: `packet_nav` (see views._packet_neighbors). Renders nothing
-for an unpacketized question, which has no sequence to walk.
+for an unpacketized question, which has no sequence to walk. Pass
+`nav_class="packet-nav-top"` to render it as its own row (under the breadcrumb)
+rather than inline after the packet name.
 {% endcomment %}
 {% if packet_nav.prev or packet_nav.next %}
-<div class="packet-nav">
+<div class="packet-nav {{ nav_class }}">
     {% if packet_nav.prev %}
         <a href="{{ packet_nav.prev.url }}" class="packet-nav-link packet-nav-prev"
            title="{{ packet_nav.prev.qtype|capfirst }}{% if packet_nav.prev.number %} #{{ packet_nav.prev.number }}{% endif %}: {{ packet_nav.prev.label }}"

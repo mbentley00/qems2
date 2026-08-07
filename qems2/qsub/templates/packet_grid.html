@@ -251,10 +251,17 @@
 .grid-hbar:hover .grid-hbar-thumb { opacity: 0.72; }
 .grid-hbar.is-dragging .grid-hbar-thumb { opacity: 0.9; }
 
-/* Packet names stay put while you scroll down: without this, ten rows in you
-   can't tell which column is which packet. The corner cell is sticky both ways,
-   so it has to sit above both the header row and the number column. */
-.packet-grid thead th { position: sticky; top: 60px; z-index: 4; background: #f0f0f0; }
+/* The header row is sticky horizontally (with the number column) so the packet
+   names track the columns as you scroll sideways.
+
+   `top` MUST stay 0. `.grid-scroll` sets `overflow-x: auto`, which makes it a
+   scroll container on BOTH axes, so a sticky offset here is measured from the
+   top of that container — not the viewport. A `top: 60px` meant to clear the
+   app bar instead shoved the header 60px down into the table: the header row
+   appeared *below* tossup 1, covering half of it, with a blank strip where it
+   should have been. The container never scrolls vertically, so 0 is the only
+   offset that leaves the header where it belongs. */
+.packet-grid thead th { position: sticky; top: 0; z-index: 4; background: #f0f0f0; }
 .packet-grid thead th.num-col { left: 0; z-index: 5; }
 .packet-grid td.num-col { z-index: 2; }
 .swap-btn {

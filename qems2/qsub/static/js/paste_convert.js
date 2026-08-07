@@ -194,6 +194,24 @@ $(function () {
     }
 
     /**
+     * True if the text in front of a guide ends with a closing \P. Closing
+     * markup may sit between the marked word and its guide — a target inside
+     * italics reads ~Death of the \PDauphin\P~ ("DOFF-in") — so trailing
+     * italic/underline characters and \S \s \B tokens are stepped over first.
+     * Mirrors style_checker.ends_with_pg_target on the server.
+     */
+    function endsWithPgTarget(head) {
+        var s = (head || '').replace(/\s+$/, '');
+        while (s) {
+            if (/\\P$/.test(s)) { return true; }
+            if (/[_~]$/.test(s)) { s = s.slice(0, -1).replace(/\s+$/, ''); }
+            else if (/\\[SsB]$/.test(s)) { s = s.slice(0, -2).replace(/\s+$/, ''); }
+            else { return false; }
+        }
+        return false;
+    }
+
+    /**
      * Wrap the word(s) before each unmarked pronunciation guide in \P...\P,
      * guessing how many words each guide covers from its word count. Guides are
      * walked right-to-left so earlier match offsets stay valid. Power marks
@@ -216,7 +234,7 @@ $(function () {
             var head = out.slice(0, g.index), tail = out.slice(g.index);
             var trimmed = head.replace(/\s+$/, '');
             var trailing = head.slice(trimmed.length);
-            if (/\\P$/.test(trimmed)) { continue; }  // already marked
+            if (endsWithPgTarget(trimmed)) { continue; }  // already marked
             var words = trimmed.split(' ');
             if (words.length < n) { continue; }
             var target = words.slice(words.length - n).join(' ');

@@ -60,6 +60,7 @@ RULE_LABELS = [
     ('answer_format', 'Non-standard bold/underline on an answer line'),
     ('pronunciation', 'Pronunciation-guide suggestions'),
     ('pg_span', 'Pronunciation guides without a marked target (\\P…\\P)'),
+    ('pg_possessive', 'Pronunciation guides that split a possessive'),
     ('answer_alts', 'Answer line missing standard alternates'),
 ]
 RULE_LABEL_MAP = dict(RULE_LABELS)
@@ -98,6 +99,35 @@ def _issue(severity, message, code, token='', fix=None, message_html=''):
     return d
 
 
+def _widen_to_words(text, start, end):
+    """Grow the [start, end) span out to whole words. A bolded space — a double
+    space, or the space before a comma — would otherwise be invisible in the
+    preview, and a bare "..." reads better with the word it trails."""
+    while start > 0 and not text[start - 1].isspace():
+        start -= 1
+    while end < len(text) and not text[end].isspace():
+        end += 1
+    return start, end
+
+
+def _context_html(message, source, start, end):
+    """`message` plus a short excerpt of `source` around the [start, end) span,
+    the offending text bolded — the same preview the pronunciation suggestions
+    show, so an editor can see what a rule is pointing at without hunting for
+    it in the question."""
+    start, end = _widen_to_words(source, start, end)
+    prefix, before, match, after, suffix = context_snippet(source, start, end)
+    return '{0} — <span class="pg-context">{1}<strong>{2}</strong>{3}</span>'.format(
+        _escape(message), _escape(prefix + before), _escape(match), _escape(after + suffix))
+
+
+def _issue_at(severity, message, code, token, fix, source, m):
+    """An issue that points at the text it found: `_issue` plus the context
+    preview for match `m` within `source`."""
+    return _issue(severity, message, code, token, fix,
+                  message_html=_context_html(message, source, m.start(), m.end()))
+
+
 def _plain(text):
     """Readable plain text: strip HTML/smart quotes (strip_markup) plus QEMS
     markup characters, so style checks see the words as read."""
@@ -113,25 +143,35 @@ def _mechanical_issues(label, raw, field):
     issues = []
     text = _plain(raw)
     no_power = text.replace('(*)', '').replace('(+)', '')
-    if '  ' in text:
-        issues.append(_issue(WARNING, '{0}: double space'.format(label), 'double_space', label,
-                             {'field': field, 'op': 'regex', 'pattern': r' {2,}', 'repl': ' '}))
-    if re.search(r'\s[,.;:!?]', no_power):
-        issues.append(_issue(WARNING, '{0}: space before punctuation'.format(label),
-                             'space_before_punct', label,
-                             {'field': field, 'op': 'regex', 'pattern': r'[ \t]+([,.;:!?])', 'repl': r'\1'}))
-    if re.search(r',[A-Za-z]', text):
-        issues.append(_issue(WARNING, '{0}: missing space after comma'.format(label),
-                             'comma_no_space', label,
-                             {'field': field, 'op': 'regex', 'pattern': r',([A-Za-z])', 'repl': r', \1'}))
-    if '...' in text:
-        issues.append(_issue(INFO, '{0}: use ellipsis (…)'.format(label),
-                             'ellipsis', label,
-                             {'field': field, 'op': 'regex', 'pattern': r'\.{3,}', 'repl': '…'}))
-    if '--' in text:
-        issues.append(_issue(INFO, '{0}: use em dash (—)'.format(label),
-                             'double_hyphen', label,
-                             {'field': field, 'op': 'regex', 'pattern': r'-{2,}', 'repl': '—'}))
+    m = re.search(r' {2,}', text)
+    if m:
+        issues.append(_issue_at(WARNING, '{0}: double space'.format(label), 'double_space', label,
+                                {'field': field, 'op': 'regex', 'pattern': r' {2,}', 'repl': ' '},
+                                text, m))
+    m = re.search(r'\s[,.;:!?]', no_power)
+    if m:
+        issues.append(_issue_at(WARNING, '{0}: space before punctuation'.format(label),
+                                'space_before_punct', label,
+                                {'field': field, 'op': 'regex', 'pattern': r'[ \t]+([,.;:!?])', 'repl': r'\1'},
+                                no_power, m))
+    m = re.search(r',[A-Za-z]', text)
+    if m:
+        issues.append(_issue_at(WARNING, '{0}: missing space after comma'.format(label),
+                                'comma_no_space', label,
+                                {'field': field, 'op': 'regex', 'pattern': r',([A-Za-z])', 'repl': r', \1'},
+                                text, m))
+    m = re.search(r'\.{3,}', text)
+    if m:
+        issues.append(_issue_at(INFO, '{0}: use ellipsis (…)'.format(label),
+                                'ellipsis', label,
+                                {'field': field, 'op': 'regex', 'pattern': r'\.{3,}', 'repl': '…'},
+                                text, m))
+    m = re.search(r'-{2,}', text)
+    if m:
+        issues.append(_issue_at(INFO, '{0}: use em dash (—)'.format(label),
+                                'double_hyphen', label,
+                                {'field': field, 'op': 'regex', 'pattern': r'-{2,}', 'repl': '—'},
+                                text, m))
     if no_power.count('(') != no_power.count(')'):
         issues.append(_issue(WARNING, '{0}: unbalanced parentheses'.format(label),
                              'unbalanced_parens', label))
@@ -141,13 +181,14 @@ def _mechanical_issues(label, raw, field):
     # Single quotes are skipped (a possessive like «writers'.» is correct).
     m = re.search(r'["”]([.,])', no_power)
     if m:
-        issues.append(_issue(
+        issues.append(_issue_at(
             WARNING,
             '{0}: "{1}" after a closing quote — American style puts periods and '
             'commas inside the quotes'.format(label, m.group(1)),
             'quote_punct', label,
             {'field': field, 'op': 'regex',
-             'pattern': r'(["”]|&quot;|&#x22;|&#34;)([.,])', 'repl': r'\2\1'}))
+             'pattern': r'(["”]|&quot;|&#x22;|&#34;)([.,])', 'repl': r'\2\1'},
+            no_power, m))
     return issues
 
 
@@ -170,8 +211,8 @@ def _prose_issues(label, raw, field):
         if key in seen:
             continue
         seen.add(key)
-        issues.append(_issue(WARNING, '{0}: contraction "{1}"'.format(label, m.group(0)),
-                             'contractions', '{0}|{1}'.format(label, key)))
+        issues.append(_issue_at(WARNING, '{0}: contraction "{1}"'.format(label, m.group(0)),
+                                'contractions', '{0}|{1}'.format(label, key), None, text, m))
 
     seen_rep = set()
     for m in re.finditer(r'\b(\w+)\s+\1\b', text, re.IGNORECASE):
@@ -179,9 +220,10 @@ def _prose_issues(label, raw, field):
         if word in seen_rep:
             continue
         seen_rep.add(word)
-        issues.append(_issue(WARNING, '{0}: repeated word "{1} {1}"'.format(label, m.group(1)),
-                             'repeated_word', '{0}|{1}'.format(label, word),
-                             {'field': field, 'op': 'regex', 'pattern': r'\b(\w+)\s+\1\b', 'repl': r'\1'}))
+        issues.append(_issue_at(WARNING, '{0}: repeated word "{1} {1}"'.format(label, m.group(1)),
+                                'repeated_word', '{0}|{1}'.format(label, word),
+                                {'field': field, 'op': 'regex', 'pattern': r'\b(\w+)\s+\1\b', 'repl': r'\1'},
+                                text, m))
 
     seen_from = set()
     for m in re.finditer(r'\bfrom this (country|nation|empire|kingdom|city|state)\b', text, re.IGNORECASE):
@@ -189,18 +231,22 @@ def _prose_issues(label, raw, field):
         if place in seen_from:
             continue
         seen_from.add(place)
-        issues.append(_issue(
+        issues.append(_issue_at(
             INFO, '{0}: "from this {1}" → prefer "born in this {1}"'.format(label, place),
-            'imprecise_from', '{0}|{1}'.format(label, place)))
+            'imprecise_from', '{0}|{1}'.format(label, place), None, text, m))
 
-    if '&' in text:
-        issues.append(_issue(INFO, '{0}: spell out "and" (not &)'.format(label), 'ampersand', label,
-                             {'field': field, 'op': 'regex', 'pattern': r'\s*&\s*', 'repl': ' and '}))
+    m = re.search(r'&', text)
+    if m:
+        issues.append(_issue_at(INFO, '{0}: spell out "and" (not &)'.format(label), 'ampersand', label,
+                                {'field': field, 'op': 'regex', 'pattern': r'\s*&\s*', 'repl': ' and '},
+                                text, m))
 
-    if re.search(r'\d\s*-\s*\d', text):
-        issues.append(_issue(INFO, '{0}: use en dash (–) for ranges'.format(label),
-                             'number_range', label,
-                             {'field': field, 'op': 'regex', 'pattern': r'(\d)\s*-\s*(\d)', 'repl': r'\1–\2'}))
+    m = re.search(r'\d\s*-\s*\d', text)
+    if m:
+        issues.append(_issue_at(INFO, '{0}: use en dash (–) for ranges'.format(label),
+                                'number_range', label,
+                                {'field': field, 'op': 'regex', 'pattern': r'(\d)\s*-\s*(\d)', 'repl': r'\1–\2'},
+                                text, m))
     return issues
 
 
@@ -238,6 +284,26 @@ def guide_word_count(inner):
     return len(stripped.split())
 
 
+def ends_with_pg_target(head):
+    """True if `head` (the text in front of a guide) ends with a closing ``\\P``.
+
+    Closing markup may sit between the marked word and its guide — a target
+    inside italics reads ``~Death of the \\PDauphin\\P~ ("DOFF-in")`` — so any
+    trailing italic/underline characters and ``\\S``/``\\s``/``\\B`` tokens are
+    stepped over before looking for the marker."""
+    head = (head or '').rstrip()
+    while head:
+        if head.endswith('\\P'):
+            return True
+        if head[-1] in ('_', '~'):
+            head = head[:-1].rstrip()
+        elif head[-2:] in ('\\S', '\\s', '\\B'):
+            head = head[:-2].rstrip()
+        else:
+            return False
+    return False
+
+
 def mark_pg_target(text, guide_index):
     """Wrap the word(s) preceding the `guide_index`-th pronunciation guide in
     ``\\P...\\P``, guessing how many words the guide covers from its word count.
@@ -255,7 +321,7 @@ def mark_pg_target(text, guide_index):
     head = text[:m.start()]
     trailing = head[len(head.rstrip()):]  # whitespace between target and guide
     head = head.rstrip()
-    if '\\P' in head[-2:]:
+    if ends_with_pg_target(head):
         return text  # already marked
 
     words = head.split(' ')
@@ -269,6 +335,71 @@ def mark_pg_target(text, guide_index):
         target, trailing, text[m.start():])
 
 
+def fix_pg_possessive(text, guide_index):
+    """Move the possessive that trails the `guide_index`-th pronunciation guide
+    back onto the word it belongs to, and respell the guide to cover it:
+    ``Saatchi ("SAH-chee")'s`` -> ``Saatchi's ("SAH-cheez")``. An existing
+    ``\\P...\\P`` mark grows to include the possessive. Returns `text` unchanged
+    if that guide isn't followed by one."""
+    guides = [m for m in _GUIDE_PAREN.finditer(text or '')
+              if m.group(1) not in ('*', '+')]
+    if guide_index >= len(guides):
+        return text
+    m = guides[guide_index]
+    pm = _POSSESSIVE_RE.match(text, m.end())
+    if not pm:
+        return text
+    poss = pm.group(0)
+
+    head = text[:m.start()]
+    gap = head[len(head.rstrip()):]  # whitespace between the word and its guide
+    head = head.rstrip()
+    if not head:
+        return text
+    # The possessive goes on the word itself — inside any \P mark and any
+    # closing italic/underline markup that sits between the word and the guide.
+    at = len(head)
+    while at > 0:
+        if head[at - 2:at] in _MARKUP_TOKENS:
+            at -= 2
+        elif head[at - 1] in ('_', '~'):
+            at -= 1
+        else:
+            break
+    if at == 0:
+        return text
+    inner = m.group(1)
+    quote = inner[:1] if inner[:1] in ('"', '“') else ''
+    close = inner[-1:] if quote and inner[-1:] in ('"', '”') else ''
+    body = inner[len(quote):len(inner) - len(close)] if close else inner[len(quote):]
+    if _possessive_sounds(poss):
+        body = possessive_respelling(body)
+    guide = '({0}{1}{2})'.format(quote, body, close)
+    return (head[:at] + poss + head[at:] + gap + guide + text[pm.end():])
+
+
+def _pg_possessive_issues(label, raw, field):
+    """Flag a pronunciation guide that splits a possessive —
+    ``Saatchi ("SAH-chee")'s`` — since the word is read as one. The fix moves
+    the possessive onto the word and respells the guide to match."""
+    text = raw or ''
+    issues = []
+    for idx, m in enumerate(g for g in _GUIDE_PAREN.finditer(text)
+                            if g.group(1) not in ('*', '+')):
+        pm = _POSSESSIVE_RE.match(text, m.end())
+        if not pm:
+            continue
+        fix = None
+        if fix_pg_possessive(text, idx) != text:
+            fix = {'field': field, 'op': 'pg_possessive', 'idx': idx}
+        message = ('{0}: pronunciation guide {1} splits the possessive "{2}" — keep the '
+                   'possessive on the word and respell the guide to cover it'.format(
+                       label, m.group(0), pm.group(0)))
+        issues.append(_issue_at(WARNING, message, 'pg_possessive',
+                                '{0}|{1}|{2}'.format(label, idx, m.group(0)), fix, text, m))
+    return issues
+
+
 def _pg_span_issues(label, raw, field):
     """Flag a pronunciation guide ``("...")`` whose spoken word(s) aren't wrapped
     in ``\\P...\\P``. Marking the target ties the guide to exactly the word(s) it
@@ -280,18 +411,18 @@ def _pg_span_issues(label, raw, field):
     for idx, m in enumerate(g for g in _GUIDE_PAREN.finditer(text)
                             if g.group(1) not in ('*', '+')):
         # A \P closing the target span should sit just before the '(' (any
-        # whitespace between the marked word and its guide is fine).
-        if text[:m.start()].rstrip().endswith('\\P'):
+        # whitespace, or closing italic/underline markup, in between is fine).
+        if ends_with_pg_target(text[:m.start()]):
             continue
         guide = m.group(0)
         fix = None
         if mark_pg_target(text, idx) != text:
             fix = {'field': field, 'op': 'pg_span', 'idx': idx}
-        issues.append(_issue(
+        issues.append(_issue_at(
             INFO,
             '{0}: pronunciation guide {1} has no marked target — mark the word(s) '
             'it covers (\\P…\\P)'.format(label, guide),
-            'pg_span', '{0}|{1}|{2}'.format(label, idx, guide), fix))
+            'pg_span', '{0}|{1}|{2}'.format(label, idx, guide), fix, text, m))
     return issues
 
 
@@ -437,14 +568,18 @@ def check_tossup(tu, guide=DEFAULT_GUIDE, disabled=None):
     issues += _prose_issues('Question', text, 'tossup_text')
     issues += _late_identifier_issues('Question', text)
 
-    if re.search(r'\banswers?\s*:', plain, re.IGNORECASE):
-        issues.append(_issue(WARNING, '"ANSWER:" in question text', 'answer_leak'))
+    m = re.search(r'\banswers?\s*:', plain, re.IGNORECASE)
+    if m:
+        issues.append(_issue_at(WARNING, '"ANSWER:" in question text', 'answer_leak', '', None,
+                                plain, m))
 
-    if re.search(r'for ten points', plain, re.IGNORECASE):
-        issues.append(_issue(WARNING, 'use numerals: "For 10 points"',
-                             'numerals', 'tossup_text',
-                             {'field': 'tossup_text', 'op': 'regex',
-                              'pattern': r'(?i)for ten points', 'repl': 'For 10 points'}))
+    m = re.search(r'for ten points', plain, re.IGNORECASE)
+    if m:
+        issues.append(_issue_at(WARNING, 'use numerals: "For 10 points"',
+                                'numerals', 'tossup_text',
+                                {'field': 'tossup_text', 'op': 'regex',
+                                 'pattern': r'(?i)for ten points', 'repl': 'For 10 points'},
+                                plain, m))
 
     if not re.search(r'for \d+ points', plain, re.IGNORECASE):
         issues.append(_issue(INFO, 'no "For 10 points" phrase', 'fps'))
@@ -458,7 +593,12 @@ def check_tossup(tu, guide=DEFAULT_GUIDE, disabled=None):
         issues.append(_issue(WARNING, 'superpower (+) should come before the power (*)', 'power'))
 
     if plain.rstrip().endswith('?'):
-        issues.append(_issue(WARNING, 'interrogative giveaway; prefer imperative', 'imperative'))
+        # Point at the giveaway itself — the question mark and the words leading
+        # up to it are what has to be reworded.
+        end = len(plain.rstrip())
+        msg = 'interrogative giveaway; prefer imperative'
+        issues.append(_issue(WARNING, msg, 'imperative', '', None,
+                             _context_html(msg, plain, end - 1, end)))
 
     if not _has_underline(tu.tossup_answer):
         issues.append(_issue(WARNING, 'answer not underlined', 'underline'))
@@ -474,6 +614,9 @@ def check_tossup(tu, guide=DEFAULT_GUIDE, disabled=None):
 
     if 'pg_span' in enabled:
         issues += _pg_span_issues('Question', text, 'tossup_text')
+
+    if 'pg_possessive' in enabled:
+        issues += _pg_possessive_issues('Question', text, 'tossup_text')
 
     return [i for i in issues if i['code'] in enabled]
 
@@ -493,11 +636,13 @@ def check_bonus(b, guide=DEFAULT_GUIDE, disabled=None):
             issues += _prose_issues(label, raw, field)
 
     plain_leadin = _plain(leadin)
-    if re.search(r'for ten points each', plain_leadin, re.IGNORECASE):
-        issues.append(_issue(WARNING, 'Leadin: use numerals: "For 10 points each"',
-                             'numerals', 'leadin',
-                             {'field': 'leadin', 'op': 'regex',
-                              'pattern': r'(?i)for ten points each', 'repl': 'For 10 points each'}))
+    m = re.search(r'for ten points each', plain_leadin, re.IGNORECASE)
+    if m:
+        issues.append(_issue_at(WARNING, 'Leadin: use numerals: "For 10 points each"',
+                                'numerals', 'leadin',
+                                {'field': 'leadin', 'op': 'regex',
+                                 'pattern': r'(?i)for ten points each', 'repl': 'For 10 points each'},
+                                plain_leadin, m))
     if not re.search(r'for \d+ points each', plain_leadin, re.IGNORECASE):
         issues.append(_issue(INFO, 'Leadin: no "For 10 points each"', 'fpe', 'leadin'))
 
@@ -532,6 +677,11 @@ def check_bonus(b, guide=DEFAULT_GUIDE, disabled=None):
             if raw.strip():
                 issues += _pg_span_issues(label, raw, field)
 
+    if 'pg_possessive' in enabled:
+        for label, raw, field in parts:
+            if raw.strip():
+                issues += _pg_possessive_issues(label, raw, field)
+
     return [i for i in issues if i['code'] in enabled]
 
 
@@ -562,26 +712,84 @@ def _strip_markup_indexed(text):
     return ''.join(clean), idx_map
 
 
+# A possessive ending: "'s" / "’s", or the bare apostrophe of a plural
+# possessive ("Jones' letters"). A guide must never be dropped in front of one —
+# «Saatchi ("SAH-chee")'s» splits a word that is read as one.
+_POSSESSIVE_RE = re.compile(r"['’]s(?![\w'’])|(?<=[sS])['’](?![\w'’])")
+
+# Respelling endings that decide how a possessive is said: a sibilant takes an
+# extra syllable ("BUSH" -> "BUSH-iz"), a voiceless consonant takes /s/
+# ("BAHK" -> "BAHKS"), everything else takes /z/ ("SAH-chee" -> "SAH-cheez").
+_SIBILANT_ENDINGS = ('sh', 'ch', 'zh', 'ge', 'ce', 'se', 'ss', 'zz', 'dg')
+_VOICELESS_ENDINGS = ('p', 't', 'k', 'f', 'th', 'ph', 'ck')
+
+
+def possessive_respelling(pron):
+    """`pron` with the sound the possessive adds, so the guide still matches the
+    word it covers once the possessive is folded into the target: "SAH-chee" ->
+    "SAH-cheez". Case follows the respelling's last letter, which carries the
+    stress convention (all-caps syllables). Returns `pron` unchanged when it
+    already ends in the possessive sound."""
+    body = (pron or '').rstrip()
+    tail = pron[len(body):]
+    letters = re.sub(r'[^A-Za-z]+$', '', body)
+    if not letters:
+        return pron
+    low = letters.lower()
+    if low.endswith(_SIBILANT_ENDINGS) or low[-1] in ('s', 'z', 'x', 'j'):
+        # An added syllable — unless it's already there ("BUSH-iz").
+        if low.endswith(('iz', 'ez', 'es', 'is')):
+            return pron
+        add = '-iz'
+    elif low.endswith('th') or low[-1] in _VOICELESS_ENDINGS:
+        add = 's'
+    else:
+        add = 'z'
+    if letters[-1].isupper():
+        add = add.upper()
+    return body[:len(body) - len(letters)] + letters + add + tail
+
+
+def _possessive_sounds(poss):
+    """True if the possessive adds a sound to the spoken word. "Saatchi's" does;
+    the bare apostrophe of a plural possessive ("Jones' letters") doesn't, so
+    its respelling is left alone."""
+    return bool(poss) and poss[-1] in ('s', 'S')
+
+
+def _absorb_possessive(text, pos):
+    """The end of a possessive ending that starts at `pos` in `text`, or `pos`
+    itself when there isn't one."""
+    m = _POSSESSIVE_RE.match(text, pos)
+    return m.end() if m else pos
+
+
 def _insert_guide(text, term, pron):
     """Insert ``("RESPELLING")`` after the first occurrence of `term` that isn't
     already followed by a guide, wrapping the term in ``\\P...\\P`` so the guide
     is tied to exactly the word(s) it covers. Matching ignores QEMS inline
     markup so an underlined/italicized term still matches, and the guide is
     placed after any closing markup (the \\P wrap is skipped there — it would
-    misnest with the other markup). Returns the text unchanged if no occurrence
-    is found."""
-    guide = ' ("{0}")'.format(pron)
+    misnest with the other markup).
+
+    A possessive goes with the term rather than being split off by the guide:
+    "Saatchi's" becomes ``\\PSaatchi's\\P ("SAH-cheez")``, not
+    ``\\PSaatchi\\P ("SAH-chee")'s``. Returns the text unchanged if no
+    occurrence is found."""
     clean, idx_map = _strip_markup_indexed(text)
     pat = re.compile(r'(?<!\w)' + re.escape(term) + r'(?!\w)', re.IGNORECASE)
     for m in pat.finditer(clean):
         start = idx_map[m.start()]
         pos = idx_map[m.end()]  # raw index after the term (past any closing markup)
-        if guide_opener_at(text, pos):
+        end = _absorb_possessive(text, pos)
+        guide = ' ("{0}")'.format(
+            possessive_respelling(pron) if _possessive_sounds(text[pos:end]) else pron)
+        if guide_opener_at(text, end):
             continue
-        raw_term = text[start:pos]
-        if raw_term.lower() == m.group(0).lower():
-            return text[:start] + '\\P' + raw_term + '\\P' + guide + text[pos:]
-        return text[:pos] + guide + text[pos:]
+        raw_term = text[start:end]
+        if raw_term.lower() == m.group(0).lower() + text[pos:end].lower():
+            return text[:start] + '\\P' + raw_term + '\\P' + guide + text[end:]
+        return text[:end] + guide + text[end:]
     return text
 
 
@@ -599,6 +807,8 @@ def apply_fix(question, fix):
         new = _insert_guide(text, fix['term'], fix['pron'])
     elif op == 'pg_span':
         new = mark_pg_target(text, fix['idx'])
+    elif op == 'pg_possessive':
+        new = fix_pg_possessive(text, fix['idx'])
     else:
         return False
     if new == text:

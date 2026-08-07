@@ -1,5 +1,61 @@
 # Changelog
 
+## 2026-08-07b — Power reads as power in MODAQ; pronunciation-guide fixes
+
+- **Exported YAPP/YAPP2 packets show their power region in bold again.** MODAQ
+  renders the bold formatting a packet carries and uses `(*)` only to score the
+  buzz — it never infers bold from the marker. A YAPP file made from a Word
+  packet has the region as bold runs; ours had only the marker, so every
+  exported tossup read as unpowered. The export now bolds through the last
+  power mark (the whole stem for an all-power tossup), closing and reopening any
+  italics that straddle the boundary so the tags stay nested. Importing such a
+  file back is unchanged — the importer already drops bold in question text.
+- **Packet grid: the header row is back above tossup 1.** `.grid-scroll` sets
+  `overflow-x: auto`, which makes it a scroll container on *both* axes, so the
+  header's `top: 60px` (meant to clear the app bar) was measured from the top of
+  the grid, not the viewport — shoving the header 60px down, below row 1 and
+  over its category line. The offset is 0 now. The names still track the columns
+  when you scroll sideways; they no longer follow vertical page scroll, which
+  they never actually did.
+- **The character count shows red on load.** Opening an over-length question
+  showed a plain black count until you typed a character; the colour is now
+  applied to the server-rendered count too.
+- **Style suggestions show the text they found.** "Space before punctuation",
+  "use ellipsis (…)", repeated words, ampersands, number ranges, contractions,
+  "ANSWER:" leaks, "For ten points" and the pronunciation-guide rules now each
+  carry the same context preview the PG suggestions had, with the offending
+  words bolded — so you can see what a rule is pointing at without hunting for
+  it. Spans too small to see (a double space, the space before a comma) widen to
+  whole words.
+- **A pronunciation guide no longer splits a possessive.** Auto-applying a guide
+  to "Edward Saatchi's" wrote `\PEdward Saatchi\P ("SAH-chee")'s`, breaking a
+  word that's read as one. It now marks `\PEdward Saatchi's\P ("SAH-cheez")`,
+  growing the respelling by the sound the possessive actually adds (/z/, /s/, or
+  a whole syllable after a sibilant; a plural possessive like "Jones'" adds
+  none). A new style rule flags guides already written that way, with a fix that
+  moves the possessive and respells the guide.
+- **No more false "no marked target" warning.** A target closed inside markup —
+  `~Death of the \PDauphin\P~ ("DOFF-in")` — wasn't recognized, because the
+  check only looked for a `\P` immediately before the guide. Closing italics,
+  underlines and `\B`/`\S`/`\s` are now stepped over, on the server and in the
+  editor's "PG auto" (which would otherwise have marked the word twice).
+- **Packet prev/next moved to the top of the edit pages,** under the breadcrumb,
+  instead of down in the packet meta row.
+
+## 2026-08-07 — Pronunciation guides stay guides inside power
+
+- **A guide in the power region is gray and unbolded, like every other guide.**
+  A `("KAM-uh-flahzh")` before the `(*)` was rendered as plain bold clue text,
+  so in doc view and on the question pages it competed with the words a
+  moderator actually reads. It now keeps the gray, non-bold guide styling
+  wherever it falls — matching what the Word export has always done — while the
+  `(*)` / `(+)` marks themselves stay bold. This also means an in-power guide is
+  picked up by doc view's "PGs Above" toggle, which had skipped them.
+- **Guides are gray on the edit and add pages too.** The gray styling only
+  existed in doc view and the category document; everywhere else guides rendered
+  as bold black text. It's one rule in the app stylesheet now, so a guide looks
+  the same in every formatted view (dark theme included).
+
 ## 2026-08-06 — Packet grid scrolling, doc-view Swap next to Edit
 
 - **A horizontal scrollbar you can see and reach.** The grid's own scrollbar sat
