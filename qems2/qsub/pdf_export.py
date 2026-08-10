@@ -68,11 +68,13 @@ class _RunWriter(HTMLParser):
         self.pdf.write(LINE_H, data)
 
 
-def _write_qems(pdf, text, is_answer=False, size=SIZE, all_power=False, allow_superpower=True):
+def _write_qems(pdf, text, is_answer=False, size=SIZE, all_power=False, allow_superpower=True,
+                quoted_guides=False):
     """Render one QEMS-markup field as inline formatted runs on the PDF."""
     html_text = get_formatted_question_html(
         _safe(text), True, True, False, not is_answer,
-        allPower=all_power, allowSuperpower=allow_superpower)
+        allPower=all_power, allowSuperpower=allow_superpower,
+        guidesRequireQuotes=quoted_guides)
     _RunWriter(pdf, size).feed(html_text)
 
 
@@ -120,24 +122,37 @@ def _write_meta(pdf, meta):
     pdf.set_text_color(0, 0, 0)
 
 
+def _quoted_guides(question):
+    """Whether this question's set only treats a quoted parenthetical as a
+    pronunciation guide (so the rest print as ordinary text)."""
+    getter = getattr(question, 'guides_require_quotes', None)
+    try:
+        return bool(getter()) if callable(getter) else False
+    except Exception:
+        return False
+
+
 def _tossup(pdf, tossup, num, opts):
+    quoted = _quoted_guides(tossup)
     pdf.set_font(_FONT, 'B', SIZE)
     pdf.write(LINE_H, '{0}. '.format(num))
     _write_qems(pdf, tossup.tossup_text,
                 all_power=tossup.is_all_power(),
-                allow_superpower=tossup.superpower_enabled())
+                allow_superpower=tossup.superpower_enabled(),
+                quoted_guides=quoted)
     pdf.ln(LINE_H)
     pdf.set_font(_FONT, 'B', SIZE)
     pdf.write(LINE_H, 'ANSWER: ')
-    _write_qems(pdf, tossup.tossup_answer, is_answer=True)
+    _write_qems(pdf, tossup.tossup_answer, is_answer=True, quoted_guides=quoted)
     _write_meta(pdf, _meta_line(tossup, opts))
     pdf.ln(LINE_H + GAP)
 
 
 def _bonus(pdf, bonus, num, opts):
+    quoted = _quoted_guides(bonus)
     pdf.set_font(_FONT, 'B', SIZE)
     pdf.write(LINE_H, '{0}. '.format(num))
-    _write_qems(pdf, bonus.leadin)
+    _write_qems(pdf, bonus.leadin, quoted_guides=quoted)
     for i in range(1, 4):
         text = getattr(bonus, 'part{0}_text'.format(i), '') or ''
         if not text.strip():
@@ -147,11 +162,11 @@ def _bonus(pdf, bonus, num, opts):
         pdf.ln(LINE_H)
         pdf.set_font(_FONT, 'B', SIZE)
         pdf.write(LINE_H, '[10{0}] '.format(diff))
-        _write_qems(pdf, text)
+        _write_qems(pdf, text, quoted_guides=quoted)
         pdf.ln(LINE_H)
         pdf.set_font(_FONT, 'B', SIZE)
         pdf.write(LINE_H, 'ANSWER: ')
-        _write_qems(pdf, answer, is_answer=True)
+        _write_qems(pdf, answer, is_answer=True, quoted_guides=quoted)
     _write_meta(pdf, _meta_line(bonus, opts))
     pdf.ln(LINE_H + GAP)
 
@@ -188,6 +203,10 @@ def build_packetized_pdf(set_name, groups, opts, credits=None):
     tossup 1, bonus 1, tossup 2, … (reading order) instead of all tossups then
     all bonuses. `credits` is an optional (writer_names, editor_names) tuple
     shown before the first packet's tossups. Returns PDF bytes.
+
+    The set export calls this once per packet with a single group, so each
+    packet is its own file (and carries the credits, since it travels alone);
+    passing several groups still produces one combined document.
     """
     pdf = FPDF(unit='pt', format='letter')
     pdf.set_margins(40, 40, 40)

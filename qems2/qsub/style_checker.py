@@ -20,7 +20,7 @@ present) is applied server-side by apply_fix(); it is never sent by the client.
 import re
 from html import escape as _escape
 
-from .utils import strip_markup
+from .utils import strip_markup, parenthetical_has_quotes
 from .pron_dict import suggest_guide_matches, context_snippet, guide_opener_at
 
 ERROR = 'error'
@@ -49,6 +49,7 @@ RULE_LABELS = [
     ('contractions', 'Contractions (don\'t, it\'s, …)'),
     ('imprecise_from', 'Imprecise "from this country" (prefer "born in")'),
     ('late_identifier', 'Identifier comes late in the first sentence'),
+    ('mixed_identifier', 'Identifier switches between singular and plural'),
     ('unbalanced_parens', 'Unbalanced parentheses'),
     ('answer_leak', 'ANSWER: leaked into question text'),
     ('numerals', 'Numerals in "For 10 points"'),
@@ -250,14 +251,14 @@ def _prose_issues(label, raw, field):
     return issues
 
 
-def _pronunciation_issues(label, raw, field):
+def _pronunciation_issues(label, raw, field, require_quotes=False):
     """Suggest a verified-OL pronunciation guide for any dictionary term in the
     text that doesn't already have one (INFO, auto-applicable). Each suggestion
     shows the term in surrounding context so the editor can confirm the match
     is the intended sense (e.g. the proper noun, not a common-word homograph)."""
     plain = _plain(raw)
     issues = []
-    for term, pron, start, end in suggest_guide_matches(plain):
+    for term, pron, start, end in suggest_guide_matches(plain, require_quotes):
         prefix, before, match, after, suffix = context_snippet(plain, start, end)
         message = '{0}: PG for "{1}" ({2}) — {3}{4}{5}{6}{7}'.format(
             label, term, pron, prefix, before, match, after, suffix)
@@ -274,6 +275,22 @@ def _pronunciation_issues(label, raw, field):
 
 # A parenthetical that isn't an escaped literal paren; used to find guides.
 _GUIDE_PAREN = re.compile(r'(?<!\\)\(([^()]*)\)')
+
+
+def _guide_matches(text):
+    """Every parenthetical that could be a pronunciation guide, in order. Power
+    marks are excluded, but nothing else is — the *index* of a guide in this list
+    is what an auto-fix is stored against (see mark_pg_target), so it must not
+    depend on any per-set setting. Callers that only want real guides skip the
+    ones they don't want and keep the enumeration intact."""
+    return [m for m in _GUIDE_PAREN.finditer(text or '')
+            if m.group(1) not in ('*', '+')]
+
+
+def _not_a_guide(match, require_quotes):
+    """True when a set requiring quoted respellings would read this parenthetical
+    as ordinary text rather than a guide."""
+    return require_quotes and not parenthetical_has_quotes(match.group(1))
 
 
 def guide_word_count(inner):
@@ -309,8 +326,7 @@ def mark_pg_target(text, guide_index):
     ``\\P...\\P``, guessing how many words the guide covers from its word count.
     Returns `text` unchanged if the guide can't be found or there aren't enough
     words in front of it."""
-    guides = [m for m in _GUIDE_PAREN.finditer(text or '')
-              if m.group(1) not in ('*', '+')]
+    guides = _guide_matches(text)
     if guide_index >= len(guides):
         return text
     m = guides[guide_index]
@@ -341,8 +357,7 @@ def fix_pg_possessive(text, guide_index):
     ``Saatchi ("SAH-chee")'s`` -> ``Saatchi's ("SAH-cheez")``. An existing
     ``\\P...\\P`` mark grows to include the possessive. Returns `text` unchanged
     if that guide isn't followed by one."""
-    guides = [m for m in _GUIDE_PAREN.finditer(text or '')
-              if m.group(1) not in ('*', '+')]
+    guides = _guide_matches(text)
     if guide_index >= len(guides):
         return text
     m = guides[guide_index]
@@ -378,14 +393,15 @@ def fix_pg_possessive(text, guide_index):
     return (head[:at] + poss + head[at:] + gap + guide + text[pm.end():])
 
 
-def _pg_possessive_issues(label, raw, field):
+def _pg_possessive_issues(label, raw, field, require_quotes=False):
     """Flag a pronunciation guide that splits a possessive —
     ``Saatchi ("SAH-chee")'s`` — since the word is read as one. The fix moves
     the possessive onto the word and respells the guide to match."""
     text = raw or ''
     issues = []
-    for idx, m in enumerate(g for g in _GUIDE_PAREN.finditer(text)
-                            if g.group(1) not in ('*', '+')):
+    for idx, m in enumerate(_guide_matches(text)):
+        if _not_a_guide(m, require_quotes):
+            continue
         pm = _POSSESSIVE_RE.match(text, m.end())
         if not pm:
             continue
@@ -400,16 +416,18 @@ def _pg_possessive_issues(label, raw, field):
     return issues
 
 
-def _pg_span_issues(label, raw, field):
+def _pg_span_issues(label, raw, field, require_quotes=False):
     """Flag a pronunciation guide ``("...")`` whose spoken word(s) aren't wrapped
     in ``\\P...\\P``. Marking the target ties the guide to exactly the word(s) it
     covers (used for audio and rich rendering). The auto-fix guesses the target
     from the guide's word count, so the editor should check what it picked.
-    Power marks ``(*)``/``(+)`` are not guides."""
+    Power marks ``(*)``/``(+)`` are not guides, and neither is an unquoted aside
+    when the set requires quoted respellings."""
     text = raw or ''
     issues = []
-    for idx, m in enumerate(g for g in _GUIDE_PAREN.finditer(text)
-                            if g.group(1) not in ('*', '+')):
+    for idx, m in enumerate(_guide_matches(text)):
+        if _not_a_guide(m, require_quotes):
+            continue
         # A \P closing the target span should sit just before the '(' (any
         # whitespace, or closing italic/underline markup, in between is fine).
         if ends_with_pg_target(text[:m.start()]):
@@ -558,15 +576,109 @@ def _late_identifier_issues(label, raw):
         'late_identifier', '{0}|{1}'.format(label, ident))]
 
 
+def _requires_quoted_guides(question):
+    """Whether this question's set only reads a quoted parenthetical as a
+    pronunciation guide. Tolerates a bare stand-in object (the style-check
+    preview posts unsaved text)."""
+    getter = getattr(question, 'guides_require_quotes', None)
+    try:
+        return bool(getter()) if callable(getter) else bool(getter)
+    except Exception:
+        return False
+
+
+# An answer cue: "this"/"these" plus the noun it points at. Quizbowl uses only
+# these two determiners for the cue, so "that"/"those" (ordinary prose) are out.
+_IDENT_CUE_RE = re.compile(r'\b(this|these)\s+([A-Za-z][A-Za-z\-]*)\b', re.IGNORECASE)
+
+# Nouns whose singular already ends in "s" — a naive de-pluralizer would turn
+# "this species" into "specie" and then never match "these species".
+_S_SINGULARS = {
+    'species', 'series', 'crisis', 'thesis', 'analysis', 'basis', 'axis', 'genesis',
+    'hypothesis', 'oasis', 'campus', 'virus', 'census', 'chorus', 'corpus', 'nucleus',
+    'process', 'class', 'glass', 'mass', 'pass', 'press', 'business', 'congress',
+    'address', 'goddess', 'princess', 'canvas', 'atlas', 'bias', 'gas', 'lens',
+    'news', 'physics', 'mathematics', 'politics', 'economics', 'ethics',
+}
+
+# Irregular plurals that carry the answer often enough to be worth knowing.
+_IRREGULAR_PLURALS = {
+    'men': 'man', 'women': 'woman', 'children': 'child', 'people': 'person',
+    'peoples': 'people', 'phenomena': 'phenomenon', 'criteria': 'criterion',
+    'media': 'medium', 'data': 'datum', 'bacteria': 'bacterium', 'curricula': 'curriculum',
+    'symposia': 'symposium', 'formulae': 'formula', 'indices': 'index',
+    'appendices': 'appendix', 'matrices': 'matrix', 'vertices': 'vertex',
+    'analyses': 'analysis', 'bases': 'basis', 'crises': 'crisis', 'theses': 'thesis',
+    'hypotheses': 'hypothesis', 'oases': 'oasis', 'axes': 'axis',
+    'feet': 'foot', 'teeth': 'tooth', 'geese': 'goose', 'mice': 'mouse',
+}
+
+
+def _singular_stem(noun):
+    """A best-effort singular form of `noun`, used only to decide whether two
+    cues name the same thing. Wrong guesses cost a missed report, never a false
+    one: an unrecognized plural simply keys to itself and matches nothing."""
+    w = (noun or '').lower()
+    if w in _IRREGULAR_PLURALS:
+        return _IRREGULAR_PLURALS[w]
+    if w in _S_SINGULARS or not w.endswith('s'):
+        return w
+    if w.endswith('ies') and len(w) > 4:
+        return w[:-3] + 'y'
+    for suffix in ('ches', 'shes', 'sses', 'xes', 'zes'):
+        if w.endswith(suffix):
+            return w[:-2]
+    if w.endswith('ss'):        # "this glass" — not a plural at all
+        return w
+    return w[:-1]
+
+
+def _mixed_identifier_issues(label, raw):
+    """Flag a question that names its answer both ways — "these animals" early
+    and "this animal" later. One question has one answer, so the cue has to pick
+    a number and keep it; a reader who hears both doesn't know what shape of
+    answer to give.
+
+    Matching is by the noun's singular stem, so only the *same* cue counts:
+    "this novel" alongside "these poems" is ordinary writing, not a mismatch.
+    There is no auto-fix — which number is right depends on the answer line."""
+    text = _plain(raw)
+    if not text:
+        return []
+
+    # stem -> {'this'|'these': first match}. The report points at the second
+    # form to appear, which is the one that breaks the pattern already set.
+    seen = {}
+    issues = []
+    reported = set()
+    for m in _IDENT_CUE_RE.finditer(text):
+        det = m.group(1).lower()
+        stem = _singular_stem(m.group(2))
+        forms = seen.setdefault(stem, {})
+        other = 'these' if det == 'this' else 'this'
+        if other in forms and stem not in reported:
+            reported.add(stem)
+            first = forms[other].group(0)
+            message = ('{0}: the answer cue switches number — "{1}" and "{2}" '
+                       'both refer to the answer; pick one and use it '
+                       'throughout'.format(label, first, m.group(0)))
+            issues.append(_issue_at(WARNING, message, 'mixed_identifier',
+                                    '{0}|{1}'.format(label, stem), None, text, m))
+        forms.setdefault(det, m)
+    return issues
+
+
 def check_tossup(tu, guide=DEFAULT_GUIDE, disabled=None):
     enabled = _enabled_codes(guide, disabled)
     issues = []
     text = tu.tossup_text or ''
     plain = _plain(text)
+    quoted = _requires_quoted_guides(tu)
 
     issues += _mechanical_issues('Question', text, 'tossup_text')
     issues += _prose_issues('Question', text, 'tossup_text')
     issues += _late_identifier_issues('Question', text)
+    issues += _mixed_identifier_issues('Question', text)
 
     m = re.search(r'\banswers?\s*:', plain, re.IGNORECASE)
     if m:
@@ -610,13 +722,13 @@ def check_tossup(tu, guide=DEFAULT_GUIDE, disabled=None):
         issues += _answer_alt_issues('Answer', tu.tossup_answer)
 
     if 'pronunciation' in enabled:
-        issues += _pronunciation_issues('Question', text, 'tossup_text')
+        issues += _pronunciation_issues('Question', text, 'tossup_text', quoted)
 
     if 'pg_span' in enabled:
-        issues += _pg_span_issues('Question', text, 'tossup_text')
+        issues += _pg_span_issues('Question', text, 'tossup_text', quoted)
 
     if 'pg_possessive' in enabled:
-        issues += _pg_possessive_issues('Question', text, 'tossup_text')
+        issues += _pg_possessive_issues('Question', text, 'tossup_text', quoted)
 
     return [i for i in issues if i['code'] in enabled]
 
@@ -624,6 +736,7 @@ def check_tossup(tu, guide=DEFAULT_GUIDE, disabled=None):
 def check_bonus(b, guide=DEFAULT_GUIDE, disabled=None):
     enabled = _enabled_codes(guide, disabled)
     issues = []
+    quoted = _requires_quoted_guides(b)
     leadin = b.leadin or ''
     parts = [('Leadin', leadin, 'leadin'),
              ('Part 1', b.part1_text or '', 'part1_text'),
@@ -634,6 +747,9 @@ def check_bonus(b, guide=DEFAULT_GUIDE, disabled=None):
         if raw.strip():
             issues += _mechanical_issues(label, raw, field)
             issues += _prose_issues(label, raw, field)
+            # Per part, not across the bonus: each part has its own answer, so
+            # "this novel" in one and "these poems" in another is correct.
+            issues += _mixed_identifier_issues(label, raw)
 
     plain_leadin = _plain(leadin)
     m = re.search(r'for ten points each', plain_leadin, re.IGNORECASE)
@@ -670,17 +786,17 @@ def check_bonus(b, guide=DEFAULT_GUIDE, disabled=None):
     if 'pronunciation' in enabled:
         for label, raw, field in parts:
             if raw.strip():
-                issues += _pronunciation_issues(label, raw, field)
+                issues += _pronunciation_issues(label, raw, field, quoted)
 
     if 'pg_span' in enabled:
         for label, raw, field in parts:
             if raw.strip():
-                issues += _pg_span_issues(label, raw, field)
+                issues += _pg_span_issues(label, raw, field, quoted)
 
     if 'pg_possessive' in enabled:
         for label, raw, field in parts:
             if raw.strip():
-                issues += _pg_possessive_issues(label, raw, field)
+                issues += _pg_possessive_issues(label, raw, field, quoted)
 
     return [i for i in issues if i['code'] in enabled]
 

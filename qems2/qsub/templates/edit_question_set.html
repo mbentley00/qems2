@@ -121,6 +121,9 @@
             <div class="set-info-checks">
                 <label class="set-info-check">{{ form.char_count_ignores_pronunciation_guides }}
                     <span>Character counts ignore pronunciation guides</span></label>
+                <label class="set-info-check">{{ form.guides_require_quotes }}
+                    <span>Only quoted parentheses are pronunciation guides
+                        <small>On: <code>("DID-er-OW")</code> is a guide, but <code>(a plain aside)</code> is ordinary text — read normally, counted in the length, and left alone by the \P rules.</small></span></label>
                 <label class="set-info-check">{{ form.tossups_only }}
                     <span>Tossup-only tournament (no bonuses)
                         <small>Hides bonus requirements; existing bonuses are never deleted.</small></span></label>
@@ -278,7 +281,7 @@
                 <label style="display:inline-block; margin:0 10px;" title="Convert straight quotes and apostrophes to typographic &#8220;smart&#8221; ones in the exported document"><input type="checkbox" name="smartq" value="1"> Smart quotes</label>
                 <label style="display:inline-block; margin:0 10px;" title="Print tossup 1, bonus 1, tossup 2, bonus 2 &hellip; the order they're read, instead of all tossups then all bonuses"><input type="checkbox" name="interlace" value="1"> Interlace tossups and bonuses</label>
                 <button type="submit" class="button tiny primary" style="margin:0 0 0 6px;">Word</button>
-                <button type="submit" class="button tiny primary" style="margin:0 0 0 4px;" formaction="/export_question_set/{{ qset.id }}/pdf/">PDF</button>
+                <button type="submit" class="button tiny primary" style="margin:0 0 0 4px;" formaction="/export_question_set/{{ qset.id }}/pdf/" title="A zip with one PDF per packet">PDF</button>
                 <button type="submit" class="button tiny primary" style="margin:0 0 0 4px;" formaction="/export_question_set/{{ qset.id }}/yapp2-json/" title="YAPP2 JSON; with interlacing ticked it carries a readingOrder so the reader alternates tossups and bonuses.">YAPP2</button>
                 <span class="sc-guide-note" style="display:block; margin-top:4px;">(Comments and smart quotes apply to the Word export only. Of these, YAPP2 uses only interlacing.)</span>
             </form>

@@ -153,6 +153,13 @@ class QuestionSet (models.Model):
     max_vhsl_bonus_length = models.PositiveIntegerField(default=100)
     char_count_ignores_pronunciation_guides = models.BooleanField(default=True)
 
+    # When true, only a parenthetical with quotation marks in it — ("DID-er-OW")
+    # — is a pronunciation guide; a plain "(see also Wilson)" is ordinary text
+    # that renders normally, counts toward the length, and is left alone by the
+    # \P rules. Off by default, which is QEMS's long-standing behaviour of
+    # treating every parenthetical as a guide.
+    guides_require_quotes = models.BooleanField(default=False)
+
     # When true, this is a tossup-only tournament: bonuses are not expected and
     # bonus requirements/UI are suppressed.
     tossups_only = models.BooleanField(default=False)
@@ -901,9 +908,10 @@ class Tossup (models.Model):
     def character_count(self):
         char_count_ignores_pronunciation_guides = True
         if (self.get_question_set() is not None):
-            char_count_ignores_pronunciation_guides = self.question_set.char_count_ignores_pronunciation_guides        
-        
-        return get_character_count(self.tossup_text, char_count_ignores_pronunciation_guides)
+            char_count_ignores_pronunciation_guides = self.question_set.char_count_ignores_pronunciation_guides
+
+        return get_character_count(self.tossup_text, char_count_ignores_pronunciation_guides,
+                                   self.guides_require_quotes())
 
     def character_count_exclusions(self):
         """Text excluded from this tossup's character count (moderator
@@ -911,7 +919,8 @@ class Tossup (models.Model):
         ignore = True
         if self.get_question_set() is not None:
             ignore = self.question_set.char_count_ignores_pronunciation_guides
-        return get_char_count_exclusions(self.tossup_text, ignore)
+        return get_char_count_exclusions(self.tossup_text, ignore,
+                                         self.guides_require_quotes())
 
     def save(self, *args, **kwargs):
         self.setup_search_fields()
@@ -968,11 +977,18 @@ class Tossup (models.Model):
         qset = self.get_question_set()
         return bool(qset and qset.enable_superpower)
 
+    def guides_require_quotes(self):
+        """True when this set only reads a parenthetical as a pronunciation
+        guide if it has quotation marks in it (see QuestionSet)."""
+        qset = self.get_question_set()
+        return bool(qset and qset.guides_require_quotes)
+
     def to_html(self, include_category=False, include_character_count=False):
 
         output = ''
-        output = output + "<p>" + get_formatted_question_html(self.tossup_text, False, True, False, True, allPower=self.is_all_power(), allowSuperpower=self.superpower_enabled()) + "<br />"
-        output = output + "ANSWER: " + get_formatted_question_html(self.tossup_answer, True, True, False, False) + "</p>"
+        quoted = self.guides_require_quotes()
+        output = output + "<p>" + get_formatted_question_html(self.tossup_text, False, True, False, True, allPower=self.is_all_power(), allowSuperpower=self.superpower_enabled(), guidesRequireQuotes=quoted) + "<br />"
+        output = output + "ANSWER: " + get_formatted_question_html(self.tossup_answer, True, True, False, False, guidesRequireQuotes=quoted) + "</p>"
         if (include_category and self.category is not None):
             output = output + "<p><strong>Category:</strong> " + str(self.category) + "</p>"
         else:
@@ -1141,10 +1157,11 @@ class Bonus(models.Model):
         if (self.get_question_set() is not None):
             char_count_ignores_pronunciation_guides = self.question_set.char_count_ignores_pronunciation_guides  
         
-        leadin_count = get_character_count(self.leadin, char_count_ignores_pronunciation_guides)
-        part1_count = get_character_count(self.part1_text, char_count_ignores_pronunciation_guides)
-        part2_count = get_character_count(self.part2_text, char_count_ignores_pronunciation_guides)
-        part3_count = get_character_count(self.part3_text, char_count_ignores_pronunciation_guides)
+        quoted = self.guides_require_quotes()
+        leadin_count = get_character_count(self.leadin, char_count_ignores_pronunciation_guides, quoted)
+        part1_count = get_character_count(self.part1_text, char_count_ignores_pronunciation_guides, quoted)
+        part2_count = get_character_count(self.part2_text, char_count_ignores_pronunciation_guides, quoted)
+        part3_count = get_character_count(self.part3_text, char_count_ignores_pronunciation_guides, quoted)
         return leadin_count + part1_count + part2_count + part3_count
 
     def character_count_exclusions(self):
@@ -1152,9 +1169,10 @@ class Bonus(models.Model):
         ignore = True
         if self.get_question_set() is not None:
             ignore = self.question_set.char_count_ignores_pronunciation_guides
+        quoted = self.guides_require_quotes()
         out = []
         for field in (self.leadin, self.part1_text, self.part2_text, self.part3_text):
-            out.extend(get_char_count_exclusions(field, ignore))
+            out.extend(get_char_count_exclusions(field, ignore, quoted))
         seen = set()
         deduped = []
         for s in out:
@@ -1219,12 +1237,19 @@ class Bonus(models.Model):
 
         return leadin + parts_latex + r'\end{bonus}' + '\n'
 
+    def guides_require_quotes(self):
+        """True when this set only reads a parenthetical as a pronunciation
+        guide if it has quotation marks in it (see QuestionSet)."""
+        qset = self.get_question_set()
+        return bool(qset and qset.guides_require_quotes)
+
     def leadin_to_html(self):
         output = ''
+        quoted = self.guides_require_quotes()
         if (self.get_bonus_type() == ACF_STYLE_BONUS):
-            return get_formatted_question_html(self.leadin, False, True, False, False)
+            return get_formatted_question_html(self.leadin, False, True, False, False, guidesRequireQuotes=quoted)
         elif (self.get_bonus_type() == VHSL_BONUS):
-            return get_formatted_question_html(self.part1_text, False, True, False, False)
+            return get_formatted_question_html(self.part1_text, False, True, False, False, guidesRequireQuotes=quoted)
         return output
 
     def to_plain_text(self, include_category=False, include_character_count=False):
@@ -1254,15 +1279,16 @@ class Bonus(models.Model):
 
     def to_html(self, include_category=False, include_character_count=False):
         output = ''
+        quoted = self.guides_require_quotes()
 
         if (self.get_bonus_type() == ACF_STYLE_BONUS):
-            output = output + "<p>" + get_formatted_question_html(self.leadin, False, True, False, False) + "<br />"
-            output = output + "[10" + self.part1_difficulty + "] " + get_formatted_question_html(self.part1_text, False, True, False, False) + "<br />"
-            output = output + "ANSWER: " + get_formatted_question_html(self.part1_answer, True, True, False, False) + "<br />"
-            output = output + "[10" + self.part2_difficulty + "] " + get_formatted_question_html(self.part2_text, False, True, False, False) + "<br />"
-            output = output + "ANSWER: " + get_formatted_question_html(self.part2_answer, True, True, False, False) + "<br />"
-            output = output + "[10" + self.part3_difficulty + "] " + get_formatted_question_html(self.part3_text, False, True, False, False) + "<br />"
-            output = output + "ANSWER: " + get_formatted_question_html(self.part3_answer, True, True, False, False) + "</p>"
+            output = output + "<p>" + get_formatted_question_html(self.leadin, False, True, False, False, guidesRequireQuotes=quoted) + "<br />"
+            output = output + "[10" + self.part1_difficulty + "] " + get_formatted_question_html(self.part1_text, False, True, False, False, guidesRequireQuotes=quoted) + "<br />"
+            output = output + "ANSWER: " + get_formatted_question_html(self.part1_answer, True, True, False, False, guidesRequireQuotes=quoted) + "<br />"
+            output = output + "[10" + self.part2_difficulty + "] " + get_formatted_question_html(self.part2_text, False, True, False, False, guidesRequireQuotes=quoted) + "<br />"
+            output = output + "ANSWER: " + get_formatted_question_html(self.part2_answer, True, True, False, False, guidesRequireQuotes=quoted) + "<br />"
+            output = output + "[10" + self.part3_difficulty + "] " + get_formatted_question_html(self.part3_text, False, True, False, False, guidesRequireQuotes=quoted) + "<br />"
+            output = output + "ANSWER: " + get_formatted_question_html(self.part3_answer, True, True, False, False, guidesRequireQuotes=quoted) + "</p>"
 
             if (include_category and self.category is not None):
                 output = output + "<p><strong>Category:</strong> " + str(self.category) + "</p>"
@@ -1278,8 +1304,8 @@ class Bonus(models.Model):
                     output = output + "<p><strong>Character Count:</strong> " + str(char_count) + "</p>"
 
         elif (self.get_bonus_type() == VHSL_BONUS):
-            output = output + "<p>" + get_formatted_question_html(self.part1_text, False, True, False, False) + "<br />"
-            output = output + "ANSWER: " + get_formatted_question_html(self.part1_answer, True, True, False, False) + "</p>"
+            output = output + "<p>" + get_formatted_question_html(self.part1_text, False, True, False, False, guidesRequireQuotes=quoted) + "<br />"
+            output = output + "ANSWER: " + get_formatted_question_html(self.part1_answer, True, True, False, False, guidesRequireQuotes=quoted) + "</p>"
 
             if (include_category and self.category is not None):
                 output = output + "<p><strong>Category:</strong> " + str(self.category) + "</p>"

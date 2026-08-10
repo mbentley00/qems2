@@ -19,6 +19,8 @@ import tempfile
 import threading
 import time
 
+from .utils import escape_unquoted_parens
+
 # Quizbowl reading wants a measured, even cadence, not chat prosody — so the
 # defaults come from Microsoft's "News/Novel" narration voices rather than the
 # conversational "Multilingual" line (Ava etc. sound expressive but rush and
@@ -65,15 +67,21 @@ _RAW_PAREN_RE = re.compile(r"\([^)]*\)")
 _WS_RE = re.compile(r"\s+")
 
 
-def clean_for_speech(text):
+def clean_for_speech(text, guides_require_quotes=False):
     """Strip QEMS2 / HTML markup so the text reads naturally aloud.
 
     In QEMS, pronunciation guides and moderator instructions use raw parens
     (e.g. ("LIN-de-min"), (read slowly)) while parentheses meant to be read are
     escaped (\\(...\\)). So we drop raw parentheticals but keep escaped ones.
+
+    A set may declare that only a quoted parenthetical is a guide; the rest are
+    then ordinary words, and a moderator reads them, so they are escaped up front
+    and survive the drop below.
     """
     if not text:
         return ""
+    if guides_require_quotes:
+        text = escape_unquoted_parens(text)
     text = _HTML_RE.sub(" ", text)
     text = _LEADING_NOTE_RE.sub("", text)
     text = _POWER_RE.sub(" ", text)
@@ -96,24 +104,36 @@ def clean_for_speech(text):
 
 # ── Script building (operates on model instances) ────────────────────────
 
+def _quoted_guides(question):
+    """Whether this question's set reads only a quoted parenthetical as a guide
+    — the rest are words the moderator says out loud."""
+    getter = getattr(question, "guides_require_quotes", None)
+    try:
+        return bool(getter()) if callable(getter) else False
+    except Exception:
+        return False
+
+
 def _tossup_utterances(tu, include_answers, answer_gap):
     n = tu.question_number or 0
-    items = [("Tossup {0}. {1}".format(n, clean_for_speech(tu.tossup_text)), answer_gap)]
+    q = _quoted_guides(tu)
+    items = [("Tossup {0}. {1}".format(n, clean_for_speech(tu.tossup_text, q)), answer_gap)]
     if include_answers:
-        items.append(("Answer: {0}".format(clean_for_speech(tu.tossup_answer)), INTER_GAP))
+        items.append(("Answer: {0}".format(clean_for_speech(tu.tossup_answer, q)), INTER_GAP))
     return items
 
 
 def _bonus_utterances(b, include_answers, answer_gap):
     n = b.question_number or 0
-    items = [("Bonus {0}. {1} For ten points each.".format(n, clean_for_speech(b.leadin)), LEADIN_GAP)]
+    q = _quoted_guides(b)
+    items = [("Bonus {0}. {1} For ten points each.".format(n, clean_for_speech(b.leadin, q)), LEADIN_GAP)]
     for i in (1, 2, 3):
-        ptext = clean_for_speech(getattr(b, "part{0}_text".format(i)))
+        ptext = clean_for_speech(getattr(b, "part{0}_text".format(i)), q)
         if not ptext:
             continue
         items.append((ptext, answer_gap))
         if include_answers:
-            pans = clean_for_speech(getattr(b, "part{0}_answer".format(i)))
+            pans = clean_for_speech(getattr(b, "part{0}_answer".format(i)), q)
             items.append(("Answer: {0}".format(pans), LEADIN_GAP))
     if items:
         items[-1] = (items[-1][0], INTER_GAP)

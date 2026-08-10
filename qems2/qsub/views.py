@@ -19,7 +19,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment
 
-from django.shortcuts import render
+from django.shortcuts import render, get_object_or_404
 from django.forms.formsets import formset_factory
 from django.http import HttpResponse, HttpResponseRedirect, JsonResponse
 
@@ -770,6 +770,7 @@ def edit_question_set(request, qset_id):
                 qset.distribution = form.cleaned_data['distribution']
                 qset.num_packets = form.cleaned_data['num_packets']
                 qset.char_count_ignores_pronunciation_guides = form.cleaned_data['char_count_ignores_pronunciation_guides']
+                qset.guides_require_quotes = form.cleaned_data['guides_require_quotes']
                 qset.tossups_only = form.cleaned_data['tossups_only']
                 qset.enable_superpower = form.cleaned_data['enable_superpower']
                 qset.public = form.cleaned_data['public']
@@ -4724,7 +4725,7 @@ PRONUNCIATION_GUIDE_COLOR = RGBColor(0x80, 0x80, 0x80)
 
 
 def add_qems_formatted_runs(paragraph, text, bold=False, is_answer=False, smart_quotes=False,
-                            all_power=False, allow_superpower=True):
+                            all_power=False, allow_superpower=True, quoted_guides=False):
     """Convert QEMS markup to python-docx runs on a paragraph.
 
     Markup rules (mirroring get_formatted_question_html in utils.py):
@@ -4749,6 +4750,11 @@ def add_qems_formatted_runs(paragraph, text, bold=False, is_answer=False, smart_
     text = html.unescape(text)
     if smart_quotes:
         text = smarten_quotes(text)
+    # A set may require a guide to carry quotation marks; escaping the rest makes
+    # them print as the ordinary parentheses they are. Done after unescaping so
+    # the quotes are visible to the test.
+    if quoted_guides:
+        text = escape_unquoted_parens(text)
 
     allow_underlines = True
     allow_parens = True
@@ -4968,6 +4974,55 @@ def add_qems_formatted_runs(paragraph, text, bold=False, is_answer=False, smart_
 
 
 @login_required
+def export_question(request, question_type, question_id, output_format):
+    """Download one question as a YAPP/YAPP2 JSON file.
+
+    MODAQ and the other YAPP readers open a *packet*, not a question, so the
+    single question is wrapped in a packet whose other array is empty — that is
+    a valid YAPP file, and it opens in the reader with exactly this question in
+    it. Handy for checking how one question reads, or for handing a single
+    question to someone without exporting the whole set.
+
+    Anyone who can see the question on its edit page can export it; the file
+    holds nothing the page doesn't already show.
+    """
+    from . import yapp_export
+
+    is_tossup = question_type == 'tossup'
+    model = Tossup if is_tossup else Bonus
+    question = get_object_or_404(model, id=question_id)
+    qset = question.question_set
+    user = request.user.writer
+
+    if not (question.author == user or _is_set_member(user, qset)):
+        return render(request, 'failure.html',
+                      {'message': 'You are not authorized to view or export this question!',
+                       'message_class': 'alert-box alert'})
+
+    version = 2 if output_format == 'yapp2-json' else 1
+    label = 'YAPP2' if version >= 2 else 'YAPP'
+    tossups = [question] if is_tossup else []
+    bonuses = [] if is_tossup else [question]
+    # `name` is a YAPP2 addition, so a version-1 file leaves it out — same as the
+    # set-wide export, which keeps its plain-YAPP output free of YAPP2 fields.
+    name = (question.packet.packet_name if question.packet else qset.name) or None
+    payload = yapp_export.packet_to_yapp(tossups, bonuses, version=version,
+                                         name=name if version >= 2 else None)
+
+    # Name the file after the answerline, so a folder of these is readable.
+    answer = get_answer_no_formatting(get_primary_answer(
+        question.tossup_answer if is_tossup else question.part1_answer))
+    answer = html.unescape(answer or '').strip()[:60].strip()
+    base = answer or '{0} {1}'.format(question_type.capitalize(), question.id)
+    filename = re.sub(r'[\\/:*?"<>|\r\n\t]', '_', '{0} - {1}.json'.format(base, label))
+
+    response = HttpResponse(json.dumps(payload, ensure_ascii=False, indent=2),
+                            content_type='application/json')
+    response['Content-Disposition'] = 'attachment; filename="{0}"'.format(filename)
+    return response
+
+
+@login_required
 def export_question_set(request, qset_id, output_format):
     user = request.user.writer
     qset = QuestionSet.objects.get(id=qset_id)
@@ -5108,6 +5163,10 @@ def export_question_set(request, qset_id, output_format):
                 include_ids = _export_opt('ids', True)
                 include_credits = _export_opt('credits', False)
                 smart_quotes = _export_opt('smartq', False)
+                # Not an export option: whether an unquoted parenthetical is a
+                # pronunciation guide is a property of the set, so the document
+                # has to agree with what the edit pages show.
+                quoted_guides = qset.guides_require_quotes
                 # Interlaced: tossup 1, bonus 1, tossup 2, bonus 2 … the reading
                 # order at a tournament, instead of all tossups then all bonuses.
                 interlace = _export_opt('interlace', False)
@@ -5276,13 +5335,14 @@ def export_question_set(request, qset_id, output_format):
                     p.add_run(f"{num}. ").bold = True
                     add_qems_formatted_runs(p, safe_text(tossup.tossup_text), smart_quotes=smart_quotes,
                                             all_power=tossup.is_all_power(),
-                                            allow_superpower=tossup.superpower_enabled())
+                                            allow_superpower=tossup.superpower_enabled(),
+                                            quoted_guides=quoted_guides)
                     _line_break(p)
                     # Not bolded: the label is scaffolding, and bolding it drew the eye
                     # away from the underlined required answer next to it.
                     p.add_run("ANSWER: ")
                     add_qems_formatted_runs(p, safe_text(tossup.tossup_answer), is_answer=True,
-                                            smart_quotes=smart_quotes)
+                                            smart_quotes=smart_quotes, quoted_guides=quoted_guides)
                     meta = question_meta(tossup)
                     if meta:
                         _line_break(p)
@@ -5297,7 +5357,8 @@ def export_question_set(request, qset_id, output_format):
                     p.paragraph_format.keep_together = True
                     p.paragraph_format.space_after = Pt(10)
                     p.add_run(f"{num}. ").bold = True
-                    add_qems_formatted_runs(p, safe_text(bonus.leadin), smart_quotes=smart_quotes)
+                    add_qems_formatted_runs(p, safe_text(bonus.leadin), smart_quotes=smart_quotes,
+                                            quoted_guides=quoted_guides)
                     for part_num in range(1, 4):
                         part_text = getattr(bonus, f'part{part_num}_text', None)
                         part_answer = getattr(bonus, f'part{part_num}_answer', None)
@@ -5306,11 +5367,13 @@ def export_question_set(request, qset_id, output_format):
                             diff_tag = part_diff if part_diff else ''
                             _line_break(p)
                             p.add_run(f"[10{diff_tag}] ").bold = True
-                            add_qems_formatted_runs(p, safe_text(part_text), smart_quotes=smart_quotes)
+                            add_qems_formatted_runs(p, safe_text(part_text), smart_quotes=smart_quotes,
+                                                    quoted_guides=quoted_guides)
                             _line_break(p)
                             p.add_run("ANSWER: ")
                             add_qems_formatted_runs(p, safe_text(part_answer), is_answer=True,
-                                                    smart_quotes=smart_quotes)
+                                                    smart_quotes=smart_quotes,
+                                                    quoted_guides=quoted_guides)
                     meta = question_meta(bonus)
                     if meta:
                         _line_break(p)
@@ -5339,7 +5402,8 @@ def export_question_set(request, qset_id, output_format):
                         line.paragraph_format.space_after = Pt(0)
                         line.add_run('{0} {1}: '.format(label, num or '?')).bold = True
                         add_qems_formatted_runs(line, safe_text(answer), is_answer=True,
-                                                smart_quotes=smart_quotes)
+                                                smart_quotes=smart_quotes,
+                                                quoted_guides=quoted_guides)
                     document.add_paragraph().paragraph_format.space_after = Pt(8)
 
                 def save_docx_bytes(document):
@@ -5712,9 +5776,30 @@ def export_question_set(request, qset_id, output_format):
                     credits = (sorted(n for n in writers.values() if n),
                                sorted(n for n in editors.values() if n))
 
-                pdf_bytes = pdf_export.build_packetized_pdf(qset.name, groups, pdf_opts, credits=credits)
-                response = HttpResponse(pdf_bytes, content_type='application/pdf')
-                filename = f"{qset.name} - Packets.pdf" if qset.name else "packets.pdf"
+                # One PDF per packet, zipped — the same shape as the Word export.
+                # A packet is what gets handed to a room, so it has to be its own
+                # file; credits go in every packet rather than only the first,
+                # since each file now travels on its own.
+                def _safe_filename(name):
+                    return re.sub(r'[\\/:*?"<>|]', '_', name or 'Packet').strip() or 'Packet'
+
+                zip_buf = io.BytesIO()
+                with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+                    used_names = set()
+                    for group in groups:
+                        pdf_bytes = pdf_export.build_packetized_pdf(
+                            qset.name, [group], pdf_opts, credits=credits)
+                        base = _safe_filename(group[0])
+                        fname = base
+                        n = 2
+                        while fname in used_names:
+                            fname = '{0} ({1})'.format(base, n)
+                            n += 1
+                        used_names.add(fname)
+                        zf.writestr('{0}.pdf'.format(fname), pdf_bytes)
+
+                response = HttpResponse(zip_buf.getvalue(), content_type='application/zip')
+                filename = f"{qset.name} - Packets (PDF).zip" if qset.name else "packets-pdf.zip"
                 response['Content-Disposition'] = f'attachment; filename="{filename}"'
                 return response
             else:
@@ -6894,6 +6979,13 @@ def packet_grid(request, qset_id):
     tu_per_packet = _per_packet_target(qset, 'tossup')
     bs_per_packet = 0 if qset.tossups_only else _per_packet_target(qset, 'bonus')
 
+    # One empty row past the bottom of every grid, so a packet can be given a
+    # question beyond the set's per-packet count without first having to invent
+    # the row somewhere else. Filling it grows the grid and a fresh spare row
+    # appears under it, the way a spreadsheet always has one more line.
+    # Read-only viewers get no spare row — there's nothing they could do with it.
+    spare_rows = 0 if read_only else 1
+
     def build_rows(question_model, preview_func, edit_url, target_rows=0):
         qtype = 'tossup' if question_model is Tossup else 'bonus'
         vacancies = {(v.packet_id, v.question_number): v.category
@@ -6920,7 +7012,8 @@ def packet_grid(request, qset_id):
             max_num = max(max_num, number)
             cells_by_packet.setdefault(question.packet_id, {})[number] = cell
         rows = []
-        for number in range(1, max(max_num, target_rows) + 1):
+        last_real = max(max_num, target_rows)
+        for number in range(1, last_real + spare_rows + 1):
             cells = []
             for p in packets:
                 cell = cells_by_packet.get(p.id, {}).get(number)
@@ -6930,7 +7023,7 @@ def packet_grid(request, qset_id):
                 cells.append(cell if cell is not None else
                              {'empty': True, 'packet_id': p.id,
                               'removed_category': vacancies.get((p.id, number), '')})
-            rows.append({'num': number, 'cells': cells})
+            rows.append({'num': number, 'cells': cells, 'spare': number > last_real})
         return rows, unplaced
 
     tossup_rows, unplaced_tu = build_rows(
@@ -7946,6 +8039,69 @@ def _record_visit_and_summarize(user, qset):
             'edited_questions': edited_questions, 'comments': comments}
 
 
+def _activity_changes(user, qset, since=None, limit=100):
+    """Changes other people made to questions of yours, newest first.
+
+    A question is "yours" once you write or edit it — but becoming its editor
+    must not hand you its whole past. Editing one question someone else wrote
+    used to dump every earlier revision of it into your activity, which is
+    noise you have already seen (you just read the question) and can't act on.
+    So each question is only reported from *your own last change to it* onward:
+    for one you wrote that is its creation, i.e. everything after; for one you
+    edited it is the moment you took it on.
+
+    `since` additionally drops anything at or before that time (the badge's
+    "new since you last looked"). Yields at most `limit` rows, newest first —
+    the queryset is ordered and consumed lazily, so a long history costs nothing
+    beyond what's shown.
+    """
+    items = []
+    for model, hist_model, edit_url in ((Tossup, TossupHistory, '/edit_tossup/'),
+                                        (Bonus, BonusHistory, '/edit_bonus/')):
+        mine = (model.objects.filter(question_set=qset)
+                .filter(Q(author=user) | Q(editor=user))
+                .select_related('category'))
+        hist_to_q = {q.question_history_id: q for q in mine if q.question_history_id}
+        if not hist_to_q:
+            continue
+
+        # When each question became yours: your latest change to it. A question
+        # you wrote but never re-saved has no row here; nothing about it is
+        # backfill, so it has no cutoff at all.
+        own_last = {
+            r['question_history_id']: r['last']
+            for r in (hist_model.objects
+                      .filter(question_history_id__in=hist_to_q.keys(), changer=user)
+                      .values('question_history_id')
+                      .annotate(last=Max('change_date')))
+        }
+
+        changes = (hist_model.objects.filter(question_history_id__in=hist_to_q.keys())
+                   .exclude(changer=user).select_related('changer__user')
+                   .order_by('-change_date'))
+        if since is not None:
+            changes = changes.filter(change_date__gt=since)
+        kept = 0
+        for h in changes.iterator():
+            q = hist_to_q.get(h.question_history_id)
+            if q is None:
+                continue
+            cutoff = own_last.get(h.question_history_id)
+            if cutoff is None and q.author_id != user.id:
+                # You appear only as its editor, with no save of your own on
+                # record (an imported or bulk-stamped question): the editor
+                # stamp is the moment you took it on.
+                cutoff = q.edited_date
+            if cutoff is not None and h.change_date <= cutoff:
+                continue
+            items.append((model, hist_model, edit_url, h, q))
+            kept += 1
+            if kept >= limit:
+                break
+    items.sort(key=lambda row: row[3].change_date, reverse=True)
+    return items[:limit]
+
+
 def _new_activity_count(user, qset):
     """Count activity (mentions + others' changes to your questions) newer than
     the last time the user viewed their activity feed for this set."""
@@ -7964,17 +8120,9 @@ def _new_activity_count(user, qset):
     if last is not None:
         mentions = mentions.filter(created_date__gt=last)
     count = mentions.count()
-
-    for model, hist_model in ((Tossup, TossupHistory), (Bonus, BonusHistory)):
-        hids = [h for h in model.objects.filter(question_set=qset)
-                .filter(Q(author=user) | Q(editor=user))
-                .values_list('question_history_id', flat=True) if h]
-        if not hids:
-            continue
-        changes = hist_model.objects.filter(question_history_id__in=hids).exclude(changer=user)
-        if last is not None:
-            changes = changes.filter(change_date__gt=last)
-        count += changes.count()
+    # Same rule as the feed, so the badge never promises items the page won't
+    # show (and the cap matches the number the feed lists).
+    count += len(_activity_changes(user, qset, since=last))
     return count
 
 
@@ -8012,34 +8160,20 @@ def activity(request, qset_id):
             'edit_url': '{0}{1}/'.format('/edit_tossup/' if is_tu else '/edit_bonus/', c.object_pk),
         })
 
-    # --- changes by others to questions you authored or edited ---
+    # --- changes by others to questions you authored or edited, from the point
+    # each one became yours (see _activity_changes) ---
     change_items = []
-    for model, hist_model, edit, preview in (
-            (Tossup, TossupHistory, '/edit_tossup/', lambda q: _grid_answer_preview(q.tossup_answer)),
-            (Bonus, BonusHistory, '/edit_bonus/', lambda q: _grid_answer_preview(q.part1_answer, 30))):
-        mine = (model.objects.filter(question_set=qset)
-                .filter(Q(author=user) | Q(editor=user))
-                .select_related('category'))
-        hist_to_q = {q.question_history_id: q for q in mine if q.question_history_id}
-        if not hist_to_q:
-            continue
-        histories = (hist_model.objects.filter(question_history_id__in=hist_to_q.keys())
-                     .exclude(changer=user).select_related('changer__user')
-                     .order_by('-change_date')[:100])
-        for h in histories:
-            q = hist_to_q.get(h.question_history_id)
-            if q is None:
-                continue
-            change_items.append({
-                'date': h.change_date,
-                'by': str(h.changer) if h.changer else 'unknown',
-                'qtype': 'tossup' if model is Tossup else 'bonus',
-                'edit_url': '{0}{1}/'.format(edit, q.id),
-                'preview': preview(q),
-                'role': 'wrote' if q.author_id == user.id else 'edited',
-            })
-    change_items.sort(key=lambda x: x['date'], reverse=True)
-    change_items = change_items[:100]
+    for model, _hist_model, edit, h, q in _activity_changes(user, qset):
+        preview = (_grid_answer_preview(q.tossup_answer) if model is Tossup
+                   else _grid_answer_preview(q.part1_answer, 30))
+        change_items.append({
+            'date': h.change_date,
+            'by': str(h.changer) if h.changer else 'unknown',
+            'qtype': 'tossup' if model is Tossup else 'bonus',
+            'edit_url': '{0}{1}/'.format(edit, q.id),
+            'preview': preview,
+            'role': 'wrote' if q.author_id == user.id else 'edited',
+        })
 
     # Mark this set's activity as seen (clears the notification badge).
     ActivitySeen.objects.update_or_create(
@@ -8683,15 +8817,17 @@ def live_char_count(request):
     if request.method != 'POST':
         return HttpResponse(json.dumps({'count': 0}))
     ignore = True
+    quoted = False
     try:
         qset = QuestionSet.objects.get(id=int(request.POST['qset_id']))
         ignore = qset.char_count_ignores_pronunciation_guides
+        quoted = qset.guides_require_quotes
     except (KeyError, ValueError, QuestionSet.DoesNotExist):
         pass
     texts = request.POST.getlist('text[]')
     if not texts:
         texts = [request.POST.get('text', '')]
-    total = sum(get_character_count(t, ignore) for t in texts)
+    total = sum(get_character_count(t, ignore, quoted) for t in texts)
     return HttpResponse(json.dumps({'count': total}))
 
 

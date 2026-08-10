@@ -1,4 +1,5 @@
 import json
+import re
 
 from django.test import TestCase, override_settings
 from django.core import mail
@@ -1959,12 +1960,38 @@ class PacketizedWordExportTests(TestCase):
         p10 = '\n'.join(p.text for p in self._doc(zf, 'Packet 10.docx').paragraphs)
         self.assertNotIn('Credits', p10)
 
-    def test_pdf_export_returns_pdf(self):
-        resp = self.client.get('/export_question_set/{0}/pdf/'.format(self.qset.id))
+    def _pdf_zip(self, **params):
+        import io as _io, zipfile as _zip
+        resp = self.client.get('/export_question_set/{0}/pdf/'.format(self.qset.id), params)
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp['Content-Type'], 'application/pdf')
-        self.assertTrue(resp.content.startswith(b'%PDF'))
-        self.assertGreater(len(resp.content), 1000)
+        self.assertEqual(resp['Content-Type'], 'application/zip')
+        return _zip.ZipFile(_io.BytesIO(resp.content))
+
+    def test_pdf_export_returns_one_pdf_per_packet(self):
+        """A packet is what gets handed to a room, so each one is its own file
+        rather than a page in a combined document."""
+        zf = self._pdf_zip()
+        names = zf.namelist()
+        self.assertIn('Packet 2.pdf', names)
+        self.assertIn('Packet 10.pdf', names)
+        for name in names:
+            body = zf.read(name)
+            self.assertTrue(body.startswith(b'%PDF'), name)
+            self.assertGreater(len(body), 1000, name)
+
+    def test_each_packet_pdf_holds_only_its_own_questions(self):
+        import io as _io
+        from pypdf import PdfReader
+        zf = self._pdf_zip()
+
+        def text(name):
+            reader = PdfReader(_io.BytesIO(zf.read(name)))
+            return '\n'.join(page.extract_text() or '' for page in reader.pages)
+
+        p2, p10 = text('Packet 2.pdf'), text('Packet 10.pdf')
+        self.assertIn('Packet 2', p2)
+        self.assertNotIn('Packet 10', p2)
+        self.assertIn('Packet 10', p10)
 
     def test_pdf_export_handles_unicode(self):
         # Diacritics / Greek must not crash the PDF (bundled Unicode font).
@@ -1974,10 +2001,8 @@ class PacketizedWordExportTests(TestCase):
             tossup_text='About Küçük Kaynarca and Ω. (*) end.',
             tossup_answer='_Hammarskjöld_', created_date=datetime.now(),
             last_changed_date=datetime.now(), question_number=3)
-        resp = self.client.get('/export_question_set/{0}/pdf/'.format(self.qset.id),
-                               {'opts': '1', 'credits': '1', 'writers': '1'})
-        self.assertEqual(resp.status_code, 200)
-        self.assertTrue(resp.content.startswith(b'%PDF'))
+        zf = self._pdf_zip(opts='1', credits='1', writers='1')
+        self.assertTrue(zf.read('Packet 2.pdf').startswith(b'%PDF'))
 
     def test_default_link_keeps_comments_and_attribution(self):
         # A legacy plain link (no opts marker) keeps the historical behavior.
@@ -3363,6 +3388,98 @@ class AnswerAltsTests(TestCase):
         self.assertEqual(answer_db.missing_alternates('_Zxqwv Notanswer_'), ('', []))
 
 
+class MixedIdentifierStyleCheckTests(TestCase):
+    """A question names its answer one way: "these animals" and "this animal"
+    in the same question leaves the reader guessing what shape to answer in."""
+
+    def _issues(self, text, label='Question'):
+        from qems2.qsub.style_checker import _mixed_identifier_issues
+        return _mixed_identifier_issues(label, text)
+
+    def test_flags_a_number_switch_on_the_same_noun(self):
+        issues = self._issues('Name these animals. This animal migrates at night.')
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]['code'], 'mixed_identifier')
+        self.assertIn('these animals', issues[0]['message'])
+        self.assertIn('This animal', issues[0]['message'])
+
+    def test_reported_once_per_noun(self):
+        issues = self._issues(
+            'These animals hunt. This animal sleeps. This animal migrates.')
+        self.assertEqual(len(issues), 1)
+
+    def test_different_nouns_are_not_a_switch(self):
+        """"This novel" alongside "these poems" is ordinary writing — the cue
+        only has to be consistent about the answer, not about every noun."""
+        self.assertEqual(self._issues('This novel quotes these poems.'), [])
+
+    def test_consistent_plural_is_clean(self):
+        self.assertEqual(
+            self._issues('These animals hunt at night. Name these animals.'), [])
+
+    def test_irregular_plural_is_caught(self):
+        issues = self._issues('This man founded it. These men signed it.')
+        self.assertEqual(len(issues), 1)
+
+    def test_singular_noun_ending_in_s_is_not_mistaken_for_a_plural(self):
+        """"This species" is singular; de-pluralizing it to "specie" would have
+        made it a different noun from "these species" and hidden the switch."""
+        issues = self._issues('This species nests here. These species differ.')
+        self.assertEqual(len(issues), 1)
+
+    def test_that_those_are_not_answer_cues(self):
+        self.assertEqual(self._issues('That animal ran. Those animals ran.'), [])
+
+    def test_issue_carries_a_context_preview(self):
+        issues = self._issues('Name these animals. This animal migrates at night.')
+        self.assertIn('<strong>', issues[0]['message_html'])
+
+    def test_runs_on_a_tossup_and_can_be_disabled(self):
+        from datetime import datetime
+        from qems2.qsub import style_checker as sc
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        acf = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        ou = User.objects.create_user('mi_owner', password='pw', email='mi@t.com')
+        owner = Writer.objects.get(user=ou)
+        dist = Distribution.objects.create(name='mi dist')
+        qset = QuestionSet.objects.create(
+            name='MI Set', date=timezone.now(), host='', address='', owner=owner,
+            num_packets=1, distribution=dist)
+        tu = Tossup.objects.create(
+            author=owner, question_set=qset, question_type=acf,
+            tossup_text=('These animals were described by Lorenz. For 10 points, '
+                         'name this animal.'),
+            tossup_answer='_Ans_', created_date=datetime.now(),
+            last_changed_date=datetime.now(), question_number=1)
+        self.assertIn('mixed_identifier', {i['code'] for i in sc.check_tossup(tu)})
+        self.assertNotIn('mixed_identifier',
+                         {i['code'] for i in sc.check_tossup(tu, disabled=['mixed_identifier'])})
+
+    def test_bonus_parts_are_checked_separately(self):
+        """Each part has its own answer, so a singular cue in one part and a
+        plural in another is correct — only a switch inside one part is wrong."""
+        from datetime import datetime
+        from qems2.qsub import style_checker as sc
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        acf_b = QuestionType.objects.get(question_type=ACF_STYLE_BONUS)
+        ou = User.objects.create_user('mi_bonus', password='pw', email='mib@t.com')
+        owner = Writer.objects.get(user=ou)
+        dist = Distribution.objects.create(name='mi bonus dist')
+        qset = QuestionSet.objects.create(
+            name='MI Bonus Set', date=timezone.now(), host='', address='', owner=owner,
+            num_packets=1, distribution=dist)
+        b = Bonus.objects.create(
+            author=owner, question_set=qset, question_type=acf_b,
+            leadin='For 10 points each, name these things.',
+            part1_text='Name this animal, a nocturnal hunter.', part1_answer='_Owl_',
+            part2_text='Name these animals, which Lorenz studied.', part2_answer='_Geese_',
+            part3_text='', part3_answer='',
+            created_date=datetime.now(), last_changed_date=datetime.now())
+        self.assertNotIn('mixed_identifier', {i['code'] for i in sc.check_bonus(b)})
+        b.part1_text = 'These animals hunt at night; name this animal.'
+        self.assertIn('mixed_identifier', {i['code'] for i in sc.check_bonus(b)})
+
+
 class AnswerAltsStyleCheckTests(TestCase):
     """The answer_alts rule firing inside the tossup/bonus style checks."""
 
@@ -3553,6 +3670,100 @@ class PgAnnotationTests(TestCase):
     def test_style_checker_plain_strips_markers(self):
         from qems2.qsub.style_checker import _plain
         self.assertEqual(_plain('a \\Pb\\P c'), 'a b c')
+
+
+class GuidesRequireQuotesTests(TestCase):
+    """QuestionSet.guides_require_quotes: a parenthetical is only a
+    pronunciation guide when it carries quotation marks, so an ordinary aside
+    reads, counts and style-checks as the plain text it is."""
+
+    ASIDE = 'The \\PBauhaus\\P ("BOW-house") show (his first) opened.'
+
+    def test_escape_leaves_quoted_guides_alone(self):
+        from qems2.qsub.utils import escape_unquoted_parens
+        out = escape_unquoted_parens(self.ASIDE)
+        self.assertIn('("BOW-house")', out)          # still a guide
+        self.assertIn('\\(his first\\)', out)        # now literal parens
+
+    def test_escape_never_touches_power_marks(self):
+        """A power mark is a scoring mark, not text — escaping it would silently
+        turn a powered tossup into an unpowered one."""
+        from qems2.qsub.utils import escape_unquoted_parens
+        self.assertEqual(escape_unquoted_parens('a (+) b (*) c'), 'a (+) b (*) c')
+
+    def test_escape_leaves_already_escaped_parens_alone(self):
+        from qems2.qsub.utils import escape_unquoted_parens
+        self.assertEqual(escape_unquoted_parens(r'a \(b\) c'), r'a \(b\) c')
+
+    def test_apostrophes_do_not_make_a_guide(self):
+        """Only double quotes count: an apostrophe is ordinary prose, and
+        treating it as a respelling would exempt half the asides in a set."""
+        from qems2.qsub.utils import escape_unquoted_parens
+        self.assertEqual(escape_unquoted_parens("x (Smith's own account)"),
+                         "x \\(Smith's own account\\)")
+
+    def test_aside_renders_as_plain_text_not_a_guide(self):
+        from qems2.qsub.utils import get_formatted_question_html
+        on = get_formatted_question_html(self.ASIDE, False, True, False, False,
+                                         guidesRequireQuotes=True)
+        self.assertIn('<strong class="pronunciation-guide">("BOW-house")</strong>', on)
+        self.assertIn('(his first)', on)
+        self.assertNotIn('pronunciation-guide">(his first)', on)
+        # Off (the default), QEMS's long-standing behaviour is unchanged.
+        off = get_formatted_question_html(self.ASIDE, False, True, False, False)
+        self.assertIn('<strong class="pronunciation-guide">(his first)</strong>', off)
+
+    def test_aside_counts_toward_the_character_count(self):
+        from qems2.qsub.utils import get_character_count
+        text = 'Fine art (a portrait) here.'
+        # Guides are excluded from the count; an aside isn't a guide any more, so
+        # its words count — but its escape backslashes never do.
+        self.assertEqual(get_character_count(text, True, True),
+                         get_character_count('Fine art (a portrait) here.', False))
+        self.assertLess(get_character_count(text, True), get_character_count(text, True, True))
+
+    def test_exclusions_stop_claiming_a_guide_was_dropped(self):
+        from qems2.qsub.utils import get_char_count_exclusions
+        text = 'Fine art (a portrait) here.'
+        self.assertIn('pronunciation guides', get_char_count_exclusions(text, True))
+        self.assertNotIn('pronunciation guides', get_char_count_exclusions(text, True, True))
+
+    def test_pg_span_ignores_an_unquoted_aside(self):
+        from qems2.qsub import style_checker
+        text = 'Denis Diderot (a philosophe) wrote things.'
+        self.assertEqual(len(style_checker._pg_span_issues('Question', text, 'tossup_text')), 1)
+        self.assertEqual(
+            style_checker._pg_span_issues('Question', text, 'tossup_text', True), [])
+
+    def test_pg_span_fix_index_survives_the_filter(self):
+        """The fix is stored as "the Nth guide", and that N indexes every
+        parenthetical — so filtering out asides must not renumber the rest."""
+        from qems2.qsub import style_checker
+        text = 'Ravel (a Frenchman) wrote Bolero ("boh-LAIR-oh") in 1928.'
+        issues = style_checker._pg_span_issues('Question', text, 'tossup_text', True)
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]['fix']['idx'], 1)
+        fixed = style_checker.mark_pg_target(text, issues[0]['fix']['idx'])
+        self.assertIn('\\PBolero\\P ("boh-LAIR-oh")', fixed)
+        self.assertIn('(a Frenchman)', fixed)
+
+    def test_suggestions_are_not_blocked_by_an_aside(self):
+        """A term followed by "(" reads as already guided; with the option on,
+        an aside isn't a guide, so the suggestion should still come."""
+        from qems2.qsub.pron_dict import _already_guided
+        self.assertTrue(_already_guided('Diderot (a philosophe)', len('Diderot'), 'DID-er-OW'))
+        self.assertFalse(
+            _already_guided('Diderot (a philosophe)', len('Diderot'), 'DID-er-OW', True))
+        self.assertTrue(
+            _already_guided('Diderot ("DID-er-OW")', len('Diderot'), 'X', True))
+
+    def test_moderator_reads_the_aside_aloud(self):
+        from qems2.qsub.audio import clean_for_speech
+        text = 'The Bauhaus ("BOW-house") show (his first) opened.'
+        self.assertNotIn('his first', clean_for_speech(text))
+        spoken = clean_for_speech(text, True)
+        self.assertIn('(his first)', spoken)
+        self.assertNotIn('BOW-house', spoken)   # a real guide is still silent
 
 
 class EmailPreferenceLinkTests(TestCase):
@@ -4632,6 +4843,102 @@ class Yapp2ExportViewTests(TestCase):
         r2 = self.client.get('/export_question_set/{0}/yapp2-json/'.format(self.qset.id))
         self.assertIn('YAPP JSON.zip', r1['Content-Disposition'])
         self.assertIn('YAPP2 JSON.zip', r2['Content-Disposition'])
+
+
+class SingleQuestionYappExportTests(TestCase):
+    """The /export_question/ route: one question, wrapped in a one-question YAPP
+    packet so a reader that only opens packets can still open it."""
+
+    def setUp(self):
+        import json as _json
+        self._json = _json
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        self.acf_tu = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.acf_bo = QuestionType.objects.get(question_type=ACF_STYLE_BONUS)
+        self.ou = User.objects.create_user('sq_owner', password='pw', email='sq@test.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='sq dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='Literature', subcategory='European')
+        self.qset = QuestionSet.objects.create(
+            name='SQ Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.owner.question_set_editor.add(self.qset)
+        self.packet = Packet.objects.create(
+            question_set=self.qset, packet_name='Packet 3', created_by=self.owner)
+        self.tossup = Tossup.objects.create(
+            author=self.owner, question_set=self.qset, packet=self.packet,
+            question_type=self.acf_tu, category=self.de,
+            tossup_text='Denis \\PDiderot\\P ("DID-er-OW") edited this. (*) For 10 points, name it.',
+            tossup_answer='_Encyclopedie_',
+            created_date=datetime.now(), last_changed_date=datetime.now(), question_number=7)
+        self.bonus = Bonus.objects.create(
+            author=self.owner, question_set=self.qset, packet=self.packet,
+            question_type=self.acf_bo, category=self.de,
+            leadin='Name these things.',
+            part1_text='Part one.', part1_answer='_Ada_',
+            part2_text='Part two.', part2_answer='_Bob_',
+            part3_text='Part three.', part3_answer='_Cy_',
+            created_date=datetime.now(), last_changed_date=datetime.now(), question_number=7)
+        self.client.login(username='sq_owner', password='pw')
+
+    def _payload(self, qtype, qid, fmt):
+        resp = self.client.get('/export_question/{0}/{1}/{2}/'.format(qtype, qid, fmt))
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp['Content-Type'], 'application/json')
+        return resp, self._json.loads(resp.content.decode('utf-8'))
+
+    def test_tossup_exports_alone_in_a_valid_packet(self):
+        resp, data = self._payload('tossup', self.tossup.id, 'yapp-json')
+        self.assertEqual(len(data['tossups']), 1)
+        self.assertEqual(data['bonuses'], [])           # present, so readers don't choke
+        self.assertNotIn('version', data)
+        self.assertNotIn('name', data)                  # `name` is a YAPP2 field
+        t = data['tossups'][0]
+        self.assertEqual(t['number'], 7)                # the packet's own numbering
+        self.assertNotIn('<pg>', t['question'])
+        self.assertNotIn('anchored', t)
+        self.assertIn('Encyclopedie', t['answer'])
+        self.assertIn('Encyclopedie - YAPP.json', resp['Content-Disposition'])
+
+    def test_tossup_yapp2_carries_the_anchor(self):
+        from qems2.qsub import yapp_export
+        resp, data = self._payload('tossup', self.tossup.id, 'yapp2-json')
+        self.assertEqual(data['version'], yapp_export.YAPP2_VERSION)
+        self.assertEqual(data['name'], 'Packet 3')
+        t = data['tossups'][0]
+        self.assertNotIn('<pg>', t['question'])
+        self.assertIn('<pg>Diderot</pg>', t['anchored']['question'])
+        self.assertIn('YAPP2.json', resp['Content-Disposition'])
+
+    def test_bonus_exports_alone_in_a_valid_packet(self):
+        _, data = self._payload('bonus', self.bonus.id, 'yapp-json')
+        self.assertEqual(data['tossups'], [])
+        self.assertEqual(len(data['bonuses']), 1)
+        b = data['bonuses'][0]
+        self.assertEqual(b['number'], 7)
+        self.assertEqual(len(b['parts']), 3)
+        self.assertEqual(b['values'], [10, 10, 10])
+
+    def test_single_question_matches_the_whole_set_export(self):
+        """The one-question file is the same JSON the set-wide export would emit
+        for that question — one route, one meaning."""
+        _, one = self._payload('tossup', self.tossup.id, 'yapp2-json')
+        resp = self.client.get('/export_question_set/{0}/yapp2-json/'.format(self.qset.id))
+        import io as _io, zipfile as _zip
+        whole = self._json.loads(
+            _zip.ZipFile(_io.BytesIO(resp.content)).read('Packet 3.json').decode('utf-8'))
+        self.assertEqual(one['tossups'][0], whole['tossups'][0])
+
+    def test_outsiders_cannot_export(self):
+        User.objects.create_user('sq_outsider', password='pw', email='out@test.com')
+        self.client.logout()
+        self.client.login(username='sq_outsider', password='pw')
+        resp = self.client.get(
+            '/export_question/tossup/{0}/yapp-json/'.format(self.tossup.id))
+        self.assertNotEqual(resp['Content-Type'], 'application/json')
+        self.assertIn('not authorized', resp.content.decode('utf-8'))
 
 
 class RoleGroupPendingRequestTests(TestCase):
@@ -5915,11 +6222,17 @@ class PostSubmitFlowTests(TestCase):
         self.assertNotIn('be submitted yet', body)
         self.assertIn('value="Submit"', body)
 
+    def _num_cols(self, body):
+        """Row-number cells, counting the spare row at the bottom of each grid
+        (it carries a title attribute, so it doesn't match the plain form)."""
+        return body.count('<td class="num-col">') + body.count('<td class="num-col" title=')
+
     def test_packet_grid_lays_out_a_full_packet_of_rows(self):
         # The distribution asks for 2 tossups and 2 bonuses per packet, so the
         # grid offers those rows even though nothing is assigned yet.
         body = self.client.get('/packet_grid/{0}/'.format(self.qset.id)).content.decode()
         self.assertEqual(body.count('<td class="num-col">'), 4)   # 2 tossup + 2 bonus rows
+        self.assertEqual(self._num_cols(body), 6)                 # plus a spare row each
 
     def test_packet_grid_falls_back_to_twenty_rows(self):
         # An implausible per-packet total (an imported distribution holding
@@ -5929,6 +6242,7 @@ class PostSubmitFlowTests(TestCase):
         self.de.save()
         body = self.client.get('/packet_grid/{0}/'.format(self.qset.id)).content.decode()
         self.assertEqual(body.count('<td class="num-col">'), 40)  # 20 + 20
+        self.assertEqual(self._num_cols(body), 42)                # plus a spare row each
 
     def test_packet_status_marks_covered_subcategories_optional(self):
         # Two subcategories at 1 tossup each; the packet has 2 questions, both
@@ -6422,10 +6736,14 @@ class InterlacedExportTests(TestCase):
         self.assertNotIn('Tossups', joined)
 
     def test_interlaced_pdf_renders(self):
+        import io as _io, zipfile as _zip
         resp = self.client.get(
             '/export_question_set/{0}/pdf/?opts=1&interlace=1'.format(self.qset.id))
         self.assertEqual(resp.status_code, 200)
-        self.assertTrue(resp.content.startswith(b'%PDF'))
+        zf = _zip.ZipFile(_io.BytesIO(resp.content))
+        self.assertTrue(zf.namelist())
+        for name in zf.namelist():
+            self.assertTrue(zf.read(name).startswith(b'%PDF'))
 
     def test_uneven_counts_still_export_everything(self):
         # One extra tossup with no bonus to pair with: it still gets written.
@@ -6851,6 +7169,166 @@ class PacketGridLiveRefreshTests(TestCase):
         body = self.client.get('/packet_grid/{0}/'.format(self.qset.id)).content.decode()
         self.assertIn('/packet_grid_state/{0}/'.format(self.qset.id), body)
 
+
+class ActivityFeedScopeTests(TestCase):
+    """Your activity covers a question from the point it became yours — editing
+    someone else's question shouldn't hand you its entire earlier history."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.au = User.objects.create_user('af_author', password='pw', email='afa@t.com')
+        self.author = Writer.objects.get(user=self.au)
+        self.eu = User.objects.create_user('af_editor', password='pw', email='afe@t.com')
+        self.editor = Writer.objects.get(user=self.eu)
+        self.tu2 = User.objects.create_user('af_third', password='pw', email='aft@t.com')
+        self.third = Writer.objects.get(user=self.tu2)
+        self.dist = Distribution.objects.create(name='af dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='Science', subcategory='Biology')
+        self.qset = QuestionSet.objects.create(
+            name='AF Set', date=timezone.now(), host='h', address='', owner=self.author,
+            num_packets=1, distribution=self.dist)
+        for w in (self.author, self.editor, self.third):
+            w.question_set_editor.add(self.qset)
+
+        # A question the author wrote and two other people revised, all before
+        # the editor ever touched it.
+        self.tu = Tossup.objects.create(
+            question_set=self.qset, question_type=self.acf, category=self.de,
+            author=self.author, tossup_text='Stem one. (*) end.',
+            tossup_answer='_Mitochondria_',
+            created_date=datetime.now(), last_changed_date=datetime.now())
+        self.tu.save_question(edit_type=QUESTION_CHANGE, changer=self.author)
+        for n, who in ((2, self.author), (3, self.third)):
+            self.tu.tossup_text = 'Stem {0}. (*) end.'.format(n)
+            self.tu.save_question(edit_type=QUESTION_CHANGE, changer=who)
+
+    def _changes(self, writer):
+        from qems2.qsub.views import _activity_changes
+        return _activity_changes(writer, self.qset)
+
+    def test_author_still_sees_every_change_by_others(self):
+        rows = self._changes(self.author)
+        self.assertEqual(len(rows), 1)                       # the third party's
+        self.assertEqual(rows[0][3].changer_id, self.third.id)
+
+    def test_editing_a_question_does_not_backfill_its_history(self):
+        self.assertEqual(self._changes(self.editor), [])     # not involved yet
+        self.tu.tossup_text = 'Edited stem. (*) end.'
+        self.tu.edited = True
+        self.tu.save_question(edit_type=QUESTION_EDIT, changer=self.editor)
+        # Now the editor's question — but its past is not their news.
+        self.assertEqual(self._changes(self.editor), [])
+
+    def test_changes_after_you_edit_do_reach_you(self):
+        self.tu.tossup_text = 'Edited stem. (*) end.'
+        self.tu.edited = True
+        self.tu.save_question(edit_type=QUESTION_EDIT, changer=self.editor)
+        self.tu.tossup_text = 'Later stem. (*) end.'
+        self.tu.save_question(edit_type=QUESTION_CHANGE, changer=self.third)
+        rows = self._changes(self.editor)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0][3].changer_id, self.third.id)
+        self.assertIn('Later stem', rows[0][3].tossup_text)
+
+    def test_your_own_later_save_clears_what_you_have_seen(self):
+        """The cutoff is your *last* change, so re-saving a question you have
+        just read stops it repeating in the feed."""
+        self.tu.tossup_text = 'Edited stem. (*) end.'
+        self.tu.edited = True
+        self.tu.save_question(edit_type=QUESTION_EDIT, changer=self.editor)
+        self.tu.tossup_text = 'Later stem. (*) end.'
+        self.tu.save_question(edit_type=QUESTION_CHANGE, changer=self.third)
+        self.assertEqual(len(self._changes(self.editor)), 1)
+        self.tu.tossup_text = 'Editor again. (*) end.'
+        self.tu.save_question(edit_type=QUESTION_CHANGE, changer=self.editor)
+        self.assertEqual(self._changes(self.editor), [])
+
+    def test_badge_count_matches_the_feed(self):
+        from qems2.qsub.views import _new_activity_count
+        self.tu.tossup_text = 'Edited stem. (*) end.'
+        self.tu.edited = True
+        self.tu.save_question(edit_type=QUESTION_EDIT, changer=self.editor)
+        self.assertEqual(_new_activity_count(self.editor, self.qset), 0)
+        self.tu.tossup_text = 'Later stem. (*) end.'
+        self.tu.save_question(edit_type=QUESTION_CHANGE, changer=self.third)
+        self.assertEqual(_new_activity_count(self.editor, self.qset), 1)
+
+    def test_the_page_renders_the_scoped_feed(self):
+        self.tu.tossup_text = 'Edited stem. (*) end.'
+        self.tu.edited = True
+        self.tu.save_question(edit_type=QUESTION_EDIT, changer=self.editor)
+        self.client.login(username='af_editor', password='pw')
+        resp = self.client.get('/activity/{0}/'.format(self.qset.id))
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, str(self.third.user.username))
+
+
+class PacketGridSpareRowTests(TestCase):
+    """The grid always shows one empty row past the bottom, so a packet can be
+    given an extra question without the row having to exist somewhere first."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf_tu = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('sr_owner', password='pw', email='sr@test.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.wu = User.objects.create_user('sr_writer', password='pw', email='srw@test.com')
+        self.writer = Writer.objects.get(user=self.wu)
+        self.dist = Distribution.objects.create(
+            name='sr dist', acf_tossup_per_period_count=2, acf_bonus_per_period_count=2)
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='Science', subcategory='Biology',
+            min_tossups=2, max_tossups=2, min_bonuses=2, max_bonuses=2)
+        self.qset = QuestionSet.objects.create(
+            name='SR Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist, tossups_per_packet=2,
+            bonuses_per_packet=2)
+        self.owner.question_set_editor.add(self.qset)
+        self.writer.question_set_writer.add(self.qset)
+        self.packet = Packet.objects.create(
+            question_set=self.qset, packet_name='Packet 1', created_by=self.owner)
+        self.client.login(username='sr_owner', password='pw')
+
+    def _row_numbers(self, body, qtype='tossup'):
+        return sorted({int(n) for n in re.findall(
+            r'data-qtype="{0}" data-num="(\d+)"'.format(qtype), body)})
+
+    def _body(self):
+        return self.client.get('/packet_grid/{0}/'.format(self.qset.id)).content.decode()
+
+    def test_one_row_past_the_per_packet_target(self):
+        # Target is 2 tossups a packet, so rows 1-2 are the packet and 3 is spare.
+        self.assertEqual(self._row_numbers(self._body()), [1, 2, 3])
+
+    def test_the_spare_row_moves_down_as_the_grid_grows(self):
+        Tossup.objects.create(
+            author=self.owner, question_set=self.qset, packet=self.packet,
+            question_type=self.acf_tu, category=self.de, question_number=3,
+            tossup_text='Extra stem. (*) end.', tossup_answer='_Extra_',
+            created_date=datetime.now(), last_changed_date=datetime.now())
+        # Filling the old spare row makes a new one appear under it.
+        self.assertEqual(self._row_numbers(self._body()), [1, 2, 3, 4])
+
+    def test_the_spare_row_is_empty_and_placeable(self):
+        body = self._body()
+        spare = re.search(r'<tr class="[^"]*spare-row"[\s\S]*?</tr>', body)
+        self.assertIsNotNone(spare)
+        self.assertIn('grid-fill', spare.group(0))     # "+ place…" in every cell
+        self.assertNotIn('cell-answer', spare.group(0))
+
+    def test_read_only_viewers_get_no_spare_row(self):
+        """A writer can't place anything, so an extra empty row would just read
+        as a packet that's missing a question."""
+        self.client.logout()
+        self.client.login(username='sr_writer', password='pw')
+        body = self._body()
+        self.assertEqual(self._row_numbers(body), [1, 2])
+        # (The class name still appears in the stylesheet; what matters is that
+        # no row carries it.)
+        self.assertNotIn('<tr class="spare-row"', body)
+        self.assertNotIn('spare-row">', body.split('<style>')[0])
 
 
 class PacketRequirementTests(TestCase):

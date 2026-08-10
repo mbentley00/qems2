@@ -244,7 +244,13 @@ def toggle_comment_strike(raw, start, end, strike):
     return raw
 
 def get_formatted_question_html(line, allowUnderlines, allowParens, allowNewLines, allowPowers,
-                                allPower=False, allowSuperpower=True):
+                                allPower=False, allowSuperpower=True,
+                                guidesRequireQuotes=False):
+    # With the set option on, a parenthetical with no quotation marks in it isn't
+    # a guide; escaping it here makes the rest of the parse render it as the
+    # literal parens it is.
+    if guidesRequireQuotes and allowParens:
+        line = escape_unquoted_parens(line)
     italicsFlag = False
     parensFlag = False
     underlineFlag = False
@@ -481,13 +487,15 @@ def strip_moderator_instructions(line):
     return line
 
 
-def get_char_count_exclusions(line, ignore_pronunciation):
+def get_char_count_exclusions(line, ignore_pronunciation, guides_require_quotes=False):
     """The snippets dropped before counting characters, so the UI can explain
     what wasn't counted: moderator-instruction sentences (e.g. "Description
     acceptable"), inline directives ([emphasize]), and — when the set ignores
     them — pronunciation guides. Returns a de-duplicated list of strings."""
     if not line:
         return []
+    if guides_require_quotes:
+        line = escape_unquoted_parens(line)
     found = []
     for m in MODERATOR_INSTRUCTION_RE.finditer(line):
         s = m.group(0).strip(' ~.!?\t\n')
@@ -509,8 +517,12 @@ def get_char_count_exclusions(line, ignore_pronunciation):
             out.append(s)
     return out
 
-def get_character_count(line, ignore_pronunciation):
+def get_character_count(line, ignore_pronunciation, guides_require_quotes=False):
     line = strip_moderator_instructions(line)
+    # An unquoted parenthetical is ordinary text under this set option, so it is
+    # escaped into literal parens and counted like any other words.
+    if guides_require_quotes:
+        line = escape_unquoted_parens(line)
     # \P markers only annotate which words a pronunciation guide covers; they
     # are never read, so they never count.
     line = line.replace('\\P', '')
@@ -594,6 +606,47 @@ def does_answerline_have_underlines(line):
 _UNESCAPED_PAREN_RE = re.compile(r'(?<!\\)\(([^()]*)\)')
 # A pronunciation guide is a quoted respelling: ("KAM-uh-flahzh").
 _QUOTED_GUIDE_RE = re.compile(u'^\\s*["“‘\'].*["”’\']\\s*$', re.S)
+
+# The quote characters that mark a parenthetical as a pronunciation guide when
+# the set requires them. Only double quotes count: an apostrophe is ordinary
+# prose ("(Smith's own account)" is a note, not a respelling), and QEMS converts
+# straight quotes to curly ones on save, so both forms have to be accepted.
+_GUIDE_QUOTE_CHARS = u'"“”'
+
+
+def parenthetical_has_quotes(inner):
+    """True if the text inside a parenthetical carries a quotation mark, i.e. it
+    reads as a respelling — ``("DID-er-OW")`` — rather than an aside."""
+    return any(ch in (inner or '') for ch in _GUIDE_QUOTE_CHARS)
+
+
+def escape_unquoted_parens(line):
+    """Escape the parentheses around every parenthetical with no quotation marks
+    in it, so it renders, counts and style-checks as ordinary text rather than as
+    a pronunciation guide.
+
+    This is how ``QuestionSet.guides_require_quotes`` is applied: QEMS treats any
+    parenthetical as a guide, and a set that also writes ordinary asides —
+    "(a portrait of the artist's wife)" — wants those read, counted and left
+    alone. Escaped parens are already the app's way of saying "literal paren", so
+    everything downstream (rendering, the character count, the ``\\P`` rules, the
+    exports) obeys without knowing about the setting.
+
+    Power marks ``(*)``/``(+)`` are scoring marks, not text, and are left alone;
+    so are parens already escaped by hand. Only one level is rewritten — nested
+    parentheses are a formatting error the balance check already reports."""
+    if not line:
+        return line
+
+    def _escape(match):
+        inner = match.group(1)
+        if not inner.strip() or inner.strip() in ('*', '+'):
+            return match.group(0)
+        if parenthetical_has_quotes(inner):
+            return match.group(0)
+        return '\\(' + inner + '\\)'
+
+    return _UNESCAPED_PAREN_RE.sub(_escape, line)
 
 
 def escape_answer_note_parens(answer):

@@ -410,6 +410,11 @@ html[data-theme="dark"] .pg-target { color: #f0a868; }
     background: rgba(161, 73, 11, 0.07);
 }
 html[data-theme="dark"] .rich-editor .pg-target { background: rgba(240, 168, 104, 0.12); }
+/* The guide belonging to a marked target, greyed in the editor the way the
+   saved question renders it. Amber word + grey guide is what "anchored"
+   looks like, so a guide still in the clue colour is one you haven't marked. */
+.pg-guide { color: #888; }
+html[data-theme="dark"] .pg-guide { color: var(--qx-muted, #9aa0ad); }
 /* "PGs above" mode (doc view): the guide moves into ruby text over its words
    and the inline bold guide is hidden. The ruby annotation exists only after
    the toggle first runs; rt stays hidden unless the mode class is on. */

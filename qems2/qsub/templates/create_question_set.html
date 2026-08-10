@@ -77,6 +77,9 @@
             <label class="cqs-check">{{ form.char_count_ignores_pronunciation_guides }}
                 <span>Character counts ignore pronunciation guides
                     <small>A ("pruh-nun-see-AY-shun") guide doesn't eat into the length limit.</small></span></label>
+            <label class="cqs-check">{{ form.guides_require_quotes }}
+                <span>Only quoted parentheses are pronunciation guides
+                    <small>On: <code>("DID-er-OW")</code> is a guide, but <code>(a plain aside)</code> is ordinary text — read normally, counted in the length, and left alone by the \P rules.</small></span></label>
             <label class="cqs-check">{{ form.tossups_only }}
                 <span>Tossup-only tournament (no bonuses)
                     <small>Hides bonus requirements and quotas. Bonuses are never deleted.</small></span></label>

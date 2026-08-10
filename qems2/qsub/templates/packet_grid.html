@@ -136,8 +136,8 @@
         </thead>
         <tbody>
             {% for row in tossup_rows %}
-            <tr{% if row.num > tossups_per_packet %} class="tiebreaker-row"{% endif %}>
-                <td class="num-col">{{ row.num }}{% if row.num > tossups_per_packet %} (TB){% endif %}</td>
+            <tr class="{% if row.num > tossups_per_packet %}tiebreaker-row {% endif %}{% if row.spare %}spare-row{% endif %}">
+                {% if row.spare %}<td class="num-col" title="A spare row: place a question here to give a packet one more tossup than the rest">{% else %}<td class="num-col">{% endif %}{{ row.num }}{% if row.num > tossups_per_packet %} (TB){% endif %}</td>
                 {% for cell in row.cells %}
                 <td class="grid-cell{% if cell.empty %} grid-cell-empty{% endif %}" data-qtype="tossup" data-num="{{ row.num }}">
                     {% if cell.id %}
@@ -169,8 +169,8 @@
         </thead>
         <tbody>
             {% for row in bonus_rows %}
-            <tr{% if row.num > bonuses_per_packet %} class="tiebreaker-row"{% endif %}>
-                <td class="num-col">{{ row.num }}{% if row.num > bonuses_per_packet %} (TB){% endif %}</td>
+            <tr class="{% if row.num > bonuses_per_packet %}tiebreaker-row {% endif %}{% if row.spare %}spare-row{% endif %}">
+                {% if row.spare %}<td class="num-col" title="A spare row: place a question here to give a packet one more bonus than the rest">{% else %}<td class="num-col">{% endif %}{{ row.num }}{% if row.num > bonuses_per_packet %} (TB){% endif %}</td>
                 {% for cell in row.cells %}
                 <td class="grid-cell{% if cell.empty %} grid-cell-empty{% endif %}" data-qtype="bonus" data-num="{{ row.num }}">
                     {% if cell.id %}
@@ -329,6 +329,12 @@
 }
 .packet-grid tbody tr:nth-child(even) { background-color: #f9f9f9; }
 .packet-grid .tiebreaker-row { background-color: #fff8dc !important; }
+/* The always-present empty row at the bottom: visible enough to be found when
+   you want a 21st tossup in one packet, quiet enough not to read as a row of
+   missing questions. */
+.packet-grid .spare-row { opacity: 0.55; }
+.packet-grid .spare-row:hover { opacity: 1; }
+.packet-grid .spare-row .num-col { font-style: italic; }
 .cell-answer { display: block; font-weight: bold; }
 .cell-category { color: #777; font-size: 0.9em; }
 .grid-cell.drag-over { background-color: #d9edf7 !important; outline: 2px dashed #008CBA; }
@@ -410,7 +416,20 @@ $(function() {
         });
     }
     $(window).on('beforeunload', saveGridScroll);
+    // Restored again once the horizontal-scrollbar wrapper is in place: building
+    // it re-parents each .grid-scroll, and moving a scrollable element resets its
+    // scrollLeft to 0 — so restoring only here silently did nothing. Also redone
+    // on load, since at DOM-ready the table may not yet be wide enough to accept
+    // the offset (a too-large scrollLeft is clamped, not queued).
     restoreGridScroll();
+    $(window).on('load', restoreGridScroll);
+
+    // A reload the grid asks for itself. Saves the scroll first rather than
+    // trusting beforeunload, and replaces so a reload isn't a history entry.
+    function reloadGrid() {
+        saveGridScroll();
+        window.location.replace(window.location.pathname + window.location.search);
+    }
 
     // --- Make browser find-in-page (Ctrl+F) work inside the grid ---
     // The grid scrolls horizontally inside its own container, and a find match
@@ -600,6 +619,7 @@ $(function() {
                 new ResizeObserver(layout).observe(scroller.querySelector('table') || scroller);
             }
         });
+        restoreGridScroll();   // the re-parent above zeroed it
     })();
 
     // --- Unpacketized panel: filter + collapse (available read-only too) ---
@@ -639,7 +659,7 @@ $(function() {
         $.post('/assign_unpacketized/', { qset_id: {{ qset.id }} }, function(response) {
             var json = $.parseJSON(response);
             alert(json.message || (json.success ? 'Done.' : 'Failed.'));
-            if (json.success) { location.reload(); } else { $btn.prop('disabled', false); }
+            if (json.success) { reloadGrid(); } else { $btn.prop('disabled', false); }
         }).fail(function() { $btn.prop('disabled', false); });
     });
 
@@ -648,12 +668,16 @@ $(function() {
         e.preventDefault();
         e.stopPropagation();
         var $cell = $(this).closest('.grid-cell');
+        var question = cellQuestion($cell);
         $.post('/unassign_packet_question/', {
             question_type: $cell.data('qtype'),
             question_id: $cell.find('.cell-answer').data('qid')
         }, function(response) {
             var json = $.parseJSON(response);
-            if (json.success) { location.reload(); } else { alert(json.message); }
+            if (json.success) {
+                addUnpChip($cell.data('qtype'), question);
+                refreshGrid();
+            } else { alert(json.message); }
         });
     });
 
@@ -667,7 +691,7 @@ $(function() {
         }).get();
         $.post('/set_packet_order/', { qset_id: {{ qset.id }}, 'packet_ids[]': ids }, function(response) {
             var json = $.parseJSON(response);
-            if (json.success) { location.reload(); } else { alert(json.message || 'Could not save order.'); }
+            if (json.success) { reloadGrid(); } else { alert(json.message || 'Could not save order.'); }
         });
     });
 
@@ -678,7 +702,9 @@ $(function() {
         $.post('/undo_packet_grid_change/', { qset_id: {{ qset.id }} }, function (response) {
             var json = $.parseJSON(response);
             if (json.success) {
-                location.reload();
+                // An undo can restore a question to the pool or out of it, so
+                // the panel has to be rebuilt: reload, keeping the scroll.
+                reloadGrid();
             } else {
                 alert(json.message || 'Nothing to undo.');
                 $btn.prop('disabled', false);
@@ -744,7 +770,8 @@ $(function() {
             var $source = ui.draggable;
             var $target = $(this);
             // Source may be a grid cell or an unpacketized chip.
-            var qid = $source.hasClass('unp-item')
+            var fromPool = $source.hasClass('unp-item');
+            var qid = fromPool
                 ? $source.data('qid')
                 : $source.find('.cell-answer').data('qid');
             $.post('/move_packet_question/', {
@@ -755,7 +782,8 @@ $(function() {
             }, function(response) {
                 var json = $.parseJSON(response);
                 if (json.success) {
-                    location.reload();
+                    if (fromPool) { removeUnpChip($source.data('qtype'), qid); }
+                    refreshGrid();
                 } else {
                     alert(json.message);
                 }
@@ -771,7 +799,7 @@ $(function() {
     });
 
     // Unpacketized chips: draggable onto grid cells (placing/swapping).
-    $('.unp-item').draggable({
+    var unpDraggableOptions = {
         helper: function() {
             return $('<div class="grid-helper">').text($(this).find('.unp-answer').text());
         },
@@ -782,7 +810,64 @@ $(function() {
         drag: function(event) { autoScrollGrids(event); },
         start: function() { dragging = true; $(this).addClass('ui-draggable-dragging'); },
         stop: function() { dragging = false; $(this).removeClass('ui-draggable-dragging'); }
-    });
+    };
+    $('.unp-item').draggable(unpDraggableOptions);
+
+    // The Unpacketized panel isn't part of the polled grid state (it's a list,
+    // not a set of slots), so placing and unassigning keep it in step by hand.
+    // That's what lets both stay on the page instead of reloading it.
+    function unpList(qtype) {
+        return $(qtype === 'bonus' ? '#unp-bs-list' : '#unp-tu-list');
+    }
+
+    function syncUnpPanel() {
+        $('#unp-tu-count').text($('#unp-tu-list .unp-item').length);
+        $('#unp-bs-count').text($('#unp-bs-list .unp-item').length);
+        $('.unp-list').each(function() {
+            var $list = $(this);
+            var empty = !$list.find('.unp-item').length;
+            $list.find('.unp-none').toggle(empty);
+            if (empty && !$list.find('.unp-none').length) {
+                $list.append('<span class="unp-none">None</span>');
+            }
+        });
+        $('#unpacketized-panel').toggleClass(
+            'unpacketized-empty', !$('.unp-item').length);
+        updateUnpShownCounts();
+    }
+
+    function removeUnpChip(qtype, qid) {
+        if (!qid) { return; }
+        unpList(qtype).find('.unp-item[data-qid="' + qid + '"]').remove();
+        syncUnpPanel();
+    }
+
+    function addUnpChip(qtype, cell) {
+        if (!cell || !cell.id) { return; }
+        var $list = unpList(qtype);
+        if ($list.find('.unp-item[data-qid="' + cell.id + '"]').length) { return; }
+        var $chip = $('<span class="unp-item">')
+            .attr({'data-qtype': qtype, 'data-qid': cell.id})
+            .attr('data-search', ((cell.answer || '') + ' ' + (cell.category || '')).toLowerCase())
+            .append($('<a class="unp-answer" target="_blank" rel="noopener">')
+                .attr('href', cell.edit_url || '#').text(cell.answer || ''))
+            .append($('<span class="unp-category">').text(cell.category || ''));
+        $list.append($chip);
+        $chip.draggable(unpDraggableOptions);
+        syncUnpPanel();
+    }
+
+    // What a grid cell is showing right now, in the shape addUnpChip wants.
+    function cellQuestion($cell) {
+        var $answer = $cell.find('.cell-answer');
+        if (!$answer.length) { return null; }
+        return {
+            id: $answer.data('qid'),
+            answer: $answer.text(),
+            category: $cell.find('.cell-category').clone().children().remove().end().text(),
+            edit_url: $answer.attr('href')
+        };
+    }
     $('#unp-body').on('click', '.unp-answer', function(e) {
         if ($(this).closest('.unp-item').hasClass('ui-draggable-dragging')) e.preventDefault();
     });
@@ -795,12 +880,16 @@ $(function() {
         drop: function(event, ui) {
             $(this).removeClass('drop-target');
             var $src = ui.draggable;
+            var question = cellQuestion($src);
             $.post('/unassign_packet_question/', {
                 question_type: $src.data('qtype'),
                 question_id: $src.find('.cell-answer').data('qid')
             }, function(response) {
                 var json = $.parseJSON(response);
-                if (json.success) { location.reload(); } else { alert(json.message); }
+                if (json.success) {
+                    addUnpChip($src.data('qtype'), question);
+                    refreshGrid();
+                } else { alert(json.message); }
             });
         }
     });
@@ -875,7 +964,11 @@ $(function() {
                     $.post('/move_packet_question/', post, function(response) {
                         var json = $.parseJSON(response);
                         if (json.success) {
-                            location.reload();
+                            $swapDialog.dialog('close');
+                            if (cand.unpacketized) {
+                                removeUnpChip(swapSource.qtype, cand.id);
+                            }
+                            refreshGrid();
                         } else {
                             alert(json.message);
                         }
@@ -996,14 +1089,15 @@ $(function() {
         return a && b && JSON.stringify(a) === JSON.stringify(b);
     }
 
-    function applyState(state) {
-        if (lastState === null) { lastState = state; return; }   // first poll is the baseline
-        if (!sameShape(lastState.shape, state.shape)) {
-            // Columns or rows differ — a reload is the only honest repaint.
-            // location.replace so a GET, not a re-POST, and no history entry.
-            window.location.replace(window.location.pathname + window.location.search);
-            return;
-        }
+    // Just the part of the shape that decides the table's layout. After a change
+    // we made ourselves the pool counts have moved on purpose and the panel is
+    // already updated, so only rows and columns can force a reload.
+    function sameGridShape(a, b) {
+        return a && b && a.tossup_rows === b.tossup_rows && a.bonus_rows === b.bonus_rows &&
+               JSON.stringify(a.packets) === JSON.stringify(b.packets);
+    }
+
+    function repaintChanged(state) {
         var changed = 0;
         $.each(cellIndex, function(key, $cell) {
             var before = lastState.cells[key] || null;
@@ -1014,7 +1108,37 @@ $(function() {
             }
         });
         lastState = state;
+        return changed;
+    }
+
+    function applyState(state) {
+        if (lastState === null) { lastState = state; return; }   // first poll is the baseline
+        if (!sameShape(lastState.shape, state.shape)) {
+            // Columns or rows differ — a reload is the only honest repaint.
+            reloadGrid();
+            return;
+        }
+        var changed = repaintChanged(state);
         if (changed) { showLiveNote(changed); }
+    }
+
+    // Repaint after a change *we* made. Moving a question used to reload the
+    // page, which threw away the horizontal scroll — on packet 20 you were sent
+    // back to packet 1 every time you placed something. The live-refresh
+    // machinery already knows how to repaint single cells, so reuse it and stay
+    // put; only a change to the grid's shape (a new row or packet) still needs a
+    // reload, and that one keeps the scroll via reloadGrid().
+    function refreshGrid() {
+        $.getJSON('/packet_grid_state/{{ qset.id }}/')
+            .done(function(state) {
+                if (!state || !state.ok || lastState === null ||
+                        !sameGridShape(lastState.shape, state.shape)) {
+                    reloadGrid();
+                    return;
+                }
+                repaintChanged(state);   // ours, so no "someone else" note
+            })
+            .fail(reloadGrid);
     }
 
     function showLiveNote(count) {

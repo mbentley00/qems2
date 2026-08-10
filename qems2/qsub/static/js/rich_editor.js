@@ -38,10 +38,29 @@ $(function () {
         html = html.replace(/\\B([\s\S]+?)\\B/g, '<b>$1</b>');
         html = html.replace(/\\S([\s\S]+?)\\S/g, '<sup>$1</sup>');
         html = html.replace(/\\s([\s\S]+?)\\s/g, '<sub>$1</sub>');
-        // \Pword\P marks the target of a following pronunciation guide.
-        html = html.replace(/\\P([\s\S]+?)\\P/g, '<span class="pg-target">$1</span>');
+        // \Pword\P marks the target of a following pronunciation guide. The
+        // guide itself is greyed whenever the pair is complete, so "anchored"
+        // is something you can see rather than infer: amber word, grey guide.
+        // Closing markup may sit between the two (~...\PDauphin\P~ ("DOFF-in")),
+        // so the gap allows closing tags as well as spaces.
+        html = html.replace(
+            /\\P([\s\S]+?)\\P((?:<\/[a-z]+>|\s)*)(\(([^()]*)\))?/g,
+            function (all, term, gap, guide, inner) {
+                var marked = '<span class="pg-target">' + term + '</span>';
+                gap = gap || '';
+                if (guide && window.QemsMarkup.parenIsGuide(stripTags(inner))) {
+                    return marked + gap + '<span class="pg-guide">' + guide + '</span>';
+                }
+                return marked + gap + (guide || '');
+            });
         html = html.replace(/@@QXUS@@/g, '\\_').replace(/@@QXTI@@/g, '\\~');
         return html;
+    }
+
+    // Text content of a display-HTML fragment — used when a decision has to be
+    // made about what the reader sees, not about the tags around it.
+    function stripTags(html) {
+        return (html || '').replace(/<[^>]*>/g, '');
     }
 
     function qemsToHtml(text, multiline) {
@@ -205,12 +224,28 @@ $(function () {
         }
 
         // Drop the mark around the caret. Goes through execCommand on a range
-        // covering the span so the native undo stack stays intact.
+        // covering the span so the native undo stack stays intact. The guide
+        // beside it loses its grey at the same time — the grey means "this pair
+        // is anchored", so it must not outlive the anchor.
         function unmarkPgTarget(span) {
             var inner = span.innerHTML;
+            ungreyGuideAfter(span);
             selectNode(span);
             document.execCommand('insertHTML', false, inner);
             syncDown();
+        }
+
+        // Unwrap the .pg-guide span that follows `node` (skipping whitespace and
+        // the closing markup a target inside italics leaves behind).
+        function ungreyGuideAfter(node) {
+            var next = node.nextSibling;
+            while (next) {
+                if (next.nodeType === 3 && !next.nodeValue.trim()) { next = next.nextSibling; continue; }
+                if (next.nodeType === 1 && $(next).hasClass('pg-guide')) {
+                    $(next).replaceWith(next.innerHTML);
+                }
+                return;
+            }
         }
 
         // Narrow an existing mark to just the selected word(s): rebuild the
@@ -259,15 +294,18 @@ $(function () {
             }
             var html = selectionHtml();
             if (!html) { return; }
-            // Peel any pg-target markers already inside the selection so we don't
-            // nest spans when re-marking.
-            html = html.replace(/<span class="pg-target">([\s\S]*?)<\/span>/g, '$1');
-            // Split off a trailing ("...") / (...) guide, keeping it outside the span.
-            var m = html.match(/^([\s\S]*?)(\s*\([^()]*\)\s*)$/);
+            // Peel any pg-target/pg-guide markers already inside the selection so
+            // we don't nest spans when re-marking.
+            html = html.replace(/<span class="pg-(?:target|guide)">([\s\S]*?)<\/span>/g, '$1');
+            // Split off a trailing ("...") / (...) guide, keeping it outside the
+            // span — and greying it, since marking the target is exactly what
+            // makes the pair anchored.
+            var m = html.match(/^([\s\S]*?)(\s*\(([^()]*)\)\s*)$/);
             var termHtml, tail;
-            if (m && m[1].replace(/<[^>]*>/g, '').trim()) {
+            if (m && m[1].replace(/<[^>]*>/g, '').trim() &&
+                    window.QemsMarkup.parenIsGuide(stripTags(m[3]))) {
                 termHtml = m[1].replace(/\s+$/, '');
-                tail = ' ' + m[2].trim();
+                tail = ' <span class="pg-guide">' + m[2].trim() + '</span>';
             } else {
                 termHtml = html;
                 tail = '';

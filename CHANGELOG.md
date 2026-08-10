@@ -1,5 +1,66 @@
 # Changelog
 
+## 2026-08-10b — Plain parentheses, per-packet PDFs, a grid that stays put
+
+- **A set can declare that only quoted parentheses are pronunciation guides.**
+  QEMS has always read *every* parenthetical as a guide: grey on the page, left
+  out of the character count, silent when the question is read aloud, and
+  nagged at by the `\P` rules. A set that also writes ordinary asides —
+  "(a portrait of the artist's wife)" — had no way to say so. With **Only quoted
+  parentheses are pronunciation guides** ticked (set options, off by default),
+  `("DID-er-OW")` is still a guide and everything else is ordinary text: it
+  renders plain, counts toward the length, is read aloud in the audio, prints
+  normally in Word and PDF, and no longer draws "guide has no marked target".
+  Power marks `(*)`/`(+)` are untouched, and only double quotes count — an
+  apostrophe is prose, not a respelling. The setting is applied at render time,
+  so ticking or unticking it takes effect immediately on questions already
+  written.
+- **An anchored pronunciation guide turns grey in the editor.** The marked
+  word was amber and the guide beside it looked like ordinary clue text, so
+  there was no way to see at a glance that `\P…\P` and its guide were actually
+  paired. Now the guide greys as soon as the pair is complete — amber word,
+  grey guide — and un-greys if you remove the mark.
+- **The packet grid always has one spare row.** With every packet at 20
+  tossups there was no way to give one packet a 21st: the grid only drew rows
+  that already existed. There is now a dim empty row under the last one; place a
+  question in it and a new spare appears beneath, the way a spreadsheet always
+  has one more line. Read-only viewers don't get it.
+- **Placing a question on the grid no longer reloads the page.** Working on
+  packet 20 meant being thrown back to packet 1 on every placement. Moves,
+  swaps, placements and unassigns now repaint just the cells that changed
+  (reusing the live-refresh machinery) and update the Unpacketized panel in
+  place. The operations that really do need a reload — adding a packet,
+  reordering packets, undo — now keep the horizontal scroll properly: it was
+  being saved and restored already, but the restore ran *before* the
+  scrollbar wrapper re-parented each grid, and re-parenting a scrollable
+  element resets it to 0.
+- **The PDF export is one PDF per packet, zipped** — the same shape as the Word
+  export. A packet is what gets handed to a room, so it's its own file; the
+  credits page, when enabled, goes in every packet rather than only the first.
+- **New style rule: the answer cue switches number.** "these animals" early and
+  "this animal" later is flagged, with the two phrases shown in context. Only
+  the same noun counts, so "this novel" alongside "these poems" is left alone,
+  and bonus parts are checked separately since each part has its own answer.
+- **Your activity no longer backfills when you edit someone else's question.**
+  Becoming a question's editor used to dump every earlier revision of it into
+  your feed. Each question is now reported from your own last change to it
+  onward: for one you wrote, everything after you wrote it; for one you edited,
+  everything after you took it on. The badge count uses the same rule.
+
+## 2026-08-10 — Export one question to YAPP/YAPP2
+
+- **The edit tossup and edit bonus pages have YAPP and YAPP2 buttons.** They sit
+  with Move Set / History / Delete and download just that question. MODAQ and
+  the other YAPP readers open a packet rather than a question, so the file is a
+  one-question packet — the question in one array, the other array empty, which
+  every YAPP reader accepts. The JSON is byte-identical to what the set-wide
+  export writes for that question: same power bolding, same all-power handling,
+  same `anchored` pronunciation-guide fields on YAPP2, and the question keeps
+  its packet number rather than being renumbered to 1. Useful for hearing how a
+  single question reads without exporting the whole set, or for handing one
+  question to someone. Anyone who can open the question's edit page can export
+  it; the file holds nothing the page doesn't already show.
+
 ## 2026-08-07b — Power reads as power in MODAQ; pronunciation-guide fixes
 
 - **Exported YAPP/YAPP2 packets show their power region in bold again.** MODAQ

@@ -212,6 +212,28 @@ $(function () {
     }
 
     /**
+     * True when this set only reads a parenthetical as a pronunciation guide if
+     * it carries quotation marks (QuestionSet.guides_require_quotes, published
+     * by base.html). Defaults to false, QEMS's long-standing behaviour.
+     */
+    function guidesRequireQuotes() {
+        return !!window.QEMS_GUIDES_REQUIRE_QUOTES;
+    }
+
+    /**
+     * True if `inner` — the text between a pair of parens — reads as a
+     * pronunciation guide. Power marks are never guides; under the set option
+     * neither is an aside with no quotation marks in it. Only double quotes
+     * count: an apostrophe belongs to ordinary prose.
+     * Mirrors utils.parenthetical_has_quotes on the server.
+     */
+    function parenIsGuide(inner) {
+        if (inner === '*' || inner === '+') { return false; }
+        if (!guidesRequireQuotes()) { return true; }
+        return /["“”]/.test(inner || '');
+    }
+
+    /**
      * Wrap the word(s) before each unmarked pronunciation guide in \P...\P,
      * guessing how many words each guide covers from its word count. Guides are
      * walked right-to-left so earlier match offsets stay valid. Power marks
@@ -223,7 +245,7 @@ $(function () {
         var re = /\(([^()]*)\)/g, m, guides = [];
         while ((m = re.exec(text)) !== null) {
             if (m.index > 0 && text.charAt(m.index - 1) === '\\') { continue; }
-            if (m[1] === '*' || m[1] === '+') { continue; }
+            if (!parenIsGuide(m[1])) { continue; }
             guides.push(m);
         }
         var out = text, changed = 0;
@@ -250,7 +272,9 @@ $(function () {
     window.QemsMarkup = {
         htmlToQems: htmlToQemsMarkup,
         isRichHtml: function (html) { return isRichHtml(html); },
-        autoMarkPgTargets: autoMarkPgTargets
+        autoMarkPgTargets: autoMarkPgTargets,
+        parenIsGuide: parenIsGuide,
+        guidesRequireQuotes: guidesRequireQuotes
     };
 
     /**

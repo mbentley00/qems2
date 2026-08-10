@@ -10,7 +10,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
 
     <link rel="stylesheet" href="{% static 'css/app.min.css' %}">
-    <link rel="stylesheet" href="{% static 'css/base.css' %}?v=54">
+    <link rel="stylesheet" href="{% static 'css/base.css' %}?v=55">
     <link rel="stylesheet" href="{% static 'fontawesome/css/all.min.css' %}">
 
     {# Apply saved sidebar-collapsed + theme preferences before first paint (shared across tabs via localStorage). #}
@@ -38,6 +38,13 @@
     <script src="{% static 'sprintf/src/sprintf.js' %}"></script>
     <script src="{% static 'expanding-textareas/expanding.js' %}"></script>
     <script src="{% static 'js/qsub.js' %}"></script>
+    {% comment %}
+    Set-level flags the editor scripts need. Emitted here so every page that
+    renders a question in a set agrees with the server about what counts as a
+    pronunciation guide.
+    {% endcomment %}
+    {% if qset %}<script>window.QEMS_QSET_ID = {{ qset.id }};
+    window.QEMS_GUIDES_REQUIRE_QUOTES = {{ qset.guides_require_quotes|yesno:"true,false" }};</script>{% endif %}
 </head>
 
 <body class="{% block body_class %}{% endblock %}{% if request.user.is_authenticated %} app-authed{% endif %}">
@@ -204,8 +211,8 @@
     </div>{# /row #}
 {% endif %}
 
-    <script src="{% static 'js/paste_convert.js' %}?v=24"></script>
-    <script src="{% static 'js/rich_editor.js' %}?v=15"></script>
+    <script src="{% static 'js/paste_convert.js' %}?v=25"></script>
+    <script src="{% static 'js/rich_editor.js' %}?v=16"></script>
     <script src="{% static 'js/comment_strike.js' %}?v=3"></script>
     <script src="{% static 'foundation/js/foundation.min.js' %}"></script>
     <script>

@@ -117,6 +117,8 @@
             {% if role == "editor" %}<a href="#" class="button small secondary edit-swap-btn" data-qtype="tossup" data-qid="{{ tossup.id }}" data-packet="{{ tossup.packet.id }}" data-num="{{ tossup.question_number }}">Swap Packets</a>{% endif %}
             <a href="/tossup_history/{{ tossup.id }}" class="button small secondary">History</a>
             <a href="/convert_tossup/{{ tossup.id }}" class="button small secondary convert_tossup" value="{{ tossup.id }}" qset-id="{{ qset.id }}" target-type="ACF-style bonus">Bonusify</a>
+            <a href="/export_question/tossup/{{ tossup.id }}/yapp-json/" class="button small secondary" title="Download just this tossup as a one-question YAPP JSON packet, readable by MODAQ">YAPP</a>
+            <a href="/export_question/tossup/{{ tossup.id }}/yapp2-json/" class="button small secondary" title="Download just this tossup as YAPP2 JSON — the same packet, plus pronunciation-guide anchoring">YAPP2</a>
             <a href="/delete_tossup/{{ tossup.id }}" class="button small alert delete_tossup" value="{{ tossup.id }}" qset-id="{{ qset.id }}">Delete</a>
             {% endif %}
             <input type="submit" id="submit-bonus" value="Save" class="button primary qmeta-save" />

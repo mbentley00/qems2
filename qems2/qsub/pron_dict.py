@@ -23,6 +23,11 @@ _WORD_RE = re.compile(r"[^\W\d_]+(?:['’\-][^\W\d_]+)*")
 # NB: single quotes are deliberately excluded — an apostrophe in a possessive
 # ("Goethe's") would otherwise be read as an opener, blocking the auto-fix.
 _GUIDE_OPENER_RE = re.compile(r"""\s{0,2}[(\["“]""")
+# The same, for a set whose guides must carry quotation marks: a bare "(" opens
+# an ordinary aside there, so only a paren that goes straight into a quote
+# counts. Without this, "Diderot (the encyclopedist)" would read as already
+# guided and no guide would ever be suggested for it.
+_QUOTED_GUIDE_OPENER_RE = re.compile(r"""\s{0,2}(?:[\["“]|\(\s*["“])""")
 
 # Cache: (by_first, max_phrase_len). Built once on first use.
 _MATCHER = None
@@ -115,21 +120,25 @@ def guide_opener_at(text, pos):
     return bool(_GUIDE_OPENER_RE.match(text, pos))
 
 
-def _already_guided(text, end_char, pron):
+def _already_guided(text, end_char, pron, require_quotes=False):
     """True if the term ending at `end_char` already has a pronunciation guide:
     a paren/quote/bracket opener immediately follows it, or the verified
     respelling already appears somewhere in the text."""
-    if _GUIDE_OPENER_RE.match(text, end_char):
+    opener = _QUOTED_GUIDE_OPENER_RE if require_quotes else _GUIDE_OPENER_RE
+    if opener.match(text, end_char):
         return True
     np = _alnum_lower(pron)
     return bool(np) and np in _alnum_lower(text)
 
 
-def _iter_guide_matches(text):
+def _iter_guide_matches(text, require_quotes=False):
     """Yield (term, pron, start, end) for verified dictionary terms found in
     `text` that do not already carry a pronunciation guide. Each term is yielded
     at most once. start/end are character offsets into `text`. `text` should be
-    readable plain text (markup/HTML stripped)."""
+    readable plain text (markup/HTML stripped).
+
+    With `require_quotes`, only a quoted respelling counts as an existing guide
+    — matching a set that reads a bare parenthetical as ordinary text."""
     by_first, max_len, _stamp = _matcher()
     if not by_first:
         return
@@ -152,7 +161,7 @@ def _iter_guide_matches(text):
         if match:
             term, pron, L, start_char, end_char = match
             low = term.lower()
-            if low not in seen and not _already_guided(text, end_char, pron):
+            if low not in seen and not _already_guided(text, end_char, pron, require_quotes):
                 yield (term, pron, start_char, end_char)
                 seen.add(low)
             i += L
@@ -166,10 +175,10 @@ def suggest_guides(text):
     return [(term, pron) for term, pron, _s, _e in _iter_guide_matches(text)]
 
 
-def suggest_guide_matches(text):
+def suggest_guide_matches(text, require_quotes=False):
     """Like suggest_guides but each item is (term, pron, start, end) with the
     character offsets of the match, so callers can build a context preview."""
-    return list(_iter_guide_matches(text))
+    return list(_iter_guide_matches(text, require_quotes))
 
 
 def context_snippet(text, start, end, words=7):

@@ -179,6 +179,8 @@
             <a href="/bonus_history/{{ bonus.id }}" class="button small secondary">History</a>
             <a href="/convert_bonus/{{ bonus.id }}" class="button small secondary convert_bonus" value="{{ bonus.id }}" qset-id="{{ qset.id }}" target-type="ACF-style tossup">Convert to ACF tossup</a>
             {% if question_type == "VHSL bonus" %}<a href="/convert_bonus/{{ bonus.id }}" class="button small secondary convert_bonus" value="{{ bonus.id }}" qset-id="{{ qset.id }}" target-type="ACF-style bonus">Convert to ACF bonus</a>{% endif %}
+            <a href="/export_question/bonus/{{ bonus.id }}/yapp-json/" class="button small secondary" title="Download just this bonus as a one-question YAPP JSON packet, readable by MODAQ">YAPP</a>
+            <a href="/export_question/bonus/{{ bonus.id }}/yapp2-json/" class="button small secondary" title="Download just this bonus as YAPP2 JSON — the same packet, plus pronunciation-guide anchoring">YAPP2</a>
             <a href="/delete_bonus/{{ bonus.id }}" class="button small alert delete_bonus" value="{{ bonus.id }}" qset-id="{{ qset.id }}">Delete</a>
         </div>
         {% endif %}
