@@ -3,7 +3,7 @@
 {% block title %}Forgot Username - QEMS3{% endblock %}
 
 {% block content %}
-<h4>Forgot Username</h4>
+<h4>Forgot your username</h4>
 {% if sent %}
     <div class="alert-box success">
         If an account exists with that email address, we have sent an email with the username.
@@ -18,5 +18,7 @@
         <input type="submit" value="Send Username" class="button primary expand">
     </form>
 {% endif %}
-<p class="small-below"><a href="{% url 'account_login' %}">Back to sign in</a></p>
+<div class="auth-links">
+    <a href="{% url 'account_login' %}">Back to sign in</a>
+</div>
 {% endblock %}

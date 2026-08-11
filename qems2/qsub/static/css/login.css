@@ -1,16 +1,183 @@
-body {
-    display:flex;
-    padding:0;
+/* Signed-out pages (sign in, sign up, password reset).
+ *
+ * The app shell paints itself from the --qx-* tokens in base.css but scopes
+ * almost everything to body.app-authed, which the signed-out pages aren't. This
+ * file is the same design applied to them: one centred card on the app's own
+ * background, in the app's typeface and purple, and honouring the dark theme.
+ */
+
+.auth-page {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px 16px;
+    background: var(--qx-bg, #f7f7fa);
+    color: var(--qx-ink, #20232e);
+    font-family: var(--qx-sans);
 }
-div.row {
-    margin:auto;
+
+/* The app paints links purple via `body.app-authed a`, which by definition
+   doesn't apply here — without this the signed-out pages keep Foundation's teal
+   and read as a different product. */
+.auth-page a { color: var(--qx-primary, #6d28d9); }
+.auth-page a:hover { color: var(--qx-primary-dark, #5b21b6); }
+
+.auth-shell { width: 100%; max-width: 420px; }
+
+.auth-card {
+    background: var(--qx-card, #fff);
+    border: 1px solid var(--qx-border, #e9e9ef);
+    border-radius: 12px;
+    padding: 28px 28px 22px;
+    box-shadow: 0 1px 2px rgba(20, 22, 30, 0.04), 0 8px 24px rgba(20, 22, 30, 0.06);
 }
-form {
-    padding-bottom:1.5rem;
+
+/* Brand lockup, matching the sidebar's (.app-brand-mark / .app-brand-name come
+   from base.css, so the two can't drift apart). */
+.auth-brand {
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    margin-bottom: 18px;
 }
-h4 {
-    padding-bottom:0.5rem;
+.auth-brand:hover { text-decoration: none; }
+
+.auth-card h4 {
+    font-family: var(--qx-sans);
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: var(--qx-ink, #20232e);
+    text-align: center;
+    margin: 0 0 4px;
 }
-.small-below {
-    margin:0;
+.auth-card > p { color: var(--qx-muted, #8a8f9c); font-size: 0.9rem; text-align: center; }
+.auth-card > p a { font-weight: 600; }
+
+.auth-card form { margin: 18px 0 0; padding: 0; }
+
+.auth-card label {
+    display: block;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--qx-ink, #20232e);
+    margin-bottom: 12px;
+}
+/* "Remember me" is a checkbox and its label reads as a sentence, not a heading. */
+.auth-card label.auth-check { font-weight: 400; color: var(--qx-muted, #8a8f9c); }
+.auth-card label.auth-check input { margin: 0 6px 0 0; vertical-align: -1px; }
+
+.auth-card input[type="text"],
+.auth-card input[type="email"],
+.auth-card input[type="password"] {
+    width: 100%;
+    height: auto;
+    margin: 5px 0 0;
+    padding: 9px 11px;
+    font-family: var(--qx-sans);
+    font-size: 0.95rem;
+    color: var(--qx-ink, #20232e);
+    background: var(--qx-card, #fff);
+    border: 1px solid var(--qx-border, #e9e9ef);
+    border-radius: 8px;
+    box-shadow: none;
+    transition: border-color .12s ease, box-shadow .12s ease;
+}
+.auth-card input[type="text"]:focus,
+.auth-card input[type="email"]:focus,
+.auth-card input[type="password"]:focus {
+    outline: none;
+    border-color: var(--qx-primary, #6d28d9);
+    box-shadow: 0 0 0 3px rgba(109, 40, 217, 0.14);
+    background: var(--qx-card, #fff);
+}
+
+.auth-card input[type="submit"],
+.auth-card button[type="submit"] {
+    width: 100%;
+    margin: 4px 0 0;
+    padding: 11px 14px;
+    font-family: var(--qx-sans);
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #fff;
+    background: var(--qx-primary, #6d28d9);
+    border: 1px solid var(--qx-primary, #6d28d9);
+    border-radius: 8px;
+    transition: background .12s ease;
+}
+.auth-card input[type="submit"]:hover,
+.auth-card button[type="submit"]:hover {
+    background: var(--qx-primary-dark, #5b21b6);
+    border-color: var(--qx-primary-dark, #5b21b6);
+}
+
+.auth-card .alert-box {
+    border-radius: 8px;
+    font-size: 0.88rem;
+    padding: 9px 12px;
+    margin-bottom: 14px;
+}
+
+/* The "forgot your…" links, as a quiet row under the card's action. */
+.auth-links {
+    display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 14px;
+    margin: 16px 0 0; padding-top: 14px;
+    border-top: 1px solid var(--qx-border, #e9e9ef);
+}
+.auth-links a { font-size: 0.84rem; color: var(--qx-muted, #8a8f9c); }
+.auth-links a:hover { color: var(--qx-primary, #6d28d9); }
+.small-below { margin: 0; }
+
+.auth-footnote {
+    margin: 14px 0 0;
+    text-align: center;
+    font-size: 0.8rem;
+    color: var(--qx-muted, #8a8f9c);
+}
+
+/* Theme toggle, tucked into the corner rather than in the card. */
+.auth-theme-toggle {
+    position: fixed; top: 14px; right: 16px;
+    width: 34px; height: 34px; padding: 0;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--qx-muted, #8a8f9c);
+    background: var(--qx-card, #fff);
+    border: 1px solid var(--qx-border, #e9e9ef);
+    border-radius: 9px;
+    cursor: pointer;
+}
+/* Foundation paints every <button> teal on hover/focus, which is exactly the
+   colour this redesign is getting away from — restate the card styling for
+   those states rather than letting the framework win them. */
+.auth-theme-toggle:hover,
+.auth-theme-toggle:focus,
+.auth-theme-toggle:active {
+    color: var(--qx-primary, #6d28d9);
+    background: var(--qx-card, #fff);
+    border-color: var(--qx-border, #e9e9ef);
+    outline: none;
+}
+
+@media (max-width: 480px) {
+    .auth-card { padding: 22px 18px 18px; border-radius: 10px; }
+}
+
+/* ---- dark ---- */
+html[data-theme="dark"] .auth-card {
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+html[data-theme="dark"] .auth-page a { color: #a78bfa; }
+/* Keep the secondary links quiet in dark too: the rule above is more specific
+   than `.auth-links a`, so without this they'd come back as full-strength
+   purple and compete with the sign-in button. */
+html[data-theme="dark"] .auth-page .auth-links a { color: var(--qx-muted, #9aa0ad); }
+html[data-theme="dark"] .auth-page .auth-links a:hover { color: #a78bfa; }
+html[data-theme="dark"] .auth-card input[type="text"],
+html[data-theme="dark"] .auth-card input[type="email"],
+html[data-theme="dark"] .auth-card input[type="password"] {
+    background: var(--qx-elevate, #262932);
+    color: var(--qx-ink, #e6e7ea);
+}
+html[data-theme="dark"] .auth-card input:focus {
+    box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.22);
 }

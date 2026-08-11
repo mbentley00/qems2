@@ -29,7 +29,7 @@
     </form>
 
     <div class="sc-counts">
-        Checked <strong>{{ checked }}</strong>, <strong>{{ flagged }}</strong> flagged
+        Checked <strong>{{ checked }}</strong>, <strong class="sc-flagged-count">{{ flagged }}</strong> flagged
         <span class="sc-pill err{% if not counts.error %} zero{% endif %}" title="errors">{{ counts.error }}</span>
         <span class="sc-pill warn{% if not counts.warning %} zero{% endif %}" title="warnings">{{ counts.warning }}</span>
         <span class="sc-pill info{% if not counts.info %} zero{% endif %}" title="info">{{ counts.info }}</span>
@@ -37,6 +37,7 @@
         <span class="sc-guide-note">· {{ dismissed_count }} dismissed
             {% if show_dismissed %}<a href="?guide={{ guide }}">hide</a>{% else %}<a href="?guide={{ guide }}&amp;show_dismissed=1">show</a>{% endif %}</span>
         {% endif %}
+        <span class="sc-guide-note">· <a href="/style_ignored/{{ qset.id }}/?guide={{ guide }}">what's ignored for this set</a></span>
     </div>
 
     {% if can_configure %}<a href="#" id="toggle-style-settings" class="sc-config-toggle">Configure rules&hellip;</a>{% endif %}
@@ -101,6 +102,7 @@
         {% for i in r.issues %}
         <li class="style-issue sev-{{ i.severity }}{% if i.dismissed %} style-issue-dismissed{% endif %}"
             data-qtype="{{ r.type }}" data-qid="{{ r.id }}" data-code="{{ i.code }}" data-token="{{ i.token }}"
+            data-describe="{{ i.describe }}" data-dscope="{{ i.dismissed_scope }}"
             data-fixable="{% if i.fixable %}1{% else %}0{% endif %}">
             {% if not i.dismissed %}<input type="checkbox" class="issue-check" autocomplete="off" title="Select for a bulk action">{% endif %}
             <span class="style-issue-msg">{% if i.message_html %}{% autoescape off %}{{ i.message_html }}{% endautoescape %}{% else %}{{ i.message }}{% endif %}</span>
@@ -109,8 +111,8 @@
                     <a class="style-action sc-link" data-action="restore" title="Restore this issue">undo</a>
                 {% else %}
                     {% if i.fixable %}<a class="style-action sc-fix" data-action="apply" title="Apply this fix">Fix</a><a class="style-action sc-fix sc-fix-open" data-action="apply-open" title="Apply this fix and open the question">Fix&nbsp;&#8599;</a>{% endif %}
-                    <a class="style-action sc-link" data-action="dismiss" title="Hide just this issue, on this question only">dismiss</a>
-                    <a class="style-action sc-link" data-action="dismiss-all" title="Stop flagging this suggestion on every question in the set">dismiss for set</a>
+                    <a class="style-action sc-link" data-action="dismiss" title="Hide this on this question only. Other questions keep being checked for it.">dismiss</a>
+                    <a class="style-action sc-link" data-action="dismiss-all" title="Ignore {{ i.describe }} everywhere in this set. The rest of the rule keeps running.">ignore for set&hellip;</a>
                 {% endif %}
             </span>
         </li>
@@ -195,6 +197,7 @@
 <script>
 $(function () {
     var GUIDE = "{{ guide|escapejs }}";
+    var SHOW_DISMISSED = {% if show_dismissed %}true{% else %}false{% endif %};
     $('#toggle-style-settings').on('click', function (e) { e.preventDefault(); $('#style-settings-form').toggle(); });
 
     // The top nav is position:fixed and wraps to a variable height, so pin the
@@ -205,8 +208,10 @@ $(function () {
     syncBulkBarTop();
     $(window).on('resize', syncBulkBarTop);
 
+    // Returns the jqXHR so a caller can chain .fail() (apply-open does, to close
+    // the tab it opened optimistically).
     function post(url, li, action, done, scope) {
-        $.post(url, {
+        return $.post(url, {
             question_type: li.data('qtype'),
             question_id: li.data('qid'),
             code: li.data('code'),
@@ -225,30 +230,137 @@ $(function () {
         });
     }
 
-    $('.style-action').on('click', function () {
+    // ---- in-place refresh -------------------------------------------------
+    // Every action used to reload the page, which on a long set meant losing
+    // your scroll position and re-running the whole check to see one row change.
+    // Instead: re-ask the server for the issues on the question we touched and
+    // redraw just that block. A set-wide dismissal also hides the matching rows
+    // on every other question, which is a pure client-side match on (code,token).
+
+    function issueHtml(i, qtype, qid) {
+        var actions;
+        if (i.dismissed) {
+            actions = '<a class="style-action sc-link" data-action="restore" ' +
+                      'title="Restore this issue">undo</a>';
+        } else {
+            actions = (i.fixable
+                ? '<a class="style-action sc-fix" data-action="apply" title="Apply this fix">Fix</a>' +
+                  '<a class="style-action sc-fix sc-fix-open" data-action="apply-open" ' +
+                  'title="Apply this fix and open the question">Fix&nbsp;&#8599;</a>'
+                : '') +
+                '<a class="style-action sc-link" data-action="dismiss" ' +
+                'title="Hide this on this question only. Other questions keep being checked for it.">dismiss</a>' +
+                '<a class="style-action sc-link" data-action="dismiss-all" ' +
+                'title="Ignore ' + esc(i.describe || 'this suggestion') +
+                ' everywhere in this set. The rest of the rule keeps running.">ignore for set&hellip;</a>';
+        }
+        return $('<li>')
+            .addClass('style-issue sev-' + i.severity + (i.dismissed ? ' style-issue-dismissed' : ''))
+            .attr({'data-qtype': qtype, 'data-qid': qid, 'data-code': i.code,
+                   'data-token': i.token, 'data-describe': i.describe || '',
+                   'data-dscope': i.dismissed_scope || '',
+                   'data-fixable': i.fixable ? '1' : '0'})
+            .append(i.dismissed ? '' :
+                '<input type="checkbox" class="issue-check" autocomplete="off" title="Select for a bulk action">')
+            .append($('<span class="style-issue-msg">')[i.message_html ? 'html' : 'text'](
+                i.message_html || i.message))
+            .append($('<span class="style-issue-actions">').html(actions));
+    }
+
+    function esc(s) { return $('<div>').text(s == null ? '' : s).html(); }
+
+    // Redraw one question's issue list from the server. Resolves when done.
+    function refreshQuestion(qtype, qid) {
+        var $block = $('.style-issue[data-qtype="' + qtype + '"][data-qid="' + qid + '"]')
+            .first().closest('.sc-q');
+        return $.getJSON('/question_style_issues/', {
+            question_type: qtype, question_id: qid, guide: GUIDE,
+            include_dismissed: SHOW_DISMISSED ? '1' : '0'
+        }).done(function (resp) {
+            if (!resp || !resp.ok) { return; }
+            var $ul = $block.find('.sc-issues');
+            $ul.empty();
+            $.each(resp.issues, function (_, i) { $ul.append(issueHtml(i, qtype, qid)); });
+            // A question with nothing left to say shouldn't keep an empty box.
+            if (!resp.issues.length) { $block.remove(); }
+            recount();
+        });
+    }
+
+    // Drop every row for one (code, token) across the page — what a set-wide
+    // dismissal does to questions other than the one it was made from.
+    function hideSetWide(code, token) {
+        $('.style-issue').filter(function () {
+            return $(this).data('code') === code && String($(this).data('token')) === String(token);
+        }).each(function () {
+            var $li = $(this), $block = $li.closest('.sc-q');
+            if (SHOW_DISMISSED) {
+                $li.addClass('style-issue-dismissed').find('.issue-check').remove();
+                $li.find('.style-issue-actions').html(
+                    '<a class="style-action sc-link" data-action="restore" title="Restore this issue">undo</a>');
+            } else {
+                $li.remove();
+                if (!$block.find('.style-issue').length) { $block.remove(); }
+            }
+        });
+        recount();
+    }
+
+    // Keep the header tally honest after an in-place change.
+    function recount() {
+        var counts = {error: 0, warning: 0, info: 0};
+        $('.style-issue').not('.style-issue-dismissed').each(function () {
+            var cls = this.className.match(/sev-(\w+)/);
+            if (cls && counts[cls[1]] !== undefined) { counts[cls[1]]++; }
+        });
+        $('.sc-pill.err').text(counts.error).toggleClass('zero', !counts.error);
+        $('.sc-pill.warn').text(counts.warning).toggleClass('zero', !counts.warning);
+        $('.sc-pill.info').text(counts.info).toggleClass('zero', !counts.info);
+        $('.sc-flagged-count').text($('.sc-q').length);
+        updateCount();
+    }
+
+    $(document).on('click', '.style-action', function () {
         var btn = $(this), li = btn.closest('.style-issue'), action = btn.data('action');
+        var qtype = li.data('qtype'), qid = li.data('qid');
+        var code = li.data('code'), token = li.data('token');
         btn.css('pointer-events', 'none');
         if (action === 'apply') {
-            post('/apply_style_fix/', li, '', function () { location.reload(); });
+            // A fix can change the text enough to resolve or reword the other
+            // issues on that question, so redraw the whole question, not the row.
+            post('/apply_style_fix/', li, '', function () { refreshQuestion(qtype, qid); });
         } else if (action === 'apply-open') {
             // Open a blank tab now (a user gesture, so it isn't popup-blocked),
             // apply the fix, then point the tab at the question so it loads the
             // already-fixed version instead of stale text. Close it if the fix fails.
-            var url = '/edit_' + li.data('qtype') + '/' + li.data('qid') + '/';
+            var url = '/edit_' + qtype + '/' + qid + '/';
             var w = window.open('', '_blank');
             post('/apply_style_fix/', li, '', function () {
                 if (w) { w.location = url; }
-                location.reload();
+                refreshQuestion(qtype, qid);
             }).fail(function () { if (w) { w.close(); } });
         } else if (action === 'dismiss') {
-            post('/dismiss_style_issue/', li, '', function () { location.reload(); });
+            post('/dismiss_style_issue/', li, '', function () { refreshQuestion(qtype, qid); });
         } else if (action === 'dismiss-all') {
-            if (!confirm('Hide this suggestion for every question in the set?')) {
+            var what = li.data('describe') || 'this suggestion';
+            if (!confirm('Ignore ' + what + ' everywhere in this set?\n\n' +
+                         'This hides only that suggestion — every other example of the ' +
+                         'same rule keeps being flagged. You can take it back from ' +
+                         '"what\'s ignored for this set".')) {
                 btn.css('pointer-events', ''); return;
             }
-            post('/dismiss_style_issue/', li, '', function () { location.reload(); }, 'all');
+            post('/dismiss_style_issue/', li, '', function () {
+                hideSetWide(code, token);
+            }, 'all');
         } else if (action === 'restore') {
-            post('/dismiss_style_issue/', li, 'restore', function () { location.reload(); });
+            // Undo has to match how it was dismissed — a set-wide dismissal
+            // isn't recorded against this question, so restoring it "here"
+            // would delete nothing and the row would come back dismissed.
+            var dscope = li.data('dscope') === 'set' ? 'all' : '';
+            post('/dismiss_style_issue/', li, 'restore', function () {
+                if (dscope === 'all') { location.replace(window.location.href); }
+                else { refreshQuestion(qtype, qid); }
+            }, dscope);
         }
     });
 
@@ -291,10 +403,23 @@ $(function () {
             if (!lis.length) { alert('None of the selected issues have an automatic fix.'); return; }
         } else if (action === 'dismiss-all') {
             scope = 'all';
-            if (!confirm('Dismiss the selected suggestion(s) for every question in the set?')) { return; }
+            // Name what is actually being silenced. "Dismiss the selected
+            // suggestions for the set" reads like switching the rules off; each
+            // one is only ever the specific thing it was found on.
+            var what = lis.map(function (li) { return li.data('describe'); })
+                          .filter(function (d, i, all) { return d && all.indexOf(d) === i; });
+            var shown = what.slice(0, 6).map(function (d) { return '  • ' + d; }).join('\n');
+            if (what.length > 6) { shown += '\n  • …and ' + (what.length - 6) + ' more'; }
+            if (!confirm('Ignore these everywhere in this set?\n\n' + shown +
+                         '\n\nEach one hides only that suggestion — the rest of the same ' +
+                         'rule keeps being flagged. You can take them back from ' +
+                         '"what\'s ignored for this set".')) { return; }
         }
         $('.bulk-action').prop('disabled', true);
         var errors = [];
+        // Which questions were touched, so only those get redrawn afterwards.
+        var touched = {};
+        lis.forEach(function (li) { touched[li.data('qtype') + '|' + li.data('qid')] = li; });
         var seq = lis.reduce(function (p, li) {
             return p.then(function () {
                 return postP(url, li, scope).then(null, function (err) { errors.push(err); });
@@ -302,7 +427,22 @@ $(function () {
         }, $.Deferred().resolve().promise());
         seq.always(function () {
             if (errors.length) { alert(errors.length + ' operation(s) failed (e.g. ' + errors[0] + ').'); }
-            location.reload();
+            if (scope === 'all') {
+                // Set-wide: the same suggestion may be on questions that weren't
+                // selected, so clear every matching row rather than redrawing.
+                lis.forEach(function (li) { hideSetWide(li.data('code'), li.data('token')); });
+                $('.bulk-action').prop('disabled', false);
+                return;
+            }
+            var pending = Object.keys(touched).map(function (key) {
+                var li = touched[key];
+                return refreshQuestion(li.data('qtype'), li.data('qid'));
+            });
+            $.when.apply($, pending).always(function () {
+                $('.bulk-action').prop('disabled', false);
+                $('#select-all-issues').prop('checked', false);
+                recount();
+            });
         });
     });
 });

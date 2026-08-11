@@ -3,26 +3,29 @@
 {% block title %}Sign In - QEMS3{% endblock %}
 
 {% block content %}
-<h4>Sign In</h4>
-<p>If you have not created an account yet, please <a href="{% url 'account_signup' %}">sign up</a> first.</p>
+<h4>Sign in</h4>
+<p>No account yet? <a href="{% url 'account_signup' %}">Sign up</a>.</p>
 
 <form method="post" action="{% url 'account_login' %}">
     {% csrf_token %}
     {% if form.errors %}
         <div class="alert-box alert">Your login credentials were incorrect. Please try again.</div>
     {% endif %}
-    <label for="id_login">Username or Email
+    <label for="id_login">Username or email
         <input type="text" name="login" id="id_login" placeholder="Username or email" required autofocus>
     </label>
     <label for="id_password">Password
         <input type="password" name="password" id="id_password" placeholder="Password" required>
     </label>
-    <label>
+    <label class="auth-check">
         <input type="checkbox" name="remember"> Remember me
     </label>
     {{ redirect_field }}
-    <input type="submit" value="Sign In" class="button primary expand">
+    <input type="submit" value="Sign in" class="button primary expand">
 </form>
-<p class="small-below"><a href="{% url 'account_reset_password' %}">Forgot your password?</a></p>
-<p class="small-below"><a href="{% url 'forgot_username' %}">Forgot your username?</a></p>
+
+<div class="auth-links">
+    <a href="{% url 'account_reset_password' %}">Forgot your password?</a>
+    <a href="{% url 'forgot_username' %}">Forgot your username?</a>
+</div>
 {% endblock %}

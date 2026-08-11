@@ -8,6 +8,7 @@ from django.forms.models import modelformset_factory
 from django.contrib.contenttypes.models import ContentType, ContentTypeManager
 from django_comments.models import Comment
 from django.db.models import Q, Count
+from django.utils.html import escape
 
 import os
 import re
@@ -552,9 +553,14 @@ def get_tossup_and_bonuses_in_set(qset, question_limit=30, preview_only=False):
 
     return tossups, tossup_dict, bonuses, bonus_dict
 
-def get_comment_tab_list(tossup_dict, bonus_dict, comment_limit=60):
-    """Comments on a set's questions, newest first, for the comment lists (the
-    all-comments page and the dashboard's Recent Comments tab).
+def get_comment_tab_list(tossup_dict, bonus_dict, comment_limit=60, qset=None):
+    """Comments on a set, newest first, for the comment lists (the all-comments
+    page and the dashboard's Recent Comments tab).
+
+    Covers questions and — when `qset` is given — the set's packets. A
+    packet-level comment ("this packet is short on science") is a note about the
+    set like any other; leaving it out meant it was only ever visible to someone
+    who happened to open that packet's page.
 
     Resolved discussions are left out. Resolving a comment is how an editor says
     it's been dealt with, so keeping it in a list of things to look at works
@@ -562,11 +568,20 @@ def get_comment_tab_list(tossup_dict, bonus_dict, comment_limit=60):
     of them to bury what's still open. A reply is dropped along with the comment
     it answers, since the thread is what gets resolved, not the individual
     message. Both are still on the question itself and in its history.
+
+    Each entry carries `question_type` + `question_id`, which the templates join
+    into ``/edit_<type>/<id>`` — the packet entries use 'packet' so they link to
+    the packet page through that same shape.
     """
     comment_tab_list = []
 
     tossup_content_type_id = ContentType.objects.get_for_model(Tossup).id
     bonus_content_type_id = ContentType.objects.get_for_model(Bonus).id
+    packet_content_type_id = ContentType.objects.get_for_model(Packet).id
+
+    packet_dict = {}
+    if qset is not None:
+        packet_dict = {p.id: p for p in Packet.objects.filter(question_set=qset)}
 
     comment_filter = Q()
     if tossup_dict:
@@ -575,6 +590,9 @@ def get_comment_tab_list(tossup_dict, bonus_dict, comment_limit=60):
     if bonus_dict:
         comment_filter |= Q(content_type_id=bonus_content_type_id,
                             object_pk__in=[str(pk) for pk in bonus_dict])
+    if packet_dict:
+        comment_filter |= Q(content_type_id=packet_content_type_id,
+                            object_pk__in=[str(pk) for pk in packet_dict])
     if not comment_filter:
         return comment_tab_list
 
@@ -594,6 +612,12 @@ def get_comment_tab_list(tossup_dict, bonus_dict, comment_limit=60):
                                      'question_text': get_formatted_question_html(tossup.tossup_answer[0:80], True, True, False, False),
                                      'question_id': tossup.id,
                                      'question_type': 'tossup'})
+        elif (comment.content_type_id == packet_content_type_id):
+            packet = packet_dict[int(comment.object_pk)]
+            comment_tab_list.append({'comment': comment,
+                                     'question_text': escape(packet.packet_name or 'Packet'),
+                                     'question_id': packet.id,
+                                     'question_type': 'packet'})
         else:
             bonus = bonus_dict[int(comment.object_pk)]
             comment_tab_list.append({'comment': comment,

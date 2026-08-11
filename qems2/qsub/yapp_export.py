@@ -117,6 +117,13 @@ def qems_to_yapp_html(text, anchors=False):
                 pg = not pg
             i += 2
             continue
+        if c == '\\' and nxt == 'N':
+            # A note to the moderator/players. It is read aloud, so the words
+            # stay; only the marker goes. YAPP has no field for "this is an
+            # instruction", and inventing markup here would show up as literal
+            # text in a reader.
+            i += 2
+            continue
 
         # Power markers stay as literal text ((+) superpower, (*) power).
         if text[i:i + 3] == '(*)' or text[i:i + 3] == '(+)':

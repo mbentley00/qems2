@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% load filters %}
+
+{% block title %}Ignored Style Suggestions - {{ qset.name }} - QEMS3{% endblock %}
+
+{% block content %}
+
+<h3 class="page-header">Ignored Style Suggestions</h3>
+<ul class="breadcrumbs">
+    <li><a href="/edit_question_set/{{ qset.id }}/">{{ qset.name }}</a></li>
+    <li><a href="/style_check/{{ qset.id }}/?guide={{ guide }}">Style Check</a></li>
+    <li class="current">Ignored</li>
+</ul>
+
+<p class="si-intro">Everything this set has silenced in the style checker. A
+dismissal is always keyed to the exact suggestion it was made on &mdash; one
+term's pronunciation guide, one field's double spaces &mdash; so the rest of
+that rule keeps running.</p>
+
+<h5 class="si-heading">Rules switched off for the set
+    <span class="si-count">{{ off_rules|length }}</span></h5>
+{% if off_rules %}
+<p class="si-note">These are off entirely: no question is checked against them.
+Change them under <a href="/style_check/{{ qset.id }}/?guide={{ guide }}">Configure rules</a>.</p>
+<ul class="si-list">
+    {% for r in off_rules %}
+    <li><span class="si-rule">{{ r.label }}</span> <code class="si-code">{{ r.code }}</code></li>
+    {% endfor %}
+</ul>
+{% else %}
+<p class="si-empty">None &mdash; every rule this guide defines is running.</p>
+{% endif %}
+
+<h5 class="si-heading">Ignored across the whole set
+    <span class="si-count">{{ set_wide|length }}</span></h5>
+{% if set_wide %}
+<p class="si-note">Hidden on every question in the set, including ones written
+later.</p>
+<table class="si-table">
+    <thead><tr><th>What is ignored</th><th>Rule</th><th>By</th><th>When</th><th></th></tr></thead>
+    <tbody>
+        {% for d in set_wide %}
+        <tr data-code="{{ d.code }}" data-token="{{ d.token }}">
+            <td class="si-what">{{ d.summary }}</td>
+            <td><code class="si-code">{{ d.code }}</code></td>
+            <td>{{ d.by|default:"&mdash;" }}</td>
+            <td>{{ d.date|to_short_datetime }}</td>
+            <td>{% if not read_only %}<a href="#" class="si-restore" data-scope="all">stop ignoring</a>{% endif %}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="si-empty">None &mdash; nothing has been dismissed for the whole set.</p>
+{% endif %}
+
+<h5 class="si-heading">Ignored on one question
+    <span class="si-count">{{ per_question_count }}</span></h5>
+{% if per_question %}
+<p class="si-note">Hidden only on the question it was dismissed on; the same
+suggestion still appears elsewhere.</p>
+{% for q in per_question %}
+<div class="si-q">
+    <div class="si-q-head">
+        <a href="{{ q.edit_url }}" target="_blank" rel="noopener">{% autoescape off %}{{ q.label }}{% endautoescape %}</a>
+        <span class="si-loc">{% if q.qtype == 'tossup' %}Tossup{% else %}Bonus{% endif %}</span>
+    </div>
+    <ul class="si-list">
+        {% for d in q.items %}
+        <li data-code="{{ d.code }}" data-token="{{ d.token }}"
+            data-qtype="{{ q.qtype }}" data-qid="{{ q.qid }}">
+            <span class="si-what">{{ d.summary }}</span>
+            <code class="si-code">{{ d.code }}</code>
+            <span class="si-meta">{{ d.by|default:"&mdash;" }} &middot; {{ d.date|to_short_datetime }}</span>
+            {% if not read_only %}<a href="#" class="si-restore" data-scope="">stop ignoring</a>{% endif %}
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+{% endfor %}
+{% else %}
+<p class="si-empty">None &mdash; no suggestion has been dismissed on a single question.</p>
+{% endif %}
+
+<style>
+.si-intro { color:#555; max-width:60em; }
+.si-heading { margin:1.2rem 0 0.3rem; }
+.si-count { display:inline-block; min-width:1.7em; text-align:center; padding:0 0.45em;
+            border-radius:10px; font-size:0.78rem; font-weight:bold; line-height:1.6;
+            color:#fff; background:#9aa0a6; vertical-align:0.15em; }
+.si-note { color:#777; font-size:0.85rem; margin:0 0 0.5rem; }
+.si-empty { color:#9aa0a6; font-size:0.88rem; }
+.si-list { list-style:none; margin:0 0 0.6rem; }
+.si-list li { display:flex; align-items:baseline; gap:0.5em; padding:0.12rem 0; font-size:0.9rem; }
+.si-rule { font-weight:bold; }
+.si-what { font-weight:bold; }
+.si-code { background:#f2f2f2; color:#777; font-size:0.75rem; padding:0 0.35em; border-radius:3px; }
+.si-meta { color:#9aa0a6; font-size:0.78rem; }
+.si-restore { font-size:0.8rem; }
+.si-table { width:100%; font-size:0.9rem; }
+.si-table th { font-size:0.78rem; color:#777; text-transform:uppercase; letter-spacing:0.03em; }
+.si-q { border:1px solid #e8e8e8; border-radius:4px; padding:0.35rem 0.6rem; margin-bottom:0.3rem; }
+.si-q-head { font-size:0.9rem; font-weight:bold; }
+.si-q-head .si-loc { color:#9aa0a6; font-size:0.78rem; font-weight:normal; margin-left:0.4em; }
+.si-gone { opacity:0.5; text-decoration:line-through; }
+html[data-theme="dark"] .si-code { background:#2a2f36; color:var(--qx-muted); }
+html[data-theme="dark"] .si-q { border-color:#333a44; }
+</style>
+
+<script>
+$(function () {
+    // Restoring goes through the same endpoint the style-check page uses, so a
+    // suggestion taken back here reappears there on the next run.
+    $('.si-restore').on('click', function (e) {
+        e.preventDefault();
+        var $link = $(this);
+        var $row = $link.closest('li, tr');
+        var scope = $link.data('scope') || '';
+        $link.text('…').css('pointer-events', 'none');
+        $.post('/restore_style_dismissal/', {
+            qset_id: {{ qset.id }},
+            question_type: $row.data('qtype') || '',
+            question_id: $row.data('qid') || '',
+            code: $row.data('code'),
+            token: $row.data('token'),
+            scope: scope
+        }).done(function (resp) {
+            if (typeof resp === 'string') { try { resp = JSON.parse(resp); } catch (e) {} }
+            if (resp && resp.ok) {
+                $row.addClass('si-gone');
+                $link.replaceWith('<span class="si-meta">no longer ignored</span>');
+            } else {
+                $link.text('stop ignoring').css('pointer-events', '');
+                alert((resp && resp.error) || 'Could not restore that suggestion.');
+            }
+        }).fail(function () {
+            $link.text('stop ignoring').css('pointer-events', '');
+            alert('Could not restore that suggestion.');
+        });
+    });
+});
+</script>
+
+{% endblock %}

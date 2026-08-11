@@ -43,6 +43,7 @@ class _RunWriter(HTMLParser):
         self.pdf = pdf
         self.size = size
         self.b = self.i = self.u = 0
+        self.spans = []      # one entry per open <span>: True if it's a note
 
     def handle_starttag(self, tag, attrs):
         if tag in ('b', 'strong'):
@@ -51,6 +52,17 @@ class _RunWriter(HTMLParser):
             self.i += 1
         elif tag == 'u':
             self.u += 1
+        elif tag == 'span':
+            # A note to the moderator/players is italic through CSS on the web
+            # (so the editor can round-trip it without adding tildes), which
+            # means the tag walk has to notice the class to italicize it here.
+            # Spans are also used for pronunciation-guide targets, so remember
+            # which kind each one was rather than assuming the next `</span>`
+            # closes a note.
+            is_note = self._is_note(attrs)
+            self.spans.append(is_note)
+            if is_note:
+                self.i += 1
 
     def handle_endtag(self, tag):
         if tag in ('b', 'strong'):
@@ -59,6 +71,16 @@ class _RunWriter(HTMLParser):
             self.i = max(0, self.i - 1)
         elif tag == 'u':
             self.u = max(0, self.u - 1)
+        elif tag == 'span':
+            if self.spans and self.spans.pop():
+                self.i = max(0, self.i - 1)
+
+    @staticmethod
+    def _is_note(attrs):
+        for name, value in attrs:
+            if name == 'class' and 'q-note' in (value or '').split():
+                return True
+        return False
 
     def handle_data(self, data):
         if not data:

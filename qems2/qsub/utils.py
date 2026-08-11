@@ -115,8 +115,8 @@ def get_answer_no_formatting(line):
     output = line
     output = strip_markup(output)
     # Strip unescaped markup, then turn "\_"/"\~" back into literal characters.
-    # \B bold, \S superscript, \s subscript, \P pronunciation guide.
-    for marker in ('\\B', '\\S', '\\s', '\\P'):
+    # \B bold, \S superscript, \s subscript, \P pronunciation guide, \N note.
+    for marker in ('\\B', '\\S', '\\s', '\\P', '\\N'):
         output = output.replace(marker, '')
     output = re.sub(r'(?<!\\)_', '', output)
     output = re.sub(r'(?<!\\)~', '', output)
@@ -260,6 +260,7 @@ def get_formatted_question_html(line, allowUnderlines, allowParens, allowNewLine
     boldFlag = False
     strikeFlag = False
     pgTargetFlag = False
+    noteFlag = False
     powerFlag = False
     powerIndex = -1
     promptFlag = False
@@ -398,6 +399,19 @@ def get_formatted_question_html(line, allowUnderlines, allowParens, allowNewLine
             else:
                 pgTargetFlag = True
                 output += u"<span class=\"pg-target\">"
+        elif (c == u"N" and previousChar == u"\\" and secondPreviousChar != u"\\"):
+            # \Ntext\N marks a note to the moderator or the players — "Description
+            # acceptable.", "Note to moderator: read the answer line carefully."
+            # It is read aloud but is not part of the clue, so it never counts
+            # toward the question's length. The italics say the same thing to
+            # anyone reading the page.
+            output = output[:-1] # Get rid of the escape character
+            if (noteFlag):
+                noteFlag = False
+                output += u"</span>"
+            else:
+                noteFlag = True
+                output += u"<span class=\"q-note\">"
         else:
             if (c == u"_" and previousChar == u"\\" and secondPreviousChar != u"\\"):
                 # Escaped underscore: render a literal "_", not markup.
@@ -440,6 +454,9 @@ def get_formatted_question_html(line, allowUnderlines, allowParens, allowNewLine
     if (pgTargetFlag):
         output += u"</span>"
 
+    if (noteFlag):
+        output += u"</span>"
+
     if (underlineFlag):
         output += u"</b></u>"
 
@@ -477,11 +494,30 @@ MODERATOR_INSTRUCTION_RE = re.compile(
     re.IGNORECASE)
 INLINE_DIRECTIVE_RE = re.compile(r'\[(?:emphasi[sz]e|pause|read slowly)\]\s*', re.IGNORECASE)
 
-def strip_moderator_instructions(line):
-    """Remove moderator/player instruction sentences and inline directive
-    markers so they don't count toward question length."""
+#: An explicitly marked note to the moderator or the players: ``\Ntext\N``.
+#: The rules above have to guess from the wording, which means an unusual
+#: phrasing is counted and an ordinary sentence occasionally isn't. Marking one
+#: is the way to say so outright, and it always wins.
+NOTE_RE = re.compile(r'\\N(.*?)\\N', re.S)
+
+def strip_notes(line):
+    """Remove ``\\Ntext\\N`` notes, and any spacing they leave behind."""
     if not line:
         return line
+    line = NOTE_RE.sub('', line)
+    # An unclosed \N (mid-edit, or a typo) would otherwise leave the marker in
+    # the counted text; drop the marker without eating the rest of the question.
+    line = line.replace('\\N', '')
+    return re.sub(r'\s{2,}', ' ', line).strip()
+
+def strip_moderator_instructions(line):
+    """Remove moderator/player instruction sentences and inline directive
+    markers so they don't count toward question length. Explicitly marked notes
+    (``\\Ntext\\N``) go first, since they say outright what the sentence rules
+    below can only infer."""
+    if not line:
+        return line
+    line = strip_notes(line)
     line = MODERATOR_INSTRUCTION_RE.sub('', line)
     line = INLINE_DIRECTIVE_RE.sub('', line)
     return line
@@ -497,6 +533,13 @@ def get_char_count_exclusions(line, ignore_pronunciation, guides_require_quotes=
     if guides_require_quotes:
         line = escape_unquoted_parens(line)
     found = []
+    for m in NOTE_RE.finditer(line):
+        s = m.group(1).strip()
+        if s:
+            found.append(s)
+    # Whatever a marked note covered is already accounted for; running the
+    # guessing rules over it too would list the same sentence twice.
+    line = strip_notes(line)
     for m in MODERATOR_INSTRUCTION_RE.finditer(line):
         s = m.group(0).strip(' ~.!?\t\n')
         if s:
@@ -587,6 +630,10 @@ def special_character_imbalance_reason(line):
         return ('Unbalanced pronunciation-guide target markers ("\\P"): there is '
                 'an odd number of them. Wrap the word(s) a guide covers in a '
                 'pair, e.g. Denis \\PDiderot\\P ("DID-er-OW").')
+    if len(re.findall(r'(?<!\\)\\N', line)) % 2:
+        return ('Unbalanced note markers ("\\N"): there is an odd number of '
+                'them. Wrap a note to the moderator or players in a pair, e.g. '
+                '\\NDescription acceptable.\\N')
     return None
 
 def are_special_characters_balanced(line):

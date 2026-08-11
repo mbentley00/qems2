@@ -312,7 +312,7 @@
                     <tr>
                         <th>Commenter</th>
                         <th>Comment</th>
-                        <th>Question</th>
+                        <th>On</th>
                         <th>Date</th>
                     </tr>
                 </thead>
@@ -323,7 +323,7 @@
                                 <tr>
                                     <td>{{ comment.comment|commenter_name }}</td>
                                     <td>{{ comment.comment.comment|comment_html }}</td>
-                                    <td><a href="/edit_{{ comment.question_type }}/{{ comment.question_id }}">{{ comment.question_text }}</a></td>
+                                    <td>{% if comment.question_type == "packet" %}<span class="packet-comment-badge" title="A comment on the packet itself, not on one question">Packet</span> {% endif %}<a href="/edit_{{ comment.question_type }}/{{ comment.question_id }}">{{ comment.question_text }}</a></td>
                                     <td>{{ comment.comment.submit_date|to_short_datetime }}</td>
                                 </tr>
                             {% endif %}

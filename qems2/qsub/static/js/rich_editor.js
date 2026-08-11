@@ -38,6 +38,11 @@ $(function () {
         html = html.replace(/\\B([\s\S]+?)\\B/g, '<b>$1</b>');
         html = html.replace(/\\S([\s\S]+?)\\S/g, '<sup>$1</sup>');
         html = html.replace(/\\s([\s\S]+?)\\s/g, '<sub>$1</sub>');
+        // \Ntext\N — a note to the moderator/players. Shown the way it renders
+        // on the saved question, so it's obvious which words are outside the
+        // character count. Italic comes from CSS, not an <em>, so converting
+        // back to markup doesn't add tildes inside the note.
+        html = html.replace(/\\N([\s\S]+?)\\N/g, '<span class="q-note">$1</span>');
         // \Pword\P marks the target of a following pronunciation guide. The
         // guide itself is greyed whenever the pair is complete, so "anchored"
         // is something you can see rather than infer: amber word, grey guide.
@@ -117,6 +122,9 @@ $(function () {
             // Guess every unmarked guide\'s target from how many words its
             // respelling has, so marks don't have to be placed by hand.
             '  <a href="#" class="rich-editor-btn rich-editor-pg" data-cmd="pgauto" title="Mark the target of every pronunciation guide in this field, guessing the word(s) each one covers from its respelling">PG auto</a>' +
+            // A note to the moderator/players (\N...\N): read aloud, but never
+            // counted toward the question length. A toggle, like PG.
+            '  <a href="#" class="rich-editor-btn rich-editor-note" data-cmd="note" title="Mark a note to the moderator or players (e.g. &quot;Description acceptable.&quot;). It is read aloud but never counts toward the question length. Click with the caret inside a note to remove the mark.">Note</a>' +
             // Switch to editing the raw QEMS markup (e.g. ~foo~ for italics) in
             // the underlying textarea, to hand-fix anything the rich view got
             // wrong; the label flips to "Rich" to switch back.
@@ -191,22 +199,50 @@ $(function () {
             return box.innerHTML;
         }
 
-        // The pg-target span containing `node`, if any (bounded by the editor).
-        function pgTargetAt(node) {
+        // The span of class `cls` containing `node`, if any (bounded by the editor).
+        function spanAt(node, cls) {
             while (node && node !== $editor[0]) {
-                if (node.nodeType === 1 && $(node).hasClass('pg-target')) { return node; }
+                if (node.nodeType === 1 && $(node).hasClass(cls)) { return node; }
                 node = node.parentNode;
             }
             return null;
         }
 
-        // The pg-target span the caret/selection currently sits inside, if any.
-        function currentPgTarget() {
+        function pgTargetAt(node) { return spanAt(node, 'pg-target'); }
+
+        // The span of class `cls` the caret/selection currently sits inside.
+        function currentSpan(cls) {
             var sel = window.getSelection();
             if (!sel || !sel.rangeCount) { return null; }
             var range = sel.getRangeAt(0);
             if (!$editor[0].contains(range.commonAncestorContainer)) { return null; }
-            return pgTargetAt(range.commonAncestorContainer);
+            return spanAt(range.commonAncestorContainer, cls);
+        }
+
+        function currentPgTarget() { return currentSpan('pg-target'); }
+        function currentNote() { return currentSpan('q-note'); }
+
+        // Wrap the selection in a note (\N...\N), or, with the caret inside one
+        // and nothing selected, unwrap it — the same toggle shape as PG. A note
+        // is read aloud but never counts toward the question length, so being
+        // able to take one off matters as much as putting it on.
+        function toggleNote() {
+            var span = currentNote();
+            if (span) {
+                var inner = span.innerHTML;
+                selectNode(span);
+                document.execCommand('insertHTML', false, inner);
+                syncDown();
+                return;
+            }
+            var html = selectionHtml();
+            if (!html) { return; }
+            // Never nest: a note inside a note would round-trip to \N\N pairs
+            // that don't mean anything.
+            html = html.replace(/<span class="q-note">([\s\S]*?)<\/span>/g, '$1');
+            document.execCommand('insertHTML', false,
+                '<span class="q-note">' + html + '</span>');
+            syncDown();
         }
 
         function selectNode(node) {
@@ -336,6 +372,7 @@ $(function () {
         // (a button appears "pressed" when its style is active).
         function updateToolbarState() {
             var inPg = !!currentPgTarget();
+            var inNote = !!currentNote();
             $toolbar.find('.rich-editor-btn').each(function () {
                 var cmd = $(this).attr('data-cmd');
                 if (cmd === 'pgauto') { return; }
@@ -347,6 +384,11 @@ $(function () {
                     $(this).attr('title', inPg
                         ? 'Remove this pronunciation-guide mark (or select fewer words to shrink it)'
                         : 'Mark pronunciation-guide target: select the word(s) and their ("...") guide');
+                } else if (cmd === 'note') {
+                    active = inNote;
+                    $(this).attr('title', inNote
+                        ? 'This is a note to the moderator/players — click to unmark it and count it toward the length again'
+                        : 'Mark the selection as a note to the moderator or players. It is read aloud but never counts toward the question length.');
                 } else {
                     try { active = document.queryCommandState(cmd); } catch (e) { active = false; }
                 }
@@ -423,6 +465,8 @@ $(function () {
                 wrapPgTarget();
             } else if (cmd === 'pgauto') {
                 autoMarkPgTargets();
+            } else if (cmd === 'note') {
+                toggleNote();
             } else {
                 cmd.split(',').forEach(function (c) {
                     document.execCommand(c, false, null);

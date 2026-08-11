@@ -10,11 +10,27 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
 
     <link rel="stylesheet" href="{% static 'css/app.min.css' %}">
-    <link rel="stylesheet" href="{% static 'fontawesome/css/font-awesome.css' %}">
-    <link rel="stylesheet" href="{% static 'css/login.css' %}?v=2">
+    <link rel="stylesheet" href="{% static 'fontawesome/css/all.min.css' %}">
+    {% comment %}
+    base.css carries the --qx-* design tokens and the dark theme, so the
+    signed-out pages are built from the same palette as the app itself.
+    {% endcomment %}
+    <link rel="stylesheet" href="{% static 'css/base.css' %}?v=56">
+    <link rel="stylesheet" href="{% static 'css/login.css' %}?v=5">
+    {% if DEBUG %}
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='12' fill='%2316a34a'/><text x='32' y='47' font-size='42' font-weight='bold' fill='white' text-anchor='middle' font-family='Arial,sans-serif'>Q</text></svg>"/>
+    {% else %}
     <link rel="icon" type="image/png" href="{% static 'favicon.png' %}">
+    {% endif %}
 
-    <link href='https://fonts.googleapis.com/css?family=Karla:400,400italic,700,700italic' rel='stylesheet' type='text/css'>
+    {% comment %}
+    Apply the saved theme before first paint, the same way the app shell does,
+    so signing out of dark mode doesn't flash a white page.
+    {% endcomment %}
+    <script>try{if(localStorage.getItem('qx_theme')==='dark'){document.documentElement.setAttribute('data-theme','dark');}}catch(e){}</script>
+
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href='https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap' rel='stylesheet'>
 
     <script src="{% static 'foundation/js/vendor/jquery.js' %}"></script>
     <script src="{% static 'foundation/js/vendor/jquery.cookie.js' %}"></script>
@@ -25,17 +41,47 @@
     <script src="{% static 'js/qsub.js' %}"></script>
 </head>
 
-<body>
+<body class="auth-page">
     {% block header %}{% endblock %}
-    <div class="row">
-        <div class="small-8 small-centered columns">
+
+    <main class="auth-shell">
+        <div class="auth-card">
+            <a href="/" class="auth-brand">
+                <span class="app-brand-mark">Q</span>
+                <span class="app-brand-name">QEMS3</span>
+            </a>
             {% block content %}{% endblock %}
         </div>
-    </div>
+        <p class="auth-footnote">A question set management system for quizbowl.</p>
+    </main>
+
+    <button type="button" class="auth-theme-toggle" id="auth-theme-toggle"
+            title="Switch theme" aria-label="Switch theme"><i class="fa fa-moon"></i></button>
 
     <script src="{% static 'foundation/js/foundation.min.js' %}"></script>
     <script>
         $(document).foundation();
+        // The same toggle the app shell offers, sharing its localStorage key, so
+        // your choice carries across signing in and out.
+        (function () {
+            var btn = document.getElementById('auth-theme-toggle');
+            function syncIcon() {
+                var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+                var icon = btn && btn.querySelector('i');
+                if (icon) { icon.className = dark ? 'fa fa-sun' : 'fa fa-moon'; }
+                if (btn) { btn.title = dark ? 'Switch to light mode' : 'Switch to dark mode'; }
+            }
+            syncIcon();
+            if (btn) {
+                btn.addEventListener('click', function () {
+                    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+                    if (dark) { document.documentElement.removeAttribute('data-theme'); }
+                    else { document.documentElement.setAttribute('data-theme', 'dark'); }
+                    try { localStorage.setItem('qx_theme', dark ? 'light' : 'dark'); } catch (e) {}
+                    syncIcon();
+                });
+            }
+        })();
     </script>
 </body>
 </html>

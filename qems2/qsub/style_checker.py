@@ -91,6 +91,52 @@ def _enabled_codes(guide, disabled):
     return GUIDE_CODES.get(guide, GUIDE_CODES[DEFAULT_GUIDE]) - set(disabled or ())
 
 
+# A dismissal is keyed by (code, token), and the token is what keeps it narrow:
+# for these rules it names the *thing* the suggestion was about — one term, one
+# guide, one cue — so dismissing it silences that one thing and nothing else.
+# The number is which '|'-separated part of the token holds that name.
+_TOKEN_SUBJECT_PART = {
+    'pronunciation': 1,     # Question|Diderot
+    'pg_span': 2,           # Question|0|("DID-er-OW")
+    'pg_possessive': 2,     # Question|0|("SAH-chee")
+    'late_identifier': 1,   # Question|this composer
+    'mixed_identifier': 1,  # Question|animal
+}
+
+
+def describe_dismissal(code, token):
+    """What dismissing (code, token) actually silences, in words.
+
+    A dismissal is never "turn this rule off". It is keyed to the exact thing
+    the suggestion was about: one term's pronunciation guide, or one field's
+    double spaces. Saying which is the difference between an editor silencing a
+    single guide and believing they have silenced every guide in the set.
+
+    Returns a dict with `rule` (the rule's own label), `subject` (the specific
+    thing, when the token names one), `field` (the part of the question it was
+    found in) and `summary` (a sentence combining them).
+    """
+    rule = RULE_LABEL_MAP.get(code, code)
+    parts = (token or '').split('|')
+    field = parts[0] if parts and parts[0] else ''
+    subject = ''
+    idx = _TOKEN_SUBJECT_PART.get(code)
+    if idx is not None and len(parts) > idx:
+        subject = parts[idx]
+
+    if subject:
+        summary = '{0} for "{1}"'.format(rule, subject)
+        # The field is part of the key, so the same term in a different field is
+        # a separate suggestion and stays. Say so rather than implying otherwise.
+        if field:
+            summary += ' (where it appears in {0} text)'.format(field)
+    elif field:
+        summary = '{0}, in {1} text'.format(rule, field)
+    else:
+        summary = rule
+    return {'rule': rule, 'subject': subject, 'field': field, 'summary': summary}
+
+
 def _issue(severity, message, code, token='', fix=None, message_html=''):
     d = {'severity': severity, 'message': message, 'code': code, 'token': token}
     if message_html:
@@ -131,9 +177,11 @@ def _issue_at(severity, message, code, token, fix, source, m):
 
 def _plain(text):
     """Readable plain text: strip HTML/smart quotes (strip_markup) plus QEMS
-    markup characters, so style checks see the words as read."""
+    markup characters, so style checks see the words as read. A note to the
+    moderator or players (``\\N…\\N``) keeps its words — it is read out, and the
+    prose rules apply to it like any other sentence — but loses its markers."""
     t = strip_markup(text or '')
-    for marker in ('\\S', '\\s', '\\B', '\\P'):
+    for marker in ('\\S', '\\s', '\\B', '\\P', '\\N'):
         t = t.replace(marker, '')
     return t.replace('_', '').replace('~', '')
 

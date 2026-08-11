@@ -1,5 +1,43 @@
 # Changelog
 
+## 2026-08-11 — Notes that don't count, a clearer dismiss, a login page that matches
+
+- **Mark a note to the moderator or players with `\N…\N`.** QEMS already tried
+  to keep "Description acceptable." out of the character count, but it had to
+  recognise the phrasing — so an unusual note was counted and the odd ordinary
+  sentence wasn't. A marked note is certain: never counted, listed by name in
+  the "what wasn't counted" breakdown, and set in grey italics everywhere
+  (question page, editor, Word, PDF, Discord copy). It keeps its own look inside
+  a bolded power region, the way a pronunciation guide does, so it can't read as
+  clue text. There's a **Note** button in the rich-text editor; the old
+  wording-based rules still run for anything unmarked.
+- **The All Comments page lists packet-level comments.** A comment left on a
+  packet was only ever visible to someone who opened that packet's page. They
+  now appear in the set's comment list and the dashboard's Recent Comments tab,
+  tagged **Packet** and linking to the packet.
+- **Dismissing a style suggestion says what it actually silences.** "Dismiss for
+  set" now reads *ignore for set…* and names the thing — "Ignore
+  Pronunciation-guide suggestions for "Diderot" everywhere in this set?" — with
+  a note that the rest of the rule keeps running. It was too easy to read the
+  old wording as switching off every pronunciation-guide check.
+- **New page: what's ignored for this set** (linked from Style Check). Lists
+  rules switched off outright, suggestions ignored set-wide, and per-question
+  dismissals grouped under their questions, each with a *stop ignoring* link.
+  Previously the only record of a dismissal was a suggestion quietly not
+  appearing. Taking one back works even if the question it was made on has since
+  been deleted.
+- **The style check page updates in place.** Applying a fix, dismissing, or
+  ignoring for the set no longer reloads: the affected question is redrawn from
+  the server (a fix can change the other issues on that question, so the whole
+  question is refetched rather than the one row), a set-wide dismissal clears
+  every matching row across the page, and the counts follow. Also fixes a latent
+  crash in "Fix ↗", which called `.fail()` on a function that returned nothing.
+- **The sign-in page matches the rest of the app** — the same purple, typeface,
+  card and dark theme, with the theme toggle and your saved preference carried
+  across signing in and out. Same treatment for sign-up, password reset and
+  forgot-username. Its Font Awesome stylesheet was also pointing at a path that
+  has 404'd since the v6 upgrade, so the signed-out pages had no icons at all.
+
 ## 2026-08-10b — Plain parentheses, per-packet PDFs, a grid that stays put
 
 - **A set can declare that only quoted parentheses are pronunciation guides.**

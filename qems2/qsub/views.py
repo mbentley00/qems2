@@ -789,7 +789,7 @@ def edit_question_set(request, qset_id):
                 set_status, total_tu_req, total_bs_req, tu_needed, bs_needed, set_pct_complete = get_questions_remaining(qset)
                 writer_stats = get_writer_questions_remaining(qset, total_tu_req, total_bs_req)
                                                                 
-                comment_tab_list = get_comment_tab_list(tossup_dict, bonus_dict)
+                comment_tab_list = get_comment_tab_list(tossup_dict, bonus_dict, qset=qset)
 
                 return render(request, 'edit_question_set.html',
                                           {'form': form,
@@ -822,7 +822,7 @@ def edit_question_set(request, qset_id):
                 tossups, tossup_dict, bonuses, bonus_dict = get_tossup_and_bonuses_in_set(qset, question_limit=30, preview_only=True)
                 set_status, total_tu_req, total_bs_req, tu_needed, bs_needed, set_pct_complete = get_questions_remaining(qset)
                 writer_stats = get_writer_questions_remaining(qset, total_tu_req, total_bs_req)
-                comment_tab_list = get_comment_tab_list(tossup_dict, bonus_dict)
+                comment_tab_list = get_comment_tab_list(tossup_dict, bonus_dict, qset=qset)
                 read_only = not (qset.is_owner(user) or user in qset_editors)
         else:
             return render(request, 'failure.html', {'message': 'You are not authorized to change this set!', 'message_class': 'alert-box alert'})
@@ -855,7 +855,7 @@ def edit_question_set(request, qset_id):
         set_status, total_tu_req, total_bs_req, tu_needed, bs_needed, set_pct_complete = get_questions_remaining(qset)
         writer_stats = get_writer_questions_remaining(qset, total_tu_req, total_bs_req)
                                                                 
-        comment_tab_list = get_comment_tab_list(tossup_dict, bonus_dict)                    
+        comment_tab_list = get_comment_tab_list(tossup_dict, bonus_dict, qset=qset)                    
 
     print("End edit_question_set get", time.strftime("%H:%M:%S"))
         
@@ -1277,7 +1277,7 @@ def view_all_comments(request, qset_id):
                                   'message_class': 'alert-box alert'})        
     else:
         tossups, tossup_dict, bonuses, bonus_dict = get_tossup_and_bonuses_in_set(qset, question_limit=10000, preview_only=True)
-        comment_tab_list = get_comment_tab_list(tossup_dict, bonus_dict, comment_limit=10000)
+        comment_tab_list = get_comment_tab_list(tossup_dict, bonus_dict, comment_limit=10000, qset=qset)
             
     return render(request, 'view_all_comments.html',
         {
@@ -4723,6 +4723,11 @@ def move_bonus(request, q_set_id, bonus_id):
 PRONUNCIATION_GUIDE_FONT = 'Source Sans Pro'
 PRONUNCIATION_GUIDE_COLOR = RGBColor(0x80, 0x80, 0x80)
 
+#: A marked note to the moderator or players (\Ntext\N) in exported Word
+#: documents: italic and dark grey — still clearly meant to be read, but not
+#: mistaken for a clue.
+QUESTION_NOTE_COLOR = RGBColor(0x55, 0x55, 0x55)
+
 
 def add_qems_formatted_runs(paragraph, text, bold=False, is_answer=False, smart_quotes=False,
                             all_power=False, allow_superpower=True, quoted_guides=False):
@@ -4770,6 +4775,7 @@ def add_qems_formatted_runs(paragraph, text, bold=False, is_answer=False, smart_
     super_flag = False
     bold_flag = False
     pg_flag = False
+    note_flag = False
     need_restore_italics = False
 
     if allow_powers:
@@ -4797,13 +4803,22 @@ def add_qems_formatted_runs(paragraph, text, bold=False, is_answer=False, smart_
         nonlocal buf
         if buf:
             run = paragraph.add_run(buf)
-            run.bold = False if guide else b
-            run.italic = i
+            # A note to the moderator/players keeps its own look wherever it
+            # falls — italic, grey, never bold — the same way a pronunciation
+            # guide does: it is read out, but it isn't clue text, so it
+            # shouldn't read as part of a bolded power region. `note_flag` is
+            # read live from the enclosing scope rather than passed in, since
+            # every caller flushes the buffer *before* toggling a flag, so the
+            # value here is the one the buffered text was written under.
+            run.bold = False if (guide or note_flag) else b
+            run.italic = i or note_flag
             run.underline = u
             if sub:
                 run.font.subscript = True
             if sup:
                 run.font.superscript = True
+            if note_flag and not guide:
+                run.font.color.rgb = QUESTION_NOTE_COLOR
             if guide:
                 # The parenthesized guide itself: a gray sans-serif aside, set
                 # apart from the question text a moderator actually reads.
@@ -4942,6 +4957,16 @@ def add_qems_formatted_runs(paragraph, text, bold=False, is_answer=False, smart_
                 buf = buf[:-1]
             flush(*current_state())
             pg_flag = not pg_flag
+            index += 1
+            prev2, prev = prev, c
+            continue
+
+        # Note to the moderator/players toggle: \N
+        if c == "N" and prev == "\\" and prev2 != "\\":
+            if buf.endswith("\\"):
+                buf = buf[:-1]
+            flush(*current_state())
+            note_flag = not note_flag
             index += 1
             prev2, prev = prev, c
             continue
@@ -8420,11 +8445,18 @@ def style_check(request, qset_id):
         for i in issues:
             i = dict(i, fixable=('fix' in i))
             i.pop('fix', None)  # keep the transform server-side
-            if ((qtype, q.id, i['code'], i.get('token', '')) in dismissed
-                    or (i['code'], i.get('token', '')) in rule_dismissed):
+            # What dismissing this one would actually silence, so the page can
+            # say it before asking rather than after doing it.
+            i['describe'] = style_checker.describe_dismissal(
+                i['code'], i.get('token', ''))['summary']
+            set_wide = (i['code'], i.get('token', '')) in rule_dismissed
+            if ((qtype, q.id, i['code'], i.get('token', '')) in dismissed or set_wide):
                 dismissed_count += 1
                 if show_dismissed:
                     i['dismissed'] = True
+                    # Undoing has to match how it was dismissed: a set-wide
+                    # dismissal isn't stored against this question at all.
+                    i['dismissed_scope'] = 'set' if set_wide else 'question'
                     shown.append(i)
             else:
                 counts[i['severity']] = counts.get(i['severity'], 0) + 1
@@ -8733,7 +8765,122 @@ def dismiss_style_issue(request):
         StyleIssueDismissal.objects.get_or_create(
             question_type=qtype, question_id=question.id, code=code, token=token,
             defaults={'question_set': qset, 'dismissed_by': user})
+    # The description says what was actually silenced (one term's guide, not the
+    # whole pronunciation rule), so the page can report it rather than leaving
+    # the editor to guess how wide the dismissal went.
+    from . import style_checker
+    return HttpResponse(json.dumps({
+        'ok': True,
+        'scope': 'set' if scope_all else 'question',
+        'description': style_checker.describe_dismissal(code, token)['summary'],
+        'set_wide_count': StyleRuleDismissal.objects.filter(question_set=qset).count(),
+    }))
+
+
+@login_required
+def restore_style_dismissal(request):
+    """Un-ignore a style suggestion from the Ignored page.
+
+    `dismiss_style_issue` authorizes through the question a suggestion was found
+    on, which a set-wide dismissal doesn't have (and the question it was made on
+    may since have been deleted). This one authorizes on the set itself, so the
+    Ignored page can always take something back.
+    """
+    if request.method != 'POST':
+        return HttpResponse(json.dumps({'ok': False, 'error': 'POST required'}), status=405)
+    user = request.user.writer
+    try:
+        qset = QuestionSet.objects.get(id=int(request.POST.get('qset_id', '')))
+    except (ValueError, QuestionSet.DoesNotExist):
+        return HttpResponse(json.dumps({'ok': False, 'error': 'No such set'}), status=404)
+    if not (qset.is_owner(user) or user in qset.editor.all()):
+        return HttpResponse(json.dumps({'ok': False, 'error': 'Not authorized'}), status=403)
+
+    code = request.POST.get('code', '')
+    token = request.POST.get('token', '')
+    if request.POST.get('scope', '') == 'all':
+        StyleRuleDismissal.objects.filter(
+            question_set=qset, code=code, token=token).delete()
+    else:
+        qtype = request.POST.get('question_type', '')
+        qid = request.POST.get('question_id', '')
+        if not str(qid).isdigit():
+            return HttpResponse(json.dumps({'ok': False, 'error': 'No such question'}), status=404)
+        StyleIssueDismissal.objects.filter(
+            question_set=qset, question_type=qtype, question_id=int(qid),
+            code=code, token=token).delete()
     return HttpResponse(json.dumps({'ok': True}))
+
+
+@login_required
+def style_ignored(request, qset_id):
+    """Everything this set has silenced in the style checker: rules switched off
+    outright, suggestions ignored set-wide, and the per-question dismissals.
+
+    Without this the only record of a dismissal was its absence — a suggestion
+    simply stopped appearing, with no way to see what had been silenced or to
+    take it back except by finding the question it came from.
+    """
+    from . import style_checker
+    user = request.user.writer
+    qset = QuestionSet.objects.get(id=qset_id)
+    if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+        return render(request, 'failure.html',
+                      {'message': 'You are not authorized to view this set!',
+                       'message_class': 'alert-box alert'})
+
+    guide = request.GET.get('guide', style_checker.DEFAULT_GUIDE)
+    if guide not in style_checker.guide_keys():
+        guide = style_checker.DEFAULT_GUIDE
+
+    disabled = qset.disabled_style_rule_set()
+    off_rules = [{'code': code, 'label': label}
+                 for code, label in style_checker.configurable_rules(guide)
+                 if code in disabled]
+
+    set_wide = []
+    for d in (StyleRuleDismissal.objects.filter(question_set=qset)
+              .select_related('dismissed_by__user').order_by('-dismissed_date')):
+        info = style_checker.describe_dismissal(d.code, d.token)
+        set_wide.append({'code': d.code, 'token': d.token, 'by': d.dismissed_by,
+                         'date': d.dismissed_date, **info})
+
+    # Per-question dismissals, grouped by the question they were made on so the
+    # list reads as "this question, these suggestions".
+    per_question = []
+    dismissals = list(StyleIssueDismissal.objects.filter(question_set=qset)
+                      .select_related('dismissed_by__user').order_by('-dismissed_date'))
+    tu_ids = [d.question_id for d in dismissals if d.question_type == 'tossup']
+    bs_ids = [d.question_id for d in dismissals if d.question_type == 'bonus']
+    tossups = {t.id: t for t in Tossup.objects.filter(id__in=tu_ids)}
+    bonuses = {b.id: b for b in Bonus.objects.filter(id__in=bs_ids)}
+    by_question = {}
+    for d in dismissals:
+        question = (tossups if d.question_type == 'tossup' else bonuses).get(d.question_id)
+        if question is None:
+            continue        # the question was deleted; its dismissals are moot
+        key = (d.question_type, d.question_id)
+        if key not in by_question:
+            answer = (question.tossup_answer if d.question_type == 'tossup'
+                      else question.part1_answer)
+            by_question[key] = {
+                'qtype': d.question_type, 'qid': d.question_id,
+                'label': _grid_answer_preview(answer, 60),
+                'edit_url': '/edit_{0}/{1}/'.format(d.question_type, d.question_id),
+                'items': []}
+        by_question[key]['items'].append(
+            {'code': d.code, 'token': d.token, 'by': d.dismissed_by,
+             'date': d.dismissed_date, **style_checker.describe_dismissal(d.code, d.token)})
+    per_question = list(by_question.values())
+
+    return render(request, 'style_ignored.html',
+                  {'qset': qset, 'user': user, 'guide': guide,
+                   'off_rules': off_rules, 'set_wide': set_wide,
+                   'per_question': per_question,
+                   'per_question_count': sum(len(q['items']) for q in per_question),
+                   'extra_crumb': 'Ignored',
+                   'extra_crumb_url': '/style_ignored/{0}/'.format(qset.id),
+                   'read_only': not (qset.is_owner(user) or user in qset.editor.all())})
 
 
 @login_required
@@ -8767,15 +8914,24 @@ def question_style_issues(request):
     rule_dismissed = set(StyleRuleDismissal.objects.filter(
         question_set=qset).values_list('code', 'token'))
 
+    # The style-check page re-renders one question in place after an action, and
+    # it can be showing dismissed issues — so it asks for them, flagged, rather
+    # than having them silently disappear from a list that was displaying them.
+    include_dismissed = request.GET.get('include_dismissed') == '1'
+
     issues = []
     for i in found:
         key = (i['code'], i.get('token', ''))
-        if key in dismissed or key in rule_dismissed:
+        is_dismissed = key in dismissed or key in rule_dismissed
+        if is_dismissed and not include_dismissed:
             continue
         issues.append({'severity': i['severity'], 'message': i['message'],
                        'message_html': i.get('message_html', ''),
                        'code': i['code'], 'token': i.get('token', ''),
-                       'fixable': 'fix' in i})
+                       'fixable': 'fix' in i,
+                       'dismissed': is_dismissed,
+                       'dismissed_scope': 'set' if key in rule_dismissed else (
+                           'question' if is_dismissed else '')})
     return HttpResponse(json.dumps({'ok': True, 'issues': issues, 'guide': guide,
                                     'qset_id': qset.id}))
 

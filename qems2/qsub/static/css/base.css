@@ -190,6 +190,19 @@
     font-size: 0.85em;
     letter-spacing: 0.02em;
 }
+/* The note button, tinted to match the grey .q-note spans it produces. */
+.rich-editor-toolbar a.rich-editor-btn.rich-editor-note {
+    color: #555;
+    font-style: italic;
+    font-size: 0.85em;
+    letter-spacing: 0.02em;
+}
+html[data-theme="dark"] .rich-editor-toolbar a.rich-editor-btn.rich-editor-note {
+    color: var(--qx-muted, #9aa0ad);
+}
+/* In the editor a note gets a faint tint so the run it covers is obvious even
+   before you notice the italics. */
+.rich-editor .q-note { background: rgba(120, 120, 120, 0.10); border-radius: 2px; }
 
 /* Reflects the formatting at the caret/selection (pressed = active) */
 .rich-editor-toolbar a.rich-editor-btn.active {
@@ -400,6 +413,14 @@ ul.button-group.home-actions > li > .button { display: flex; align-items: center
    in-power guide would read as clue text. */
 .pronunciation-guide { color: #888; font-weight: normal; }
 html[data-theme="dark"] .pronunciation-guide { color: var(--qx-muted, #9aa0ad); }
+/* A note to the moderator or the players, marked \Ntext\N: read aloud, but not
+   part of the clue. Like a guide it keeps its own look inside a bolded power
+   region, so it can't be mistaken for clue text that scores. */
+/* Italic comes from here rather than an <em> tag on purpose: the editor turns
+   its HTML back into QEMS markup, and a real <em> would add a pair of tildes
+   inside the note on every save. */
+.q-note { color: #555; font-weight: normal; font-style: italic; }
+html[data-theme="dark"] .q-note { color: var(--qx-muted, #9aa0ad); }
 /* Pronunciation-guide target word(s), marked \Pword\P in QEMS markup: amber, not
    blue, so it can't be mistaken for an italic run (which is blue in the editor).
    In the editor a dotted underline shows exactly where the marked span ends. */
@@ -1129,3 +1150,20 @@ html[data-theme="dark"] .category-tree-count { color: var(--qx-muted); }
     border-radius: 9px;
 }
 html[data-theme="dark"] .commenter-tag { background: #2a2147; color: #c4b5fd; }
+
+/* Marks a comment left on a packet rather than on a question, so the comment
+   lists (which are otherwise all questions) don't read as if a packet name were
+   an answer line. */
+.packet-comment-badge {
+    display: inline-block;
+    margin-right: 0.35em;
+    padding: 0.05em 0.45em;
+    font-size: 0.7rem;
+    letter-spacing: 0.02em;
+    line-height: 1.5;
+    vertical-align: 0.08em;
+    color: #0b5c73;
+    background: #dcf0f7;
+    border-radius: 9px;
+}
+html[data-theme="dark"] .packet-comment-badge { background: #16333d; color: #8fd3e8; }

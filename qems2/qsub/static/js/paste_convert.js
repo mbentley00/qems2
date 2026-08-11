@@ -132,6 +132,11 @@ $(function () {
         // (<span class="pg-target">) round-trips back to \Pword\P markup.
         var isPgTarget = (tag === 'span' &&
                           /\bpg-target\b/.test(node.getAttribute('class') || ''));
+        // Likewise <span class="q-note"> -> \Ntext\N. The note looks italic
+        // through CSS rather than an <em> tag, precisely so that round-tripping
+        // it doesn't add a pair of tildes inside the note on every save.
+        var isNote = (tag === 'span' &&
+                      /\bq-note\b/.test(node.getAttribute('class') || ''));
 
         // Apply QEMS markup wrappers
         if (isBold && isUnderline) {
@@ -153,6 +158,9 @@ $(function () {
         }
         if (isPgTarget) {
             inner = wrapInlineMarkup(inner, '\\P');
+        }
+        if (isNote) {
+            inner = wrapInlineMarkup(inner, '\\N');
         }
 
         // Block-level elements get a newline after them
@@ -598,6 +606,11 @@ $(function () {
 
         // 7. Pronunciation-guide target markers — annotation only, dropped
         text = text.replace(/\\P/g, '');
+
+        // 8. Notes to the moderator/players → Discord italic. The words are read
+        //    aloud, so they stay; only the marker becomes formatting.
+        text = text.replace(/\\N([\s\S]+?)\\N/g, '_$1_');
+        text = text.replace(/\\N/g, '');
 
         return text;
     }

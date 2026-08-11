@@ -3,8 +3,8 @@
 {% block title %}Sign Up - QEMS3{% endblock %}
 
 {% block content %}
-<h4>Sign Up</h4>
-<p>Already have an account? Then please <a href="{% url 'account_login' %}">sign in</a>.</p>
+<h4>Create an account</h4>
+<p>Already have one? <a href="{% url 'account_login' %}">Sign in</a>.</p>
 
 <form method="post" action="{% url 'account_signup' %}">
     {% csrf_token %}
@@ -23,6 +23,10 @@
         {% endif %}
     {% endfor %}
     {{ redirect_field }}
-    <input type="submit" value="Sign Up" class="button primary expand">
+    <input type="submit" value="Create account" class="button primary expand">
 </form>
+
+<div class="auth-links">
+    <a href="{% url 'account_login' %}">Back to sign in</a>
+</div>
 {% endblock %}

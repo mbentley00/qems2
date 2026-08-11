@@ -7728,3 +7728,425 @@ class ResolvedCommentListTests(TestCase):
         self._resolve(self._comment('already handled'))
         body = self.client.get('/edit_tossup/{0}/'.format(self.tu.id)).content.decode()
         self.assertIn('already handled', body)
+
+
+class QuestionNoteMarkupTests(TestCase):
+    """\\Ntext\\N marks a note to the moderator or players. It is read aloud but
+    never counts toward the question length — the point being that it says so
+    outright, where the wording rules can only guess."""
+
+    NOTE = 'Some clue. \\NDescription acceptable.\\N More clue here.'
+
+    def test_it_never_counts_toward_the_length(self):
+        from qems2.qsub.utils import get_character_count
+        with_note = get_character_count(self.NOTE, True)
+        without = get_character_count('Some clue. More clue here.', True)
+        self.assertEqual(with_note, without)
+
+    def test_an_unusual_note_the_wording_rules_would_miss_still_drops_out(self):
+        """This is the whole reason the marker exists: the automatic rules match
+        known phrasings, so anything else was counted."""
+        from qems2.qsub.utils import get_character_count, strip_moderator_instructions
+        odd = 'Some clue. \\NTell the teams to confer quietly.\\N More clue.'
+        self.assertIn('confer quietly',
+                      strip_moderator_instructions('Some clue. Tell the teams to confer quietly.'))
+        self.assertEqual(get_character_count(odd, True),
+                         get_character_count('Some clue. More clue.', True))
+
+    def test_the_markers_themselves_never_count(self):
+        from qems2.qsub.utils import get_character_count
+        self.assertEqual(get_character_count('\\NNote.\\N', True), 0)
+
+    def test_it_is_listed_as_an_exclusion(self):
+        from qems2.qsub.utils import get_char_count_exclusions
+        self.assertIn('Description acceptable.',
+                      get_char_count_exclusions(self.NOTE, True))
+
+    def test_a_marked_note_is_not_listed_twice(self):
+        """"Description acceptable." matches the wording rules too; marking it
+        shouldn't make it show up as two separate exclusions."""
+        from qems2.qsub.utils import get_char_count_exclusions
+        found = get_char_count_exclusions(self.NOTE, True)
+        self.assertEqual(sum(1 for f in found if 'Description acceptable' in f), 1)
+
+    def test_it_renders_as_a_note_span(self):
+        from qems2.qsub.utils import get_formatted_question_html
+        out = get_formatted_question_html(self.NOTE, False, True, False, True)
+        self.assertIn('<span class="q-note">Description acceptable.</span>', out)
+        self.assertNotIn('\\N', out)
+
+    def test_an_unclosed_marker_is_reported(self):
+        from qems2.qsub.utils import special_character_imbalance_reason
+        self.assertIsNone(special_character_imbalance_reason('a \\Nb\\N c'))
+        reason = special_character_imbalance_reason('a \\Nb c')
+        self.assertIn('\\N', reason)
+
+    def test_an_unclosed_marker_does_not_eat_the_question(self):
+        """A half-typed note shouldn't silently drop the rest of the stem from
+        the count — that would read as the question suddenly getting shorter."""
+        from qems2.qsub.utils import get_character_count
+        self.assertGreater(get_character_count('Some clue. \\NNote here.', True), 15)
+
+    def test_the_answer_preview_drops_the_markers(self):
+        from qems2.qsub.utils import get_answer_no_formatting
+        self.assertEqual(get_answer_no_formatting('_Ans_ \\Nprompt on this\\N'),
+                         'Ans prompt on this')
+
+    def test_the_style_checker_still_reads_the_words(self):
+        """A note is prose that gets read out, so the prose rules apply to it —
+        it just loses its markers."""
+        from qems2.qsub.style_checker import _plain
+        self.assertEqual(_plain('a \\Nnote here\\N b'), 'a note here b')
+
+    def test_yapp_export_keeps_the_words_and_drops_the_marker(self):
+        from qems2.qsub.yapp_export import qems_to_yapp_html
+        out = qems_to_yapp_html('Clue. \\NDescription acceptable.\\N More.')
+        self.assertIn('Description acceptable.', out)
+        self.assertNotIn('\\N', out)
+
+    def test_word_export_sets_a_note_apart(self):
+        from docx import Document
+        from qems2.qsub.views import add_qems_formatted_runs, QUESTION_NOTE_COLOR
+        doc = Document()
+        p = add_qems_formatted_runs(doc.add_paragraph(), self.NOTE)
+        texts = ''.join(r.text for r in p.runs)
+        self.assertNotIn('\\N', texts)
+        noted = [r.text for r in p.runs
+                 if r.font.color and r.font.color.rgb == QUESTION_NOTE_COLOR]
+        self.assertEqual(noted, ['Description acceptable.'])
+        self.assertTrue(all(r.italic for r in p.runs if r.text == 'Description acceptable.'))
+
+    def test_a_note_inside_power_keeps_its_own_look(self):
+        """Like a pronunciation guide: it's read out, but it isn't clue text, so
+        it must not render as part of the bolded power region."""
+        from docx import Document
+        from qems2.qsub.views import add_qems_formatted_runs
+        doc = Document()
+        p = add_qems_formatted_runs(
+            doc.add_paragraph(), '\\NDescription acceptable.\\N Clue (*) rest.')
+        note_runs = [r for r in p.runs if r.text == 'Description acceptable.']
+        self.assertTrue(note_runs)
+        self.assertFalse(any(r.bold for r in note_runs))
+
+    def test_pdf_run_writer_italicizes_a_note_and_nothing_after_it(self):
+        """The PDF walks tags, and a note is italic by CSS class rather than an
+        <em>, so the walker has to recognise the span — and not let a nested
+        pg-target span's closing tag turn the italics back off early."""
+        from qems2.qsub.pdf_export import _RunWriter
+
+        class FakePdf:
+            def __init__(self):
+                self.runs = []
+                self._style = ''
+
+            def set_font(self, name, style, size):
+                self._style = style
+
+            def write(self, height, text):
+                self.runs.append((self._style, text))
+
+        pdf = FakePdf()
+        _RunWriter(pdf).feed(
+            'clue <span class="q-note">note <span class="pg-target">word</span> on</span> after')
+        styles = {text.strip(): style for style, text in pdf.runs if text.strip()}
+        self.assertEqual(styles['clue'], '')
+        self.assertEqual(styles['note'], 'I')
+        self.assertEqual(styles['word'], 'I')      # still inside the note
+        self.assertEqual(styles['after'], '')      # the note ended
+
+    def test_the_character_count_matches_end_to_end_on_a_saved_question(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        acf = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        ou = User.objects.create_user('qn_owner', password='pw', email='qn@t.com')
+        owner = Writer.objects.get(user=ou)
+        dist = Distribution.objects.create(name='qn dist')
+        qset = QuestionSet.objects.create(
+            name='QN Set', date=timezone.now(), host='', address='', owner=owner,
+            num_packets=1, distribution=dist)
+        tu = Tossup.objects.create(
+            author=owner, question_set=qset, question_type=acf,
+            tossup_text=self.NOTE, tossup_answer='_Ans_',
+            created_date=datetime.now(), last_changed_date=datetime.now())
+        plain = Tossup(author=owner, question_set=qset, question_type=acf,
+                       tossup_text='Some clue. More clue here.', tossup_answer='_Ans_')
+        self.assertEqual(tu.character_count(), plain.character_count())
+
+
+class StyleDismissalScopeTests(TestCase):
+    """A dismissal silences the exact suggestion it was made on, never a whole
+    rule — and the UI has to say which, then let you find it again."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('sd_owner', password='pw', email='sd@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.wu = User.objects.create_user('sd_writer', password='pw', email='sdw@t.com')
+        self.writer = Writer.objects.get(user=self.wu)
+        self.dist = Distribution.objects.create(name='sd dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='Science', subcategory='Biology')
+        self.qset = QuestionSet.objects.create(
+            name='SD Set', date=timezone.now(), host='', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.owner.question_set_editor.add(self.qset)
+        self.writer.question_set_writer.add(self.qset)
+        self.tu = Tossup.objects.create(
+            author=self.owner, question_set=self.qset, question_type=self.acf,
+            category=self.de, question_number=1,
+            tossup_text='Denis Diderot ("DID-er-OW") edited it. For 10 points, name it.',
+            tossup_answer='_Encyclopedie_',
+            created_date=datetime.now(), last_changed_date=datetime.now())
+        self.client.login(username='sd_owner', password='pw')
+
+    # --- what a dismissal covers, in words -------------------------------
+    def test_description_names_the_term_not_the_rule(self):
+        from qems2.qsub.style_checker import describe_dismissal
+        out = describe_dismissal('pronunciation', 'Question|Diderot')
+        self.assertEqual(out['subject'], 'Diderot')
+        self.assertIn('Diderot', out['summary'])
+        self.assertIn('Pronunciation', out['summary'])
+
+    def test_description_names_the_guide_for_a_pg_span(self):
+        from qems2.qsub.style_checker import describe_dismissal
+        out = describe_dismissal('pg_span', 'Question|0|("DID-er-OW")')
+        self.assertEqual(out['subject'], '("DID-er-OW")')
+
+    def test_description_falls_back_to_the_field_for_a_mechanical_rule(self):
+        """A mechanical rule's token is only the field, so a set-wide dismissal
+        really does cover that whole field — the wording has to admit it."""
+        from qems2.qsub.style_checker import describe_dismissal
+        out = describe_dismissal('double_space', 'Question')
+        self.assertEqual(out['subject'], '')
+        self.assertIn('Question', out['summary'])
+        self.assertIn('Double space', out['summary'])
+
+    def test_unknown_code_still_describes_something(self):
+        from qems2.qsub.style_checker import describe_dismissal
+        self.assertTrue(describe_dismissal('made_up', '')['summary'])
+
+    def test_the_page_carries_the_description_for_the_confirm_dialog(self):
+        body = self.client.get('/style_check/{0}/'.format(self.qset.id)).content.decode()
+        self.assertIn('data-describe=', body)
+        self.assertIn('ignore for set', body)
+
+    def test_dismiss_reports_what_it_silenced(self):
+        resp = self.client.post('/dismiss_style_issue/', {
+            'question_type': 'tossup', 'question_id': self.tu.id,
+            'code': 'pronunciation', 'token': 'Question|Diderot', 'scope': 'all'})
+        data = json.loads(resp.content.decode())
+        self.assertTrue(data['ok'])
+        self.assertEqual(data['scope'], 'set')
+        self.assertIn('Diderot', data['description'])
+        self.assertEqual(data['set_wide_count'], 1)
+
+    # --- the ignored page -------------------------------------------------
+    def _ignored(self):
+        resp = self.client.get('/style_ignored/{0}/'.format(self.qset.id))
+        self.assertEqual(resp.status_code, 200)
+        return resp.content.decode()
+
+    def test_ignored_page_lists_a_set_wide_dismissal(self):
+        StyleRuleDismissal.objects.create(
+            question_set=self.qset, code='pronunciation', token='Question|Diderot',
+            dismissed_by=self.owner)
+        body = self._ignored()
+        self.assertIn('Diderot', body)
+        self.assertIn('pronunciation', body)
+
+    def test_ignored_page_lists_a_per_question_dismissal_under_its_question(self):
+        StyleIssueDismissal.objects.create(
+            question_set=self.qset, question_type='tossup', question_id=self.tu.id,
+            code='pg_span', token='Question|0|("DID-er-OW")', dismissed_by=self.owner)
+        body = self._ignored()
+        self.assertIn('Encyclopedie', body)                 # the question it's on
+        self.assertIn('/edit_tossup/{0}/'.format(self.tu.id), body)
+        self.assertIn('DID-er-OW', body)
+
+    def test_ignored_page_lists_rules_switched_off(self):
+        self.qset.disabled_style_rules = 'contractions'
+        self.qset.save()
+        self.assertIn('Contractions', self._ignored())
+
+    def test_ignored_page_says_so_when_nothing_is_ignored(self):
+        # Count the rendered elements, not the string — the stylesheet on the
+        # same page also mentions the class.
+        body = self._ignored()
+        self.assertEqual(body.count('class="si-empty"'), 3)   # all three sections
+
+    def test_a_dismissal_on_a_deleted_question_is_skipped(self):
+        """The dismissal row outlives the question; the page must not 500 on it."""
+        StyleIssueDismissal.objects.create(
+            question_set=self.qset, question_type='tossup', question_id=999999,
+            code='pg_span', token='Question|0|(x)', dismissed_by=self.owner)
+        self.assertEqual(
+            self.client.get('/style_ignored/{0}/'.format(self.qset.id)).status_code, 200)
+
+    def test_style_check_links_to_the_ignored_page(self):
+        body = self.client.get('/style_check/{0}/'.format(self.qset.id)).content.decode()
+        self.assertIn('/style_ignored/{0}/'.format(self.qset.id), body)
+
+    # --- taking one back --------------------------------------------------
+    def test_restore_removes_a_set_wide_dismissal(self):
+        StyleRuleDismissal.objects.create(
+            question_set=self.qset, code='pronunciation', token='Question|Diderot')
+        resp = self.client.post('/restore_style_dismissal/', {
+            'qset_id': self.qset.id, 'code': 'pronunciation',
+            'token': 'Question|Diderot', 'scope': 'all'})
+        self.assertTrue(json.loads(resp.content.decode())['ok'])
+        self.assertFalse(StyleRuleDismissal.objects.filter(question_set=self.qset).exists())
+
+    def test_restore_removes_a_per_question_dismissal(self):
+        StyleIssueDismissal.objects.create(
+            question_set=self.qset, question_type='tossup', question_id=self.tu.id,
+            code='pg_span', token='t')
+        resp = self.client.post('/restore_style_dismissal/', {
+            'qset_id': self.qset.id, 'question_type': 'tossup',
+            'question_id': self.tu.id, 'code': 'pg_span', 'token': 't', 'scope': ''})
+        self.assertTrue(json.loads(resp.content.decode())['ok'])
+        self.assertFalse(StyleIssueDismissal.objects.filter(question_set=self.qset).exists())
+
+    def test_restore_works_when_the_question_it_came_from_is_gone(self):
+        """A set-wide dismissal outlives its question — that's the whole reason
+        this endpoint authorizes on the set rather than through a question."""
+        StyleRuleDismissal.objects.create(
+            question_set=self.qset, code='pronunciation', token='Question|Diderot')
+        self.tu.delete()
+        resp = self.client.post('/restore_style_dismissal/', {
+            'qset_id': self.qset.id, 'code': 'pronunciation',
+            'token': 'Question|Diderot', 'scope': 'all'})
+        self.assertTrue(json.loads(resp.content.decode())['ok'])
+
+    def test_a_writer_cannot_restore(self):
+        StyleRuleDismissal.objects.create(
+            question_set=self.qset, code='pronunciation', token='Question|Diderot')
+        self.client.logout()
+        self.client.login(username='sd_writer', password='pw')
+        resp = self.client.post('/restore_style_dismissal/', {
+            'qset_id': self.qset.id, 'code': 'pronunciation',
+            'token': 'Question|Diderot', 'scope': 'all'})
+        self.assertEqual(resp.status_code, 403)
+        self.assertTrue(StyleRuleDismissal.objects.filter(question_set=self.qset).exists())
+
+    # --- the in-place refresh the page does after an action ---------------
+    def _issues(self, **extra):
+        params = {'question_type': 'tossup', 'question_id': self.tu.id}
+        params.update(extra)
+        resp = self.client.get('/question_style_issues/', params)
+        return json.loads(resp.content.decode())['issues']
+
+    def test_question_issues_can_include_dismissed_ones_flagged(self):
+        # Dismiss a suggestion the checker really emits for this question, so
+        # the test can't pass or fail on a token that never existed.
+        before = self._issues()
+        self.assertTrue(before, 'expected the sample tossup to raise something')
+        target = before[0]
+        StyleRuleDismissal.objects.create(
+            question_set=self.qset, code=target['code'], token=target['token'])
+
+        plain = self._issues()
+        self.assertNotIn((target['code'], target['token']),
+                         [(i['code'], i['token']) for i in plain])
+        self.assertTrue(all(not i['dismissed'] for i in plain))
+
+        withd = self._issues(include_dismissed='1')
+        hidden = [i for i in withd if i['dismissed']]
+        self.assertEqual([(i['code'], i['token']) for i in hidden],
+                         [(target['code'], target['token'])])
+        self.assertEqual(hidden[0]['dismissed_scope'], 'set')
+
+    def test_a_per_question_dismissal_is_flagged_as_such(self):
+        target = self._issues()[0]
+        StyleIssueDismissal.objects.create(
+            question_set=self.qset, question_type='tossup', question_id=self.tu.id,
+            code=target['code'], token=target['token'])
+        hidden = [i for i in self._issues(include_dismissed='1') if i['dismissed']]
+        self.assertEqual(hidden[0]['dismissed_scope'], 'question')
+
+
+class PacketCommentListTests(TestCase):
+    """A comment left on a packet is a note about the set like any other, so it
+    belongs in the comment lists — before, it was only ever visible to someone
+    who happened to open that packet's page."""
+
+    def setUp(self):
+        from django.contrib.sites.models import Site
+        from django_comments.models import Comment as _C
+        self.Comment = _C
+        self.site = Site.objects.get_current()
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf_tu = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('pc_owner', password='pw', email='pc@test.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='pc dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='Science', subcategory='Biology')
+        self.qset = QuestionSet.objects.create(
+            name='PC Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.owner.question_set_editor.add(self.qset)
+        self.packet = Packet.objects.create(
+            question_set=self.qset, packet_name='Packet 7', created_by=self.owner)
+        self.tu = Tossup.objects.create(
+            author=self.owner, question_set=self.qset, question_type=self.acf_tu,
+            category=self.de, question_number=1, packet=self.packet,
+            tossup_text='A stem. (*) end.', tossup_answer='_Photosynthesis_',
+            created_date=datetime.now(), last_changed_date=datetime.now())
+        self.client.login(username='pc_owner', password='pw')
+
+    def _comment_on(self, obj, text):
+        return self.Comment.objects.create(
+            content_type=ContentType.objects.get_for_model(obj),
+            object_pk=str(obj.id), site=self.site, user=self.ou, comment=text,
+            is_public=True, is_removed=False)
+
+    def _all_comments_body(self):
+        resp = self.client.get('/view_all_comments/{0}/'.format(self.qset.id))
+        self.assertEqual(resp.status_code, 200)
+        return resp.content.decode()
+
+    def test_a_packet_comment_is_listed(self):
+        self._comment_on(self.packet, 'this packet is light on science')
+        body = self._all_comments_body()
+        self.assertIn('this packet is light on science', body)
+
+    def test_it_links_to_the_packet_and_is_labelled(self):
+        self._comment_on(self.packet, 'needs a tiebreaker')
+        row = [r for r in self._all_comments_body().split('<tr') if 'needs a tiebreaker' in r][0]
+        self.assertIn('/edit_packet/{0}'.format(self.packet.id), row)
+        self.assertIn('Packet 7', row)
+        self.assertIn('packet-comment-badge', row)
+
+    def test_question_comments_are_unaffected(self):
+        self._comment_on(self.tu, 'fix the power mark')
+        self._comment_on(self.packet, 'reorder these')
+        body = self._all_comments_body()
+        self.assertIn('fix the power mark', body)
+        self.assertIn('reorder these', body)
+        row = [r for r in body.split('<tr') if 'fix the power mark' in r][0]
+        self.assertIn('/edit_tossup/{0}'.format(self.tu.id), row)
+        self.assertNotIn('packet-comment-badge', row)
+
+    def test_a_resolved_packet_comment_drops_out_like_any_other(self):
+        comment = self._comment_on(self.packet, 'already handled')
+        CommentResolution.objects.create(
+            comment=comment, resolved=True, resolved_by=self.owner)
+        self.assertNotIn('already handled', self._all_comments_body())
+
+    def test_the_dashboard_recent_comments_tab_lists_them_too(self):
+        """One list showing packet comments and the other not would just be
+        confusing — they come from the same helper."""
+        self._comment_on(self.packet, 'short on science')
+        body = self.client.get(
+            '/edit_question_set/{0}/'.format(self.qset.id)).content.decode()
+        table = body.split('id="comments-table"')[1].split('</table>')[0]
+        self.assertIn('short on science', table)
+
+    def test_another_sets_packet_comments_stay_out(self):
+        other_set = QuestionSet.objects.create(
+            name='Other Set', date=timezone.now(), host='h', address='',
+            owner=self.owner, num_packets=1, distribution=self.dist)
+        other_packet = Packet.objects.create(
+            question_set=other_set, packet_name='Elsewhere', created_by=self.owner)
+        self._comment_on(other_packet, 'belongs to the other set')
+        self.assertNotIn('belongs to the other set', self._all_comments_body())
