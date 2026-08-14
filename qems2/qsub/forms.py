@@ -59,8 +59,13 @@ class QuestionSetForm(forms.ModelForm):
         # tossups_per_packet / bonuses_per_packet are managed on the packetization
         # page, not this form; leaving them in made the form (which never renders
         # them) fail validation on every submit, so edits silently didn't save.
+        # approval_status/approval_date are the administrator's, not the
+        # owner's: they're set when the set is created and changed only from
+        # the review page. Left in, the form would render neither but demand
+        # both, so every submit would fail validation.
         exclude = ['owner', 'address', 'host', 'max_vhsl_bonus_length',
-                   'tossups_per_packet', 'bonuses_per_packet']
+                   'tossups_per_packet', 'bonuses_per_packet',
+                   'approval_status', 'approval_date']
 
     def __init__(self, read_only=False, writer=None, *args, **kwargs):
         super(QuestionSetForm, self).__init__(*args, **kwargs)
@@ -114,10 +119,13 @@ class TossupForm(forms.ModelForm):
         # all_power is rendered as a plain checkbox in the template and read
         # straight from POST (a nullable BooleanField would otherwise render as
         # a three-way select).
+        # tossup_answer_structure is written from the structured answer editor's
+        # own fields (see views._with_structured_answers), not as a JSON box.
         exclude = ['question_set', 'subtype', 'time_period', 'location', 'question_number',
                    'search_question_content', 'search_question_answers', 'question_history',
                    'editor', 'edited_date', 'proofreader', 'proofread_date',
-                   'created_date', 'last_changed_date', 'all_power']
+                   'created_date', 'last_changed_date', 'all_power',
+                   'tossup_answer_structure']
 
     def __init__(self, *args, **kwargs):
         qset_id = kwargs.pop('qset_id', None)
@@ -202,10 +210,13 @@ class BonusForm(forms.ModelForm):
         model = Bonus
         # See TossupForm.Meta: bookkeeping fields belong to save_question(),
         # not the form, so a bound instance must not overwrite them.
+        # The part*_answer_structure fields are written from the structured
+        # answer editor's own fields (see views._with_structured_answers).
         exclude = ['question_set', 'subtype', 'time_period', 'location', 'question_number',
                    'search_question_content', 'search_question_answers', 'question_history',
                    'editor', 'edited_date', 'proofreader', 'proofread_date',
-                   'created_date', 'last_changed_date']
+                   'created_date', 'last_changed_date',
+                   'part1_answer_structure', 'part2_answer_structure', 'part3_answer_structure']
 
     def __init__(self, *args, **kwargs):
         qset_id = kwargs.pop('qset_id', None)

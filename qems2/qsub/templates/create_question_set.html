@@ -11,6 +11,14 @@
 
 <h3 class="page-header">Create Question Set</h3>
 {% if message %}<div class="{{ message_class }}">{{ message }}</div>{% endif %}
+{% if needs_approval %}
+<div class="alert-box info">
+    Your account is less than two days old, so this set will be created provisionally and a
+    site administrator will be emailed to approve it. You can start writing straight away;
+    until it's approved the set just won't appear in the public set list and its join links
+    won't work.
+</div>
+{% endif %}
 
 <form action="" method="post" class="cqs-form">
     {% csrf_token %}
@@ -83,6 +91,9 @@
             <label class="cqs-check">{{ form.tossups_only }}
                 <span>Tossup-only tournament (no bonuses)
                     <small>Hides bonus requirements and quotas. Bonuses are never deleted.</small></span></label>
+            <label class="cqs-check">{{ form.structured_answers }}
+                <span>Structured answer lines
+                    <small>Records an answer as a primary answer plus its accepts and directed prompts, editable as fields. The printed line is unchanged.</small></span></label>
             <label class="cqs-check">{{ form.public }}
                 <span>Public (listed for everyone)
                     <small>Anyone can see this set is being written and request to join (which emails you). It grants no access by itself.</small></span></label>

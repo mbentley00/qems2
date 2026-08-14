@@ -265,6 +265,13 @@ EMAIL_PORT = int(os.environ.get('EMAIL_PORT', '587'))
 EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
 EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
 
+# Where to send "a brand-new account created a set — approve it?" mail. A set
+# made before the new-account wait is up is created provisionally and held out
+# of the public list until someone here approves it. Comma-separate for several
+# recipients; blank switches the review off, in which case such a set is simply
+# approved on creation.
+SET_APPROVAL_EMAIL = os.environ.get('SET_APPROVAL_EMAIL', 'bentley.michael.j@gmail.com')
+
 # Absolute base URL used to build links in notification emails (no trailing
 # slash). Override per-deployment with the BASE_URL env var.
 BASE_URL = os.environ.get('BASE_URL', 'https://qems2-bbhfewbrfzhyhvbk.westus3-01.azurewebsites.net').rstrip('/')

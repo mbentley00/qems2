@@ -91,11 +91,17 @@
                     {{ form.part1_text }}
                     {% if form.part1_text.errors %}{{ form.part1_text.errors }}{% endif %}
                 </label>
+                {% if structured_answers_on %}
+                    {% for block in structured_parts %}{% if block.part == 1 %}
+                    {% include "_structured_answer.html" with prefix=block.prefix structure=block.structure label="Part 1 Answer" is_tossup=False line=block.line %}
+                    {% endif %}{% endfor %}
+                {% else %}
                 <label>
                     Part 1 Answer
                     {{ form.part1_answer }}
-                    {% if form.part1_answer.errors %}{{ form.part1_answer.errors }}{% endif %}
                 </label>
+                {% endif %}
+                {% if form.part1_answer.errors %}{{ form.part1_answer.errors }}{% endif %}
             </div>
         </div>
 
@@ -111,11 +117,17 @@
                         {{ form.part2_text }}
                         {% if form.part2_text.errors %}{{ form.part2_text.errors }}{% endif %}
                     </label>
+                    {% if structured_answers_on %}
+                        {% for block in structured_parts %}{% if block.part == 2 %}
+                        {% include "_structured_answer.html" with prefix=block.prefix structure=block.structure label="Part 2 Answer" is_tossup=False line=block.line %}
+                        {% endif %}{% endfor %}
+                    {% else %}
                     <label>
                         Part 2 Answer
                         {{ form.part2_answer }}
-                        {% if form.part2_answer.errors %}{{ form.part2_answer.errors }}{% endif %}
                     </label>
+                    {% endif %}
+                    {% if form.part2_answer.errors %}{{ form.part2_answer.errors }}{% endif %}
                 </div>
             </div>
             <div class="bonus-part">
@@ -129,15 +141,26 @@
                         {{ form.part3_text }}
                         {% if form.part3_text.errors %}{{ form.part3_text.errors }}{% endif %}
                     </label>
+                    {% if structured_answers_on %}
+                        {% for block in structured_parts %}{% if block.part == 3 %}
+                        {% include "_structured_answer.html" with prefix=block.prefix structure=block.structure label="Part 3 Answer" is_tossup=False line=block.line %}
+                        {% endif %}{% endfor %}
+                    {% else %}
                     <label>
                         Part 3 Answer
                         {{ form.part3_answer }}
-                        {% if form.part3_answer.errors %}{{ form.part3_answer.errors }}{% endif %}
                     </label>
+                    {% endif %}
+                    {% if form.part3_answer.errors %}{{ form.part3_answer.errors }}{% endif %}
                 </div>
             </div>
         {% endif %}
         </div>
+        {% if structured_answer_problems %}
+        <div class="alert-box warning sa-problems">
+            <ul>{% for problem in structured_answer_problems %}<li>{{ problem }}</li>{% endfor %}</ul>
+        </div>
+        {% endif %}
         {% if bonus %}
         <p class="char-count-note">
             Live character count: <strong id="live-char-count" data-qset-id="{{ qset.id }}" data-max="{{ qset.max_acf_bonus_length }}">{{ bonus.character_count }}</strong> / {{ qset.max_acf_bonus_length }}
@@ -318,6 +341,7 @@ $(function () {
 {% if bonus and role == "editor" %}{% include "_swap_dialog.html" %}{% endif %}
 
 <script src="{% static 'js/anchored_comments.js' %}?v=2"></script>
+{% if structured_answers_on %}<script src="{% static 'js/structured_answer.js' %}?v=1"></script>{% endif %}
 <script>
 // Live character count for the bonus (leadin + parts) as it's edited.
 $(function () {

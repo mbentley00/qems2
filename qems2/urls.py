@@ -91,6 +91,7 @@ urlpatterns = [
     re_path(r'^role_groups/$', role_groups),
     re_path(r'^user_search/$', user_search),
     re_path(r'^approve_group_join/(?P<group_id>[0-9]+)/(?P<writer_id>[0-9]+)/$', approve_group_join),
+    re_path(r'^approve_new_set/(?P<qset_id>[0-9]+)/$', approve_new_set),
     re_path(r'^attach_role_group/(?P<qset_id>[0-9]+)/$', attach_role_group),
     re_path(r'^detach_role_group/(?P<qset_id>[0-9]+)/$', detach_role_group),
     re_path(r'^add_editor/(?P<qset_id>[0-9]+)/$', add_editor),

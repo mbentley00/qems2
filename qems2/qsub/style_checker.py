@@ -63,6 +63,7 @@ RULE_LABELS = [
     ('pg_span', 'Pronunciation guides without a marked target (\\P…\\P)'),
     ('pg_possessive', 'Pronunciation guides that split a possessive'),
     ('answer_alts', 'Answer line missing standard alternates'),
+    ('prompt_undirected', 'Prompts with no directed instruction'),
 ]
 RULE_LABEL_MAP = dict(RULE_LABELS)
 ALL_CODES = [c for c, _ in RULE_LABELS]
@@ -99,6 +100,7 @@ _TOKEN_SUBJECT_PART = {
     'pronunciation': 1,     # Question|Diderot
     'pg_span': 2,           # Question|0|("DID-er-OW")
     'pg_possessive': 2,     # Question|0|("SAH-chee")
+    'prompt_undirected': 1,  # Answer|Louis
     'late_identifier': 1,   # Question|this composer
     'mixed_identifier': 1,  # Question|animal
 }
@@ -547,6 +549,65 @@ def _answer_format_issues(label, raw):
     return issues
 
 
+# What makes a prompt *directed*: it tells the moderator what to say. "by
+# asking", "by saying" and the like are the standard phrasings; a quoted
+# question after "with" ("prompt on __Louis__ with \"which Louis?\"") says the
+# same thing. The open "by <verb>ing" form catches the rest ("by requesting the
+# regnal number") without listing every verb a writer might reach for.
+_DIRECTED_PROMPT_RE = re.compile(
+    r'(?i)\bby\s+[a-z]+ing\b'
+    r'|\bwith\s*["“‘\']'
+    r'|\bask(?:ing)?\s*["“‘\']')
+
+# Where a prompt clause ends: the next directive, or a separator that starts a
+# new one. Without this, "prompt on __Louis__; accept __Louis XIV__ by ..." would
+# look directed because a later clause happens to contain the phrasing. "or" is
+# deliberately not a boundary — "prompt on __Louis__ or __Louis the Great__ by
+# asking ..." is one clause with two targets.
+_CLAUSE_END_RE = re.compile(r'(?i)[;\]]|\banti-?prompt\b|\bprompt\b|\baccept\b|\breject\b')
+
+
+def _prompt_target(clause):
+    """The word(s) a prompt clause is about: its first markup run ("__Louis__"),
+    or the words after "on" when the writer didn't mark one."""
+    m = _ANSWER_RUN_RE.search(clause)
+    if m:
+        return (m.group(1) or m.group(2) or m.group(3) or '').strip()
+    m = re.search(r'(?i)\bon\s+(.{1,40}?)(?:[;,\]]|$)', clause)
+    return _plain(m.group(1)).strip() if m else ''
+
+
+def _prompt_direction_issues(label, raw):
+    """Flag a prompt that doesn't tell the moderator what to say.
+
+    "Prompt on __Louis__" leaves the moderator to invent the follow-up, and two
+    moderators inventing different ones is the whole reason directed prompts
+    exist. "Prompt on __Louis__ by asking for the regnal number" says it once,
+    in the packet.
+    """
+    if not (raw or '').strip():
+        return []
+    issues = []
+    for n, m in enumerate(_ANSWER_DIRECTIVE_RE.finditer(raw)):
+        directive = m.group(1).lower()
+        if 'prompt' not in directive:
+            continue
+
+        end = _CLAUSE_END_RE.search(raw, m.end())
+        clause = raw[m.end():end.start() if end else len(raw)]
+        if _DIRECTED_PROMPT_RE.search(clause):
+            continue
+
+        target = _prompt_target(clause)
+        quoted = ' "{0}"'.format(target) if target else ''
+        message = ('{0}: undirected {1}{2} — say what the moderator should ask '
+                   '("by asking ...")'.format(label, directive, quoted))
+        issues.append(_issue_at(
+            WARNING, message, 'prompt_undirected',
+            '{0}|{1}'.format(label, target or n), None, raw, m))
+    return issues
+
+
 def _answer_alt_issues(label, raw_answer):
     """Suggest standard acceptable alternates the answer line is missing, looked
     up by primary answer in the bundled answer database (INFO, not auto-fixed —
@@ -769,6 +830,9 @@ def check_tossup(tu, guide=DEFAULT_GUIDE, disabled=None):
     if 'answer_alts' in enabled:
         issues += _answer_alt_issues('Answer', tu.tossup_answer)
 
+    if 'prompt_undirected' in enabled:
+        issues += _prompt_direction_issues('Answer', tu.tossup_answer)
+
     if 'pronunciation' in enabled:
         issues += _pronunciation_issues('Question', text, 'tossup_text', quoted)
 
@@ -830,6 +894,10 @@ def check_bonus(b, guide=DEFAULT_GUIDE, disabled=None):
         for label, ans in (('Answer 1', b.part1_answer), ('Answer 2', b.part2_answer), ('Answer 3', b.part3_answer)):
             if (ans or '').strip():
                 issues += _answer_alt_issues(label, ans)
+
+    if 'prompt_undirected' in enabled:
+        for label, ans in (('Answer 1', b.part1_answer), ('Answer 2', b.part2_answer), ('Answer 3', b.part3_answer)):
+            issues += _prompt_direction_issues(label, ans)
 
     if 'pronunciation' in enabled:
         for label, raw, field in parts:

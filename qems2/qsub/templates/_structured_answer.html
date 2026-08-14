@@ -1,0 +1,80 @@
+{% comment %}
+One structured answer line: the required primary answer, then any number of
+accepts and directed prompts. Include with `prefix` (the POST field prefix,
+e.g. "answer" or "part1"), `structure` (from a question's answer_structure()),
+`label`, and `is_tossup` (only a tossup can say "until X is read" — a bonus part
+has no shared text to read up to).
+{% endcomment %}
+<div class="structured-answer" data-prefix="{{ prefix }}" data-is-tossup="{{ is_tossup|yesno:"1,0" }}">
+    <label class="sa-primary">
+        {{ label }}<span class="sa-required" title="Required">*</span>
+        <input type="text" name="{{ prefix }}_primary" value="{{ structure.primary }}"
+               class="sa-primary-input" required>
+    </label>
+
+    <div class="sa-group" data-group="accept">
+        <div class="sa-group-head">Also accept</div>
+        <div class="sa-rows">
+            {% for accept in structure.accepts %}
+            <div class="sa-row">
+                <input type="text" name="{{ prefix }}_accept_text" value="{{ accept.text }}"
+                       placeholder="another acceptable answer" class="sa-text">
+                {% if is_tossup %}
+                <input type="text" name="{{ prefix }}_accept_until" value="{{ accept.until|default_if_none:"" }}"
+                       placeholder="until this word is read" class="sa-until"
+                       title="Optional: a word in the tossup after which this stops being acceptable">
+                {% endif %}
+                <button type="button" class="sa-remove" title="Remove">&times;</button>
+            </div>
+            {% endfor %}
+        </div>
+        <button type="button" class="sa-add" data-group="accept">+ accept</button>
+    </div>
+
+    <div class="sa-group" data-group="prompt">
+        <div class="sa-group-head">Prompt on</div>
+        <div class="sa-rows">
+            {% for prompt in structure.prompts %}
+            <div class="sa-row">
+                <select name="{{ prefix }}_prompt_anti" class="sa-kind">
+                    <option value="prompt"{% if not prompt.anti %} selected{% endif %}>prompt</option>
+                    <option value="anti"{% if prompt.anti %} selected{% endif %}>antiprompt</option>
+                </select>
+                <input type="text" name="{{ prefix }}_prompt_text" value="{{ prompt.text }}"
+                       placeholder="what to prompt on" class="sa-text">
+                <input type="text" name="{{ prefix }}_prompt_instruction" value="{{ prompt.instruction }}"
+                       placeholder="by asking&hellip;" class="sa-instruction"
+                       title="What the moderator should say. Leaving this empty means every moderator invents their own follow-up.">
+                {% if is_tossup %}
+                <input type="text" name="{{ prefix }}_prompt_until" value="{{ prompt.until|default_if_none:"" }}"
+                       placeholder="until this word is read" class="sa-until"
+                       title="Optional: a word in the tossup after which this stops being promptable">
+                {% endif %}
+                <button type="button" class="sa-remove" title="Remove">&times;</button>
+            </div>
+            {% endfor %}
+        </div>
+        <button type="button" class="sa-add" data-group="prompt">+ prompt</button>
+    </div>
+
+    {% if structure.unparsed %}
+    <div class="sa-group sa-unparsed">
+        <div class="sa-group-head">Kept as written
+            <small>This part of the answer line isn't an accept or a prompt, so it's carried through untouched.</small>
+        </div>
+        <div class="sa-rows">
+            {% for clause in structure.unparsed %}
+            <div class="sa-row">
+                <input type="text" name="{{ prefix }}_unparsed" value="{{ clause }}" class="sa-text">
+                <button type="button" class="sa-remove" title="Remove">&times;</button>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="sa-preview" aria-live="polite">
+        <span class="sa-preview-label">Reads as</span>
+        <code class="sa-preview-text">{{ line }}</code>
+    </div>
+</div>

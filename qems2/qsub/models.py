@@ -120,6 +120,12 @@ class Writer (models.Model):
 
     administrator = models.BooleanField(default=False)
 
+    # Lifts the new-account wait for this one person. A brand-new account can't
+    # create sets, distributions or role groups for two days (anti-spam); tick
+    # this in the Django admin and they can do all three straight away. It's the
+    # vouching-for-someone lever: nothing else about the account changes.
+    can_create_early = models.BooleanField(default=False)
+
     send_mail_on_comments = models.BooleanField(default=False)
 
     def get_real_name(self):
@@ -141,6 +147,22 @@ class QuestionSet (models.Model):
     # When public, the set is listed for all logged-in users, who can request to
     # join it (which emails the owner). It does not grant any access by itself.
     public = models.BooleanField(default=False)
+
+    # Anti-spam review state. A set made by an account too new to create one
+    # outright isn't refused — it's created 'pending' and an administrator is
+    # emailed to approve it. A pending set belongs to its owner and works
+    # normally for them; what it can't do is reach anyone else, so it stays out
+    # of the public list and off its own join links until it's approved.
+    APPROVAL_APPROVED = 'approved'
+    APPROVAL_PENDING = 'pending'
+    APPROVAL_DECLINED = 'declined'
+    APPROVAL_CHOICES = ((APPROVAL_APPROVED, 'Approved'),
+                        (APPROVAL_PENDING, 'Pending review'),
+                        (APPROVAL_DECLINED, 'Declined'))
+    approval_status = models.CharField(max_length=10, default=APPROVAL_APPROVED,
+                                       choices=APPROVAL_CHOICES)
+    # When the administrator acted, for the record. Null while pending.
+    approval_date = models.DateTimeField(null=True, blank=True)
     # Comma-separated style-check rule codes turned off for this set (e.g. a team
     # that allows contractions). Empty = run every rule the guide enables.
     disabled_style_rules = models.TextField(blank=True, default='')
@@ -173,6 +195,14 @@ class QuestionSet (models.Model):
     # text and never scores 20.
     enable_superpower = models.BooleanField(default=False)
 
+    # When true, answer lines are recorded as structure - a required primary
+    # answer plus optional accepts and directed prompts - instead of only as
+    # prose. Off by default. The prose line stays canonical either way, so
+    # turning this on never changes what a packet looks like; it adds a
+    # structured editor, and derives the structure for questions that arrive as
+    # prose. See qsub/answer_structure.py.
+    structured_answers = models.BooleanField(default=False)
+
     class Admin: pass
 
     def is_owner(self, writer):
@@ -188,6 +218,22 @@ class QuestionSet (models.Model):
     def disabled_style_rule_set(self):
         """Style-check rule codes turned off for this set."""
         return set(c for c in (self.disabled_style_rules or '').split(',') if c)
+
+    @property
+    def awaiting_approval(self):
+        """True while an administrator has yet to review this set."""
+        return self.approval_status == self.APPROVAL_PENDING
+
+    @property
+    def approval_declined(self):
+        return self.approval_status == self.APPROVAL_DECLINED
+
+    @property
+    def visible_to_strangers(self):
+        """True if the set may be shown to, or joined by, people who aren't
+        already members. Only an approved set qualifies — that is the whole
+        point of holding a new account's first set for review."""
+        return self.approval_status == self.APPROVAL_APPROVED
 
     def __str__(self):
         return '{0!s}'.format(self.name)
@@ -866,6 +912,10 @@ class Tossup (models.Model):
     question_set = models.ForeignKey(QuestionSet, on_delete=models.CASCADE)
     tossup_text = models.TextField()
     tossup_answer = models.TextField()
+    # The answer line's structure, for sets with structured_answers on: a
+    # primary answer plus optional accepts and prompts. Null when the set
+    # doesn't use it. tossup_answer stays the canonical printed line.
+    tossup_answer_structure = models.JSONField(null=True, blank=True, default=None)
     period = models.ForeignKey(Period, on_delete=models.CASCADE, null=True)
 
     category = models.ForeignKey(DistributionEntry, on_delete=models.CASCADE, null=True) # TODO: Delete this later
@@ -982,6 +1032,35 @@ class Tossup (models.Model):
         guide if it has quotation marks in it (see QuestionSet)."""
         qset = self.get_question_set()
         return bool(qset and qset.guides_require_quotes)
+
+    def structured_answers_enabled(self):
+        """True when this set records answer lines as structure (see
+        QuestionSet.structured_answers)."""
+        qset = self.get_question_set()
+        return bool(qset and qset.structured_answers)
+
+    def answer_structure(self):
+        """This tossup's answer structure, derived from the prose line when
+        nothing has been stored yet — a set that switches the setting on gets
+        structure for the questions already in it, without a migration.
+
+        A stored structure is only used while it still describes the line: the
+        structured editor writes the two together, so anything that edits the
+        line on its own (a bulk edit, an import, a reverted history entry)
+        leaves them disagreeing, and the line is the one to believe."""
+        from .answer_structure import describes, normalize, parse_line
+        if self.tossup_answer_structure:
+            stored = normalize(self.tossup_answer_structure)
+            if describes(stored, self.tossup_answer):
+                return stored
+        return parse_line(self.tossup_answer)
+
+    def answer_structure_problems(self):
+        """Editor-facing warnings about this tossup's answer structure."""
+        from .answer_structure import validate
+        if not self.structured_answers_enabled():
+            return []
+        return validate(self.answer_structure(), self.tossup_text)
 
     def to_html(self, include_category=False, include_character_count=False):
 
@@ -1116,6 +1195,13 @@ class Bonus(models.Model):
     part3_text = models.TextField(null=True)
     part3_answer = models.TextField(null=True)
 
+    # Each part's answer-line structure, for sets with structured_answers on.
+    # Null when the set doesn't use it. A bonus part has no shared text to read
+    # up to, so these never carry an "until". See qsub/answer_structure.py.
+    part1_answer_structure = models.JSONField(null=True, blank=True, default=None)
+    part2_answer_structure = models.JSONField(null=True, blank=True, default=None)
+    part3_answer_structure = models.JSONField(null=True, blank=True, default=None)
+
     DIFFICULTY_CHOICES = [('', '-'), ('e', 'Easy'), ('m', 'Medium'), ('h', 'Hard')]
     part1_difficulty = models.CharField(max_length=1, blank=True, default='', choices=DIFFICULTY_CHOICES)
     part2_difficulty = models.CharField(max_length=1, blank=True, default='', choices=DIFFICULTY_CHOICES)
@@ -1242,6 +1328,41 @@ class Bonus(models.Model):
         guide if it has quotation marks in it (see QuestionSet)."""
         qset = self.get_question_set()
         return bool(qset and qset.guides_require_quotes)
+
+    def structured_answers_enabled(self):
+        """True when this set records answer lines as structure (see
+        QuestionSet.structured_answers)."""
+        qset = self.get_question_set()
+        return bool(qset and qset.structured_answers)
+
+    def answer_structure(self, part):
+        """Part `part`'s (1-3) answer structure, derived from the prose line
+        when nothing has been stored yet. A bonus part never carries an
+        "until" — there is no shared text to read up to."""
+        from .answer_structure import describes, normalize, parse_line
+        answer = getattr(self, 'part{0}_answer'.format(part), '') or ''
+        stored = getattr(self, 'part{0}_answer_structure'.format(part), None)
+        if stored:
+            # Only while it still describes the line — see Tossup.answer_structure
+            normalized = normalize(stored, is_tossup=False)
+            if describes(normalized, answer):
+                return normalized
+        return parse_line(answer, is_tossup=False)
+
+    def answer_structure_problems(self):
+        """Editor-facing warnings about this bonus's answer structures, each
+        labelled with the part it came from."""
+        from .answer_structure import validate
+        if not self.structured_answers_enabled():
+            return []
+        problems = []
+        for part in (1, 2, 3):
+            if not (getattr(self, 'part{0}_answer'.format(part), '') or '').strip():
+                continue
+            problems.extend(
+                'Answer {0}: {1}'.format(part, problem)
+                for problem in validate(self.answer_structure(part), is_tossup=False))
+        return problems
 
     def leadin_to_html(self):
         output = ''

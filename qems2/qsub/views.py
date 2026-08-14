@@ -31,6 +31,7 @@ from .forms import *
 from .model_utils import *
 from .utils import *
 from .packet_parser import parse_packet_data
+from . import answer_structure
 from .duplicate_checker import find_duplicates, find_internal_issues, find_topic_repeats, find_answer_matches, CRITICAL, WARNING, INFO
 from django.utils.safestring import mark_safe
 from django_comments.models import Comment
@@ -142,7 +143,8 @@ def question_sets (request):
 
     # Public sets the user isn't already part of — they can request to join.
     my_set_ids = {qset.id for qset in all_sets[0]['qsets']} | {qset.id for qset in all_sets[1]['qsets']}
-    public_sets = [qs for qs in QuestionSet.objects.filter(public=True).order_by('-date')
+    public_sets = [qs for qs in QuestionSet.objects.filter(
+                       public=True, approval_status=QuestionSet.APPROVAL_APPROVED).order_by('-date')
                    if qs.id not in my_set_ids]
 
     return render(request, 'question_sets.html',
@@ -158,7 +160,7 @@ def request_to_join(request):
         qset = QuestionSet.objects.get(id=int(request.POST['qset_id']))
     except (KeyError, ValueError, QuestionSet.DoesNotExist):
         return HttpResponse(json.dumps({'success': False, 'message': 'Set not found.'}))
-    if not qset.public:
+    if not qset.public or not qset.visible_to_strangers:
         return HttpResponse(json.dumps({'success': False, 'message': 'This set is not public.'}))
     if _is_set_member(user, qset):
         return HttpResponse(json.dumps({'success': False, 'message': 'You are already part of this set.'}))
@@ -296,6 +298,13 @@ def join_set(request, token):
 
     if ctx['already']:
         SetJoinRequest.objects.filter(question_set=qset, requester=user).delete()
+        return render(request, 'join_set.html', ctx)
+
+    # A set still waiting on its own approval can't recruit anyone. The link
+    # isn't broken and doesn't need reissuing — it starts working the moment an
+    # administrator approves the set.
+    if not qset.visible_to_strangers:
+        ctx['unavailable'] = True
         return render(request, 'join_set.html', ctx)
 
     existing = SetJoinRequest.objects.filter(question_set=qset, requester=user).first()
@@ -509,6 +518,84 @@ def _notify_group_join_request(group, requester):
     return True
 
 
+def _new_set_approval_recipients():
+    """Who reviews sets made by brand-new accounts. Blank setting = nobody, and
+    the review is skipped rather than leaving sets pending forever."""
+    from django.conf import settings as dj_settings
+    raw = getattr(dj_settings, 'SET_APPROVAL_EMAIL', '') or ''
+    return [addr.strip() for addr in raw.split(',') if addr.strip()]
+
+
+def _notify_new_set_pending(qset):
+    """Email the administrator that an account too new to create a set has made
+    one anyway, provisionally, with a direct link to approve or decline it.
+    Returns False when no approval address is configured."""
+    recipients = _new_set_approval_recipients()
+    if not recipients:
+        return False
+    from .signals import _send_mail_async
+    from django.conf import settings as dj_settings
+    owner = qset.owner
+    base = dj_settings.BASE_URL.rstrip('/')
+    joined = owner.user.date_joined.strftime('%Y-%m-%d %H:%M UTC') if owner.user else 'unknown'
+    subject = 'QEMS3: new account created "{0}" — approve?'.format(qset.name)
+    body = ('{0} (@{1}{2}) signed up on {3} and has created the question set "{4}".\n\n'
+            'The account is younger than the two-day wait, so the set is provisional: '
+            'they can work in it, but it stays out of the public set list and its join '
+            'links are dead until you approve it.\n\n'
+            'Review it:\n{5}/approve_new_set/{6}/\n\n'
+            'The set itself:\n{5}/edit_question_set/{6}/').format(
+        _actor_name(owner), owner.user.username if owner.user else '?',
+        ', ' + owner.user.email if (owner.user and owner.user.email) else '',
+        joined, qset.name, base, qset.id)
+    _send_mail_async(subject, body, recipients)
+    return True
+
+
+@login_required
+def approve_new_set(request, qset_id):
+    """Administrator review of a set created by an account that hadn't waited
+    out the new-account period, linked directly from the notification email.
+    Approving makes it an ordinary set. Declining leaves it in place but keeps
+    it out of everyone else's way; deleting is offered separately, since that
+    throws away whatever the owner has written."""
+    user = request.user.writer
+    if not request.user.is_superuser:
+        return render(request, 'failure.html',
+                      {'message': 'Only a site administrator can review new sets.',
+                       'message_class': 'alert-box alert'})
+    try:
+        qset = QuestionSet.objects.get(id=int(qset_id))
+    except (ValueError, QuestionSet.DoesNotExist):
+        return render(request, 'failure.html',
+                      {'message': 'That set no longer exists.',
+                       'message_class': 'alert-box alert'})
+
+    action = request.POST.get('action', '') if request.method == 'POST' else ''
+
+    if action == 'delete':
+        name = qset.name
+        from . import set_importer
+        set_importer.delete_question_set(qset)
+        cache.clear()
+        return render(request, 'approve_new_set.html',
+                      {'deleted': True, 'set_name': name, 'user': user})
+
+    if action in ('approve', 'decline'):
+        qset.approval_status = (QuestionSet.APPROVAL_APPROVED if action == 'approve'
+                                else QuestionSet.APPROVAL_DECLINED)
+        qset.approval_date = timezone.now()
+        qset.save(update_fields=['approval_status', 'approval_date'])
+        cache.clear()
+        return render(request, 'approve_new_set.html',
+                      {'qset': qset, 'acted': action, 'user': user})
+
+    counts = {'tossups': Tossup.objects.filter(question_set=qset).count(),
+              'bonuses': Bonus.objects.filter(question_set=qset).count()}
+    return render(request, 'approve_new_set.html',
+                  {'qset': qset, 'owner': qset.owner, 'counts': counts, 'user': user})
+
+
 @login_required
 def import_set(request):
     """Admin-only: create a new question set from an uploaded TSV/CSV in the
@@ -625,9 +712,14 @@ def packet(request):
 def create_question_set (request):
     user = request.user.writer
 
-    if not _account_can_create(request.user):
-        return render(request, 'failure.html',
-                      {'message': _ACCOUNT_TOO_NEW_MSG, 'message_class': 'alert-box alert'})
+    # An account too new to create a set outright isn't turned away: the set is
+    # made provisionally and an administrator is emailed to approve it. That
+    # keeps a real person's first evening from being a dead end while still
+    # giving a spam set nowhere to go — until it's approved it stays out of the
+    # public list and its join links don't work. With no approval address
+    # configured there's nobody to ask, so the set is simply approved.
+    needs_approval = (not _account_can_create(request.user)
+                      and bool(_new_set_approval_recipients()))
 
     if request.method == 'POST':
         form = QuestionSetForm(data=request.POST, writer=user)
@@ -635,6 +727,8 @@ def create_question_set (request):
             # for the moment, just use the default ACF Distribution
             #dist = Distribution.objects.get(id=1)
             question_set = form.save(commit=False)
+            if needs_approval:
+                question_set.approval_status = QuestionSet.APPROVAL_PENDING
             question_set.owner = user
             question_set.editors = []
             question_set.editors.append(user)
@@ -661,6 +755,9 @@ def create_question_set (request):
                 tiebreak_entry.dist_entry = entry
                 tiebreak_entry.save()
 
+            if needs_approval:
+                _notify_new_set_pending(question_set)
+
             # Redirect rather than render: the set page's own URL is what tells
             # the shell which set is active (rendering here left the sidebar's
             # active set on whatever you had before), and it stops a refresh
@@ -676,6 +773,7 @@ def create_question_set (request):
                                        'message_class': 'alert-box warning',
                                        'form': form,
                                        'distributions': distributions,
+                                       'needs_approval': needs_approval,
                                        'user': user})
     else:
         form = QuestionSetForm(writer=user)
@@ -684,6 +782,7 @@ def create_question_set (request):
     return render(request, 'create_question_set.html',
                               {'form': form,
                                'distributions': distributions,
+                               'needs_approval': needs_approval,
                                'user': user})
 
 def _editor_tag_context(qset):
@@ -773,6 +872,7 @@ def edit_question_set(request, qset_id):
                 qset.guides_require_quotes = form.cleaned_data['guides_require_quotes']
                 qset.tossups_only = form.cleaned_data['tossups_only']
                 qset.enable_superpower = form.cleaned_data['enable_superpower']
+                qset.structured_answers = form.cleaned_data['structured_answers']
                 qset.public = form.cleaned_data['public']
                 qset.max_acf_tossup_length = form.cleaned_data['max_acf_tossup_length']
                 qset.max_acf_bonus_length = form.cleaned_data['max_acf_bonus_length']
@@ -2363,6 +2463,101 @@ def resolve_all_suggestions(request):
     return HttpResponse(json.dumps({'ok': True}))
 
 
+def _structure_preview(answer, question_text='', is_tossup=True):
+    """How a prose answer line was understood, for the type-questions preview:
+    the structure, the line it would print as, and anything worth warning about.
+
+    Questions typed or pasted in bulk arrive as prose, so this is the "do its
+    best" path — the writer sees the reading before committing, rather than
+    finding out later that a prompt was read as part of the primary answer.
+    """
+    structure = answer_structure.parse_line(answer, is_tossup)
+    return {
+        'structure': structure,
+        'line': answer_structure.format_line(structure),
+        'problems': answer_structure.validate(structure, question_text, is_tossup),
+        'interesting': answer_structure.has_content(structure),
+    }
+
+
+def _attach_structure_previews(qset, tossups, bonuses):
+    """Hang a structure preview on each unsaved question in the upload preview.
+    A no-op for sets that don't record structure."""
+    if not getattr(qset, 'structured_answers', False):
+        return
+    for tossup in tossups:
+        tossup.structured_preview = _structure_preview(
+            tossup.tossup_answer, tossup.tossup_text, is_tossup=True)
+    for bonus in bonuses:
+        bonus.structured_preview = [
+            dict(_structure_preview(getattr(bonus, 'part{0}_answer'.format(part), '') or '',
+                                    is_tossup=False),
+                 part=part, label='Part {0}'.format(part))
+            for part in (1, 2, 3)
+            if (getattr(bonus, 'part{0}_answer'.format(part), '') or '').strip()
+        ]
+
+
+def _structured_tossup_ctx(qset, tossup):
+    """Template context for a tossup's structured answer editor. Empty when the
+    set doesn't record structure, which leaves the plain answer box in place."""
+    if tossup is None or not getattr(qset, 'structured_answers', False):
+        return {}
+    structure = tossup.answer_structure()
+    return {
+        'structured_answers_on': True,
+        'structured_answer': structure,
+        'structured_answer_line': answer_structure.format_line(structure),
+        'structured_answer_problems': tossup.answer_structure_problems(),
+    }
+
+
+def _structured_bonus_ctx(qset, bonus):
+    """The same for a bonus, one block per part. A bonus part can't say "until
+    X is read" — there is no shared text to read up to."""
+    if bonus is None or not getattr(qset, 'structured_answers', False):
+        return {}
+    parts = []
+    for part in (1, 2, 3):
+        structure = bonus.answer_structure(part)
+        parts.append({
+            'part': part,
+            'prefix': 'part{0}'.format(part),
+            'structure': structure,
+            'line': answer_structure.format_line(structure),
+        })
+    return {
+        'structured_answers_on': True,
+        'structured_parts': parts,
+        'structured_answer_problems': bonus.answer_structure_problems(),
+    }
+
+
+def _with_structured_answers(request, qset, fields):
+    """`request.POST`, with each answer field rebuilt from the structured
+    editor's rows, plus the structures themselves.
+
+    The printed line stays canonical, so the form validates and everything
+    downstream reads exactly what it did before — the structure is what the
+    editor typed, and the line is what it prints as.
+    """
+    if not getattr(qset, 'structured_answers', False):
+        return request.POST, {}
+
+    post = None
+    structures = {}
+    for field, prefix, is_tossup in fields:
+        structure = answer_structure.posted(request.POST, prefix, is_tossup)
+        if structure is None:
+            continue
+        if post is None:
+            post = request.POST.copy()
+        post[field] = answer_structure.format_line(structure)
+        structures[field] = structure
+
+    return (post if post is not None else request.POST), structures
+
+
 @login_required
 def edit_tossup(request, tossup_id):
     user = request.user.writer
@@ -2428,6 +2623,7 @@ def edit_tossup(request, tossup_id):
              'discord_threads': tossup.discord_threads.order_by('created_date'),
              'new_checks': new_checks,
              'user': user,
+             **_structured_tossup_ctx(qset, tossup),
              **_suggestion_render_ctx(user, tossup, 'tossup', qset)})
 
     elif request.method == 'POST':
@@ -2446,7 +2642,9 @@ def edit_tossup(request, tossup_id):
         if user == tossup.author or qset.is_owner(user) or user in qset.editor.all():
             # Pass instance so the current author stays a valid choice even when
             # they aren't a member of this set (imported/moved questions).
-            form = TossupForm(request.POST, instance=tossup, qset_id=qset.id, role=role)
+            post_data, posted_structures = _with_structured_answers(
+                request, qset, [('tossup_answer', 'answer', True)])
+            form = TossupForm(post_data, instance=tossup, qset_id=qset.id, role=role)
             can_change = True
             if tossup.locked and not (qset.is_owner(user) or user in qset.editor.all()):
                 can_change = False
@@ -2463,6 +2661,9 @@ def edit_tossup(request, tossup_id):
 
                 tossup.tossup_text = strip_markup(form.cleaned_data['tossup_text'])
                 tossup.tossup_answer = strip_markup(form.cleaned_data['tossup_answer'])
+                # Stored beside the line it prints as, never instead of it
+                if 'tossup_answer' in posted_structures:
+                    tossup.tossup_answer_structure = posted_structures['tossup_answer']
                 # all_power is a plain checkbox (present only when checked), so
                 # every save records an explicit True/False override.
                 tossup.all_power = 'all_power' in request.POST
@@ -2537,6 +2738,7 @@ def edit_tossup(request, tossup_id):
              'playtest': _question_buzz_data(tossup, 'tossup'),
              'discord_threads': tossup.discord_threads.order_by('created_date'),
              'user': user,
+             **_structured_tossup_ctx(qset, tossup),
              **_suggestion_render_ctx(user, tossup, 'tossup', qset)})
 
 @login_required
@@ -2607,6 +2809,7 @@ def edit_bonus(request, bonus_id):
              'playtest': _question_buzz_data(bonus, 'bonus'),
              'discord_threads': bonus.discord_threads.order_by('created_date'),
              'user': user,
+             **_structured_bonus_ctx(qset, bonus),
              **_suggestion_render_ctx(user, bonus, 'bonus', qset)})
 
     elif request.method == 'POST':
@@ -2624,7 +2827,12 @@ def edit_bonus(request, bonus_id):
         if user == bonus.author or qset.is_owner(user) or user in qset.editor.all():
             # Pass instance so the current author stays a valid choice even when
             # they aren't a member of this set (imported/moved questions).
-            form = BonusForm(request.POST, instance=bonus, qset_id=qset.id, role=role, question_type=question_type)
+            post_data, posted_structures = _with_structured_answers(
+                request, qset,
+                [('part1_answer', 'part1', False),
+                 ('part2_answer', 'part2', False),
+                 ('part3_answer', 'part3', False)])
+            form = BonusForm(post_data, instance=bonus, qset_id=qset.id, role=role, question_type=question_type)
 
             can_change = True
             if bonus.locked and not (qset.is_owner(user) or user in qset.editor.all()):
@@ -2646,6 +2854,11 @@ def edit_bonus(request, bonus_id):
                 bonus.part2_answer = strip_markup(form.cleaned_data['part2_answer'])
                 bonus.part3_text = strip_markup(form.cleaned_data['part3_text'])
                 bonus.part3_answer = strip_markup(form.cleaned_data['part3_answer'])
+                # Stored beside the lines they print as, never instead of them
+                for part in (1, 2, 3):
+                    field = 'part{0}_answer'.format(part)
+                    if field in posted_structures:
+                        setattr(bonus, field + '_structure', posted_structures[field])
                 bonus.part1_difficulty = form.cleaned_data.get('part1_difficulty', '')
                 bonus.part2_difficulty = form.cleaned_data.get('part2_difficulty', '')
                 bonus.part3_difficulty = form.cleaned_data.get('part3_difficulty', '')
@@ -2721,6 +2934,7 @@ def edit_bonus(request, bonus_id):
              'playtest': _question_buzz_data(bonus, 'bonus'),
              'discord_threads': bonus.discord_threads.order_by('created_date'),
              'user': user,
+             **_structured_bonus_ctx(qset, bonus),
              **_suggestion_render_ctx(user, bonus, 'bonus', qset)})
 
 @login_required
@@ -3444,8 +3658,18 @@ def change_question_order(request):
 
 def _account_can_create(user):
     """Anti-spam: a new account can't create question sets or distributions
-    until 2 days after it was created."""
+    until 2 days after it was created.
+
+    Two ways out, both an administrator's call: a superuser is never held by
+    the wait, and ticking "can create early" on a writer in the Django admin
+    lifts it for that one person. Everyone else waits — but for question sets
+    waiting no longer means being turned away; see `create_question_set`."""
     from datetime import timedelta
+    if user.is_superuser:
+        return True
+    writer = getattr(user, 'writer', None)
+    if writer is not None and writer.can_create_early:
+        return True
     return (timezone.now() - user.date_joined) >= timedelta(days=2)
 
 
@@ -3917,6 +4141,10 @@ def type_questions(request, qset_id=None):
                 # Uncategorized questions used to sail through and land in the
                 # set with no category, which nothing downstream can count.
                 category_errors = _uncategorized_errors(tossups, bonuses)
+
+                # Show how each prose answer line was read, for sets that
+                # record structure
+                _attach_structure_previews(qset, tossups, bonuses)
 
                 return render(request, 'type_questions_preview.html',
                                          {'tossups': tossups,

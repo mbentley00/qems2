@@ -2571,8 +2571,9 @@ class GridUnassignTests(TestCase):
 
 
 class AccountAgeAndDistributionPermissionTests(TestCase):
-    """New accounts can't create sets/distributions for 2 days; distributions
-    are only visible/editable for sets the user belongs to."""
+    """New accounts wait 2 days to create distributions (and create sets only
+    provisionally); distributions are only visible/editable for sets the user
+    belongs to."""
 
     def setUp(self):
         from datetime import timedelta
@@ -2602,10 +2603,13 @@ class AccountAgeAndDistributionPermissionTests(TestCase):
         self.new_user.save()
         Writer.objects.get(user=self.new_user)
 
-    def test_new_account_cannot_create_question_set(self):
+    def test_new_account_is_warned_the_set_needs_approval(self):
+        # A new account is no longer turned away from the create page — it's
+        # told the set will need an administrator's approval.
         self.client.login(username='new_u', password='pw')
         resp = self.client.get('/create_question_set/')
-        self.assertContains(resp, '2 days after sign-up')
+        self.assertNotContains(resp, '2 days after sign-up')
+        self.assertContains(resp, 'provisionally')
 
     def test_old_account_can_reach_create_question_set(self):
         self.client.login(username='old_u', password='pw')
@@ -8150,3 +8154,743 @@ class PacketCommentListTests(TestCase):
             question_set=other_set, packet_name='Elsewhere', created_by=self.owner)
         self._comment_on(other_packet, 'belongs to the other set')
         self.assertNotIn('belongs to the other set', self._all_comments_body())
+
+
+class UndirectedPromptStyleCheckTests(TestCase):
+    """A prompt that doesn't say what to ask leaves each moderator to invent
+    the follow-up, which is exactly what a directed prompt prevents."""
+
+    def _issues(self, answer, label='Answer'):
+        from qems2.qsub.style_checker import _prompt_direction_issues
+        return _prompt_direction_issues(label, answer)
+
+    def test_flags_a_bare_prompt(self):
+        issues = self._issues('_Louis XIV_ [prompt on __Louis__]')
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]['code'], 'prompt_undirected')
+        self.assertIn('Louis', issues[0]['message'])
+
+    def test_a_directed_prompt_is_clean(self):
+        self.assertEqual(
+            self._issues('_Louis XIV_ [prompt on __Louis__ by saying be more specific]'), [])
+
+    def test_by_asking_is_a_direction(self):
+        self.assertEqual(
+            self._issues('_Louis XIV_ [prompt on __Louis__ by asking "which Louis?"]'), [])
+
+    def test_any_by_verb_ing_counts(self):
+        """Writers don't all reach for "asking" or "saying"."""
+        self.assertEqual(
+            self._issues('_Louis XIV_ [prompt on __Louis__ by requesting the regnal number]'), [])
+
+    def test_a_quoted_question_after_with_counts(self):
+        self.assertEqual(
+            self._issues('_Louis XIV_ [prompt on __Louis__ with "which Louis?"]'), [])
+
+    def test_an_answer_line_with_no_prompt_is_clean(self):
+        self.assertEqual(self._issues('_France_ [or _the French Republic_]'), [])
+
+    def test_a_later_clauses_direction_does_not_cover_an_earlier_prompt(self):
+        """The phrasing has to be in the prompt's own clause; finding it
+        anywhere on the line would pass a bare prompt sitting next to a
+        directed one."""
+        issues = self._issues(
+            '_Louis XIV_ [prompt on __Louis__; prompt on __the Bourbons__ by asking for a king]')
+        self.assertEqual(len(issues), 1)
+        self.assertIn('Louis', issues[0]['message'])
+
+    def test_two_targets_in_one_clause_are_one_prompt(self):
+        self.assertEqual(
+            self._issues('_Louis XIV_ [prompt on __Louis__ or __Bourbon__ by asking for more]'), [])
+
+    def test_antiprompts_are_checked_too(self):
+        issues = self._issues('_Paris_ [antiprompt on __France__]')
+        self.assertEqual(len(issues), 1)
+        self.assertIn('antiprompt', issues[0]['message'])
+
+    def test_issue_carries_a_context_preview(self):
+        issues = self._issues('_Louis XIV_ [prompt on __Louis__]')
+        self.assertIn('<strong>', issues[0]['message_html'])
+
+    def test_the_token_names_the_prompt_target(self):
+        """Dismissing one bare prompt shouldn't silence every other one."""
+        first = self._issues('_Louis XIV_ [prompt on __Louis__]')[0]
+        second = self._issues('_Paris_ [prompt on __France__]')[0]
+        self.assertNotEqual(first['token'], second['token'])
+        self.assertIn('Louis', first['token'])
+
+    def test_runs_on_a_tossup_and_can_be_disabled(self):
+        from datetime import datetime
+        from qems2.qsub import style_checker as sc
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        acf = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        ou = User.objects.create_user('up_owner', password='pw', email='up@t.com')
+        owner = Writer.objects.get(user=ou)
+        dist = Distribution.objects.create(name='up dist')
+        qset = QuestionSet.objects.create(
+            name='UP Set', date=timezone.now(), host='', address='', owner=owner,
+            num_packets=1, distribution=dist)
+        tu = Tossup.objects.create(
+            author=owner, question_set=qset, question_type=acf,
+            tossup_text='This king did things. For 10 points, name this king.',
+            tossup_answer='_Louis XIV_ [prompt on __Louis__]',
+            created_date=datetime.now(), last_changed_date=datetime.now(),
+            question_number=1)
+        self.assertIn('prompt_undirected', {i['code'] for i in sc.check_tossup(tu)})
+        self.assertNotIn(
+            'prompt_undirected',
+            {i['code'] for i in sc.check_tossup(tu, disabled=['prompt_undirected'])})
+
+    def test_the_generic_guide_leaves_it_off(self):
+        """It's a style-guide rule, not a mechanical one."""
+        from qems2.qsub import style_checker as sc
+        self.assertNotIn('prompt_undirected', sc.GUIDE_CODES['generic'])
+        self.assertIn('prompt_undirected', sc.GUIDE_CODES['minkowski'])
+
+    def test_it_shows_up_in_the_per_set_settings(self):
+        from qems2.qsub import style_checker as sc
+        self.assertIn('prompt_undirected', [c for c, _ in sc.configurable_rules()])
+
+    def test_dismissal_says_which_prompt_it_silences(self):
+        from qems2.qsub import style_checker as sc
+        described = sc.describe_dismissal('prompt_undirected', 'Answer|Louis')
+        self.assertEqual(described['subject'], 'Louis')
+
+    def test_bonus_answers_are_checked(self):
+        from datetime import datetime
+        from qems2.qsub import style_checker as sc
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        acf_b = QuestionType.objects.get(question_type=ACF_STYLE_BONUS)
+        ou = User.objects.create_user('up_bonus', password='pw', email='upb@t.com')
+        owner = Writer.objects.get(user=ou)
+        dist = Distribution.objects.create(name='up bonus dist')
+        qset = QuestionSet.objects.create(
+            name='UP Bonus Set', date=timezone.now(), host='', address='', owner=owner,
+            num_packets=1, distribution=dist)
+        b = Bonus.objects.create(
+            author=owner, question_set=qset, question_type=acf_b,
+            leadin='For 10 points each, name these kings.',
+            part1_text='Name this king.', part1_answer='_Louis XIV_ [prompt on __Louis__]',
+            part2_text='', part2_answer='', part3_text='', part3_answer='',
+            created_date=datetime.now(), last_changed_date=datetime.now())
+        self.assertIn('prompt_undirected', {i['code'] for i in sc.check_bonus(b)})
+
+
+class AnswerStructureParseTests(TestCase):
+    """Reading a prose answer line as a primary answer plus its accepts and
+    prompts. Best-effort by design: anything the grammar can't place is kept
+    verbatim rather than dropped."""
+
+    def _parse(self, line, is_tossup=True):
+        from qems2.qsub.answer_structure import parse_line
+        return parse_line(line, is_tossup)
+
+    def test_a_bare_answer_is_just_a_primary(self):
+        s = self._parse('_Louis XIV_')
+        self.assertEqual(s['primary'], '_Louis XIV_')
+        self.assertEqual(s['accepts'], [])
+        self.assertEqual(s['prompts'], [])
+
+    def test_accepts_and_prompts_are_separated(self):
+        s = self._parse('_Louis XIV_ [accept _the Sun King_; prompt on __Louis__ by asking "which Louis?"]')
+        self.assertEqual([a['text'] for a in s['accepts']], ['_the Sun King_'])
+        self.assertEqual(s['prompts'][0]['text'], '__Louis__')
+        self.assertEqual(s['prompts'][0]['instruction'], 'which Louis?')
+
+    def test_or_introduces_an_accept(self):
+        s = self._parse('_Louis XIV_ [or _the Sun King_]')
+        self.assertEqual([a['text'] for a in s['accepts']], ['_the Sun King_'])
+
+    def test_a_bracketless_or_is_still_an_accept(self):
+        """The one unannounced form common enough to read without a keyword."""
+        s = self._parse('_Louis XIV_ or _the Sun King_')
+        self.assertEqual(s['primary'], '_Louis XIV_')
+        self.assertEqual([a['text'] for a in s['accepts']], ['_the Sun King_'])
+
+    def test_until_is_captured(self):
+        s = self._parse('_Louis XIV_ [accept _the King_ until "Sun King" is read]')
+        self.assertEqual(s['accepts'][0]['until'], 'Sun King')
+
+    def test_a_bonus_part_has_no_until(self):
+        """There is no shared text for a bonus part to be read up to."""
+        s = self._parse('_Paris_ [accept _the City of Light_ until "Seine" is read]', is_tossup=False)
+        self.assertIsNone(s['accepts'][0]['until'])
+
+    def test_an_antiprompt_is_marked(self):
+        s = self._parse('_Paris_ [antiprompt on __France__ by saying be more specific]')
+        self.assertTrue(s['prompts'][0]['anti'])
+        self.assertEqual(s['prompts'][0]['instruction'], 'be more specific')
+
+    def test_a_clause_it_cannot_place_is_kept_verbatim(self):
+        s = self._parse('_x_ [accept _y_; do not accept "z"]')
+        self.assertEqual(s['unparsed'], ['do not accept "z"'])
+
+    def test_a_comma_only_splits_before_a_directive(self):
+        """Commas inside one clause are ordinary punctuation."""
+        s = self._parse('_France_ [or _French Republic_, accept _Republique francaise_]')
+        self.assertEqual(len(s['accepts']), 2)
+        s = self._parse('_x_ [accept _a, b, and c_]')
+        self.assertEqual(len(s['accepts']), 1)
+
+    def test_a_parenthesized_body_works_too(self):
+        s = self._parse('_x_ (prompt on __y__ by asking "which?")')
+        self.assertEqual(s['prompts'][0]['text'], '__y__')
+
+    def test_with_a_quoted_question_counts_as_the_instruction(self):
+        s = self._parse('_Notre Dame_ [prompt on __Notre__ with "which Notre Dame?"]')
+        self.assertEqual(s['prompts'][0]['instruction'], 'which Notre Dame?')
+
+    def test_two_targets_in_one_clause_stay_one_prompt(self):
+        s = self._parse('_x_ [prompt on __a__ or __b__ by asking for more]')
+        self.assertEqual(len(s['prompts']), 1)
+        self.assertEqual(s['prompts'][0]['text'], '__a__ or __b__')
+
+
+class AnswerStructureFormatTests(TestCase):
+    """The printed line a structure produces, and the round trip back."""
+
+    def test_formats_the_conventional_line(self):
+        from qems2.qsub.answer_structure import format_line
+        line = format_line({
+            'primary': '_Louis XIV_',
+            'accepts': [{'text': '_the Sun King_', 'until': 'Bourbon'}],
+            'prompts': [{'text': '__Louis__', 'instruction': 'which Louis?',
+                         'until': None, 'anti': False}],
+        })
+        self.assertEqual(
+            line,
+            '_Louis XIV_ [accept _the Sun King_ until "Bourbon" is read; '
+            'prompt on __Louis__ by asking "which Louis?"]')
+
+    def test_a_primary_alone_has_no_bracket(self):
+        from qems2.qsub.answer_structure import empty_structure, format_line
+        self.assertEqual(format_line(empty_structure('_France_')), '_France_')
+
+    def test_round_trips(self):
+        from qems2.qsub.answer_structure import format_line, parse_line
+        for line in ('_Louis XIV_',
+                     '_Louis XIV_ [accept _the Sun King_]',
+                     '_Louis XIV_ [accept _the King_ until "Sun King" is read]',
+                     '_Louis XIV_ [prompt on __Louis__ by asking "which Louis?"]',
+                     '_x_ [accept _y_; do not accept "z"]'):
+            self.assertEqual(format_line(parse_line(line)), line, line)
+
+    def test_blank_rows_are_dropped_not_printed(self):
+        from qems2.qsub.answer_structure import format_line
+        line = format_line({'primary': '_x_', 'accepts': [{'text': '  ', 'until': ''}]})
+        self.assertEqual(line, '_x_')
+
+
+class AnswerStructureValidationTests(TestCase):
+    """Warnings for an editor — none of them block a save except a missing
+    primary answer, which would leave nothing to print."""
+
+    def _problems(self, line, question_text='', is_tossup=True):
+        from qems2.qsub.answer_structure import parse_line, validate
+        return validate(parse_line(line, is_tossup), question_text, is_tossup)
+
+    def test_a_missing_primary_is_flagged(self):
+        from qems2.qsub.answer_structure import empty_structure, validate
+        self.assertIn('needs a primary answer', ' '.join(validate(empty_structure(''))))
+
+    def test_an_undirected_prompt_is_flagged(self):
+        problems = self._problems('_Louis XIV_ [prompt on __Louis__]', 'This king ruled.')
+        self.assertEqual(len(problems), 1)
+        self.assertIn("doesn't say what to ask", problems[0])
+
+    def test_the_message_drops_the_markup(self):
+        problems = self._problems('_Louis XIV_ [prompt on __Louis__]', 'This king ruled.')
+        self.assertIn('"Louis"', problems[0])
+
+    def test_a_directed_prompt_is_clean(self):
+        self.assertEqual(
+            self._problems('_Louis XIV_ [prompt on __Louis__ by asking "which?"]', 'This king.'), [])
+
+    def test_until_must_name_a_word_in_the_tossup(self):
+        problems = self._problems(
+            '_L_ [accept _K_ until "Bourbon" is read]', 'This king revoked the Edict.')
+        self.assertEqual(len(problems), 1)
+        self.assertIn('nothing for the moderator to read up to', problems[0])
+
+    def test_until_naming_a_word_in_the_tossup_is_clean(self):
+        self.assertEqual(
+            self._problems('_L_ [accept _K_ until "Bourbon" is read]',
+                           'This Bourbon king revoked the Edict.'), [])
+
+    def test_until_matches_through_markup_in_the_tossup(self):
+        self.assertEqual(
+            self._problems('_L_ [accept _K_ until "Bourbon" is read]',
+                           'This ~Bourbon~ king ruled.'), [])
+
+
+class StructuredAnswerModelTests(TestCase):
+    """Structure on the models: derived from the line when nothing is stored,
+    and never believed once the line has moved on without it."""
+
+    def setUp(self):
+        self.ou = User.objects.create_user('sa_owner', password='pw', email='sa@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='sa dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='History', subcategory='European')
+        self.qset = QuestionSet.objects.create(
+            name='SA Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist, structured_answers=True)
+        self.tu = Tossup.objects.create(
+            author=self.owner, question_set=self.qset,
+            tossup_text='This Bourbon king revoked the Edict of Nantes.',
+            tossup_answer='_Louis XIV_ [or _the Sun King_; prompt on __Louis__]',
+            category=self.de, created_date=datetime.now(),
+            last_changed_date=datetime.now(), question_number=1)
+
+    def test_off_by_default(self):
+        other = QuestionSet.objects.create(
+            name='Plain', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.assertFalse(other.structured_answers)
+
+    def test_structure_is_derived_from_the_prose_when_none_is_stored(self):
+        """A set that switches the setting on gets structure for the questions
+        already in it, with no migration."""
+        structure = self.tu.answer_structure()
+        self.assertEqual(structure['primary'], '_Louis XIV_')
+        self.assertEqual([a['text'] for a in structure['accepts']], ['_the Sun King_'])
+        self.assertEqual(structure['prompts'][0]['text'], '__Louis__')
+
+    def test_a_stored_structure_is_used_when_it_describes_the_line(self):
+        from qems2.qsub.answer_structure import format_line, normalize
+        stored = normalize({
+            'primary': '_Louis XIV_',
+            'prompts': [{'text': '__Louis__', 'instruction': 'which Louis?'}],
+        })
+        self.tu.tossup_answer = format_line(stored)
+        self.tu.tossup_answer_structure = stored
+        self.tu.save()
+        self.assertEqual(self.tu.answer_structure()['prompts'][0]['instruction'], 'which Louis?')
+
+    def test_a_stored_structure_is_ignored_once_the_line_moves_on(self):
+        """A bulk edit or an import changes the line alone; believing a stale
+        structure would show an answer the packet no longer has."""
+        self.tu.tossup_answer_structure = {'primary': '_Louis XIV_', 'accepts': [], 'prompts': []}
+        self.tu.tossup_answer = '_Louis XV_'
+        self.tu.save()
+        self.assertEqual(self.tu.answer_structure()['primary'], '_Louis XV_')
+
+    def test_problems_are_reported_for_the_question(self):
+        self.assertIn("doesn't say what to ask", ' '.join(self.tu.answer_structure_problems()))
+
+    def test_no_problems_when_the_set_does_not_use_structure(self):
+        self.qset.structured_answers = False
+        self.qset.save()
+        self.tu.refresh_from_db()
+        self.assertEqual(self.tu.answer_structure_problems(), [])
+
+    def test_bonus_parts_each_have_their_own_structure(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        acf_b = QuestionType.objects.get(question_type=ACF_STYLE_BONUS)
+        bonus = Bonus.objects.create(
+            author=self.owner, question_set=self.qset, question_type=acf_b,
+            leadin='For 10 points each:',
+            part1_text='Name this city.', part1_answer='_Paris_ [or _Lutetia_]',
+            part2_text='Name this river.', part2_answer='_Seine_ [prompt on __river__]',
+            part3_text='', part3_answer='',
+            created_date=datetime.now(), last_changed_date=datetime.now())
+        self.assertEqual([a['text'] for a in bonus.answer_structure(1)['accepts']], ['_Lutetia_'])
+        self.assertEqual(bonus.answer_structure(2)['prompts'][0]['text'], '__river__')
+        problems = bonus.answer_structure_problems()
+        self.assertEqual(len(problems), 1)
+        self.assertTrue(problems[0].startswith('Answer 2:'))
+
+
+class StructuredAnswerPostTests(TestCase):
+    """Reading the structured editor's rows back off a form post."""
+
+    def _post(self, data):
+        from django.http import QueryDict
+        query = QueryDict(mutable=True)
+        for key, value in data.items():
+            query.setlist(key, value if isinstance(value, list) else [value])
+        return query
+
+    def test_returns_none_when_the_editor_was_not_rendered(self):
+        from qems2.qsub.answer_structure import posted
+        self.assertIsNone(posted(self._post({'tossup_answer': '_x_'}), 'answer'))
+
+    def test_rows_line_up_by_index(self):
+        from qems2.qsub.answer_structure import posted
+        structure = posted(self._post({
+            'answer_primary': '_Louis XIV_',
+            'answer_accept_text': ['_the Sun King_', '_the Great_'],
+            'answer_accept_until': ['Bourbon', ''],
+        }), 'answer')
+        self.assertEqual(structure['accepts'],
+                         [{'text': '_the Sun King_', 'until': 'Bourbon'},
+                          {'text': '_the Great_', 'until': None}])
+
+    def test_a_blank_row_is_dropped_without_shifting_the_others(self):
+        from qems2.qsub.answer_structure import posted
+        structure = posted(self._post({
+            'answer_primary': '_x_',
+            'answer_accept_text': ['', '_kept_'],
+            'answer_accept_until': ['', 'word'],
+        }), 'answer')
+        self.assertEqual(structure['accepts'], [{'text': '_kept_', 'until': 'word'}])
+
+    def test_the_antiprompt_selector_is_read(self):
+        from qems2.qsub.answer_structure import posted
+        structure = posted(self._post({
+            'answer_primary': '_x_',
+            'answer_prompt_text': ['__a__', '__b__'],
+            'answer_prompt_anti': ['prompt', 'anti'],
+            'answer_prompt_instruction': ['ask a', 'ask b'],
+        }), 'answer')
+        self.assertFalse(structure['prompts'][0]['anti'])
+        self.assertTrue(structure['prompts'][1]['anti'])
+
+    def test_a_bonus_post_carries_no_until(self):
+        from qems2.qsub.answer_structure import posted
+        structure = posted(self._post({
+            'part1_primary': '_x_',
+            'part1_accept_text': ['_y_'],
+            'part1_accept_until': ['word'],
+        }), 'part1', is_tossup=False)
+        self.assertIsNone(structure['accepts'][0]['until'])
+
+
+class StructuredAnswerEditorViewTests(TestCase):
+    """The editor on the question page, and what a save through it stores."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('sae_owner', password='pw', email='sae@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='sae dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='History', subcategory='European')
+        self.qset = QuestionSet.objects.create(
+            name='SAE Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist, structured_answers=True)
+        self.tu = Tossup.objects.create(
+            author=self.owner, question_set=self.qset, question_type=self.acf,
+            tossup_text='This Bourbon king revoked the Edict of Nantes. Name this king.',
+            tossup_answer='_Louis XIV_', category=self.de,
+            created_date=datetime.now(), last_changed_date=datetime.now(), question_number=1)
+        self.client.login(username='sae_owner', password='pw')
+
+    def test_the_editor_is_rendered_for_a_structured_set(self):
+        body = self.client.get('/edit_tossup/{0}/'.format(self.tu.id)).content.decode()
+        self.assertIn('structured-answer', body)
+        self.assertIn('answer_primary', body)
+
+    def test_a_plain_set_keeps_the_plain_answer_box(self):
+        self.qset.structured_answers = False
+        self.qset.save()
+        body = self.client.get('/edit_tossup/{0}/'.format(self.tu.id)).content.decode()
+        self.assertNotIn('structured-answer', body)
+        self.assertIn('id_tossup_answer', body)
+
+    def _save(self, **overrides):
+        data = {
+            'tossup_text': self.tu.tossup_text,
+            'category': self.de.id,
+            'author': self.owner.id,
+            'question_type': self.acf.id,
+            'answer_primary': '_Louis XIV_',
+            'answer_accept_text': '_the Sun King_',
+            'answer_accept_until': 'Bourbon',
+            'answer_prompt_text': '__Louis__',
+            'answer_prompt_instruction': 'which Louis?',
+            'answer_prompt_until': '',
+            'answer_prompt_anti': 'prompt',
+        }
+        data.update(overrides)
+        return self.client.post('/edit_tossup/{0}/'.format(self.tu.id), data)
+
+    def test_saving_builds_the_printed_line_from_the_rows(self):
+        """The line stays canonical — everything downstream reads it, not the
+        structure."""
+        self._save()
+        self.tu.refresh_from_db()
+        self.assertEqual(
+            self.tu.tossup_answer,
+            '_Louis XIV_ [accept _the Sun King_ until "Bourbon" is read; '
+            'prompt on __Louis__ by asking "which Louis?"]')
+
+    def test_saving_stores_the_structure_beside_the_line(self):
+        self._save()
+        self.tu.refresh_from_db()
+        self.assertEqual(self.tu.tossup_answer_structure['prompts'][0]['instruction'],
+                         'which Louis?')
+        self.assertEqual(self.tu.tossup_answer_structure['accepts'][0]['until'], 'Bourbon')
+
+    def test_the_stored_structure_is_the_one_read_back(self):
+        self._save()
+        self.tu.refresh_from_db()
+        self.assertEqual(self.tu.answer_structure(), self.tu.tossup_answer_structure)
+
+    def test_an_until_that_is_not_in_the_tossup_is_warned_about_not_refused(self):
+        self._save(answer_accept_until='Habsburg')
+        self.tu.refresh_from_db()
+        self.assertIn('Habsburg', self.tu.tossup_answer)
+        self.assertIn('nothing for the moderator to read up to',
+                      ' '.join(self.tu.answer_structure_problems()))
+
+
+class StructuredAnswerUploadPreviewTests(TestCase):
+    """The bulk type-questions path parses prose answer lines as best it can and
+    shows the reading before anything is committed."""
+
+    def setUp(self):
+        self.ou = User.objects.create_user('sau_owner', password='pw', email='sau@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='sau dist')
+        self.qset = QuestionSet.objects.create(
+            name='SAU Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist, structured_answers=True)
+
+    def test_a_prose_line_is_read_into_a_structure(self):
+        from qems2.qsub.views import _structure_preview
+        preview = _structure_preview(
+            '_Louis XIV_ [or _the Sun King_; prompt on __Louis__]',
+            'This Bourbon king ruled.')
+        self.assertEqual([a['text'] for a in preview['structure']['accepts']], ['_the Sun King_'])
+        self.assertTrue(preview['interesting'])
+        self.assertIn("doesn't say what to ask", ' '.join(preview['problems']))
+
+    def test_a_plain_answer_is_not_worth_showing(self):
+        from qems2.qsub.views import _structure_preview
+        self.assertFalse(_structure_preview('_France_', 'This country.')['interesting'])
+
+    def test_previews_are_attached_only_for_a_structured_set(self):
+        from qems2.qsub.views import _attach_structure_previews
+        tossup = Tossup(tossup_text='This king.', tossup_answer='_L_ [or _M_]')
+        _attach_structure_previews(self.qset, [tossup], [])
+        self.assertTrue(hasattr(tossup, 'structured_preview'))
+
+        plain_set = QuestionSet.objects.create(
+            name='Plain SAU', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        other = Tossup(tossup_text='This king.', tossup_answer='_L_ [or _M_]')
+        _attach_structure_previews(plain_set, [other], [])
+        self.assertFalse(hasattr(other, 'structured_preview'))
+
+
+@override_settings(EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend',
+                   BASE_URL='https://test.example',
+                   SET_APPROVAL_EMAIL='admin@test.com')
+class NewAccountSetApprovalTests(TestCase):
+    """A brand-new account's set is created provisionally and held for an
+    administrator, and an administrator can lift the wait for one account."""
+
+    def setUp(self):
+        from datetime import timedelta
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        self.dist = Distribution.objects.create(name='NA dist', public=True)
+        self.new_user = User.objects.create_user('na_new', password='pw', email='n@t.com')
+        self.new = Writer.objects.get(user=self.new_user)
+        self.old_user = User.objects.create_user('na_old', password='pw', email='o@t.com')
+        self.old_user.date_joined = timezone.now() - timedelta(days=5)
+        self.old_user.save()
+        self.old = Writer.objects.get(user=self.old_user)
+        self.admin_user = User.objects.create_superuser('na_admin', 'a@t.com', 'pw')
+        Writer.objects.get_or_create(user=self.admin_user)
+
+    def _wait_mail(self, n=1, timeout=2.0):
+        import time
+        end = time.time() + timeout
+        while time.time() < end and len(mail.outbox) < n:
+            time.sleep(0.02)
+
+    def _create(self, name, public=False):
+        data = {'name': name, 'date': '2026-08-01', 'distribution': self.dist.id,
+                'num_packets': 1, 'max_acf_tossup_length': 750,
+                'max_acf_bonus_length': 400}
+        if public:
+            data['public'] = 'on'
+        return self.client.post('/create_question_set/', data)
+
+    # --- provisional creation -------------------------------------------------
+
+    def test_new_account_set_is_created_pending_not_refused(self):
+        self.client.login(username='na_new', password='pw')
+        self._create('Provisional Set')
+        qset = QuestionSet.objects.get(name='Provisional Set')
+        self.assertEqual(qset.approval_status, QuestionSet.APPROVAL_PENDING)
+        self.assertTrue(qset.awaiting_approval)
+        self.assertEqual(qset.owner, self.new)
+
+    def test_old_account_set_is_approved_outright(self):
+        self.client.login(username='na_old', password='pw')
+        self._create('Ordinary Set')
+        qset = QuestionSet.objects.get(name='Ordinary Set')
+        self.assertEqual(qset.approval_status, QuestionSet.APPROVAL_APPROVED)
+
+    def test_creation_emails_the_approval_address_with_a_review_link(self):
+        mail.outbox = []
+        self.client.login(username='na_new', password='pw')
+        self._create('Mailed Set')
+        self._wait_mail(1)
+        self.assertEqual(len(mail.outbox), 1)
+        msg = mail.outbox[0]
+        self.assertEqual(msg.to, ['admin@test.com'])
+        qset = QuestionSet.objects.get(name='Mailed Set')
+        self.assertIn('https://test.example/approve_new_set/{0}/'.format(qset.id), msg.body)
+        self.assertIn('na_new', msg.body)
+
+    @override_settings(SET_APPROVAL_EMAIL='')
+    def test_no_approval_address_means_no_review(self):
+        # Nobody to ask, so the set is approved rather than left pending forever.
+        mail.outbox = []
+        self.client.login(username='na_new', password='pw')
+        self._create('Unreviewed Set')
+        qset = QuestionSet.objects.get(name='Unreviewed Set')
+        self.assertEqual(qset.approval_status, QuestionSet.APPROVAL_APPROVED)
+        self.assertEqual(len(mail.outbox), 0)
+
+    # --- what pending holds back ---------------------------------------------
+
+    def test_pending_public_set_is_not_listed_publicly(self):
+        self.client.login(username='na_new', password='pw')
+        self._create('Hidden Public Set', public=True)
+        qset = QuestionSet.objects.get(name='Hidden Public Set')
+        self.assertTrue(qset.public)
+        self.client.logout()
+        self.client.login(username='na_old', password='pw')
+        body = self.client.get('/question_sets/').content.decode()
+        self.assertNotIn('Hidden Public Set', body)
+
+    def test_approved_public_set_is_listed_publicly(self):
+        self.client.login(username='na_new', password='pw')
+        self._create('Shown Public Set', public=True)
+        qset = QuestionSet.objects.get(name='Shown Public Set')
+        qset.approval_status = QuestionSet.APPROVAL_APPROVED
+        qset.save()
+        self.client.logout()
+        self.client.login(username='na_old', password='pw')
+        body = self.client.get('/question_sets/').content.decode()
+        self.assertIn('Shown Public Set', body)
+
+    def test_cannot_request_to_join_a_pending_set(self):
+        self.client.login(username='na_new', password='pw')
+        self._create('Unjoinable Set', public=True)
+        qset = QuestionSet.objects.get(name='Unjoinable Set')
+        self.client.logout()
+        self.client.login(username='na_old', password='pw')
+        resp = self.client.post('/request_to_join/', {'qset_id': qset.id})
+        self.assertFalse(json.loads(resp.content.decode())['success'])
+        self.assertEqual(SetJoinRequest.objects.filter(question_set=qset).count(), 0)
+
+    def test_join_link_for_a_pending_set_says_it_is_not_taking_members(self):
+        self.client.login(username='na_new', password='pw')
+        self._create('Linked Set')
+        qset = QuestionSet.objects.get(name='Linked Set')
+        link = SetJoinLink.objects.create(question_set=qset, created_by=self.new,
+                                          token=SetJoinLink.new_token())
+        self.client.logout()
+        self.client.login(username='na_old', password='pw')
+        body = self.client.get('/join/{0}/'.format(link.token)).content.decode()
+        self.assertIn('taking members yet', body)
+        self.assertEqual(SetJoinRequest.objects.filter(question_set=qset).count(), 0)
+
+    def test_owner_sees_a_pending_banner_on_the_set_page(self):
+        self.client.login(username='na_new', password='pw')
+        self._create('Bannered Set')
+        qset = QuestionSet.objects.get(name='Bannered Set')
+        body = self.client.get('/edit_question_set/{0}/'.format(qset.id)).content.decode()
+        self.assertIn('This set is waiting for approval', body)
+
+    # --- the administrator's review ------------------------------------------
+
+    def test_review_page_is_superuser_only(self):
+        self.client.login(username='na_new', password='pw')
+        self._create('Guarded Set')
+        qset = QuestionSet.objects.get(name='Guarded Set')
+        resp = self.client.get('/approve_new_set/{0}/'.format(qset.id))
+        self.assertContains(resp, 'Only a site administrator')
+        # And approving from a non-admin account changes nothing.
+        self.client.post('/approve_new_set/{0}/'.format(qset.id), {'action': 'approve'})
+        qset.refresh_from_db()
+        self.assertEqual(qset.approval_status, QuestionSet.APPROVAL_PENDING)
+
+    def test_admin_approves_the_set(self):
+        self.client.login(username='na_new', password='pw')
+        self._create('Approve Me')
+        qset = QuestionSet.objects.get(name='Approve Me')
+        self.client.logout()
+        self.client.login(username='na_admin', password='pw')
+        resp = self.client.post('/approve_new_set/{0}/'.format(qset.id), {'action': 'approve'})
+        self.assertContains(resp, 'now an ordinary question set')
+        qset.refresh_from_db()
+        self.assertEqual(qset.approval_status, QuestionSet.APPROVAL_APPROVED)
+        self.assertIsNotNone(qset.approval_date)
+
+    def test_admin_declines_without_destroying_the_set(self):
+        self.client.login(username='na_new', password='pw')
+        self._create('Decline Me')
+        qset = QuestionSet.objects.get(name='Decline Me')
+        self.client.logout()
+        self.client.login(username='na_admin', password='pw')
+        self.client.post('/approve_new_set/{0}/'.format(qset.id), {'action': 'decline'})
+        qset.refresh_from_db()
+        self.assertEqual(qset.approval_status, QuestionSet.APPROVAL_DECLINED)
+        self.assertFalse(qset.visible_to_strangers)
+        # Still there, and its owner can still open it.
+        self.client.logout()
+        self.client.login(username='na_new', password='pw')
+        body = self.client.get('/edit_question_set/{0}/'.format(qset.id)).content.decode()
+        self.assertIn('This set wasn', body)
+        self.assertIn('approved', body)
+
+    def test_admin_can_delete_a_spam_set_outright(self):
+        self.client.login(username='na_new', password='pw')
+        self._create('Spam Set')
+        qset = QuestionSet.objects.get(name='Spam Set')
+        self.client.logout()
+        self.client.login(username='na_admin', password='pw')
+        resp = self.client.post('/approve_new_set/{0}/'.format(qset.id), {'action': 'delete'})
+        self.assertContains(resp, 'has been deleted')
+        self.assertFalse(QuestionSet.objects.filter(id=qset.id).exists())
+
+    # --- the per-account override --------------------------------------------
+
+    def test_can_create_early_lifts_the_wait_for_sets(self):
+        self.new.can_create_early = True
+        self.new.save()
+        self.client.login(username='na_new', password='pw')
+        self._create('Vouched Set')
+        qset = QuestionSet.objects.get(name='Vouched Set')
+        self.assertEqual(qset.approval_status, QuestionSet.APPROVAL_APPROVED)
+
+    def test_can_create_early_lifts_the_wait_for_distributions(self):
+        self.client.login(username='na_new', password='pw')
+        self.assertContains(self.client.get('/edit_distribution/'), '2 days after sign-up')
+        self.new.can_create_early = True
+        self.new.save()
+        self.assertNotContains(self.client.get('/edit_distribution/'), '2 days after sign-up')
+
+    def test_can_create_early_lifts_the_wait_for_role_groups(self):
+        self.new.can_create_early = True
+        self.new.save()
+        self.client.login(username='na_new', password='pw')
+        resp = self.client.post('/role_groups/', {'action': 'create', 'name': 'Vouched Group'})
+        self.assertNotContains(resp, 'create role groups until')
+        self.assertTrue(RoleGroup.objects.filter(name='Vouched Group').exists())
+
+    def test_superuser_is_never_held_by_the_wait(self):
+        # A superuser account created moments ago still creates outright.
+        self.client.login(username='na_admin', password='pw')
+        self._create('Admin Set')
+        qset = QuestionSet.objects.get(name='Admin Set')
+        self.assertEqual(qset.approval_status, QuestionSet.APPROVAL_APPROVED)
+
+    def test_writer_admin_list_offers_the_toggle_inline(self):
+        # The whole point of the override is that it's two clicks in the admin,
+        # so the flag has to be editable from the writer list itself.
+        self.client.login(username='na_admin', password='pw')
+        resp = self.client.get('/admin/qsub/writer/')
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode()
+        self.assertIn('can_create_early', body)
+        self.assertIn('na_new', body)

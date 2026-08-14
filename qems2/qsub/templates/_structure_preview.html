@@ -1,0 +1,32 @@
+{% comment %}
+How a prose answer line was read, shown on the upload preview for sets that
+record structured answers. Include with `preview` (from _structure_preview) and
+an optional `label`.
+{% endcomment %}
+{% autoescape on %}
+{% if preview.interesting or preview.problems %}
+<div class="sa-read{% if preview.problems %} sa-read-warn{% endif %}">
+    <div class="sa-read-head">Read as{% if label %} ({{ label }}){% endif %}</div>
+    <ul class="sa-read-list">
+        <li><span class="sa-read-kind">answer</span> {{ preview.structure.primary }}</li>
+        {% for accept in preview.structure.accepts %}
+        <li><span class="sa-read-kind">accept</span> {{ accept.text }}{% if accept.until %}
+            <em>until "{{ accept.until }}" is read</em>{% endif %}</li>
+        {% endfor %}
+        {% for prompt in preview.structure.prompts %}
+        <li><span class="sa-read-kind">{% if prompt.anti %}antiprompt{% else %}prompt{% endif %}</span>
+            {{ prompt.text }}{% if prompt.instruction %} <em>by asking "{{ prompt.instruction }}"</em>{% endif %}{% if prompt.until %}
+            <em>until "{{ prompt.until }}" is read</em>{% endif %}</li>
+        {% endfor %}
+        {% for clause in preview.structure.unparsed %}
+        <li><span class="sa-read-kind sa-read-asis">as written</span> {{ clause }}</li>
+        {% endfor %}
+    </ul>
+    {% if preview.problems %}
+    <ul class="sa-read-problems">
+        {% for problem in preview.problems %}<li>{{ problem }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+</div>
+{% endif %}
+{% endautoescape %}

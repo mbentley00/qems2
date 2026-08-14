@@ -1167,3 +1167,108 @@ html[data-theme="dark"] .commenter-tag { background: #2a2147; color: #c4b5fd; }
     border-radius: 9px;
 }
 html[data-theme="dark"] .packet-comment-badge { background: #16333d; color: #8fd3e8; }
+
+/* ---- Structured answer lines (sets with structured_answers on) ------------
+   A primary answer plus rows of accepts and directed prompts. The rows are
+   plain inputs posted as parallel lists, so the block degrades to something
+   usable with no JavaScript — only the add/remove buttons and the live preview
+   need it. */
+.structured-answer {
+    border: 1px solid var(--qx-border, #d5d5d5);
+    border-radius: 4px;
+    padding: 10px 12px 12px;
+    margin-bottom: 12px;
+    background: var(--qx-panel, #fbfbfc);
+}
+.structured-answer .sa-primary { display: block; font-weight: bold; margin-bottom: 10px; }
+.structured-answer .sa-primary-input { width: 100%; margin-top: 4px; }
+.structured-answer .sa-required { color: #a1490b; margin-left: 2px; }
+html[data-theme="dark"] .structured-answer .sa-required { color: #f0a868; }
+.structured-answer .sa-group { margin-bottom: 8px; }
+.structured-answer .sa-group-head {
+    font-size: 0.85em;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--qx-muted, #767676);
+    margin-bottom: 4px;
+}
+.structured-answer .sa-group-head small {
+    display: block;
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 0.95em;
+}
+.structured-answer .sa-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    margin-bottom: 4px;
+}
+.structured-answer .sa-row input,
+.structured-answer .sa-row select { margin: 0; }
+.structured-answer .sa-text { flex: 2 1 0; }
+.structured-answer .sa-instruction { flex: 2 1 0; }
+.structured-answer .sa-until { flex: 1 1 0; }
+.structured-answer .sa-kind { flex: 0 0 auto; width: auto; }
+.structured-answer .sa-remove {
+    flex: 0 0 auto;
+    border: none;
+    background: none;
+    color: var(--qx-muted, #767676);
+    font-size: 1.2em;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 4px;
+}
+.structured-answer .sa-remove:hover { color: #c00; }
+.structured-answer .sa-add {
+    border: none;
+    background: none;
+    color: var(--qx-link, #5b3a9e);
+    cursor: pointer;
+    padding: 0;
+    font-size: 0.9em;
+}
+/* The line these fields will print as — the one thing a moderator sees, so it
+   stays visible while the fields are edited. */
+.structured-answer .sa-preview {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px dotted var(--qx-border, #d5d5d5);
+    font-size: 0.9em;
+}
+.structured-answer .sa-preview-label {
+    text-transform: uppercase;
+    font-size: 0.85em;
+    letter-spacing: 0.04em;
+    color: var(--qx-muted, #767676);
+    margin-right: 6px;
+}
+.sa-problems ul { margin: 0; padding-left: 20px; }
+
+/* How a pasted prose answer line was read, on the upload preview. */
+.sa-read {
+    border-left: 3px solid var(--qx-border, #d5d5d5);
+    padding: 4px 0 4px 10px;
+    margin: 0 0 12px 12px;
+    font-size: 0.9em;
+}
+.sa-read-warn { border-left-color: #d9a441; }
+.sa-read-head {
+    text-transform: uppercase;
+    font-size: 0.85em;
+    letter-spacing: 0.04em;
+    color: var(--qx-muted, #767676);
+}
+.sa-read-list, .sa-read-problems { margin: 2px 0 0; padding-left: 0; list-style: none; }
+.sa-read-list li { margin: 0; }
+.sa-read-kind {
+    display: inline-block;
+    min-width: 5.5em;
+    color: var(--qx-muted, #767676);
+    font-size: 0.9em;
+}
+.sa-read-asis { font-style: italic; }
+.sa-read-problems { margin-top: 4px; color: #8a5b00; }
+html[data-theme="dark"] .sa-read-problems { color: #f0a868; }
+.sa-read-problems li { margin: 0; }

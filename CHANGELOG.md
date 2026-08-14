@@ -1,5 +1,67 @@
 # Changelog
 
+## 2026-08-14 — A new account's first set isn't a dead end
+
+- **A brand-new account can be vouched for.** New accounts wait two days before
+  they can create question sets, distributions or role groups — a spam measure,
+  but one with no way round it, so a real person invited on the day of a set's
+  kickoff was simply stuck. Tick **Can create early** on their writer record in
+  the Django admin and the wait is lifted for that one person, for all three
+  things. It's editable straight from the writer list, which now shows username,
+  email and sign-up date, and can be searched and filtered. Superusers are never
+  held by the wait at all.
+- **Otherwise the set is created provisionally rather than refused.** An account
+  still inside its two days that creates a set now gets the set: it's made,
+  they own it, and they can write, edit and packetize in it immediately. What's
+  held back is everything that reaches other people — the set stays out of the
+  public set list and its join links report that it isn't taking members yet.
+  The set page says so plainly, and so does the create page, before they start.
+- **The administrator is emailed to approve it**, with the owner, their sign-up
+  date and a direct review link. Approving makes it an ordinary set. Declining
+  keeps it exactly as it is but leaves it closed to strangers — nothing is
+  thrown away, and it can still be approved later. Deleting a spam set outright
+  is a separate button behind its own confirmation. Set the address with the
+  `SET_APPROVAL_EMAIL` environment variable (comma-separate for several
+  reviewers); leave it blank and there is nobody to ask, so such sets are simply
+  approved on creation rather than waiting forever.
+
+## 2026-08-13 — Structured answer lines (opt-in)
+
+- **A set can record an answer as structure instead of only as prose.** Off by
+  default; turn on **Structured answer lines** in the set's settings. An answer
+  is then a required primary answer plus any number of accepts and prompts,
+  each edited as its own field, with a prompt carrying the instruction that
+  says what the moderator should ask. An accept or prompt on a *tossup* can
+  also stop applying partway through — "until <em>Bourbon</em> is read" — which
+  bonus parts don't offer, having no shared text to be read up to.
+- **The printed line doesn't change.** It is still what the packet, the PDF,
+  the Word export, the character count and the YAPP export read; the structure
+  is stored beside it and the line is rebuilt from the fields on save. Turning
+  the setting on cannot change what a packet looks like, and turning it off
+  again leaves every answer exactly as it was.
+- **Questions already in the set get structure without a migration**, read off
+  their existing answer lines. A stored structure is only trusted while it
+  still describes the line, so a bulk edit or an import that rewrites the line
+  on its own can't leave the editor showing an answer the packet no longer has.
+- **Answers typed or pasted in bulk are parsed as best they can be**, and the
+  upload preview shows the reading — which part was taken as the answer, what
+  was read as an accept or a prompt — before anything is committed. A clause
+  the parser can't place ("do not accept …") is carried through untouched
+  rather than dropped, so no text is ever lost.
+
+## 2026-08-12 — Prompts that say what to ask
+
+- **New style rule: prompts with no directed instruction.** "Prompt on
+  __Louis__" leaves each moderator to invent the follow-up, and two moderators
+  inventing different ones is the whole reason directed prompts exist. The rule
+  flags a prompt or antiprompt whose own clause doesn't say what to ask —
+  "by asking …", "by saying …", any "by …ing", or a quoted question after
+  "with". A later clause's instruction doesn't cover an earlier bare prompt, and
+  "prompt on __Louis__ or __Bourbon__ by asking for more" is one prompt with two
+  targets, not one directed and one bare. On under the Minkowski guide, off
+  under Generic, and switchable per set like any other rule; ignoring one is
+  keyed to that prompt's target, so it doesn't silence the rest.
+
 ## 2026-08-11 — Notes that don't count, a clearer dismiss, a login page that matches
 
 - **Mark a note to the moderator or players with `\N…\N`.** QEMS already tried

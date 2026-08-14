@@ -32,6 +32,13 @@
             You already have access to <strong>{{ qset.name }}</strong>.
         </div>
         <p><a href="/edit_question_set/{{ qset.id }}/" class="button small primary">Go to set</a></p>
+    {% elif unavailable %}
+        <div class="alert-box info">
+            <strong>{{ qset.name }}</strong> isn't taking members yet &mdash; it's a new set
+            still waiting on a site administrator's approval. The link is fine; try it again
+            once the owner tells you the set has been approved.
+        </div>
+        <p><a href="/question_sets/" class="button small secondary">Your question sets</a></p>
     {% elif requested %}
         <div class="alert-box success">
             Your request has been sent. An owner of <strong>{{ qset.name }}</strong> has to

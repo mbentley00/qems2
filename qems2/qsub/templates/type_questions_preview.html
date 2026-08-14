@@ -59,6 +59,7 @@
                     {% endif %}<br>
                     Type: {{ tossup.question_type|safe}}
                 </p>
+                {% if tossup.structured_preview %}{% include "_structure_preview.html" with preview=tossup.structured_preview %}{% endif %}
                 <input type="hidden" name="tossup-text-{{ forloop.counter0 }}" value="{{ tossup.tossup_text|force_escape }}">
                 <input type="hidden" name="tossup-answer-{{ forloop.counter0 }}" value="{{ tossup.tossup_answer|force_escape }}">
                 <input type="hidden" name="tossup-category-{{ forloop.counter0 }}" value="{{ tossup.category|force_escape }}">
@@ -71,6 +72,7 @@
                 {% for bonus in bonuses %}
                 {{ bonus|bonus_html_verbose }}
                 {% if not bonus.category %}<p><span class="label alert">no category</span></p>{% endif %}
+                {% for preview in bonus.structured_preview %}{% include "_structure_preview.html" with preview=preview label=preview.label %}{% endfor %}
 
 
                 <input type="hidden" name="bonus-leadin-{{ forloop.counter0 }}" value="{{ bonus.leadin|force_escape }}">

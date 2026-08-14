@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% block title %}Approve New Set - QEMS3{% endblock %}
+
+{% block content %}
+{% load static %}
+{% load filters %}
+
+{% if deleted %}
+    <h3 class="page-header">Deleted</h3>
+    <div class="alert-box success">
+        <strong>{{ set_name }}</strong> and everything in it has been deleted.
+    </div>
+    <p><a href="/question_sets/" class="button small secondary">Question sets</a></p>
+
+{% elif acted == 'approve' %}
+    <h3 class="page-header">Approved</h3>
+    <div class="alert-box success">
+        <strong>{{ qset.name }}</strong> is now an ordinary question set. If its owner has
+        marked it public it will appear in the public list, and its join links work again.
+    </div>
+    <p><a href="/edit_question_set/{{ qset.id }}/" class="button small primary">Go to set</a></p>
+
+{% elif acted == 'decline' %}
+    <h3 class="page-header">Declined</h3>
+    <div class="alert-box info">
+        <strong>{{ qset.name }}</strong> has been declined. It still exists and its owner can
+        still open it &mdash; nothing has been thrown away &mdash; but it stays out of the
+        public list and its join links stay closed. Come back to this page to approve it after
+        all, or to delete it outright.
+    </div>
+    <p><a href="/approve_new_set/{{ qset.id }}/" class="button small secondary">Back to review</a></p>
+
+{% else %}
+    <h3 class="page-header">Review new set: {{ qset.name }}</h3>
+
+    <div class="panel radius">
+        <p style="margin-bottom:4px;"><strong>{{ qset.name }}</strong>
+            {% if qset.approval_status != 'pending' %}
+                <span class="label secondary">{{ qset.get_approval_status_display }}</span>
+            {% endif %}
+        </p>
+        <p style="color:#555; margin-bottom:0;">
+            {{ qset.date }}{% if qset.host %} &middot; hosted by {{ qset.host }}{% endif %}<br>
+            Owner: {{ owner|verbose_username }}{% if owner.user.email %} &middot; {{ owner.user.email }}{% endif %}<br>
+            Account created: {{ owner.user.date_joined }}<br>
+            Content so far: {{ counts.tossups }} tossup{{ counts.tossups|pluralize }},
+            {{ counts.bonuses }} bonus{{ counts.bonuses|pluralize:"es" }}<br>
+            Packets requested: {{ qset.num_packets }}
+        </p>
+    </div>
+
+    <p>This set was made by an account younger than the two-day wait, so it was created
+    provisionally. Until it's approved it stays out of the public set list and its join
+    links don't work; the owner can write in it either way.</p>
+
+    <form action="" method="post" style="margin-bottom:0;">
+        {% csrf_token %}
+        <button type="submit" name="action" value="approve" class="button primary">Approve this set</button>
+        <button type="submit" name="action" value="decline" class="button secondary">Decline (keep it, hidden)</button>
+        <a href="/edit_question_set/{{ qset.id }}/" class="button secondary">Open the set</a>
+    </form>
+
+    <div class="panel radius" style="margin-top:18px;">
+        <p style="margin-bottom:8px;"><strong>Spam?</strong> Deleting removes the set, every
+        question in it and its comments. There's no undo.</p>
+        <form action="" method="post" style="margin-bottom:0;"
+              onsubmit="return confirm('Delete &quot;{{ qset.name|escapejs }}&quot; and everything in it? This cannot be undone.');">
+            {% csrf_token %}
+            <button type="submit" name="action" value="delete" class="button alert small">Delete this set</button>
+        </form>
+    </div>
+{% endif %}
+
+{% endblock %}

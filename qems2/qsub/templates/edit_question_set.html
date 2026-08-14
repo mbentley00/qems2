@@ -27,6 +27,24 @@
 </a>
 {% endif %}
 
+{% comment %} A set made by an account that hadn't waited out the new-account period is
+   provisional until an administrator approves it. It works normally for its own
+   members; what's held back is everything that reaches strangers. {% endcomment %}
+{% if qset.awaiting_approval %}
+<div class="alert-box warning">
+    <strong>This set is waiting for approval.</strong> It was created by a new account, so a
+    site administrator has been emailed to review it. You can write, edit and packetize as
+    normal in the meantime &mdash; but the set won't appear in the public set list and its
+    join links won't work until it's approved.
+</div>
+{% elif qset.approval_declined %}
+<div class="alert-box alert">
+    <strong>This set wasn't approved.</strong> You can still work in it, but it stays out of
+    the public set list and its join links stay closed. Contact the site administrator if you
+    think this was a mistake.
+</div>
+{% endif %}
+
 <dl class="tabs" data-tab>
     <dd class="active"><a href="#qset-info">Home</a></dd>
     <dd><a href="#questions">Recent Questions</a></dd>
@@ -130,6 +148,9 @@
                 <label class="set-info-check">{{ form.enable_superpower }}
                     <span>Enable superpowers (20-point <code>(+)</code> mark)
                         <small>Lets tossups carry a 20-point superpower mark before the 15-point power. Off: a stray (+) is plain text and never scores 20.</small></span></label>
+                <label class="set-info-check">{{ form.structured_answers }}
+                    <span>Structured answer lines
+                        <small>Records an answer as a primary answer plus its accepts and directed prompts, editable as fields. The printed line is unchanged, and answers typed or pasted as prose are parsed into structure as best they can be.</small></span></label>
                 <label class="set-info-check">{{ form.public }}
                     <span>Public (listed for everyone)
                         <small>Anyone can see this set is being written and request to join (which emails you). It grants no access by itself.</small></span></label>
