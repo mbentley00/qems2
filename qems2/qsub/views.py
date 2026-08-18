@@ -7022,11 +7022,27 @@ def get_packetization_rows(qset):
             'rec_tu': rec_tu,
             'rec_bs': rec_bs,
             'min_tu': entry.min_tossups if entry else (rec_tu if is_top else None),
-            'max_tu': entry.max_tossups if entry else (rec_tu if is_top else None),
+            'max_tu': entry.max_tossups if entry else _sub_default(rec_tu, is_top),
             'min_bs': entry.min_bonuses if entry else (rec_bs if is_top else None),
-            'max_bs': entry.max_bonuses if entry else (rec_bs if is_top else None),
+            'max_bs': entry.max_bonuses if entry else _sub_default(rec_bs, is_top),
         })
     return rows
+
+def _sub_default(recommended, is_top):
+    """The maximum a row starts out holding.  A subcategory only offers
+    maximums, and leaving them blank let one packet take every 20th Century
+    tossup while another took none, so a subcategory starts at its recommended
+    per-packet share -- the shape the distribution already asks for.  Nothing
+    else changes: the cap rounds up (`_quota_cap`), so a share of 3.3 still
+    admits 4 and the parent minimum stays reachable.
+
+    A recommendation of zero stays blank instead of capping at zero: a
+    subcategory with no share of the distribution but questions written in it
+    would otherwise be shut out of every packet.
+    """
+    if is_top:
+        return recommended
+    return recommended or None
 
 def _parse_quota_value(raw):
     raw = (raw or '').strip()
@@ -7077,8 +7093,9 @@ def packetize_set(request, qset_id):
                 if (min_tu is not None and max_tu is not None and min_tu > max_tu) or \
                    (min_bs is not None and max_bs is not None and min_bs > max_bs):
                     raise ValueError('Minimum exceeds maximum for "{0}"'.format(path))
-                if min_tu is None and max_tu is None and min_bs is None and max_bs is None:
-                    continue
+                # A row cleared of every value is still saved, so that clearing
+                # a subcategory's suggested maximum sticks instead of being
+                # filled back in from the recommendation on the next visit.
                 new_entries.append(PacketizationEntry(
                     question_set=qset, path=path, depth=depth,
                     min_tossups=min_tu, max_tossups=max_tu,

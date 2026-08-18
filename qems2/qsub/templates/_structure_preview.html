@@ -19,7 +19,7 @@ an optional `label`.
             <em>until "{{ prompt.until }}" is read</em>{% endif %}</li>
         {% endfor %}
         {% for clause in preview.structure.unparsed %}
-        <li><span class="sa-read-kind sa-read-asis">as written</span> {{ clause }}</li>
+        <li><span class="sa-read-kind sa-read-asis">note</span> {{ clause }}</li>
         {% endfor %}
     </ul>
     {% if preview.problems %}

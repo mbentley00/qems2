@@ -8894,3 +8894,85 @@ class NewAccountSetApprovalTests(TestCase):
         body = resp.content.decode()
         self.assertIn('can_create_early', body)
         self.assertIn('na_new', body)
+
+
+class PacketizationSubcategoryDefaultTests(TestCase):
+    """Subcategory rows on the packetize page arrive holding the recommended
+    per-packet share.
+
+    They used to arrive blank, which read as "no opinion" but meant "no cap":
+    one packet could take every 20th Century tossup while another took none."""
+
+    def setUp(self):
+        self.ou = User.objects.create_user('pz_owner', password='pw', email='pz@test.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='pz dist')
+        self.de_arch = DistributionEntry.objects.create(
+            distribution=self.dist, category='Fine Arts', subcategory='Architecture')
+        self.de_design = DistributionEntry.objects.create(
+            distribution=self.dist, category='Fine Arts', subcategory='Design')
+        self.qset = QuestionSet.objects.create(
+            name='PZ Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=2, tossups_per_packet=8, bonuses_per_packet=8,
+            distribution=self.dist)
+        SetWideDistributionEntry.objects.create(
+            question_set=self.qset, dist_entry=self.de_arch, num_tossups=8, num_bonuses=4)
+        # Design has a place in the distribution but no share of it.
+        SetWideDistributionEntry.objects.create(
+            question_set=self.qset, dist_entry=self.de_design, num_tossups=0, num_bonuses=0)
+        self.client.login(username='pz_owner', password='pw')
+
+    def _rows(self):
+        from qems2.qsub.views import get_packetization_rows
+        return {row['path']: row for row in get_packetization_rows(self.qset)}
+
+    def test_a_subcategory_starts_at_its_recommended_share(self):
+        row = self._rows()['Fine Arts - Architecture']
+        self.assertEqual(row['max_tu'], row['rec_tu'])
+        self.assertEqual(row['max_bs'], row['rec_bs'])
+        self.assertEqual(row['max_tu'], 4.0)
+        self.assertEqual(row['max_bs'], 2.0)
+
+    def test_a_subcategory_with_no_share_stays_uncapped(self):
+        # Capping Design at 0 would shut any Design question written anyway
+        # out of every packet.
+        row = self._rows()['Fine Arts - Design']
+        self.assertEqual(row['rec_tu'], 0.0)
+        self.assertIsNone(row['max_tu'])
+        self.assertIsNone(row['max_bs'])
+
+    def test_a_subcategory_still_offers_no_minimum(self):
+        row = self._rows()['Fine Arts - Architecture']
+        self.assertIsNone(row['min_tu'])
+        self.assertIsNone(row['min_bs'])
+
+    def test_a_saved_cap_wins_over_the_recommendation(self):
+        PacketizationEntry.objects.create(
+            question_set=self.qset, path='Fine Arts - Architecture', depth=1,
+            max_tossups=Decimal('6'))
+        row = self._rows()['Fine Arts - Architecture']
+        self.assertEqual(row['max_tu'], Decimal('6'))
+
+    def test_a_cleared_cap_stays_cleared(self):
+        PacketizationEntry.objects.create(
+            question_set=self.qset, path='Fine Arts - Architecture', depth=1)
+        row = self._rows()['Fine Arts - Architecture']
+        self.assertIsNone(row['max_tu'])
+
+    def test_the_page_renders_the_suggested_cap(self):
+        body = self.client.get('/packetize_set/{0}/'.format(self.qset.id)).content.decode()
+        index = list(self._rows()).index('Fine Arts - Architecture')
+        self.assertIn('name="row_{0}_max_tu" value="4.0"'.format(index), body)
+
+    def test_clearing_a_cap_through_the_form_persists(self):
+        paths = sorted(self._rows())
+        data = {'num_packets': 2, 'tossups_per_packet': 8, 'bonuses_per_packet': 8,
+                'row_count': len(paths)}
+        for i, path in enumerate(paths):
+            data['row_{0}_path'.format(i)] = path
+            if path == 'Fine Arts':
+                data.update({'row_{0}_min_tu'.format(i): '8', 'row_{0}_max_tu'.format(i): '8',
+                             'row_{0}_min_bs'.format(i): '8', 'row_{0}_max_bs'.format(i): '8'})
+        resp = self.client.post('/packetize_set/{0}/'.format(self.qset.id), data)
+        self.assertEqual(resp.status_code, 200)
+        self.assertIsNone(self._rows()['Fine Arts - Architecture']['max_tu'])

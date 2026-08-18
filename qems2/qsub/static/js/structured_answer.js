@@ -26,7 +26,9 @@
         var isTossup = block.getAttribute('data-is-tossup') === '1';
         var row = el('div', {'class': 'sa-row'});
 
-        if (group === 'prompt') {
+        if (group === 'note') {
+            row.appendChild(textInput(prefix + '_unparsed', 'printed as typed', 'sa-text'));
+        } else if (group === 'prompt') {
             var kind = el('select', {'name': prefix + '_prompt_anti', 'class': 'sa-kind'});
             [['prompt', 'prompt'], ['anti', 'antiprompt']].forEach(function (pair) {
                 var option = el('option', {'value': pair[0]});

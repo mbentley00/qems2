@@ -1184,19 +1184,30 @@ html[data-theme="dark"] .packet-comment-badge { background: #16333d; color: #8fd
 .structured-answer .sa-primary-input { width: 100%; margin-top: 4px; }
 .structured-answer .sa-required { color: #a1490b; margin-left: 2px; }
 html[data-theme="dark"] .structured-answer .sa-required { color: #f0a868; }
-.structured-answer .sa-group { margin-bottom: 8px; }
-.structured-answer .sa-group-head {
-    font-size: 0.85em;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--qx-muted, #767676);
-    margin-bottom: 4px;
+.structured-answer .sa-group {
+    margin: 0 0 10px;
+    padding-top: 8px;
+    border-top: 1px solid var(--qx-border, #e6e6e8);
 }
+.structured-answer .sa-group-head {
+    font-size: 0.8em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--qx-muted, #767676);
+    margin-bottom: 5px;
+}
+/* The one-line explanation under a group head is prose, not a label: it drops
+   the uppercasing so it doesn't compete with the head it sits under. */
 .structured-answer .sa-group-head small {
     display: block;
+    max-width: 46em;
+    margin-top: 2px;
     text-transform: none;
     letter-spacing: 0;
+    font-weight: normal;
     font-size: 0.95em;
+    line-height: 1.35;
 }
 .structured-answer .sa-row {
     display: flex;
@@ -1228,21 +1239,36 @@ html[data-theme="dark"] .structured-answer .sa-required { color: #f0a868; }
     cursor: pointer;
     padding: 0;
     font-size: 0.9em;
+    line-height: 1.2;
 }
+.structured-answer .sa-add:hover,
+.structured-answer .sa-add:focus { text-decoration: underline; }
 /* The line these fields will print as — the one thing a moderator sees, so it
    stays visible while the fields are edited. */
 .structured-answer .sa-preview {
-    margin-top: 8px;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-top: 10px;
     padding-top: 8px;
-    border-top: 1px dotted var(--qx-border, #d5d5d5);
+    border-top: 1px solid var(--qx-border, #d5d5d5);
     font-size: 0.9em;
 }
 .structured-answer .sa-preview-label {
+    flex: 0 0 auto;
     text-transform: uppercase;
     font-size: 0.85em;
-    letter-spacing: 0.04em;
+    font-weight: 600;
+    letter-spacing: 0.05em;
     color: var(--qx-muted, #767676);
-    margin-right: 6px;
+}
+/* A long answer line wraps instead of running off the panel — the preview is
+   the whole point of the block, so it can't be the part that gets cut off. */
+.structured-answer .sa-preview-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
 }
 .sa-problems ul { margin: 0; padding-left: 20px; }
 

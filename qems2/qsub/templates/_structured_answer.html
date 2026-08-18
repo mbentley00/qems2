@@ -57,21 +57,22 @@ has no shared text to read up to).
         <button type="button" class="sa-add" data-group="prompt">+ prompt</button>
     </div>
 
-    {% if structure.unparsed %}
-    <div class="sa-group sa-unparsed">
-        <div class="sa-group-head">Kept as written
-            <small>This part of the answer line isn't an accept or a prompt, so it's carried through untouched.</small>
+    <div class="sa-group" data-group="note">
+        <div class="sa-group-head">Notes
+            <small>Anything else the answer line says &mdash; a &ldquo;do not accept&rdquo;, a
+                clarification for the moderator &mdash; printed word for word.</small>
         </div>
         <div class="sa-rows">
             {% for clause in structure.unparsed %}
             <div class="sa-row">
-                <input type="text" name="{{ prefix }}_unparsed" value="{{ clause }}" class="sa-text">
+                <input type="text" name="{{ prefix }}_unparsed" value="{{ clause }}" class="sa-text"
+                       placeholder="printed as typed">
                 <button type="button" class="sa-remove" title="Remove">&times;</button>
             </div>
             {% endfor %}
         </div>
+        <button type="button" class="sa-add" data-group="note">+ note</button>
     </div>
-    {% endif %}
 
     <div class="sa-preview" aria-live="polite">
         <span class="sa-preview-label">Reads as</span>

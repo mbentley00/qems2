@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-08-17 — Answer-line notes, and subcategory quotas that start filled in
+
+- **"Kept as written" is now "Notes."** The last group of a structured answer
+  line holds whatever isn't an accept or a prompt — a "do not accept", a
+  parenthetical for the moderator. Its old heading described the machinery
+  rather than the thing, and read as though the field were inert. It also only
+  appeared when the parser had already found such a clause, so a line that
+  needed a note couldn't be given one; the group is always there now, with its
+  own **+ note**.
+- **The answer block reads as three groups.** Each group is separated by a rule
+  and its heading carries a little more weight than the fields under it, and
+  the "Reads as" line — the one thing a moderator ever sees — now wraps instead
+  of running off the edge of the panel.
+- **Subcategory maximums on the packetize page start at the recommended
+  share.** They used to arrive blank, which looks like "no opinion" but means
+  "no cap": with History capped at 10 and nothing said about its subcategories,
+  one packet could take six 20th Century tossups while another took none. Each
+  subcategory now starts at the per-packet share the distribution already asks
+  for, rounded up when it caps (a share of 3.3 still admits 4), and can be
+  changed or cleared as before — clearing one now sticks. A subcategory with no
+  share of the distribution stays blank rather than capping at zero, which
+  would shut any question written in it out of every packet.
+
 ## 2026-08-14 — A new account's first set isn't a dead end
 
 - **A brand-new account can be vouched for.** New accounts wait two days before
