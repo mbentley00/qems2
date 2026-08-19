@@ -1501,7 +1501,7 @@ def add_editor(request, qset_id):
 
             available_editors = [writer for writer in Writer.objects.all().order_by('user__last_name', 'user__first_name', 'user__username') #exclude(is_active=False)
                                  if writer not in current_editors and
-                                    not qset.is_owner(writer) and writer.id != 1
+                                    not qset.is_owner(writer)
                                     and writer.user.is_active]
         else:
             available_editors = []
@@ -1543,7 +1543,7 @@ def add_editor(request, qset_id):
                 set_editors = qset.editor.all()
                 available_editors = [writer for writer in Writer.objects.all().order_by('user__last_name', 'user__first_name', 'user__username') #exclude(is_active=False)
                                      if writer not in set_editors and
-                                        not qset.is_owner(writer) and writer.id != 1
+                                        not qset.is_owner(writer)
                                         and writer.user.is_active]
             else:
                 message = 'Invalid data entered!'
@@ -1569,7 +1569,7 @@ def add_co_owner(request, qset_id):
     def get_available():
         current_owners = qset.all_owners()
         return [writer for writer in Writer.objects.all().order_by('user__last_name', 'user__first_name', 'user__username')
-                if writer not in current_owners and writer.id != 1 and writer.user.is_active]
+                if writer not in current_owners and writer.user.is_active]
 
     if not qset.is_owner(user):
         return render(request, 'failure.html',
@@ -1642,7 +1642,7 @@ def add_writer(request, qset_id):
             set_writers = Writer.objects.filter(Q(question_set_writer=qset) | Q(question_set_editor=qset)).distinct().order_by('user__last_name', 'user__first_name', 'user__username')
             available_writers = [writer for writer in Writer.objects.all().order_by('user__last_name', 'user__first_name', 'user__username') #exclude(is_active=False)
                                  if writer not in set_writers and
-                                    not qset.is_owner(writer) and writer.id != 1
+                                    not qset.is_owner(writer)
                                     and writer.user.is_active]
         else:
             available_writers = []
@@ -1673,7 +1673,7 @@ def add_writer(request, qset_id):
                 set_writers = Writer.objects.filter(Q(question_set_writer=qset) | Q(question_set_editor=qset)).distinct().order_by('user__last_name', 'user__first_name', 'user__username')
                 available_writers = [writer for writer in Writer.objects.all().order_by('user__last_name', 'user__first_name', 'user__username') #exclude(is_active=False)
                                      if writer not in set_writers and
-                                        not qset.is_owner(writer) and writer.id != 1
+                                        not qset.is_owner(writer)
                                         and writer.user.is_active]
             else:
                 message = 'Invalid data entered!'

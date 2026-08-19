@@ -9092,3 +9092,54 @@ class DiscordCommentEmailTests(TestCase):
         self.author.refresh_from_db()
         self.assertFalse(self.author.email_on_discord_comments)
         self.assertTrue(self.author.send_mail_on_comments)
+
+
+class FirstWriterIsAddableTests(TestCase):
+    """Whoever holds Writer #1 can be added to a set like anyone else.
+
+    Every member picker carried a hardcoded `writer.id != 1` from 2014, so the
+    first account on an install -- here the owner's own admin account, which
+    creates sets and invites people -- was silently missing from all three
+    lists while showing up fine in the role-group search."""
+
+    def setUp(self):
+        self.first_user = User.objects.create_user('fw_first', password='pw', email='fw1@t.com')
+        self.first = Writer.objects.get(user=self.first_user)
+        self.ou = User.objects.create_user('fw_owner', password='pw', email='fwo@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='fw dist')
+        self.qset = QuestionSet.objects.create(
+            name='FW Set', date=timezone.now(), host='', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.client.login(username='fw_owner', password='pw')
+
+    def _available(self, path, key):
+        resp = self.client.get('/{0}/{1}/'.format(path, self.qset.id))
+        self.assertEqual(resp.status_code, 200)
+        return resp.context[key]
+
+    def test_the_first_writer_is_the_one_this_guards(self):
+        # The bug was specific to the lowest id, so pin that this fixture
+        # actually exercises it.
+        self.assertEqual(Writer.objects.order_by('id').first(), self.first)
+
+    def test_the_first_writer_can_be_added_as_a_writer(self):
+        self.assertIn(self.first, self._available('add_writer', 'available_writers'))
+
+    def test_the_first_writer_can_be_added_as_an_editor(self):
+        self.assertIn(self.first, self._available('add_editor', 'available_editors'))
+
+    def test_the_first_writer_can_be_added_as_a_co_owner(self):
+        self.assertIn(self.first, self._available('add_co_owner', 'available_co_owners'))
+
+    def test_adding_them_actually_works(self):
+        self.client.post('/add_writer/{0}/'.format(self.qset.id),
+                         {'writers_to_add': [str(self.first.id)]})
+        self.assertIn(self.qset, self.first.question_set_writer.all())
+        # ...and once added they drop off the list of people still to add.
+        self.assertNotIn(self.first, self._available('add_writer', 'available_writers'))
+
+    def test_an_inactive_account_is_still_left_out(self):
+        self.first_user.is_active = False
+        self.first_user.save()
+        self.assertNotIn(self.first, self._available('add_writer', 'available_writers'))

@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-08-19 — The first account on the install can be added to a set
+
+- **Whoever holds Writer #1 was missing from every member picker.** Add
+  Writer, Add Editor and Add Co-owner each carried a hardcoded `writer.id != 1`
+  inherited from the 2014 codebase, so the first account created on an install
+  — on this one the administrator's own account, which creates sets and
+  invites people — was silently absent from all three lists while showing up
+  normally in the role-group search. Nothing else about that account was
+  special. The lists still leave out deactivated accounts, the set's owner and
+  anyone already on the set.
+
 ## 2026-08-18 — Answer fields you can read, and quieter comment mail
 
 - **The structured answer fields are rich text.** They showed the markup that
