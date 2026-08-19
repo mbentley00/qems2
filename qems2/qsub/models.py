@@ -128,6 +128,12 @@ class Writer (models.Model):
 
     send_mail_on_comments = models.BooleanField(default=False)
 
+    # The Discord playtest bot posts its own comments (see DISCORD_BOT_NAME),
+    # and a busy playtest can outnumber everything a person writes. Untick this
+    # and comment mail covers only what people wrote here; everything else about
+    # the bot's comments is unchanged — they still appear on the question.
+    email_on_discord_comments = models.BooleanField(default=True)
+
     def get_real_name(self):
         return '{0!s} {1!s} '.format(self.user.first_name, self.user.last_name)
         

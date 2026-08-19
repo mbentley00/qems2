@@ -99,7 +99,12 @@ $(function () {
     var registry = {};
     var resyncFns = [];
 
-    function enhance(textarea, multiline) {
+    // `opts.compact` drops the toolbar and sizes the editor like an ordinary
+    // one-line input: the structured answer rows are four fields wide, and a
+    // toolbar apiece would bury the fields under their own chrome. Ctrl+B/U/I
+    // and paste conversion still work there.
+    function enhance(textarea, multiline, opts) {
+        opts = opts || {};
         var $ta = $(textarea);
         // Server-side validation still applies; a hidden required field
         // would silently block submission.
@@ -144,13 +149,31 @@ $(function () {
         } else if (textarea.id && SHORT_FIELDS.indexOf(textarea.id) !== -1) {
             $editor.addClass('rich-editor-short');
         }
+        if (opts.editorClass) { $editor.addClass(opts.editorClass); }
         $editor.html(qemsToHtml($ta.val(), multiline));
+
+        // A contenteditable has no placeholder of its own, so carry the
+        // field's across and show it while the editor is empty.
+        var placeholder = opts.placeholder || $ta.attr('placeholder') || '';
+        if (placeholder) { $editor.attr('data-placeholder', placeholder); }
+        function updatePlaceholder() {
+            $editor.toggleClass('rich-editor-empty', !$editor.text().trim());
+        }
+        updatePlaceholder();
 
         // The expanding-textareas plugin wraps textareas in div.expanding —
         // hide the wrapper if present, otherwise the textarea itself.
         var $anchorEl = $ta.closest('div.expanding');
         if (!$anchorEl.length) { $anchorEl = $ta; }
-        var $wrapper = $('<div class="rich-editor-wrapper"></div>').append($toolbar, $editor);
+        var $wrapper = $('<div class="rich-editor-wrapper"></div>');
+        if (opts.compact) {
+            $wrapper.addClass('rich-editor-compact').append($editor);
+        } else {
+            $wrapper.append($toolbar, $editor);
+        }
+        // Carry the field's layout classes onto the wrapper, which is what now
+        // occupies its place in the row.
+        if (opts.wrapperClass) { $wrapper.addClass(opts.wrapperClass); }
         $anchorEl.after($wrapper).hide();
 
         // When true, the raw textarea is showing and is the source of truth, so
@@ -356,6 +379,7 @@ $(function () {
         }
 
         $editor.on('input blur', syncDown);
+        $editor.on('input blur focus', updatePlaceholder);
 
         // Remember the caret/selection inside the editor so actions that move
         // focus away (toolbar buttons, the category-tag tree) can restore it.
@@ -526,7 +550,16 @@ $(function () {
 
     window.QemsRichEditor = {
         get: function (textareaId) { return registry[textareaId] || null; },
-        insertCategoryTag: insertCategoryTag
+        insertCategoryTag: insertCategoryTag,
+        // Enhance a field the page built after load (a structured answer row
+        // added by its + button).
+        enhanceField: function (field, opts) {
+            opts = opts || {};
+            enhance(field, !!opts.multiline, opts);
+        },
+        // QEMS markup -> display HTML, for anything that shows a line rather
+        // than edits it (the structured answer's live "Reads as").
+        markupToHtml: qemsLineToHtml
     };
 
     /* ---------- Wire up the pages ---------- */
@@ -538,6 +571,20 @@ $(function () {
     var allowLineBreaks = $qForm.is('#edit-tossup, #edit-bonus');
     $qForm.find(FIELD_SELECTOR).each(function () {
         enhance(this, allowLineBreaks);
+    });
+
+    // Structured answer lines: every text field is rich, so a writer sees the
+    // answer as it prints rather than the underscores that produce it. The
+    // primary answer earns the full toolbar (it is the same field the plain
+    // editor gives one to); the rows are compact.
+    $('.structured-answer').each(function () {
+        var $block = $(this);
+        $block.find('.sa-primary-input').each(function () {
+            enhance(this, false, {editorClass: 'rich-editor-short'});
+        });
+        $block.find('.sa-text, .sa-instruction').each(function () {
+            enhance(this, false, {compact: true});
+        });
     });
 
     // Type Questions page: one big line-oriented box

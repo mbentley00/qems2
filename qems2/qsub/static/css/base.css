@@ -1180,8 +1180,11 @@ html[data-theme="dark"] .packet-comment-badge { background: #16333d; color: #8fd
     margin-bottom: 12px;
     background: var(--qx-panel, #fbfbfc);
 }
-.structured-answer .sa-primary { display: block; font-weight: bold; margin-bottom: 10px; }
-.structured-answer .sa-primary-input { width: 100%; margin-top: 4px; }
+/* The label matches the "Tossup Text" label above it. It used to be bold, and
+   the field inherited the weight, so an answer line read as bold end to end
+   when only its required portion should. */
+.structured-answer .sa-primary { display: block; font-weight: normal; margin-bottom: 10px; }
+.structured-answer .sa-primary-input { width: 100%; margin-top: 4px; font-weight: normal; }
 .structured-answer .sa-required { color: #a1490b; margin-left: 2px; }
 html[data-theme="dark"] .structured-answer .sa-required { color: #f0a868; }
 .structured-answer .sa-group {
@@ -1208,6 +1211,24 @@ html[data-theme="dark"] .structured-answer .sa-required { color: #f0a868; }
     font-weight: normal;
     font-size: 0.95em;
     line-height: 1.35;
+}
+/* The fields are rich-text editors (rich_editor.js), so the answer shows as it
+   prints instead of as the markup that produces it. The wrapper takes the place
+   of the input it replaced, so it inherits the row's flex sizing. */
+.structured-answer .rich-editor-wrapper { margin-bottom: 0; margin-top: 4px; }
+.structured-answer .sa-row .rich-editor-wrapper { flex: 2 1 0; min-width: 0; margin-top: 0; }
+.structured-answer .rich-editor { min-height: 2.25em; }
+.rich-editor-wrapper.rich-editor-compact .rich-editor {
+    border-radius: 3px;
+    padding: 0.35em 0.5em;
+    box-shadow: none;
+}
+/* A contenteditable has no placeholder; enhance() copies the field's across
+   and this shows it while the editor is empty. */
+.rich-editor.rich-editor-empty:before {
+    content: attr(data-placeholder);
+    color: var(--qx-muted, #999);
+    pointer-events: none;
 }
 .structured-answer .sa-row {
     display: flex;
@@ -1269,6 +1290,9 @@ html[data-theme="dark"] .structured-answer .sa-required { color: #f0a868; }
     min-width: 0;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+    /* The same serif the editors and the exported packets use — this is the
+       printed line, so it should look like one rather than like code. */
+    font-family: Georgia, 'Times New Roman', serif;
 }
 .sa-problems ul { margin: 0; padding-left: 20px; }
 

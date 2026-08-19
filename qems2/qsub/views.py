@@ -4437,7 +4437,8 @@ def profile(request):
                         'first_name': user.first_name,
                         'last_name': user.last_name,
                         'email': user.email,
-                        'send_mail_on_comments': writer.send_mail_on_comments}
+                        'send_mail_on_comments': writer.send_mail_on_comments,
+                        'email_on_discord_comments': writer.email_on_discord_comments}
 
         form = WriterChangeForm(initial=initial_data)
 
@@ -4452,6 +4453,7 @@ def profile(request):
             user.last_name = form.cleaned_data['last_name']
             user.email = form.cleaned_data['email']
             writer.send_mail_on_comments = form.cleaned_data['send_mail_on_comments']
+            writer.email_on_discord_comments = form.cleaned_data['email_on_discord_comments']
             user.save()
             writer.save()
 

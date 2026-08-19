@@ -12,7 +12,8 @@ from django.conf import settings
 from django_comments.models import Comment
 
 from qems2.qsub.models import (Tossup, Bonus, Writer, WriterQuestionSetSettings,
-                               PerCategoryWriterSettings, CommentMention)
+                               PerCategoryWriterSettings, CommentMention,
+                               DiscordCommentRef, DISCORD_BOT_NAME)
 
 
 # @username mention (Django usernames: letters/digits and . @ + - _)
@@ -76,6 +77,30 @@ def _commenter_display(user, user_name=''):
     return '{0} ("{1}")'.format(real, user.username) if real else user.username
 
 
+def _is_discord_comment(comment):
+    """Whether a comment came from the Discord playtest bot rather than a person.
+
+    The bot posts with no Django user under its own display name; the stored ref
+    is the fallback for a bot posting under some other name (it is written just
+    after the comment, so it may not exist yet when this runs)."""
+    if comment.user_id is not None:
+        return False
+    if (comment.user_name or '').strip() == DISCORD_BOT_NAME:
+        return True
+    return DiscordCommentRef.objects.filter(comment=comment).exists()
+
+
+def _without_discord_optouts(mail_set):
+    """`mail_set` minus everyone who asked not to be e-mailed the playtest bot's
+    comments. Applied wherever a recipient came from -- author, thread, set-wide
+    or per-category subscription -- because the request is about the comment,
+    not about which rule put them on the list."""
+    opted_out = set(User.objects
+                    .filter(writer__email_on_discord_comments=False)
+                    .values_list('email', flat=True))
+    return mail_set - set(e for e in opted_out if e)
+
+
 @receiver(post_save, sender=Comment)
 def email_on_comments(sender, instance, created, **kwargs):
     if not created:
@@ -120,6 +145,9 @@ def email_on_comments(sender, instance, created, **kwargs):
             mail_set.discard(instance.user.email)
         mail_set.discard(None)
         mail_set.discard('')
+        from_discord = _is_discord_comment(instance)
+        if from_discord:
+            mail_set = _without_discord_optouts(mail_set)
         if not mail_set:
             return
 
@@ -150,8 +178,13 @@ def email_on_comments(sender, instance, created, **kwargs):
                 lines.append('- {0}: {1}'.format(
                     _commenter_display(c.user, c.user_name), c.comment or ''))
         settings_url = _email_settings_url(target.question_set)
+        profile_url = '{0}/profile/'.format(settings.BASE_URL)
         lines += ['', 'View and reply: ' + url,
                   '', 'Stop or adjust these e-mails (your settings for this set): ' + settings_url]
+        if from_discord:
+            lines += ['', 'This comment came from the Discord playtest bot. To be e-mailed only '
+                          'about comments people write here, untick "E-mail me Discord playtest '
+                          'comments" in your profile: ' + profile_url]
         body = '\n'.join(lines)
 
         # ---- HTML body ----
@@ -190,7 +223,12 @@ def email_on_comments(sender, instance, created, **kwargs):
         html.append('<p style="color:#999;font-size:12px;">You\'re receiving this because you '
                     'wrote or follow this question or set. '
                     '<a href="{0}" style="color:#008CBA;">Change your e-mail preferences for '
-                    'this set</a>.</p></div>'.format(esc(settings_url)))
+                    'this set</a>.{1}</p></div>'.format(
+                        esc(settings_url),
+                        (' This one came from the Discord playtest bot &mdash; '
+                         '<a href="{0}" style="color:#008CBA;">turn bot comments off</a> to be '
+                         'e-mailed only what people write here.'.format(esc(profile_url)))
+                        if from_discord else ''))
         html_body = '\n'.join(html)
 
         subject = 'New QEMS3 comment on "{0}" in {1}'.format(answer_label, qset)

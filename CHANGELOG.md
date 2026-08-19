@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-08-18 — Answer fields you can read, and quieter comment mail
+
+- **The structured answer fields are rich text.** They showed the markup that
+  produces the formatting — `_Franklin Delano _Roosevelt_ and Robert _Moses_` —
+  and the label above them bolded the whole line into the bargain. Each field is
+  now the same editor the plain answer box has always had: the required answer
+  is bold and underlined because it *is* bold and underlined, not because of the
+  underscores around it. The primary answer keeps the full toolbar; the accept,
+  prompt and note rows are compact, and take Ctrl+B/U/I and pasted formatting
+  just the same. The "Reads as" line is rendered the same way the saved question
+  is, rather than as code.
+- **Comment e-mail can leave out the Discord playtest bot.** A playtest posts a
+  comment per buzz, so the bot can outnumber everything the people on a set
+  write, and the only way to stop it was to stop comment e-mail altogether.
+  Untick **Include Discord playtest comments** in your profile and comment
+  e-mail covers only what people write in QEMS — however you came to be on the
+  list, as the author, as someone in the thread, or through a set-wide or
+  per-category subscription. The bot's comments still appear on the question,
+  and every bot e-mail now says where the switch is.
+
 ## 2026-08-17 — Answer-line notes, and subcategory quotas that start filled in
 
 - **"Kept as written" is now "Notes."** The last group of a structured answer

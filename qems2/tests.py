@@ -8583,6 +8583,14 @@ class StructuredAnswerEditorViewTests(TestCase):
         self.assertIn('structured-answer', body)
         self.assertIn('answer_primary', body)
 
+    def test_the_reads_as_line_is_formatted_not_marked_up(self):
+        """The writer sees the answer the way it prints, not the underscores
+        that produce it."""
+        body = self.client.get('/edit_tossup/{0}/'.format(self.tu.id)).content.decode()
+        preview = body.split('sa-preview-text')[1].split('</span>')[0]
+        self.assertIn('<u><b>Louis XIV</b></u>', preview)
+        self.assertNotIn('_Louis XIV_', preview)
+
     def test_a_plain_set_keeps_the_plain_answer_box(self):
         self.qset.structured_answers = False
         self.qset.save()
@@ -8976,3 +8984,111 @@ class PacketizationSubcategoryDefaultTests(TestCase):
         resp = self.client.post('/packetize_set/{0}/'.format(self.qset.id), data)
         self.assertEqual(resp.status_code, 200)
         self.assertIsNone(self._rows()['Fine Arts - Architecture']['max_tu'])
+
+
+class DiscordCommentEmailTests(TestCase):
+    """A writer can keep comment e-mail and still drop the Discord playtest
+    bot's comments, which on a busy playtest outnumber everything a person
+    writes."""
+
+    def setUp(self):
+        self.au = User.objects.create_user('dc_author', password='pw', email='dca@t.com')
+        self.author = Writer.objects.get(user=self.au)
+        self.author.send_mail_on_comments = True
+        self.author.save()
+        self.su = User.objects.create_user('dc_sub', password='pw', email='dcs@t.com')
+        self.sub = Writer.objects.get(user=self.su)
+        self.dist = Distribution.objects.create(name='dc dist')
+        self.qset = QuestionSet.objects.create(
+            name='DC Set', date=timezone.now(), host='', address='', owner=self.author,
+            num_packets=1, distribution=self.dist)
+        WriterQuestionSetSettings.objects.create(
+            writer=self.sub, question_set=self.qset, email_on_all_new_comments=True)
+        self.tu = Tossup.objects.create(
+            author=self.author, question_set=self.qset, tossup_text='Things.',
+            tossup_answer='_a_', created_date=datetime.now(), last_changed_date=datetime.now())
+
+    def _wait_mail(self, n=1, timeout=2.0):
+        import time
+        end = time.time() + timeout
+        while time.time() < end and len(mail.outbox) < n:
+            time.sleep(0.02)
+
+    def _comment(self, text, user=None, user_name=''):
+        from django.contrib.contenttypes.models import ContentType
+        from django.contrib.sites.models import Site
+        from django_comments.models import Comment
+        return Comment.objects.create(
+            content_type=ContentType.objects.get_for_model(Tossup), object_pk=str(self.tu.id),
+            site=Site.objects.get_current(), user=user, user_name=user_name,
+            comment=text, submit_date=timezone.now())
+
+    def _bot_comment(self, text='the room got it on the third clue'):
+        from qems2.qsub.models import DISCORD_BOT_NAME
+        return self._comment(text, user=None, user_name=DISCORD_BOT_NAME)
+
+    def _recipients(self):
+        return set(addr for msg in mail.outbox for addr in msg.to)
+
+    def test_bot_comments_are_mailed_by_default(self):
+        mail.outbox = []
+        self._bot_comment()
+        self._wait_mail(1)
+        self.assertIn('dca@t.com', self._recipients())
+        self.assertIn('dcs@t.com', self._recipients())
+
+    def test_opting_out_drops_the_bot_but_not_the_others(self):
+        self.author.email_on_discord_comments = False
+        self.author.save()
+        mail.outbox = []
+        self._bot_comment()
+        self._wait_mail(1)
+        recipients = self._recipients()
+        self.assertNotIn('dca@t.com', recipients)
+        self.assertIn('dcs@t.com', recipients)
+
+    def test_a_set_subscription_is_dropped_too(self):
+        """The opt-out is about the comment, not about which rule put you on
+        the list."""
+        self.sub.email_on_discord_comments = False
+        self.sub.save()
+        mail.outbox = []
+        self._bot_comment()
+        self._wait_mail(1)
+        self.assertNotIn('dcs@t.com', self._recipients())
+
+    def test_human_comments_still_arrive_for_the_opted_out(self):
+        self.author.email_on_discord_comments = False
+        self.author.save()
+        cu = User.objects.create_user('dc_person', password='pw', email='dcp@t.com')
+        mail.outbox = []
+        self._comment('this clue is ambiguous', user=cu)
+        self._wait_mail(1)
+        self.assertIn('dca@t.com', self._recipients())
+
+    def test_the_bot_email_says_how_to_turn_it_off(self):
+        mail.outbox = []
+        self._bot_comment()
+        self._wait_mail(1)
+        self.assertTrue(mail.outbox, 'no notification mail was sent')
+        self.assertIn('/profile/', mail.outbox[0].body)
+        self.assertIn('/profile/', mail.outbox[0].alternatives[0][0])
+
+    def test_a_human_comment_email_does_not_mention_the_bot(self):
+        cu = User.objects.create_user('dc_person2', password='pw', email='dcp2@t.com')
+        mail.outbox = []
+        self._comment('nice clue', user=cu)
+        self._wait_mail(1)
+        self.assertTrue(mail.outbox, 'no notification mail was sent')
+        self.assertNotIn('playtest bot', mail.outbox[0].body)
+
+    def test_the_profile_page_saves_the_setting(self):
+        self.client.login(username='dc_author', password='pw')
+        body = self.client.get('/profile/').content.decode()
+        self.assertIn('email_on_discord_comments', body)
+        self.client.post('/profile/', {
+            'username': 'dc_author', 'first_name': 'Dee', 'last_name': 'See',
+            'email': 'dca@t.com', 'send_mail_on_comments': 'on'})
+        self.author.refresh_from_db()
+        self.assertFalse(self.author.email_on_discord_comments)
+        self.assertTrue(self.author.send_mail_on_comments)

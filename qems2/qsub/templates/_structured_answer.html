@@ -1,3 +1,4 @@
+{% load filters %}
 {% comment %}
 One structured answer line: the required primary answer, then any number of
 accepts and directed prompts. Include with `prefix` (the POST field prefix,
@@ -74,8 +75,13 @@ has no shared text to read up to).
         <button type="button" class="sa-add" data-group="note">+ note</button>
     </div>
 
+    {% comment %}
+    The line as it prints, formatting and all — the same rendering the saved
+    question gets above the form. The editor rewrites it as the fields change;
+    this is what it looks like before any of that happens.
+    {% endcomment %}
     <div class="sa-preview" aria-live="polite">
         <span class="sa-preview-label">Reads as</span>
-        <code class="sa-preview-text">{{ line }}</code>
+        <span class="sa-preview-text">{% autoescape off %}{{ line|answer_html }}{% endautoescape %}</span>
     </div>
 </div>

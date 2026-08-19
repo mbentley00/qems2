@@ -52,6 +52,16 @@
         return row;
     }
 
+    // A row built after load gets the same rich-text fields the server-rendered
+    // rows were given (rich_editor.js enhances those at ready).
+    function enrich(row) {
+        var editor = window.QemsRichEditor;
+        if (!editor || !editor.enhanceField) { return; }
+        Array.prototype.forEach.call(
+            row.querySelectorAll('.sa-text, .sa-instruction'),
+            function (field) { editor.enhanceField(field, {compact: true}); });
+    }
+
     function values(block, name) {
         return Array.prototype.map.call(
             block.querySelectorAll('[name="' + block.getAttribute('data-prefix') + '_' + name + '"]'),
@@ -90,7 +100,17 @@
 
         var primaryInput = block.querySelector('.sa-primary-input');
         var primary = primaryInput ? (primaryInput.value || '').trim() : '';
-        target.textContent = clauses.length ? primary + ' [' + clauses.join('; ') + ']' : primary;
+        var line = clauses.length ? primary + ' [' + clauses.join('; ') + ']' : primary;
+
+        // Shown the way the answer prints — bold-underlined required answer and
+        // all — rather than as the markup that produces it. The server renders
+        // the same line the same way on load.
+        var toHtml = window.QemsRichEditor && window.QemsRichEditor.markupToHtml;
+        if (toHtml) {
+            target.innerHTML = toHtml(line);
+        } else {
+            target.textContent = line;
+        }
     }
 
     document.addEventListener('click', function (event) {
@@ -102,7 +122,8 @@
             var rows = block.querySelector('.sa-group[data-group="' + group + '"] .sa-rows');
             var row = buildRow(block, group);
             rows.appendChild(row);
-            var first = row.querySelector('input');
+            enrich(row);
+            var first = row.querySelector('.rich-editor, input');
             if (first) { first.focus(); }
             preview(block);
             return;
