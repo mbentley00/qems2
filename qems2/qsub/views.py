@@ -147,8 +147,15 @@ def question_sets (request):
                        public=True, approval_status=QuestionSet.APPROVAL_APPROVED).order_by('-date')
                    if qs.id not in my_set_ids]
 
+    # Administrators get a count of sets waiting on them, so approval isn't
+    # something you only hear about by e-mail.
+    pending_set_count = (QuestionSet.objects.filter(
+        approval_status=QuestionSet.APPROVAL_PENDING).count()
+        if request.user.is_superuser else 0)
+
     return render(request, 'question_sets.html',
-                  {'question_set_list': all_sets, 'public_sets': public_sets, 'user': writer})
+                  {'question_set_list': all_sets, 'public_sets': public_sets, 'user': writer,
+                   'pending_set_count': pending_set_count})
 
 @login_required
 def request_to_join(request):
@@ -553,6 +560,48 @@ def _notify_new_set_pending(qset):
 
 
 @login_required
+def pending_sets(request):
+    """Every set waiting on an administrator, so approval doesn't depend on an
+    e-mail arriving. Deliberately says nothing about what is *in* a set: who
+    made it, when they signed up and how much is written is what the decision
+    turns on, and a set under review is still its owner's private work.
+    """
+    if not request.user.is_superuser:
+        return render(request, 'failure.html',
+                      {'message': 'Only a site administrator can review new sets.',
+                       'message_class': 'alert-box alert'})
+
+    pending = (QuestionSet.objects
+               .filter(approval_status=QuestionSet.APPROVAL_PENDING)
+               .select_related('owner__user').order_by('id'))
+    tu_counts = {row['question_set']: row['n'] for row in
+                 Tossup.objects.filter(question_set__in=pending)
+                 .values('question_set').annotate(n=Count('id'))}
+    bs_counts = {row['question_set']: row['n'] for row in
+                 Bonus.objects.filter(question_set__in=pending)
+                 .values('question_set').annotate(n=Count('id'))}
+
+    rows = []
+    for qset in pending:
+        owner_user = qset.owner.user if qset.owner else None
+        rows.append({
+            'qset': qset,
+            'owner': qset.owner,
+            'owner_name': _actor_name(qset.owner),
+            'username': owner_user.username if owner_user else '',
+            'email': owner_user.email if owner_user else '',
+            'joined': owner_user.date_joined if owner_user else None,
+            'tossups': tu_counts.get(qset.id, 0),
+            'bonuses': bs_counts.get(qset.id, 0),
+        })
+
+    recipients = _new_set_approval_recipients()
+    return render(request, 'pending_sets.html',
+                  {'rows': rows, 'user': request.user.writer,
+                   'recipients': ', '.join(recipients)})
+
+
+@login_required
 def approve_new_set(request, qset_id):
     """Administrator review of a set created by an account that hadn't waited
     out the new-account period, linked directly from the notification email.
@@ -708,6 +757,49 @@ def packet(request):
     else:
         return HttpResponseRedirect('/accounts/login/')
 
+def _sync_set_categories(qset):
+    """Give a set one category row per entry of the distribution it currently
+    points at, and drop rows left behind by a distribution it no longer uses.
+
+    A set's categories live in SetWideDistributionEntry rows written when the
+    set is created; changing the distribution afterwards only repointed the
+    foreign key, so the categories, the requirements and the packetize page all
+    went on describing the old distribution (or stayed empty, if the rows were
+    never written). Existing rows keep their numbers -- an owner may have
+    edited a requirement by hand -- so this only adds what is missing and
+    removes what belongs to another distribution.
+
+    Returns (added, removed, stranded): stranded counts questions still filed
+    under a category from the old distribution, which nothing here moves.
+    """
+    dist = qset.distribution
+    entries = list(dist.distributionentry_set.all())
+    existing = {e.dist_entry_id: e for e in qset.setwidedistributionentry_set.all()}
+
+    removed = qset.setwidedistributionentry_set.exclude(
+        dist_entry__distribution=dist).delete()[0]
+    qset.tiebreakdistributionentry_set.exclude(dist_entry__distribution=dist).delete()
+
+    have_tiebreak = set(qset.tiebreakdistributionentry_set.values_list('dist_entry_id', flat=True))
+    added = 0
+    for entry in entries:
+        if entry.id not in existing:
+            # A distribution entry may leave its minimums blank; the set-wide
+            # row can't be null, and "unspecified" means none required.
+            SetWideDistributionEntry.objects.create(
+                question_set=qset, dist_entry=entry,
+                num_tossups=qset.num_packets * (entry.min_tossups or 0),
+                num_bonuses=qset.num_packets * (entry.min_bonuses or 0))
+            added += 1
+        if entry.id not in have_tiebreak:
+            TieBreakDistributionEntry.objects.create(
+                question_set=qset, dist_entry=entry, num_tossups=1, num_bonuses=1)
+
+    stranded = (qset.tossup_set.exclude(category__distribution=dist).count() +
+                qset.bonus_set.exclude(category__distribution=dist).count())
+    return added, removed, stranded
+
+
 @login_required
 def create_question_set (request):
     user = request.user.writer
@@ -738,25 +830,18 @@ def create_question_set (request):
             user.question_set_editor.add(question_set)
             user.save()
 
-            dist = question_set.distribution
-            dist_entries = dist.distributionentry_set.all()
-            for entry in dist_entries:
-                set_wide_entry = SetWideDistributionEntry()
-                set_wide_entry.num_tossups = question_set.num_packets * entry.min_tossups
-                set_wide_entry.num_bonuses = question_set.num_packets * entry.min_bonuses
-                set_wide_entry.question_set = question_set
-                set_wide_entry.dist_entry = entry
-                set_wide_entry.save()
-
-                tiebreak_entry = TieBreakDistributionEntry()
-                tiebreak_entry.num_bonuses = 1
-                tiebreak_entry.num_tossups = 1
-                tiebreak_entry.question_set = question_set
-                tiebreak_entry.dist_entry = entry
-                tiebreak_entry.save()
-
+            # Ask for approval as soon as there is a set to approve. This used
+            # to come after the category rows below, so anything that went
+            # wrong building them left a pending set nobody had been told
+            # about -- and a failure to notify shouldn't lose the set either.
             if needs_approval:
-                _notify_new_set_pending(question_set)
+                try:
+                    _notify_new_set_pending(question_set)
+                except Exception:
+                    print('Could not e-mail the new-set approval request:',
+                          sys.exc_info()[0], sys.exc_info()[1])
+
+            _sync_set_categories(question_set)
 
             # Redirect rather than render: the set page's own URL is what tells
             # the shell which set is active (rendering here left the sidebar's
@@ -864,6 +949,7 @@ def edit_question_set(request, qset_id):
             form = QuestionSetForm(data=request.POST, writer=user)
             if form.is_valid():
                 qset = QuestionSet.objects.get(id=qset_id)
+                previous_distribution_id = qset.distribution_id
                 qset.name = form.cleaned_data['name']
                 qset.date = form.cleaned_data['date']
                 qset.distribution = form.cleaned_data['distribution']
@@ -877,6 +963,26 @@ def edit_question_set(request, qset_id):
                 qset.max_acf_tossup_length = form.cleaned_data['max_acf_tossup_length']
                 qset.max_acf_bonus_length = form.cleaned_data['max_acf_bonus_length']
                 qset.save()
+
+                # Switching the distribution used to change nothing but the
+                # foreign key: the set's categories are its own rows, so they
+                # went on describing the distribution it was created with. The
+                # `not exists()` arm repairs a set that ended up with no
+                # categories at all.
+                saved_message = 'Your changes have been successfully saved.'
+                if (previous_distribution_id != qset.distribution_id
+                        or not qset.setwidedistributionentry_set.exists()):
+                    added, removed, stranded = _sync_set_categories(qset)
+                    if added or removed:
+                        saved_message += (' The set now carries the {0} categories of '
+                                          '"{1}"').format(len(qset.distribution.distributionentry_set.all()),
+                                                          qset.distribution)
+                        saved_message += (' ({0} added, {1} from the previous distribution '
+                                          'removed).').format(added, removed)
+                    if stranded:
+                        saved_message += (' {0} question(s) are still filed under a category '
+                                          'from the previous distribution and need '
+                                          'recategorizing.').format(stranded)
                 cache.clear()
 
                 tossups, tossup_dict, bonuses, bonus_dict = get_tossup_and_bonuses_in_set(qset, question_limit=30, preview_only=True)
@@ -914,7 +1020,7 @@ def edit_question_set(request, qset_id):
                                            'group_granted_ids': group_granted_ids,
                                            **_editor_tag_context(qset),
                                            **_join_link_context(qset, user),
-                                           'message': 'Your changes have been successfully saved.',
+                                           'message': saved_message,
                                            'message_class': 'alert-success'})
             else:
                 # Form invalid: still populate question data so the page isn't

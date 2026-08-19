@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% block title %}Sets Awaiting Approval - QEMS3{% endblock %}
+
+{% block content %}
+
+<h3 class="page-header">Sets awaiting approval</h3>
+
+{% comment %}
+Deliberately no question content: the decision is about the account, not about
+what it has written, and a set under review is still its owner's private work.
+{% endcomment %}
+<div class="panel radius">
+    <p>A set made by an account younger than the two-day wait is created provisionally:
+    its owner can work in it, but it stays out of the public set list and its join links
+    report that it isn't taking members until it's approved here.</p>
+    <p class="pending-note">The notification e-mail goes to
+    {% if recipients %}<strong>{{ recipients }}</strong>{% else %}<strong>nobody &mdash;
+    no approval address is configured, so new sets are approved on creation</strong>{% endif %}.
+    This page doesn't depend on that e-mail arriving.</p>
+</div>
+
+{% if rows %}
+<table class="table-striped table-hover" id="pending-sets-table">
+    <thead>
+        <tr>
+            <th>Set</th>
+            <th>Owner</th>
+            <th>Signed up</th>
+            <th>Written</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for row in rows %}
+        <tr>
+            <td>{{ row.qset.name }}</td>
+            <td>{{ row.owner_name }} (@{{ row.username }}){% if row.email %}<br><span class="pending-email">{{ row.email }}</span>{% endif %}</td>
+            <td>{{ row.joined|default_if_none:"&mdash;" }}</td>
+            <td>{{ row.tossups }} tossup{{ row.tossups|pluralize }}, {{ row.bonuses }} bonus{{ row.bonuses|pluralize:"es" }}</td>
+            <td><a href="/approve_new_set/{{ row.qset.id }}/" class="button tiny primary">Review</a></td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="alert-box info">Nothing is waiting for approval.</div>
+{% endif %}
+
+<p><a href="/question_sets/" class="button small secondary">Question sets</a></p>
+
+{% endblock %}

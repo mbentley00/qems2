@@ -1,5 +1,34 @@
 # Changelog
 
+## 2026-08-20 — Categories follow the distribution, and approvals don't depend on e-mail
+
+- **Switching a set's distribution now brings its categories with it.** A set's
+  categories are its own rows, written when the set is created; changing the
+  distribution afterwards only repointed a foreign key, so the category
+  overview, the per-category requirements and the packetize page all went on
+  describing the distribution the set started with. Saving the set now adds the
+  new distribution's categories and drops the ones left behind — and repairs a
+  set that somehow ended up with no categories at all, even if the distribution
+  itself hasn't changed. Questions still filed under a category from the old
+  distribution are counted and named in the save message; nothing moves them
+  for you.
+- **A distribution entry with no minimum no longer breaks set creation.**
+  Minimums are optional on a distribution entry, but a set's category row can't
+  be null, and the multiplication that turns "per packet" into "per set" was
+  done on the blank value — which threw *after* the set had been saved. The set
+  existed, had no categories, and nobody had been told about it. Blank now
+  means none required.
+- **The approval request is sent as soon as there's a set to approve.** It used
+  to go out after the categories were built, so anything that went wrong in
+  between left a provisional set that no administrator ever heard about. A
+  failure to send can no longer lose the set either.
+- **Sets awaiting approval have a page of their own.** Administrators get
+  **Sets Awaiting Approval** on the home page, with a count, listing who made
+  each set, when they signed up, and how much is written — and nothing about
+  what the questions say. A set under review is still its owner's private work;
+  the decision is about the account. Approving, declining and deleting are
+  unchanged, on the review page each row links to.
+
 ## 2026-08-19 — The first account on the install can be added to a set
 
 - **Whoever holds Writer #1 was missing from every member picker.** Add

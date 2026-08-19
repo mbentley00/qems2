@@ -9143,3 +9143,160 @@ class FirstWriterIsAddableTests(TestCase):
         self.first_user.is_active = False
         self.first_user.save()
         self.assertNotIn(self.first, self._available('add_writer', 'available_writers'))
+
+
+class SetCategorySyncTests(TestCase):
+    """A set's categories follow the distribution it currently points at.
+
+    They are the set's own SetWideDistributionEntry rows, written when the set
+    is created; switching the distribution afterwards only repointed a foreign
+    key, so the categories, the requirements and the packetize page went on
+    describing the distribution the set was created with."""
+
+    def setUp(self):
+        from datetime import timedelta
+        self.ou = User.objects.create_user('cs_owner', password='pw', email='cs@t.com')
+        self.ou.date_joined = timezone.now() - timedelta(days=30)
+        self.ou.save()
+        self.owner = Writer.objects.get(user=self.ou)
+        self.old_dist = Distribution.objects.create(name='CS old', public=True)
+        self.de_hist = DistributionEntry.objects.create(
+            distribution=self.old_dist, category='History', subcategory='European',
+            min_tossups=2, min_bonuses=2)
+        self.new_dist = Distribution.objects.create(name='CS new', public=True)
+        self.de_lit = DistributionEntry.objects.create(
+            distribution=self.new_dist, category='Literature', subcategory='American',
+            min_tossups=3, min_bonuses=3)
+        # A distribution entry may leave its minimums blank.
+        self.de_sci = DistributionEntry.objects.create(
+            distribution=self.new_dist, category='Science', subcategory='Biology')
+        self.qset = QuestionSet.objects.create(
+            name='CS Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=2, distribution=self.old_dist)
+        SetWideDistributionEntry.objects.create(
+            question_set=self.qset, dist_entry=self.de_hist, num_tossups=4, num_bonuses=4)
+        self.client.login(username='cs_owner', password='pw')
+
+    def _categories(self):
+        return sorted(str(e.dist_entry) for e in self.qset.setwidedistributionentry_set.all())
+
+    def _save(self, distribution):
+        return self.client.post('/edit_question_set/{0}/'.format(self.qset.id), {
+            'name': self.qset.name, 'date': '2026-08-01', 'distribution': distribution.id,
+            'num_packets': self.qset.num_packets, 'max_acf_tossup_length': 750,
+            'max_acf_bonus_length': 400})
+
+    def test_switching_the_distribution_brings_its_categories(self):
+        self._save(self.new_dist)
+        self.assertEqual(self._categories(), ['Literature - American', 'Science - Biology'])
+
+    def test_the_old_distributions_categories_are_dropped(self):
+        self._save(self.new_dist)
+        self.assertNotIn('History - European', self._categories())
+
+    def test_a_blank_minimum_counts_as_none_required(self):
+        """A distribution entry can leave its minimums blank; the set-wide row
+        can't be null, and multiplying None by the packet count used to raise
+        straight out of the view."""
+        self._save(self.new_dist)
+        entry = self.qset.setwidedistributionentry_set.get(dist_entry=self.de_sci)
+        self.assertEqual(entry.num_tossups, 0)
+        self.assertEqual(entry.num_bonuses, 0)
+        lit = self.qset.setwidedistributionentry_set.get(dist_entry=self.de_lit)
+        self.assertEqual(lit.num_tossups, 6)   # 3 per packet x 2 packets
+
+    def test_a_set_with_no_categories_at_all_is_repaired_on_save(self):
+        self.qset.setwidedistributionentry_set.all().delete()
+        self._save(self.old_dist)   # same distribution, nothing "changed"
+        self.assertEqual(self._categories(), ['History - European'])
+
+    def test_saving_without_touching_the_distribution_keeps_edited_numbers(self):
+        entry = self.qset.setwidedistributionentry_set.get(dist_entry=self.de_hist)
+        entry.num_tossups = 11
+        entry.save()
+        self._save(self.old_dist)
+        entry.refresh_from_db()
+        self.assertEqual(entry.num_tossups, 11)
+
+    def test_questions_left_under_the_old_categories_are_reported(self):
+        Tossup.objects.create(
+            author=self.owner, question_set=self.qset, tossup_text='Things.',
+            tossup_answer='_a_', category=self.de_hist,
+            created_date=datetime.now(), last_changed_date=datetime.now())
+        resp = self._save(self.new_dist)
+        self.assertIn('recategorizing', resp.context['message'])
+
+    def test_a_new_set_gets_its_categories(self):
+        resp = self.client.post('/create_question_set/', {
+            'name': 'Fresh Set', 'date': '2026-08-01', 'distribution': self.new_dist.id,
+            'num_packets': 2, 'max_acf_tossup_length': 750, 'max_acf_bonus_length': 400})
+        self.assertEqual(resp.status_code, 302)
+        fresh = QuestionSet.objects.get(name='Fresh Set')
+        self.assertEqual(
+            sorted(str(e.dist_entry) for e in fresh.setwidedistributionentry_set.all()),
+            ['Literature - American', 'Science - Biology'])
+        self.assertEqual(fresh.tiebreakdistributionentry_set.count(), 2)
+
+
+@override_settings(EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend',
+                   BASE_URL='https://test.example',
+                   SET_APPROVAL_EMAIL='admin@test.com')
+class PendingSetListTests(TestCase):
+    """Administrators can find sets waiting on them without an e-mail, and the
+    list says nothing about what is in a set."""
+
+    def setUp(self):
+        self.dist = Distribution.objects.create(name='PS dist', public=True)
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='History', subcategory='European',
+            min_tossups=1, min_bonuses=1)
+        self.nu = User.objects.create_user('ps_new', password='pw', email='psn@t.com')
+        self.new = Writer.objects.get(user=self.nu)
+        self.admin_user = User.objects.create_superuser('ps_admin', 'psa@t.com', 'pw')
+        Writer.objects.get_or_create(user=self.admin_user)
+        self.qset = QuestionSet.objects.create(
+            name='Held Set', date=timezone.now(), host='h', address='', owner=self.new,
+            num_packets=1, distribution=self.dist,
+            approval_status=QuestionSet.APPROVAL_PENDING)
+        Tossup.objects.create(
+            author=self.new, question_set=self.qset,
+            tossup_text='A very secret clue about phlogiston.', tossup_answer='_phlogiston_',
+            category=self.de, created_date=datetime.now(), last_changed_date=datetime.now())
+
+    def test_an_administrator_sees_the_pending_set(self):
+        self.client.login(username='ps_admin', password='pw')
+        body = self.client.get('/pending_sets/').content.decode()
+        self.assertIn('Held Set', body)
+        self.assertIn('ps_new', body)
+        self.assertIn('/approve_new_set/{0}/'.format(self.qset.id), body)
+
+    def test_the_list_does_not_show_what_is_in_the_set(self):
+        self.client.login(username='ps_admin', password='pw')
+        body = self.client.get('/pending_sets/').content.decode()
+        self.assertNotIn('phlogiston', body)
+        self.assertIn('1 tossup', body)
+
+    def test_an_approved_set_drops_off_the_list(self):
+        self.qset.approval_status = QuestionSet.APPROVAL_APPROVED
+        self.qset.save()
+        self.client.login(username='ps_admin', password='pw')
+        self.assertNotIn('Held Set', self.client.get('/pending_sets/').content.decode())
+
+    def test_an_ordinary_user_cannot_see_the_list(self):
+        self.client.login(username='ps_new', password='pw')
+        body = self.client.get('/pending_sets/').content.decode()
+        self.assertIn('Only a site administrator', body)
+        # The set's own owner sees its name in the sidebar either way; what
+        # they must not get is the review list itself.
+        self.assertNotIn('/approve_new_set/', body)
+        self.assertNotIn('psn@t.com', body)
+
+    def test_the_home_page_shows_the_count_to_an_administrator(self):
+        self.client.login(username='ps_admin', password='pw')
+        body = self.client.get('/question_sets/').content.decode()
+        self.assertIn('/pending_sets/', body)
+        self.assertIn('Sets Awaiting Approval (1)', body)
+
+    def test_the_home_page_offers_nothing_to_an_ordinary_user(self):
+        self.client.login(username='ps_new', password='pw')
+        self.assertNotIn('/pending_sets/', self.client.get('/question_sets/').content.decode())
