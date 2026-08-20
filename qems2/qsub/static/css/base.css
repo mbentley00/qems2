@@ -1204,6 +1204,112 @@ html[data-theme="dark"] .editor-tag-cat { background: #1f3a26; color: #a5d6a7; }
 html[data-theme="dark"] .join-link-row input { background: var(--qx-elevate); color: var(--qx-ink); }
 html[data-theme="dark"] .join-link-off { color: #f0a868; }
 
+
+/* ---- Packet grid --------------------------------------------------------
+   The grid has its own stylesheet in packet_grid.html, written in light-theme
+   hex, and it is the one table the generic dark rules deliberately skip (it
+   paints its own cells). Everything it paints gets a dark counterpart here. */
+/* The generic table rules skip .packet-grid, so it needs its own surface too —
+   without this the odd (unstriped) rows kept Foundation's white. */
+html[data-theme="dark"] .packet-grid { background: var(--qx-card); }
+html[data-theme="dark"] .packet-grid thead th { background: var(--qx-elevate); }
+html[data-theme="dark"] .packet-grid th.num-col,
+html[data-theme="dark"] .packet-grid td.num-col { background-color: var(--qx-elevate); }
+html[data-theme="dark"] .packet-grid tbody tr:nth-child(even) { background-color: #23252d; }
+html[data-theme="dark"] .packet-grid .tiebreaker-row { background-color: #2a2820 !important; }
+html[data-theme="dark"] .packet-grid td,
+html[data-theme="dark"] .packet-grid th { border-color: var(--qx-border); color: var(--qx-ink); }
+html[data-theme="dark"] .grid-cell.drag-over { background-color: #1b3646 !important; }
+html[data-theme="dark"] .grid-cell-empty:hover { background-color: #1d2c22 !important; }
+html[data-theme="dark"] .cell-category,
+html[data-theme="dark"] .cell-removed-cat,
+html[data-theme="dark"] .unp-counts,
+html[data-theme="dark"] .unp-help,
+html[data-theme="dark"] .unp-item .unp-category,
+html[data-theme="dark"] .unp-none,
+html[data-theme="dark"] .swap-candidate .swap-cand-category { color: var(--qx-muted); }
+html[data-theme="dark"] .tag-edited { background: #1e3348; color: #93c5fd; }
+html[data-theme="dark"] .tag-proofread { background: #1c3527; color: #86d29d; }
+html[data-theme="dark"] .grid-hbar { background: var(--qx-elevate); border-top-color: var(--qx-border); }
+html[data-theme="dark"] .grid-helper,
+html[data-theme="dark"] .packet-order-item.ui-sortable-helper { background: var(--qx-card); color: var(--qx-ink); }
+html[data-theme="dark"] .packet-order-item { background: var(--qx-elevate); }
+html[data-theme="dark"] .swap-candidate:hover { background-color: #1b3646; }
+/* The live-refresh flash has to be its own keyframes: a rule can't repaint
+   the colours inside an animation. */
+html[data-theme="dark"] .grid-cell-updated { animation: grid-cell-flash-dark 2.5s ease-out; }
+@keyframes grid-cell-flash-dark {
+    0%   { background-color: #4a3f14; }
+    60%  { background-color: #2f2a15; }
+    100% { background-color: transparent; }
+}
+/* Unpacketized / unplaced panels */
+html[data-theme="dark"] .unpacketized-panel { background: var(--qx-card); border-color: var(--qx-border); }
+html[data-theme="dark"] .unpacketized-panel.drop-target { background: #16303f; }
+html[data-theme="dark"] .unp-list { background: var(--qx-elevate); border-color: var(--qx-border); }
+html[data-theme="dark"] .unp-item { background: #22303d; border-color: #2f4557; color: var(--qx-ink); }
+html[data-theme="dark"] .unplaced-panel { background: #33301c; border-color: #6b5b23; }
+html[data-theme="dark"] .unplaced-item { border-top-color: #4a4225; }
+html[data-theme="dark"] .unplaced-reason { color: #f0a868; }
+
+/* ---- Document view ------------------------------------------------------
+   The page emulates a printed packet, so in light mode it is deliberately a
+   sheet of white paper. On dark that left a glaring white slab whose headings
+   (themed light by the rules above) had vanished into it. */
+html[data-theme="dark"] .doc-page {
+    background: var(--qx-card);
+    border-color: var(--qx-border);
+    color: var(--qx-ink);
+    box-shadow: 0 0 12px rgba(0, 0, 0, 0.5);
+}
+html[data-theme="dark"] .doc-question:hover { background-color: #1e2530; border-color: #33465c; }
+html[data-theme="dark"] .doc-reorder-mode .doc-question:hover { background-color: #2b2716; border-color: #6b5b23; }
+html[data-theme="dark"] .doc-question.ui-sortable-helper { background: var(--qx-elevate); }
+html[data-theme="dark"] .doc-packet-count,
+html[data-theme="dark"] .doc-mode-hint,
+html[data-theme="dark"] .doc-category-line,
+html[data-theme="dark"] .doc-swap-candidate .swap-cand-category { color: var(--qx-muted); }
+html[data-theme="dark"] .doc-tag { background: var(--qx-elevate); color: var(--qx-muted); }
+html[data-theme="dark"] .doc-tag-edited { background: #1c3527; color: #86d29d; }
+html[data-theme="dark"] .doc-tag-unedited { background: #33301c; color: #e0c169; }
+html[data-theme="dark"] .doc-tag-overlength { background: #3a1d1d; color: #f08c8c; }
+html[data-theme="dark"] .doc-style-issues { background: #2b2716; border-color: #4a4225; }
+html[data-theme="dark"] .doc-swap-candidate:hover { background-color: #1b3646; }
+html[data-theme="dark"] #doc-context-menu { background: var(--qx-card); border-color: var(--qx-border); }
+html[data-theme="dark"] #doc-context-menu .doc-ctx-item { color: var(--qx-ink); }
+html[data-theme="dark"] .doc-tb { color: #e0c169; }
+html[data-theme="dark"] .swap-row:hover { background: #1e2530; }
+html[data-theme="dark"] .swap-row.selected { background: #1b3646; }
+html[data-theme="dark"] .callout-extras { background: #16303f; border-color: #2b5a75; }
+html[data-theme="dark"] .callout-extras a { color: #7fc7e8; }
+html[data-theme="dark"] .callout-careful { background: #33301c; border-color: #6b5b23; }
+
+
+/* ---- Style check (page and the panel on the edit pages) ------------------ */
+html[data-theme="dark"] .bulk-bar { background: var(--qx-card); border-color: var(--qx-border); }
+html[data-theme="dark"] .sc-config { background: var(--qx-elevate); border-color: var(--qx-border); }
+html[data-theme="dark"] .sc-counts,
+html[data-theme="dark"] .sc-config-help,
+html[data-theme="dark"] .bulk-bar .sc-bulk-label,
+html[data-theme="dark"] .sc-guide-note,
+html[data-theme="dark"] .pg-context,
+html[data-theme="dark"] .style-panel-note,
+html[data-theme="dark"] .style-panel-issues .pg-context { color: var(--qx-muted); }
+html[data-theme="dark"] .pg-context strong,
+html[data-theme="dark"] .style-panel-issues .pg-context strong { color: var(--qx-ink); }
+html[data-theme="dark"] .sc-pill.zero { background: var(--qx-elevate); color: var(--qx-muted); }
+html[data-theme="dark"] .sc-fix,
+html[data-theme="dark"] .style-panel-issues .sc-fix { background: #1c3527; color: #86d29d; }
+html[data-theme="dark"] .sc-fix:hover,
+html[data-theme="dark"] .style-panel-issues .sc-fix:hover { background: #234432; }
+html[data-theme="dark"] .sc-fix-open { background: #1e3348; color: #93c5fd; }
+html[data-theme="dark"] .sc-fix-open:hover { background: #26405a; }
+html[data-theme="dark"] .sc-just-fixed { background-color: #1c3527 !important; }
+html[data-theme="dark"] .ai-grammar-msg strong,
+html[data-theme="dark"] .ai-grammar-msg .ai-alt-ans,
+html[data-theme="dark"] .style-panel-issues .grammar-fix { color: #86d29d; }
+html[data-theme="dark"] .ai-grammar-msg del { color: #f08c8c; }
+
 /* Secondary buttons on dark */
 html[data-theme="dark"] .app-content .button.secondary,
 html[data-theme="dark"] .app-content a.button.secondary,
