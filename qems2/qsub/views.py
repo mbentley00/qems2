@@ -9528,6 +9528,70 @@ def grammar_texts(request, qset_id):
 
 
 @login_required
+def live_question_counts(request):
+    """Character counts for the questions being typed into the bulk entry box.
+
+    The box holds a whole run of questions, so one number for the lot would be
+    meaningless: this reads the text the way the parser will (`packet_parser.
+    outline`), works out for each question whether it is a tossup or a bonus,
+    and counts it by that type's rules against that type's limit — a tossup by
+    its stem, a bonus by its leadin plus its parts.
+    """
+    from .packet_parser import outline
+    from .utils import get_character_count
+    from .answer_structure import plain
+
+    if request.method != 'POST':
+        return HttpResponse(json.dumps({'questions': []}),
+                            content_type='application/json')
+
+    ignore_guides, quoted = True, False
+    tossup_max = bonus_max = 0
+    try:
+        qset = QuestionSet.objects.get(id=int(request.POST.get('qset_id', '')))
+        ignore_guides = qset.char_count_ignores_pronunciation_guides
+        quoted = qset.guides_require_quotes
+        tossup_max = qset.max_acf_tossup_length
+        bonus_max = qset.max_acf_bonus_length
+    except (ValueError, QuestionSet.DoesNotExist):
+        pass
+
+    text = request.POST.get('text', '') or ''
+    questions = []
+    tossups = bonuses = over = 0
+    for index, q in enumerate(outline(text.split('\n')), start=1):
+        is_tossup = q['kind'] == 'tossup'
+        limit = tossup_max if is_tossup else bonus_max
+        count = sum(get_character_count(t, ignore_guides, quoted) for t in q['text'])
+        if is_tossup:
+            tossups += 1
+        else:
+            bonuses += 1
+        if limit and count > limit:
+            over += 1
+        # The answer is the useful label — it's how a writer knows which
+        # question a row is about — with the markup taken off.
+        answer = plain(re.sub(r'(?i)^a..?wers?:\s*', '', q['answer'] or '')).strip()
+        questions.append({
+            'number': index,
+            'kind': q['kind'],
+            'label': '{0} {1}'.format('Tossup' if is_tossup else 'Bonus', index),
+            'answer': answer[:60],
+            'count': count,
+            'max': limit,
+            'over': bool(limit and count > limit),
+            'complete': q['complete'],
+        })
+
+    return HttpResponse(json.dumps({
+        'questions': questions,
+        'tossups': tossups,
+        'bonuses': bonuses,
+        'over': over,
+    }), content_type='application/json')
+
+
+@login_required
 def live_char_count(request):
     """Character count for in-progress edit text, using the set's counting
     rules (pronunciation guides / moderator instructions excluded as configured).

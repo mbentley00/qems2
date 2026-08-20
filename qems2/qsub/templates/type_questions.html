@@ -25,6 +25,23 @@
         <form action="/type_questions/" method="post" id="type-questions">
             {% csrf_token %}
             {{ form }}
+            {% comment %}
+            Live character counts for what's in the box. The box holds a run of
+            questions, so this counts each one separately, by its own type's
+            rules and against its own type's limit.
+            {% endcomment %}
+            <div class="tq-counts" id="tq-counts" data-qset-id="{{ qset.id }}"
+                 data-tossup-max="{{ qset.max_acf_tossup_length }}"
+                 data-bonus-max="{{ qset.max_acf_bonus_length }}">
+                <div class="tq-counts-head">
+                    <span class="tq-counts-title">Character count</span>
+                    <span class="tq-counts-summary" id="tq-counts-summary">Start typing to see counts.</span>
+                </div>
+                <ul class="tq-counts-list" id="tq-counts-list"></ul>
+                <p class="tq-counts-note">Limits for this set: {{ qset.max_acf_tossup_length }} per tossup,
+                {{ qset.max_acf_bonus_length }} per bonus (leadin and parts together).
+                {% if qset.char_count_ignores_pronunciation_guides %}Pronunciation guides don't count.{% endif %}</p>
+            </div>
             {% if dist_entries %}
             {% comment %} Sits directly under the entry box (where it's used), and above
                Submit — floating Submit over it left a dead top-right corner. {% endcomment %}
@@ -135,4 +152,88 @@ $(function () {
     });
 });
 </script>
+
+<script>
+// Live per-question character counts for the entry box. The reading of the
+// text — where one question ends and the next begins, and which are bonuses —
+// is the parser's own, done server-side, so it can't drift from what Submit
+// will actually create.
+$(function () {
+    var $panel = $('#tq-counts');
+    if (!$panel.length) { return; }
+    var $list = $('#tq-counts-list');
+    var $summary = $('#tq-counts-summary');
+    var qsetId = $panel.data('qset-id');
+    var timer = null, seq = 0;
+
+    function text() {
+        var el = document.getElementById('id_questions');
+        return el ? (el.value || '') : '';
+    }
+
+    function render(resp) {
+        $list.empty();
+        if (!resp.questions.length) {
+            $summary.text('Start typing to see counts.');
+            return;
+        }
+        var parts = [];
+        if (resp.tossups) { parts.push(resp.tossups + ' tossup' + (resp.tossups === 1 ? '' : 's')); }
+        if (resp.bonuses) { parts.push(resp.bonuses + ' bonus' + (resp.bonuses === 1 ? '' : 'es')); }
+        var summary = parts.join(', ');
+        if (resp.over) { summary += ' — ' + resp.over + ' over the limit'; }
+        $summary.text(summary).toggleClass('tq-over', !!resp.over);
+
+        resp.questions.forEach(function (q) {
+            var $li = $('<li class="tq-count-row"></li>').toggleClass('tq-over', !!q.over);
+            $('<span class="tq-count-label"></span>').text(q.label).appendTo($li);
+            if (q.answer) { $('<span class="tq-count-answer"></span>').text(q.answer).appendTo($li); }
+            else if (!q.complete) { $('<span class="tq-count-answer tq-count-unfinished"></span>').text('no answer line yet').appendTo($li); }
+            $('<span class="tq-count-number"></span>')
+                .text(q.count + (q.max ? ' / ' + q.max : ''))
+                .appendTo($li);
+            $list.append($li);
+        });
+    }
+
+    function update() {
+        var mine = ++seq;
+        $.post('/live_question_counts/', {qset_id: qsetId, text: text()}, function (resp) {
+            if (mine !== seq) { return; }
+            if (typeof resp === 'string') { try { resp = JSON.parse(resp); } catch (e) { return; } }
+            render(resp);
+        });
+    }
+
+    // The rich editor writes through to #id_questions on input, so listening on
+    // both covers the plain textarea and the editor that replaces it.
+    $(document).on('input', '#id_questions, .rich-editor', function () {
+        clearTimeout(timer);
+        timer = setTimeout(update, 400);
+    });
+    if (text().trim()) { update(); }
+});
+</script>
+
+<style>
+.tq-counts { border: 1px solid var(--qx-border, #e9e9ef); border-radius: 6px;
+    padding: 10px 14px; margin: 10px 0 16px; background: var(--qx-card, #fff); }
+.tq-counts-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; }
+.tq-counts-title { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--qx-muted, #8a8f9c); }
+.tq-counts-summary { font-size: 0.85rem; }
+.tq-counts-list { list-style: none; margin: 6px 0 0; padding: 0; }
+.tq-count-row { display: flex; align-items: baseline; gap: 10px; padding: 2px 0;
+    font-size: 0.85rem; border-top: 1px solid var(--qx-border, #f0f0f3); }
+.tq-count-row:first-child { border-top: none; }
+.tq-count-label { flex: 0 0 6.5em; font-weight: bold; }
+.tq-count-answer { flex: 1 1 auto; color: var(--qx-muted, #8a8f9c); overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+.tq-count-unfinished { font-style: italic; }
+.tq-count-number { flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+.tq-counts .tq-over { color: #c60f13; font-weight: bold; }
+html[data-theme="dark"] .tq-counts .tq-over { color: #f08c8c; }
+.tq-counts-note { font-size: 0.75rem; color: var(--qx-muted, #8a8f9c); margin: 6px 0 0; }
+</style>
+
 {% endblock %}

@@ -9592,3 +9592,142 @@ class ReferenceReviewScreenTests(TestCase):
         self.client.login(username='rr_admin', password='pw')
         self.assertIn('/reference_review/',
                       self.client.get('/question_sets/').content.decode())
+
+
+class TypedQuestionOutlineTests(TestCase):
+    """Reading a run of typed lines the way the parser will, without needing
+    the questions to be finished."""
+
+    def setUp(self):
+        from qems2.qsub.packet_parser import outline
+        self.outline = outline
+
+    def test_a_tossup_is_its_stem_and_its_answer(self):
+        rows = self.outline(['This city held a tea party. For 10 points, name it.',
+                             'ANSWER: Boston'])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['kind'], 'tossup')
+        self.assertTrue(rows[0]['complete'])
+        self.assertEqual(rows[0]['text'], ['This city held a tea party. For 10 points, name it.'])
+
+    def test_a_bonus_is_its_leadin_and_parts(self):
+        rows = self.outline(['Answer these questions about France.',
+                             '[10] This city is its capital.',
+                             'ANSWER: Paris',
+                             '[10] This river runs through it.',
+                             'ANSWER: the Seine',
+                             '[10] And this museum.',
+                             'ANSWER: the Louvre'])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['kind'], 'bonus')
+        self.assertEqual(rows[0]['text'],
+                         ['Answer these questions about France.',
+                          'This city is its capital.',
+                          'This river runs through it.',
+                          'And this museum.'])
+
+    def test_a_run_of_questions_is_split(self):
+        rows = self.outline(['A tossup.', 'ANSWER: One',
+                             'A bonus leadin.', '[10] A part.', 'ANSWER: Two',
+                             'Another tossup.', 'ANSWER: Three'])
+        self.assertEqual([r['kind'] for r in rows], ['tossup', 'bonus', 'tossup'])
+
+    def test_an_unfinished_question_still_reports(self):
+        """Counting as you type is the point, so a question with no answer line
+        yet is still a question."""
+        rows = self.outline(['This is a tossup I am still writing'])
+        self.assertEqual(len(rows), 1)
+        self.assertFalse(rows[0]['complete'])
+        self.assertEqual(rows[0]['kind'], 'tossup')
+
+    def test_a_vhsl_part_is_a_bonus_too(self):
+        rows = self.outline(['A VHSL leadin.', '[V10] A part.', 'ANSWER: One'])
+        self.assertEqual(rows[0]['kind'], 'bonus')
+        self.assertEqual(rows[0]['text'], ['A VHSL leadin.', 'A part.'])
+
+    def test_blank_lines_are_ignored(self):
+        rows = self.outline(['A tossup.', '', 'ANSWER: One', '   ', 'Another.', 'ANSWER: Two'])
+        self.assertEqual(len(rows), 2)
+
+    def test_a_wrapped_stem_stays_one_question(self):
+        rows = self.outline(['This stem was typed', 'across two lines.', 'ANSWER: One'])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(len(rows[0]['text']), 2)
+
+
+class TypedQuestionCountsViewTests(TestCase):
+    """The live counter behind the Type Questions box."""
+
+    def setUp(self):
+        self.ou = User.objects.create_user('tq_owner', password='pw', email='tq@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='TQ dist')
+        self.qset = QuestionSet.objects.create(
+            name='TQ Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist,
+            max_acf_tossup_length=60, max_acf_bonus_length=40)
+        self.client.login(username='tq_owner', password='pw')
+
+    def _counts(self, text):
+        resp = self.client.post('/live_question_counts/',
+                                {'qset_id': self.qset.id, 'text': text})
+        self.assertEqual(resp.status_code, 200)
+        return json.loads(resp.content.decode())
+
+    def test_a_tossup_is_counted_against_the_tossup_limit(self):
+        data = self._counts('Short tossup.\nANSWER: One')
+        self.assertEqual(data['tossups'], 1)
+        self.assertEqual(data['questions'][0]['max'], 60)
+        self.assertEqual(data['questions'][0]['label'], 'Tossup 1')
+        self.assertFalse(data['questions'][0]['over'])
+
+    def test_a_bonus_is_counted_against_the_bonus_limit(self):
+        data = self._counts('Leadin.\n[10] A part.\nANSWER: One')
+        self.assertEqual(data['bonuses'], 1)
+        self.assertEqual(data['questions'][0]['max'], 40)
+        self.assertEqual(data['questions'][0]['kind'], 'bonus')
+
+    def test_a_bonus_counts_its_leadin_and_every_part(self):
+        one = self._counts('Leadin.\n[10] A part.\nANSWER: One')['questions'][0]['count']
+        two = self._counts('Leadin.\n[10] A part.\nANSWER: One\n'
+                           '[10] Another part.\nANSWER: Two')['questions'][0]['count']
+        self.assertGreater(two, one)
+
+    def test_going_over_the_limit_is_flagged(self):
+        data = self._counts('{0}\nANSWER: One'.format('x' * 200))
+        self.assertTrue(data['questions'][0]['over'])
+        self.assertEqual(data['over'], 1)
+
+    def test_the_two_types_use_their_own_limits(self):
+        """The same text is over the limit as a bonus and under it as a tossup,
+        which is the whole reason the type has to be worked out first."""
+        stem = 'y' * 50
+        tossup = self._counts('{0}\nANSWER: One'.format(stem))['questions'][0]
+        bonus = self._counts('Leadin.\n[10] {0}\nANSWER: One'.format(stem))['questions'][0]
+        self.assertFalse(tossup['over'])
+        self.assertTrue(bonus['over'])
+
+    def test_pronunciation_guides_are_excluded_when_the_set_says_so(self):
+        text = 'A clue about \\PDiderot\\P ("DEE-der-oh") here.\nANSWER: One'
+        self.qset.char_count_ignores_pronunciation_guides = True
+        self.qset.save()
+        ignored = self._counts(text)['questions'][0]['count']
+        self.qset.char_count_ignores_pronunciation_guides = False
+        self.qset.save()
+        counted = self._counts(text)['questions'][0]['count']
+        self.assertLess(ignored, counted)
+
+    def test_the_answer_labels_each_row(self):
+        data = self._counts('A tossup.\nANSWER: _Boston_')
+        self.assertEqual(data['questions'][0]['answer'], 'Boston')
+
+    def test_an_empty_box_counts_nothing(self):
+        data = self._counts('')
+        self.assertEqual(data['questions'], [])
+
+    def test_the_page_carries_the_counter(self):
+        resp = self.client.get('/type_questions/{0}/'.format(self.qset.id))
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode()
+        self.assertIn('tq-counts', body)
+        self.assertIn('/live_question_counts/', body)

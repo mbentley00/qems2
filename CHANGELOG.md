@@ -29,6 +29,23 @@
   the decision is about the account. Approving, declining and deleting are
   unchanged, on the review page each row links to.
 
+## 2026-08-21 — Character counts while you type questions
+
+- **The Type Questions box counts as you type**, the way the edit page does.
+  The box holds a whole run of questions, so one number for the lot would mean
+  nothing: each question gets its own row with its answer, its count and its
+  limit, and anything over the limit turns red — along with a summary line
+  ("2 tossups, 1 bonus — 1 over the limit").
+- **It works out which questions are tossups and which are bonuses**, and counts
+  each by that type's rules: a tossup by its stem against the set's tossup
+  limit, a bonus by its leadin plus all of its parts against the bonus limit.
+  The reading of the text is the parser's own, done server-side, so what the
+  counter thinks you have typed cannot drift from what Submit will create — and
+  a question with no answer line yet still gets counted, since counting as you
+  write is the point.
+- Pronunciation guides and moderator directives are excluded exactly as they are
+  everywhere else, following the set's own settings.
+
 ## 2026-08-20 (later) — Reviewing the reference data by how much it can be trusted
 
 - **A review screen for the pronunciation dictionary and the answer-line

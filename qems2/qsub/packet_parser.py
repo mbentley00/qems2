@@ -88,6 +88,92 @@ def remove_bonus_difficulty_tag(line):
 
     return re.sub(bonus_difficulty_tag_regex, '', line.rstrip()).rstrip()
 
+def outline(data):
+    """What a block of typed lines contains, question by question.
+
+    `parse_packet_data` builds real Tossup/Bonus objects and rejects anything
+    malformed; this reports the same reading of the same lines without needing
+    them to be finished, so the entry box can count characters for a question
+    that is still being typed. One dict per question:
+
+        {'kind': 'tossup'|'bonus', 'text': [counted text, ...],
+         'answer': first answer line seen, 'complete': bool}
+
+    `text` is what the character count applies to — the stem for a tossup, the
+    leadin and part texts for a bonus — matching Tossup.character_count and
+    Bonus.character_count. A question is `complete` once its answer has been
+    typed; an unfinished one still reports what it has so far, which is the
+    whole point of counting as you type.
+
+    The rules are the parser's own: an ANSWER line closes a tossup, a ``[10]``
+    (or ``[V10]``) marker means the block is a bonus, and a bonus runs until a
+    line arrives that is neither a part nor an answer.
+    """
+    questions = []
+    pending = None      # {'kind', 'text', 'answer', 'complete'}
+
+    def start(line):
+        return {'kind': 'tossup', 'text': [line], 'answer': '', 'complete': False}
+
+    for raw in data:
+        line = (raw or '').strip()
+        if not line:
+            continue
+
+        if pending is None:
+            if is_bpart(line) or is_vhsl_bpart(line):
+                # A part with no leadin above it: still a bonus, just headless.
+                pending = {'kind': 'bonus', 'text': [strip_bonus_part_marker(line)],
+                           'answer': '', 'complete': False}
+            elif is_answer(line):
+                # An answer with nothing above it — keep it rather than drop it,
+                # so the writer sees a question they haven't finished.
+                pending = {'kind': 'tossup', 'text': [], 'answer': line, 'complete': True}
+                questions.append(pending)
+                pending = None
+            else:
+                pending = start(line)
+            continue
+
+        if is_bpart(line) or is_vhsl_bpart(line):
+            pending['kind'] = 'bonus'
+            pending['complete'] = False
+            pending['text'].append(strip_bonus_part_marker(line))
+            continue
+
+        if is_answer(line):
+            if not pending['answer']:
+                pending['answer'] = line
+            if pending['kind'] == 'tossup':
+                pending['complete'] = True
+                questions.append(pending)
+                pending = None
+            else:
+                # A bonus answer closes its part but not the bonus: more parts
+                # may follow.
+                pending['complete'] = True
+            continue
+
+        # An ordinary line: it continues a tossup stem that wrapped, or it
+        # starts the next question after a finished bonus.
+        if pending['kind'] == 'bonus':
+            questions.append(pending)
+            pending = start(line)
+        else:
+            pending['text'].append(line)
+
+    if pending is not None:
+        questions.append(pending)
+    return questions
+
+
+def strip_bonus_part_marker(line):
+    """A bonus part line without its ``[10]`` / ``[V10]`` marker."""
+    line = re.sub(bpart_regex, '', line)
+    line = re.sub(vhsl_bpart_regex, '', line)
+    return line.strip()
+
+
 def parse_packet_data(data, question_set):
 
     data = [line for line in data if line.strip() != '']
