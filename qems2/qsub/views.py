@@ -872,7 +872,7 @@ def import_packets(request):
     summary = None
 
     if request.method == 'POST':
-        form = ImportPacketsForm(request.POST, request.FILES)
+        form = ImportPacketsForm(request.POST, request.FILES, writer=user)
         if form.is_valid():
             from .packet_set_importer import (import_packets_from_files,
                                               import_packets_into_set, PacketImportError)
@@ -906,7 +906,7 @@ def import_packets(request):
             message = errs[0] if errs else 'Please choose files and a destination (new name or existing set).'
             message_class = 'alert-box alert'
     else:
-        form = ImportPacketsForm()
+        form = ImportPacketsForm(writer=user)
 
     return render(request, 'import_packets.html',
                   {'form': form, 'user': user, 'summary': summary,

@@ -10178,3 +10178,81 @@ class RestoreImportedAuthorsTests(TestCase):
         imported = self.qset.tossup_set.exclude(id=self.tu.id).first()
         self.assertEqual(imported.author, self.writer)
         self.assertEqual(str(imported.category), 'RMP - Mythology')
+
+
+class ImportTargetSetScopeTests(TestCase):
+    """The import dialog offers the sets you work on, and only those.
+
+    The list used to be every set on the site — somebody else's tournament to
+    nearly everyone reading the page, and one mis-click from having a packet
+    imported into it."""
+
+    def setUp(self):
+        self.au = User.objects.create_superuser('its_admin', 'its@t.com', 'pw')
+        self.admin = Writer.objects.get(user=self.au)
+        self.su = User.objects.create_user('its_stranger', password='pw', email='str@t.com')
+        self.stranger = Writer.objects.get(user=self.su)
+        self.dist = Distribution.objects.create(name='ITS dist')
+        DistributionEntry.objects.create(distribution=self.dist, category='History',
+                                         subcategory='American', min_tossups=1, min_bonuses=1)
+
+        def make(name, owner):
+            return QuestionSet.objects.create(
+                name=name, date=timezone.now(), host='h', address='', owner=owner,
+                num_packets=1, distribution=self.dist)
+
+        self.mine = make('My Own Set', self.admin)
+        self.edited = make('Set I Edit', self.stranger)
+        self.edited.editor.add(self.admin)
+        self.co_owned = make('Set I Co-own', self.stranger)
+        self.co_owned.co_owners.add(self.admin)
+        self.theirs = make('Somebody Else Tournament', self.stranger)
+        self.client.login(username='its_admin', password='pw')
+
+    def _choices(self):
+        resp = self.client.get('/import_packets/')
+        self.assertEqual(resp.status_code, 200)
+        return list(resp.context['form'].fields['target_set'].queryset)
+
+    def test_sets_i_own_edit_or_co_own_are_offered(self):
+        offered = self._choices()
+        self.assertIn(self.mine, offered)
+        self.assertIn(self.edited, offered)
+        self.assertIn(self.co_owned, offered)
+
+    def test_a_set_i_have_nothing_to_do_with_is_not_offered(self):
+        self.assertNotIn(self.theirs, self._choices())
+
+    def test_the_page_does_not_even_name_it(self):
+        body = self.client.get('/import_packets/').content.decode()
+        self.assertNotIn('Somebody Else Tournament', body)
+        self.assertIn('My Own Set', body)
+
+    def test_posting_a_set_i_cannot_reach_is_refused(self):
+        """The queryset is the check, not just the list — a hand-made post is
+        rejected the same way."""
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        payload = json.dumps({'tossups': [{'question': 'A clue. For 10 points, name it.',
+                                           'answer': '<b><u>Thing</u></b>',
+                                           'metadata': 'A, History - American'}],
+                              'bonuses': []}).encode('utf-8')
+        upload = SimpleUploadedFile('Round 1.json', payload, content_type='application/json')
+        resp = self.client.post('/import_packets/', {
+            'set_name': '', 'target_set': str(self.theirs.id), 'packet_files': upload})
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.context['form'].errors)
+        self.assertEqual(self.theirs.tossup_set.count(), 0)
+        self.assertEqual(self.theirs.packet_set.count(), 0)
+
+    def test_a_set_i_do_work_on_still_imports(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        payload = json.dumps({'tossups': [{'question': 'A clue. For 10 points, name it.',
+                                           'answer': '<b><u>Thing</u></b>',
+                                           'metadata': 'A, History - American'}],
+                              'bonuses': []}).encode('utf-8')
+        upload = SimpleUploadedFile('Round 1.json', payload, content_type='application/json')
+        self.client.post('/import_packets/', {
+            'set_name': '', 'target_set': str(self.mine.id), 'packet_files': upload})
+        self.assertEqual(self.mine.tossup_set.count(), 1)

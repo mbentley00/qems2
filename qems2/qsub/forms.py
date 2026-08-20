@@ -408,9 +408,22 @@ class ImportPacketsForm(forms.Form):
 
     set_name = forms.CharField(max_length=200, required=False, label='New tournament name')
     target_set = forms.ModelChoiceField(
-        queryset=QuestionSet.objects.all().order_by('name'), required=False,
+        queryset=QuestionSet.objects.none(), required=False,
         label='…or add packets to an existing set')
     packet_files = MultipleFileField(label='Packet files (.json, .docx, or .pdf)')
+
+    def __init__(self, *args, **kwargs):
+        """`writer` limits the target list to sets that writer actually works
+        on. It used to offer every set on the site, which is somebody else's
+        tournament to nearly everyone reading the page — and one mis-click from
+        importing a packet into it. A ModelChoiceField validates the posted id
+        against this queryset, so it's the check as well as the list."""
+        writer = kwargs.pop('writer', None)
+        super(ImportPacketsForm, self).__init__(*args, **kwargs)
+        if writer is not None:
+            self.fields['target_set'].queryset = QuestionSet.objects.filter(
+                Q(owner=writer) | Q(co_owners=writer) | Q(editor=writer)
+            ).distinct().order_by('name')
 
     def clean(self):
         cleaned = super().clean()

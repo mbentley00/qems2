@@ -57,6 +57,14 @@
   it — a distribution can be shared, and another set's questions aren't this
   page's business.
 
+## 2026-08-20 (import fixes, part 3) — The import dialog only offers your sets
+
+- **"Add packets to an existing set" listed every set on the site.** Nearly all of
+  them belong to somebody else, and choosing one would have imported a packet into
+  their tournament. The list is now the sets you own, co-own or edit, and because
+  that list is also what the field validates against, a hand-made request naming
+  any other set is refused rather than obeyed.
+
 ## 2026-08-20 (import fixes, part 2) — Choose the remaps, keep the writers
 
 - **The tidy page’s proposals are editable.** Each leftover category now has a
