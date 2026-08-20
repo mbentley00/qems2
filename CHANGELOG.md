@@ -57,6 +57,21 @@
   it — a distribution can be shared, and another set's questions aren't this
   page's business.
 
+## 2026-08-20 (import fixes, part 2) — Choose the remaps, keep the writers
+
+- **The tidy page’s proposals are editable.** Each leftover category now has a
+  dropdown of your own categories, preselected with the suggestion; change any of
+  them, send a question to no category at all, or leave a row alone entirely.
+- **Imports credit the writer the packet names.** Every imported question used to
+  be attributed to whoever pressed Import — the author sits in the same metadata
+  line as the category, and the save step overwrote it regardless. A writer with an
+  account here is matched by name (an affiliation in brackets doesn’t stop it);
+  anyone else gets the same inactive placeholder account the set importer already
+  made for imported comment authors, so the credit is real rather than lost.
+- **Credit the original writers** on the tidy page repairs sets imported before
+  this: upload the same packet files and each question is matched back to its entry
+  by its text and credited to the writer named in it. Nothing else changes.
+
 ## 2026-08-20 (later still) — Selected text is readable in dark mode
 
 - **Highlighting a row went pale blue with pale text on it.** The page never

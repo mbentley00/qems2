@@ -23,6 +23,7 @@ Admin-only; wired up in views.import_packets.
 import io
 import json
 import os
+import html
 import re
 
 from bs4 import BeautifulSoup, NavigableString
@@ -438,20 +439,56 @@ def _prepare_yapp_categories(qset, json_payloads, lookup, is_new):
     return unmatched
 
 
+# --- authors named in the metadata ------------------------------------------
+
+_AFFILIATION_RE = re.compile(r'\s*\([^)]*\)\s*$')
+
+
+def clean_author_name(raw):
+    """The writer's name out of a metadata author field.
+
+    Packets often qualify it — "Kevin Wang (Georgia Tech)" — and the school is
+    not part of the name we match on.
+    """
+    name = html.unescape((raw or '').strip())
+    name = _AFFILIATION_RE.sub('', name).strip()
+    return re.sub(r'\s+', ' ', name).strip(' ,;')
+
+
+def metadata_author(meta):
+    """The author named in a YAPP ``metadata`` string, or '' if it names none."""
+    meta = (meta or '').strip()
+    if meta.startswith('<') and meta.endswith('>'):
+        meta = meta[1:-1].strip()
+    if ',' not in meta:
+        # No comma: the whole thing is either an author or a category path, and
+        # a path is not an author.
+        return '' if ' - ' in meta else clean_author_name(meta)
+    return clean_author_name(meta.split(',', 1)[0])
+
+
+def _yapp_author(q, resolve, owner):
+    """The Writer to credit for one YAPP question."""
+    if resolve is None:
+        return owner
+    return resolve(metadata_author(q.get('metadata'))) or owner
+
+
 # --- YAPP question builders ------------------------------------------------
 
 
-def _build_tossup_from_yapp(t, qset, owner, acf_type, lookup):
+def _build_tossup_from_yapp(t, qset, owner, acf_type, lookup, resolve=None):
     answer_html, _cat = _split_answer_category(t.get('answer', ''))
     return Tossup(
         question_set=qset,
         tossup_text=_html_to_qems(t.get('question', ''), is_answer=False),
         tossup_answer=_html_to_qems(answer_html, is_answer=True),
         category=_question_category(t, is_bonus=False, lookup=lookup),
-        author=owner, question_type=acf_type, locked=False, edited=False)
+        author=_yapp_author(t, resolve, owner),
+        question_type=acf_type, locked=False, edited=False)
 
 
-def _build_bonus_from_yapp(b, qset, owner, acf_type, lookup):
+def _build_bonus_from_yapp(b, qset, owner, acf_type, lookup, resolve=None):
     parts = b.get('parts') or []
     # Strip any trailing category tag off the part answers before conversion.
     answers = [_split_answer_category(a)[0] for a in (b.get('answers') or [])]
@@ -474,21 +511,23 @@ def _build_bonus_from_yapp(b, qset, owner, acf_type, lookup):
         part2_text=part(1), part2_answer=ans(1), part2_difficulty=diff(1),
         part3_text=part(2), part3_answer=ans(2), part3_difficulty=diff(2),
         category=_question_category(b, is_bonus=True, lookup=lookup),
-        author=owner, question_type=acf_type, locked=False, edited=False)
+        author=_yapp_author(b, resolve, owner),
+        question_type=acf_type, locked=False, edited=False)
 
 
-def _parse_yapp(payload, qset, owner, acf_tu, acf_bn, lookup, name, summary):
+def _parse_yapp(payload, qset, owner, acf_tu, acf_bn, lookup, name, summary,
+                resolve=None):
     """Build (unsaved) Tossup/Bonus objects from a YAPP payload. Per-question
     failures are recorded and skipped."""
     tossups, bonuses = [], []
     for i, t in enumerate(payload.get('tossups') or []):
         try:
-            tossups.append(_build_tossup_from_yapp(t, qset, owner, acf_tu, lookup))
+            tossups.append(_build_tossup_from_yapp(t, qset, owner, acf_tu, lookup, resolve))
         except Exception as ex:
             summary['errors'].append('{0}: tossup #{1} skipped ({2})'.format(name, i + 1, ex))
     for i, b in enumerate(payload.get('bonuses') or []):
         try:
-            bonuses.append(_build_bonus_from_yapp(b, qset, owner, acf_bn, lookup))
+            bonuses.append(_build_bonus_from_yapp(b, qset, owner, acf_bn, lookup, resolve))
         except Exception as ex:
             summary['errors'].append('{0}: bonus #{1} skipped ({2})'.format(name, i + 1, ex))
     return tossups, bonuses
@@ -746,7 +785,11 @@ def _save_questions(questions, qset, packet, owner, kind, summary):
             with transaction.atomic():
                 q.question_set = qset
                 q.packet = packet
-                q.author = owner
+                # Whoever the packet named keeps the credit; only a question
+                # that arrived without an author (the docx/pdf path, where
+                # there is no metadata to read one from) falls to the importer.
+                if q.author_id is None:
+                    q.author = owner
                 q.question_number = saved + 1
                 q.locked = False
                 q.edited = False
@@ -849,6 +892,14 @@ def import_packets_from_files(uploaded_files, set_name=None, owner=None, existin
     for receiver, sender in email_receivers:
         post_save.disconnect(receiver, sender=sender)
 
+    # Credit the people the packet names. `set_importer._author_resolver` matches
+    # an existing account by real name or username and otherwise makes the same
+    # inactive "-legacy" placeholder the TSV importer does, so attribution
+    # survives even for writers who have no account here — the alternative is
+    # crediting every imported question to whoever pressed Import.
+    from . import set_importer as _set_importer
+    legacy_ids, author_resolve = _set_importer._author_resolver(owner)
+
     try:
         with transaction.atomic():
             if existing_qset is None:
@@ -904,7 +955,8 @@ def import_packets_from_files(uploaded_files, set_name=None, owner=None, existin
                 try:
                     if item['ext'] == '.json':
                         tossups, bonuses = _parse_yapp(
-                            item['payload'], qset, owner, acf_tu, acf_bn, category_lookup, name, summary)
+                            item['payload'], qset, owner, acf_tu, acf_bn, category_lookup, name,
+                            summary, resolve=author_resolve)
                         parse_errors = 0
                     else:
                         tossups, bonuses, t_errs, b_errs = parse_packet_data(item['lines'], qset)

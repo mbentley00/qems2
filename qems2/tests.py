@@ -10019,3 +10019,162 @@ class TidyImportedCategoriesTests(TestCase):
     def test_the_category_issues_page_points_at_it(self):
         body = self.client.get('/category_problems/{0}/'.format(self.qset.id)).content.decode()
         self.assertIn('/tidy_categories/{0}/'.format(self.qset.id), body)
+
+
+class TidyCategoryChoiceTests(TestCase):
+    """Choosing where each leftover category's questions go."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('tc_owner', password='pw', email='tc@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='TC dist')
+        self.myth = DistributionEntry.objects.create(
+            distribution=self.dist, category='RMP', subcategory='Mythology',
+            min_tossups=1, min_bonuses=1)
+        self.religion = DistributionEntry.objects.create(
+            distribution=self.dist, category='RMP', subcategory='Religion',
+            min_tossups=1, min_bonuses=1)
+        self.debris = DistributionEntry.objects.create(
+            distribution=self.dist, category='RMP',
+            subcategory='World Mythology&gt; ~25806~ &lt;Editor: Someone')
+        self.qset = QuestionSet.objects.create(
+            name='TC Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.qset.editor.add(self.owner)
+        self.tu = Tossup.objects.create(
+            author=self.owner, question_set=self.qset, question_type=self.acf,
+            tossup_text='A clue.', tossup_answer='_Thing_', category=self.debris,
+            created_date=datetime.now(), last_changed_date=datetime.now())
+        self.client.login(username='tc_owner', password='pw')
+
+    def _url(self):
+        return '/tidy_categories/{0}/'.format(self.qset.id)
+
+    def test_the_page_offers_every_real_category_as_a_choice(self):
+        resp = self.client.get(self._url())
+        self.assertEqual([e.id for e in resp.context['keep']],
+                         [self.myth.id, self.religion.id])
+        body = resp.content.decode()
+        self.assertIn('name="target_{0}"'.format(self.debris.id), body)
+
+    def test_the_proposal_is_preselected(self):
+        body = self.client.get(self._url()).content.decode()
+        self.assertIn('<option value="{0}" selected>RMP - Mythology</option>'.format(self.myth.id),
+                      body.replace('&quot;', '"'))
+
+    def test_a_different_choice_is_honoured(self):
+        self.client.post(self._url(), {'action': 'apply',
+                                       'target_{0}'.format(self.debris.id): str(self.religion.id)})
+        self.tu.refresh_from_db()
+        self.assertEqual(self.tu.category, self.religion)
+        self.assertFalse(DistributionEntry.objects.filter(id=self.debris.id).exists())
+
+    def test_leave_uncategorized_is_a_choice(self):
+        self.client.post(self._url(), {'action': 'apply',
+                                       'target_{0}'.format(self.debris.id): 'none'})
+        self.tu.refresh_from_db()
+        self.assertIsNone(self.tu.category)
+        self.assertFalse(DistributionEntry.objects.filter(id=self.debris.id).exists())
+
+    def test_dont_touch_this_one_leaves_it_alone(self):
+        self.client.post(self._url(), {'action': 'apply',
+                                       'target_{0}'.format(self.debris.id): 'leave'})
+        self.tu.refresh_from_db()
+        self.assertEqual(self.tu.category, self.debris)
+        self.assertTrue(DistributionEntry.objects.filter(id=self.debris.id).exists())
+
+    def test_a_category_from_another_set_cannot_be_chosen(self):
+        """The target has to be one of this set's own categories."""
+        elsewhere = Distribution.objects.create(name='Somewhere else')
+        alien = DistributionEntry.objects.create(
+            distribution=elsewhere, category='History', subcategory='American')
+        self.client.post(self._url(), {'action': 'apply',
+                                       'target_{0}'.format(self.debris.id): str(alien.id)})
+        self.tu.refresh_from_db()
+        self.assertEqual(self.tu.category, self.debris)
+
+
+class RestoreImportedAuthorsTests(TestCase):
+    """Crediting the writers a packet names, for questions already imported."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('ra_owner', password='pw', email='ra@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.wu = User.objects.create_user('ra_writer', password='pw', email='rw@t.com')
+        self.wu.first_name, self.wu.last_name = 'Jaimie', 'Carlson'
+        self.wu.save()
+        self.writer = Writer.objects.get(user=self.wu)
+        self.dist = Distribution.objects.create(name='RA dist')
+        self.entry = DistributionEntry.objects.create(
+            distribution=self.dist, category='RMP', subcategory='Mythology',
+            min_tossups=1, min_bonuses=1)
+        self.qset = QuestionSet.objects.create(
+            name='RA Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.qset.editor.add(self.owner)
+        self.text = 'A clue about a myth. For 10 points, name it.'
+        self.tu = Tossup.objects.create(
+            author=self.owner, question_set=self.qset, question_type=self.acf,
+            tossup_text=self.text, tossup_answer='_Thing_', category=self.entry,
+            created_date=datetime.now(), last_changed_date=datetime.now())
+        self.client.login(username='ra_owner', password='pw')
+
+    def _file(self, metadata, question=None):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        payload = {'tossups': [{'question': question or self.text,
+                                'answer': '<b><u>Thing</u></b>', 'metadata': metadata}],
+                   'bonuses': []}
+        return SimpleUploadedFile('Round 19.json', json.dumps(payload).encode('utf-8'),
+                                  content_type='application/json')
+
+    def _post(self, upload):
+        return self.client.post('/tidy_categories/{0}/'.format(self.qset.id),
+                                {'action': 'authors', 'files': upload})
+
+    def test_a_writer_with_an_account_is_credited(self):
+        self._post(self._file('Jaimie Carlson, RMP - World Mythology&gt; ~1~ &lt;Editor: X'))
+        self.tu.refresh_from_db()
+        self.assertEqual(self.tu.author, self.writer)
+
+    def test_an_affiliation_does_not_stop_the_match(self):
+        self.wu.first_name, self.wu.last_name = 'Kevin', 'Wang'
+        self.wu.save()
+        self._post(self._file('Kevin Wang (Georgia Tech), Science - Physics&gt; ~2~'))
+        self.tu.refresh_from_db()
+        self.assertEqual(self.tu.author, self.writer)
+
+    def test_a_writer_with_no_account_gets_a_placeholder(self):
+        self._post(self._file('Forrest Weintraub, RMP - Philosophy&gt; ~3~'))
+        self.tu.refresh_from_db()
+        self.assertNotEqual(self.tu.author, self.owner)
+        self.assertEqual(self.tu.author.get_real_name().strip(), 'Forrest Weintraub')
+        self.assertFalse(self.tu.author.user.is_active)
+
+    def test_a_question_the_files_do_not_mention_keeps_its_author(self):
+        self._post(self._file('Jaimie Carlson, RMP - Mythology', question='Some other question.'))
+        self.tu.refresh_from_db()
+        self.assertEqual(self.tu.author, self.owner)
+
+    def test_metadata_with_no_author_changes_nothing(self):
+        self._post(self._file('RMP - Mythology'))
+        self.tu.refresh_from_db()
+        self.assertEqual(self.tu.author, self.owner)
+
+    def test_the_page_says_who_it_credited(self):
+        resp = self._post(self._file('Jaimie Carlson, RMP - World Mythology&gt; ~1~'))
+        self.assertIn('Jaimie Carlson', resp.context['message'])
+
+    def test_the_import_itself_now_credits_the_named_writer(self):
+        from qems2.qsub import packet_set_importer
+        summary = packet_set_importer.import_packets_into_set(
+            [self._file('Jaimie Carlson, RMP - World Mythology&gt; ~1~ &lt;Editor: X',
+                        question='A brand new clue. For 10 points, name it.')],
+            self.qset, self.owner)
+        self.assertEqual(summary['tossups'], 1)
+        imported = self.qset.tossup_set.exclude(id=self.tu.id).first()
+        self.assertEqual(imported.author, self.writer)
+        self.assertEqual(str(imported.category), 'RMP - Mythology')

@@ -9662,6 +9662,68 @@ def save_tag_selection(request, qset, question, dist_entry, is_tossup):
         else:
             relation.remove(question)
 
+def _restore_authors_from_files(qset, uploads, owner):
+    """Credit the people the original packets named, for questions already here.
+
+    An import before this change credited everything to whoever pressed Import,
+    and the packet's own metadata — which names the author — wasn't kept. The
+    files still have it, so matching each question back to its packet entry by
+    its text restores the attribution without touching anything else.
+    """
+    from . import packet_set_importer as psi
+    from . import set_importer as si
+
+    by_text = {}
+    unreadable = []
+    for f in uploads:
+        try:
+            f.seek(0)
+            payload = json.loads(f.read().decode('utf-8'))
+        except Exception as ex:
+            unreadable.append('{0} ({1})'.format(getattr(f, 'name', 'file'), ex))
+            continue
+        for key, is_bonus in (('tossups', False), ('bonuses', True)):
+            for q in payload.get(key) or []:
+                author = psi.metadata_author(q.get('metadata'))
+                if not author:
+                    continue
+                body = q.get('leadin', '') if is_bonus else q.get('question', '')
+                text = _plain_question_key(psi._html_to_qems(body, is_answer=False))
+                if text:
+                    by_text.setdefault(text, author)
+
+    legacy_ids, resolve = si._author_resolver(owner)
+    changed, names = 0, set()
+    for tossup in qset.tossup_set.select_related('author'):
+        author = by_text.get(_plain_question_key(tossup.tossup_text))
+        if not author:
+            continue
+        writer = resolve(author)
+        if writer and writer.id != tossup.author_id:
+            tossup.author = writer
+            tossup.save(update_fields=['author'])
+            changed += 1
+            names.add(author)
+    for bonus in qset.bonus_set.select_related('author'):
+        author = by_text.get(_plain_question_key(bonus.leadin))
+        if not author:
+            continue
+        writer = resolve(author)
+        if writer and writer.id != bonus.author_id:
+            bonus.author = writer
+            bonus.save(update_fields=['author'])
+            changed += 1
+            names.add(author)
+    return changed, sorted(names), unreadable
+
+
+def _plain_question_key(text):
+    """Question text reduced to what identifies it: letters and digits only, so
+    markup, spacing and punctuation differences between the file and what was
+    stored don't stop a match."""
+    return re.sub(r'[^a-z0-9]+', '', strip_markup(text or '').lower())[:400]
+
+
 @login_required
 def tidy_categories(request, qset_id):
     """Put imported questions back into the set's own categories.
@@ -9669,12 +9731,12 @@ def tidy_categories(request, qset_id):
     An import used to invent a category for every name it found, so a set could
     end up with its own distribution plus a shadow one carrying another set's
     names — and its question ids and editors, where the packet had put them all
-    on one metadata line. This finds those, works out the nearest real category
-    for each question under them (`category_mapper`), and clears them out.
+    on one metadata line. This finds those, proposes the nearest real category
+    for each (`category_mapper`), lets you change any of them, and clears the
+    leftovers out.
 
-    Nothing is guessed twice: the proposal is shown first, and applying it moves
-    the questions, then deletes the emptied categories — but only ones no
-    question anywhere still uses, since a distribution can be shared.
+    Applying moves the questions, then deletes the emptied categories — but only
+    ones no question anywhere still uses, since a distribution can be shared.
     """
     user = request.user.writer
     qset = QuestionSet.objects.get(id=qset_id)
@@ -9683,46 +9745,57 @@ def tidy_categories(request, qset_id):
                       {'message': 'Only an owner or editor can tidy a set\'s categories.',
                        'message_class': 'alert-box alert'})
 
+    message = message_class = ''
+
+    if request.method == 'POST' and request.POST.get('action') == 'authors':
+        uploads = request.FILES.getlist('files')
+        if not uploads:
+            message, message_class = 'Choose the packet files first.', 'alert-box warning'
+        else:
+            changed, names, unreadable = _restore_authors_from_files(qset, uploads, user)
+            cache.clear()
+            parts = ['Credited {0} question{1} to the writer named in the packet.'.format(
+                changed, '' if changed == 1 else 's')]
+            if names:
+                parts.append('Authors found: {0}.'.format(', '.join(names[:12])))
+            if unreadable:
+                parts.append('Could not read: {0}.'.format('; '.join(unreadable)))
+            message = ' '.join(parts)
+            message_class = 'alert-box success' if changed else 'alert-box warning'
+
     entries = list(qset.distribution.distributionentry_set.all()
                    .order_by('category', 'subcategory')) if qset.distribution_id else []
     debris = [e for e in entries if category_mapper.looks_like_debris(e)]
     keep = [e for e in entries if e not in debris]
 
-    # Questions of this set sitting under a debris category, and where each
-    # would go. Grouped by category so the page reads as a plan, not a list of
-    # several hundred questions.
-    plan = []
-    for entry in debris:
-        tossups = list(qset.tossup_set.filter(category=entry))
-        bonuses = list(qset.bonus_set.filter(category=entry))
-        cat, sub = category_mapper.split_path(
-            '{0} - {1}'.format(entry.category, entry.subcategory).strip(' -'))
-        target = category_mapper.best_entry(cat, sub, keep)
-        # Questions in *other* sets using this category are not ours to move,
-        # and their presence is what stops the category being deleted.
-        elsewhere = (Tossup.objects.filter(category=entry).exclude(question_set=qset).count() +
-                     Bonus.objects.filter(category=entry).exclude(question_set=qset).count())
-        plan.append({
-            'entry': entry,
-            'cleaned': '{0} - {1}'.format(cat, sub).strip(' -'),
-            'target': target,
-            'tossups': len(tossups),
-            'bonuses': len(bonuses),
-            'elsewhere': elsewhere,
-        })
-
-    message = message_class = ''
     if request.method == 'POST' and request.POST.get('action') == 'apply':
         moved = deleted = stranded = 0
+        by_id = {e.id: e for e in keep}
         with transaction.atomic():
-            for row in plan:
-                entry = row['entry']
-                target = row['target']
+            for entry in debris:
+                raw = request.POST.get('target_{0}'.format(entry.id), '')
+                if raw == 'leave':
+                    continue
+                target = None
+                if raw.isdigit() and int(raw) in by_id:
+                    target = by_id[int(raw)]
+                elif not raw:
+                    # No choice submitted for this row: take the proposal. The
+                    # page always sends one, so this is the "apply what you
+                    # suggested" case rather than a silent guess.
+                    cat, sub = category_mapper.split_path(
+                        '{0} - {1}'.format(entry.category, entry.subcategory).strip(' -'))
+                    target = category_mapper.best_entry(cat, sub, keep)
                 if target is not None:
                     moved += qset.tossup_set.filter(category=entry).update(category=target)
                     moved += qset.bonus_set.filter(category=entry).update(category=target)
+                elif raw == 'none':
+                    # Deliberately unfiled: the question shows up on Category
+                    # Issues for a person to place.
+                    stranded += qset.tossup_set.filter(category=entry).update(category=None)
+                    stranded += qset.bonus_set.filter(category=entry).update(category=None)
                 else:
-                    stranded += row['tossups'] + row['bonuses']
+                    continue
                 still_used = (Tossup.objects.filter(category=entry).exists() or
                               Bonus.objects.filter(category=entry).exists())
                 if not still_used:
@@ -9737,17 +9810,32 @@ def tidy_categories(request, qset_id):
             parts.append('Removed {0} leftover categor{1}.'.format(
                 deleted, 'y' if deleted == 1 else 'ies'))
         if stranded:
-            parts.append('{0} question(s) had no near match and kept their category; '
-                         'place them by hand.'.format(stranded))
+            parts.append('{0} left uncategorized, as asked.'.format(stranded))
         message, message_class = ' '.join(parts), 'alert-box success'
-        # Rebuild the view of what's left.
         entries = list(qset.distribution.distributionentry_set.all()
                        .order_by('category', 'subcategory'))
         debris = [e for e in entries if category_mapper.looks_like_debris(e)]
-        plan = []
+        keep = [e for e in entries if e not in debris]
+
+    plan = []
+    for entry in debris:
+        cat, sub = category_mapper.split_path(
+            '{0} - {1}'.format(entry.category, entry.subcategory).strip(' -'))
+        target = category_mapper.best_entry(cat, sub, keep)
+        elsewhere = (Tossup.objects.filter(category=entry).exclude(question_set=qset).count() +
+                     Bonus.objects.filter(category=entry).exclude(question_set=qset).count())
+        plan.append({
+            'entry': entry,
+            'cleaned': '{0} - {1}'.format(cat, sub).strip(' -'),
+            'target': target,
+            'tossups': qset.tossup_set.filter(category=entry).count(),
+            'bonuses': qset.bonus_set.filter(category=entry).count(),
+            'elsewhere': elsewhere,
+        })
 
     return render(request, 'tidy_categories.html',
                   {'user': user, 'qset': qset, 'plan': plan,
+                   'keep': keep,
                    'keep_count': len(keep),
                    'movable': sum(1 for r in plan if r['target'] is not None),
                    'total_questions': sum(r['tossups'] + r['bonuses'] for r in plan),

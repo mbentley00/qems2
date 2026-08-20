@@ -9,6 +9,11 @@
 {% block content %}
 
 <h3 class="page-header">Tidy imported categories: {{ qset.name }}</h3>
+<ul class="breadcrumbs">
+    <li><a href="/edit_question_set/{{ qset.id }}/">{{ qset.name }}</a></li>
+    <li><a href="/category_problems/{{ qset.id }}/">Category Issues</a></li>
+    <li class="current">Tidy imported categories</li>
+</ul>
 
 {% if message %}<div class="{{ message_class }}">{{ message }}</div>{% endif %}
 
@@ -16,62 +21,98 @@
     <p>An import used to invent a category for every name it found in a packet, so a set
     could end up with its own distribution plus a shadow one carrying another set's names
     &mdash; and, where the packet put everything on one metadata line, its question ids and
-    editors too. This finds those, works out the nearest of <strong>your</strong>
-    {{ keep_count }} categories for each question under them, and clears them out.</p>
+    editors too. Each leftover below is matched to the nearest of <strong>your</strong>
+    {{ keep_count }} categories; <strong>change any of them in the dropdown</strong> before
+    applying.</p>
     <p class="home-note">Questions are only moved within this set. A leftover category is
     deleted once nothing anywhere uses it &mdash; a distribution can be shared, and another
     set's questions are not this page's business.</p>
 </div>
 
 {% if plan %}
-<p class="home-note">{{ plan|length }} leftover categor{{ plan|length|pluralize:"y,ies" }},
-holding {{ total_questions }} question{{ total_questions|pluralize }} of this set.
-{{ movable }} of them have a match to move to.</p>
-
-<div class="home-card">
-<table class="table-striped" id="tidy-categories-table">
-    <thead>
-        <tr>
-            <th>Leftover category</th>
-            <th>Reads as</th>
-            <th>Questions here</th>
-            <th>Moves to</th>
-        </tr>
-    </thead>
-    <tbody>
-    {% for row in plan %}
-        <tr{% if not row.target %} class="tidy-nomatch"{% endif %}>
-            <td class="tidy-debris">{{ row.entry.category }} - {{ row.entry.subcategory }}</td>
-            <td>{{ row.cleaned }}</td>
-            <td>{{ row.tossups }} tossup{{ row.tossups|pluralize }},
-                {{ row.bonuses }} bonus{{ row.bonuses|pluralize:"es" }}
-                {% if row.elsewhere %}<span class="home-note">({{ row.elsewhere }} in other sets stay put)</span>{% endif %}</td>
-            <td>{% if row.target %}<strong>{{ row.target.category }} - {{ row.target.subcategory }}</strong>
-                {% else %}<em>no near match &mdash; left alone</em>{% endif %}</td>
-        </tr>
-    {% endfor %}
-    </tbody>
-</table>
-</div>
-
-<form method="post" action="" class="tidy-apply">
+<form method="post" action="">
     {% csrf_token %}
     <input type="hidden" name="action" value="apply">
-    <input type="submit" class="button primary" value="Move the questions and remove these categories"
-           onclick="return confirm('Move {{ total_questions }} question(s) into this set’s own categories and delete the leftover ones?');">
-    <a href="/edit_question_set/{{ qset.id }}/" class="button secondary">Back to the set</a>
+    <p class="home-note">{{ plan|length }} leftover categor{{ plan|length|pluralize:"y,ies" }},
+    holding {{ total_questions }} question{{ total_questions|pluralize }} of this set.</p>
+
+    <div class="home-card">
+    <table class="table-striped" id="tidy-categories-table">
+        <thead>
+            <tr>
+                <th>Leftover category</th>
+                <th>Reads as</th>
+                <th>Questions here</th>
+                <th>Move them to</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for row in plan %}
+            <tr{% if not row.target %} class="tidy-nomatch"{% endif %}>
+                <td class="tidy-debris">{{ row.entry.category }} - {{ row.entry.subcategory }}</td>
+                <td>{{ row.cleaned }}</td>
+                <td>{{ row.tossups }} tossup{{ row.tossups|pluralize }},
+                    {{ row.bonuses }} bonus{{ row.bonuses|pluralize:"es" }}
+                    {% if row.elsewhere %}<br><span class="home-note">{{ row.elsewhere }} in other sets stay put</span>{% endif %}</td>
+                <td>
+                    <select name="target_{{ row.entry.id }}" class="tidy-target">
+                        {% for entry in keep %}
+                        <option value="{{ entry.id }}"{% if row.target and row.target.id == entry.id %} selected{% endif %}>{{ entry.category }} - {{ entry.subcategory }}</option>
+                        {% endfor %}
+                        <option value="none"{% if not row.target %} selected{% endif %}>&mdash; leave uncategorized &mdash;</option>
+                        <option value="leave">&mdash; don't touch this one &mdash;</option>
+                    </select>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+
+    <div class="tidy-apply">
+        <input type="submit" class="button primary" value="Apply these moves and remove the leftover categories"
+               onclick="return confirm('Move these questions into the categories chosen above and delete the leftover ones?');">
+        <a href="/edit_question_set/{{ qset.id }}/" class="button secondary">Back to the set</a>
+    </div>
 </form>
 {% else %}
 <div class="alert-box success">Nothing to tidy: every category in this set's distribution
 reads as a category somebody chose.</div>
-<p><a href="/edit_question_set/{{ qset.id }}/" class="button small secondary">Back to the set</a></p>
 {% endif %}
 
+{% comment %}
+Attribution is a separate repair with a separate button: the packets name their
+writers, an import before this change credited them all to whoever pressed
+Import, and the metadata that says otherwise was never stored — so the files
+have to come back to fix it.
+{% endcomment %}
+<h4 class="page-header tidy-authors-head">Credit the original writers</h4>
+<div class="panel radius">
+    <p>An import before August 2026 credited every question to whoever pressed Import.
+    The packets name their writers, so upload the same files again and each question here
+    is matched back to its entry by its text and credited to the writer named in it.
+    Nothing else about the questions changes.</p>
+    <p class="home-note">A writer with an account here is matched by name; anyone else gets
+    the same inactive placeholder account the set importer makes, so the credit is real
+    rather than lost.</p>
+    <form method="post" action="" enctype="multipart/form-data" class="tidy-authors">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="authors">
+        <input type="file" name="files" accept=".json" multiple>
+        <input type="submit" class="button small secondary" value="Credit the writers named in these files">
+    </form>
+</div>
+
 <style>
-.tidy-debris { font-family: monospace; font-size: 0.8rem; word-break: break-word; max-width: 30em; }
-#tidy-categories-table tr.tidy-nomatch td { opacity: 0.75; }
+.tidy-debris { font-family: monospace; font-size: 0.8rem; word-break: break-word; max-width: 26em; }
+#tidy-categories-table td { vertical-align: middle; }
+#tidy-categories-table tr.tidy-nomatch .tidy-debris { opacity: 0.8; }
+.tidy-target { margin: 0; min-width: 16em; }
 .tidy-apply { display: flex; gap: 8px; align-items: center; margin-top: 12px; }
 .tidy-apply input, .tidy-apply a { margin: 0; }
+.tidy-authors { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.tidy-authors input { margin: 0; }
+.tidy-authors-head { margin-top: 2rem; }
 </style>
 
 {% endblock %}
