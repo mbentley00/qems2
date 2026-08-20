@@ -90,6 +90,7 @@ urlpatterns = [
     re_path(r'^swap_candidates/$', swap_candidates),
     re_path(r'^category_tags/(?P<qset_id>[0-9]+)/$', category_tags),
     re_path(r'^category_problems/(?P<qset_id>[0-9]+)/$', category_problems),
+    re_path(r'^tidy_categories/(?P<qset_id>[0-9]+)/$', tidy_categories),
     re_path(r'^distributions/$', distributions),
     re_path(r'^role_groups/$', role_groups),
     re_path(r'^user_search/$', user_search),

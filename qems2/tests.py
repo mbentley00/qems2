@@ -9731,3 +9731,291 @@ class TypedQuestionCountsViewTests(TestCase):
         body = resp.content.decode()
         self.assertIn('tq-counts', body)
         self.assertIn('/live_question_counts/', body)
+
+
+class CategoryMapperTests(TestCase):
+    """Mapping another set's category names onto this set's distribution."""
+
+    class Entry(object):
+        def __init__(self, category, subcategory):
+            self.category, self.subcategory = category, subcategory
+
+        def __repr__(self):
+            return '{0} - {1}'.format(self.category, self.subcategory)
+
+    def setUp(self):
+        from qems2.qsub import category_mapper
+        self.cm = category_mapper
+        # The 2027 PACE NSC distribution.
+        self.entries = [self.Entry(*p) for p in [
+            ('Fine Arts', 'Audio'), ('Fine Arts', 'Other Audio'),
+            ('Fine Arts', 'Other Visual'), ('Fine Arts', 'Visual'),
+            ('History', 'American'), ('History', 'European'), ('History', 'Other'),
+            ('History', 'World'), ('Literature', 'American'), ('Literature', 'British'),
+            ('Literature', 'European'), ('Literature', 'World'),
+            ('Other', 'Current Events'), ('Other', 'Geography'), ('Other', 'Other'),
+            ('RMP', 'Mythology'), ('RMP', 'Philosophy'), ('RMP', 'Religion'),
+            ('Science', 'Biology'), ('Science', 'Chemistry'), ('Science', 'Other'),
+            ('Science', 'Physics'), ('Social Science', 'Any')]]
+
+    def _map(self, raw):
+        return str(self.cm.map_metadata_category(raw, self.entries))
+
+    # --- cleaning the name ---------------------------------------------------
+
+    def test_a_question_id_and_editor_are_not_part_of_the_category(self):
+        """YAPP hands over the whole metadata line, and this packet put three
+        things on it."""
+        self.assertEqual(
+            self.cm.clean_category_text('RMP - World Mythology&gt; ~25806~ &lt;Editor: Sinecio Morales'),
+            'RMP - World Mythology')
+
+    def test_entities_are_decoded_before_anything_else(self):
+        self.assertEqual(self.cm.clean_category_text('Other - U.S.&gt; ~1~'), 'Other - U.S.')
+
+    def test_a_clean_name_is_left_alone(self):
+        self.assertEqual(self.cm.clean_category_text('Science - Physics'), 'Science - Physics')
+
+    # --- finding the nearest category ---------------------------------------
+
+    def test_an_exact_category_maps_to_itself(self):
+        self.assertEqual(self._map('Science - Physics&gt; ~33465~'), 'Science - Physics')
+
+    def test_trailing_detail_is_dropped(self):
+        self.assertEqual(self._map('History - American - 1865-1945&gt; ~1~'), 'History - American')
+        self.assertEqual(self._map('History - American - 1945+&gt; ~2~'), 'History - American')
+
+    def test_music_is_audio_and_painting_is_visual(self):
+        self.assertEqual(self._map('Fine Arts - Music - Classical&gt; ~1~'), 'Fine Arts - Audio')
+        self.assertEqual(self._map('Fine Arts - Opera&gt; ~2~'), 'Fine Arts - Audio')
+        self.assertEqual(self._map('Fine Arts - Architecture&gt; ~3~'), 'Fine Arts - Visual')
+
+    def test_the_plainer_of_two_matches_wins(self):
+        """Architecture reaches both "Visual" and "Other Visual"; the one
+        without the qualifier is the better answer."""
+        self.assertEqual(self._map('Fine Arts - Painting'), 'Fine Arts - Visual')
+
+    def test_a_shared_word_carries_a_longer_name(self):
+        self.assertEqual(self._map('RMP - World Mythology'), 'RMP - Mythology')
+        self.assertEqual(self._map('Literature - World and Miscellaneous'), 'Literature - World')
+
+    def test_a_top_level_category_can_be_somebody_else_s_subcategory(self):
+        self.assertEqual(self._map('Geography - World&gt; ~1~'), 'Other - Geography')
+        self.assertEqual(self._map('Current Events - U.S.&gt; ~2~'), 'Other - Current Events')
+
+    def test_a_category_with_no_counterpart_falls_to_the_general_bucket(self):
+        self.assertEqual(self._map('Trash - Video Games'), 'Other - Other')
+
+    def test_a_subcategory_with_no_counterpart_uses_its_category_s_bucket(self):
+        self.assertEqual(self._map('Social Science - Economics'), 'Social Science - Any')
+
+    def test_nothing_at_all_maps_to_nothing(self):
+        self.assertIsNone(self.cm.map_metadata_category('', self.entries))
+        self.assertIsNone(self.cm.best_entry('History', 'American', []))
+
+    def test_a_set_with_no_general_bucket_leaves_it_unmapped(self):
+        lean = [self.Entry('Science', 'Physics'), self.Entry('Science', 'Biology')]
+        self.assertIsNone(self.cm.best_entry('Trash', 'Video Games', lean))
+
+    # --- spotting what an import left behind --------------------------------
+
+    def test_debris_is_recognised(self):
+        self.assertTrue(self.cm.looks_like_debris(
+            self.Entry('Current Events', 'U.S.&gt; ~27108~ &lt;Editor: Michael Bentley')))
+        self.assertTrue(self.cm.looks_like_debris(
+            self.Entry('Fine Arts', 'Music - Recent> ~26416~ <Editor: Ivvone Zhou')))
+
+    def test_a_real_category_is_not_debris(self):
+        for entry in self.entries:
+            self.assertFalse(self.cm.looks_like_debris(entry), str(entry))
+
+
+class ImportIntoExistingSetCategoryTests(TestCase):
+    """Importing packets into a set that already has a distribution.
+
+    The set's categories are the ones its editors work to; a packet's are its
+    own set's. Nothing in an import may add to that list."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        self.ou = User.objects.create_user('imp_owner', password='pw', email='imp@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='NSC-ish')
+        for cat, sub in [('Fine Arts', 'Audio'), ('Fine Arts', 'Visual'),
+                         ('History', 'American'), ('History', 'European'),
+                         ('Literature', 'British'), ('Literature', 'World'),
+                         ('Other', 'Current Events'), ('Other', 'Geography'),
+                         ('Other', 'Other'), ('RMP', 'Mythology'), ('RMP', 'Philosophy'),
+                         ('Science', 'Physics'), ('Social Science', 'Any')]:
+            DistributionEntry.objects.create(
+                distribution=self.dist, category=cat, subcategory=sub,
+                min_tossups=1, min_bonuses=1)
+        self.qset = QuestionSet.objects.create(
+            name='2027 PACE NSC', date=timezone.now(), host='h', address='',
+            owner=self.owner, num_packets=2, distribution=self.dist)
+        self.qset.editor.add(self.owner)
+        self.before = set(self.dist.distributionentry_set.values_list('id', flat=True))
+
+    def _upload(self, name, payload):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        return SimpleUploadedFile(name, json.dumps(payload).encode('utf-8'),
+                                  content_type='application/json')
+
+    def _packet(self, metas):
+        """A YAPP payload whose questions carry the given metadata strings."""
+        return {'tossups': [{'question': 'A clue about something. For 10 points, name it.',
+                             'answer': '<b><u>Thing</u></b>', 'metadata': m}
+                            for m in metas],
+                'bonuses': []}
+
+    def _import(self, metas):
+        from qems2.qsub import packet_set_importer
+        payload = self._packet(metas)
+        return packet_set_importer.import_packets_into_set(
+            [self._upload('Round 19.json', payload)], self.qset, self.owner)
+
+    def test_no_new_category_is_ever_created(self):
+        self._import(['Jaimie Carlson, RMP - World Mythology&gt; ~25806~ &lt;Editor: Sinecio Morales',
+                      'Ganon Evans, History - American - 1865-1945&gt; ~31899~ &lt;Editor: Noah Sheidlower',
+                      'Kevin Wang, Science - Physics&gt; ~33465~&lt;Editor: Aditya Patnaik'])
+        self.assertEqual(
+            set(self.dist.distributionentry_set.values_list('id', flat=True)), self.before)
+
+    def test_questions_land_in_the_nearest_existing_category(self):
+        self._import(['A, RMP - World Mythology&gt; ~1~ &lt;Editor: B',
+                      'A, History - American - 1865-1945&gt; ~2~ &lt;Editor: B',
+                      'A, Fine Arts - Music - Classical&gt; ~3~ &lt;Editor: B',
+                      'A, Geography - World&gt; ~4~ &lt;Editor: B'])
+        got = sorted(str(t.category) for t in self.qset.tossup_set.all())
+        self.assertEqual(got, ['Fine Arts - Audio', 'History - American',
+                               'Other - Geography', 'RMP - Mythology'])
+
+    def test_a_category_with_no_home_leaves_the_question_uncategorized(self):
+        lean = Distribution.objects.create(name='Science only')
+        DistributionEntry.objects.create(distribution=lean, category='Science',
+                                         subcategory='Physics', min_tossups=1, min_bonuses=1)
+        self.qset.distribution = lean
+        self.qset.save()
+        summary = self._import(['A, Trash - Video Games&gt; ~9~ &lt;Editor: B'])
+        self.assertEqual(lean.distributionentry_set.count(), 1)
+        self.assertIsNone(self.qset.tossup_set.first().category)
+        self.assertTrue(any('Trash' in e for e in summary['errors']),
+                        'the summary should say what was left unplaced: {0}'.format(summary['errors']))
+
+    def test_the_editor_name_never_becomes_a_category(self):
+        self._import(['A, Literature - British - Poetry&gt; ~26411~ &lt;Editor: Jaimie Carlson'])
+        entry = self.qset.tossup_set.first().category
+        self.assertEqual(str(entry), 'Literature - British')
+        for e in self.dist.distributionentry_set.all():
+            self.assertNotIn('Editor', '{0} {1}'.format(e.category, e.subcategory))
+
+    def test_a_new_set_still_builds_its_distribution_from_the_packet(self):
+        """Importing to a *new* set has no distribution to respect, so the
+        packet's categories are still what it gets — cleaned up."""
+        from qems2.qsub import packet_set_importer
+        payload = self._packet(['A, RMP - World Mythology&gt; ~1~ &lt;Editor: B'])
+        summary = packet_set_importer.import_packets_from_files(
+            [self._upload('Round 1.json', payload)], set_name='Fresh Import',
+            owner=self.owner)
+        fresh = QuestionSet.objects.get(name='Fresh Import')
+        names = [str(e) for e in fresh.distribution.distributionentry_set.all()]
+        self.assertEqual(names, ['RMP - World Mythology'])
+
+
+class TidyImportedCategoriesTests(TestCase):
+    """Repairing a set an older import filled with another set's categories."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('tidy_owner', password='pw', email='tidy@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.other_user = User.objects.create_user('tidy_other', password='pw', email='to@t.com')
+        self.dist = Distribution.objects.create(name='Tidy dist')
+        self.good = {}
+        for cat, sub in [('RMP', 'Mythology'), ('History', 'American'),
+                         ('Fine Arts', 'Audio'), ('Other', 'Other')]:
+            self.good[(cat, sub)] = DistributionEntry.objects.create(
+                distribution=self.dist, category=cat, subcategory=sub,
+                min_tossups=1, min_bonuses=1)
+        # What the bad import left behind.
+        self.debris = DistributionEntry.objects.create(
+            distribution=self.dist, category='RMP',
+            subcategory='World Mythology&gt; ~25806~ &lt;Editor: Sinecio Morales')
+        self.qset = QuestionSet.objects.create(
+            name='2027 PACE NSC', date=timezone.now(), host='h', address='',
+            owner=self.owner, num_packets=1, distribution=self.dist)
+        self.qset.editor.add(self.owner)
+        SetWideDistributionEntry.objects.create(
+            question_set=self.qset, dist_entry=self.debris, num_tossups=0, num_bonuses=0)
+        self.tu = Tossup.objects.create(
+            author=self.owner, question_set=self.qset, question_type=self.acf,
+            tossup_text='A clue.', tossup_answer='_Thing_', category=self.debris,
+            created_date=datetime.now(), last_changed_date=datetime.now())
+        self.client.login(username='tidy_owner', password='pw')
+
+    def _url(self):
+        return '/tidy_categories/{0}/'.format(self.qset.id)
+
+    def test_the_plan_names_the_debris_and_where_it_goes(self):
+        resp = self.client.get(self._url())
+        self.assertEqual(resp.status_code, 200)
+        plan = resp.context['plan']
+        self.assertEqual(len(plan), 1)
+        self.assertEqual(plan[0]['entry'], self.debris)
+        self.assertEqual(plan[0]['cleaned'], 'RMP - World Mythology')
+        self.assertEqual(plan[0]['target'], self.good[('RMP', 'Mythology')])
+        self.assertEqual(plan[0]['tossups'], 1)
+
+    def test_applying_moves_the_questions_and_removes_the_category(self):
+        self.client.post(self._url(), {'action': 'apply'})
+        self.tu.refresh_from_db()
+        self.assertEqual(self.tu.category, self.good[('RMP', 'Mythology')])
+        self.assertFalse(DistributionEntry.objects.filter(id=self.debris.id).exists())
+        self.assertFalse(SetWideDistributionEntry.objects.filter(dist_entry_id=self.debris.id).exists())
+
+    def test_a_category_another_set_still_uses_is_left_in_place(self):
+        """A distribution can be shared, and another set's questions are not
+        this page's business."""
+        other = QuestionSet.objects.create(
+            name='Someone Else', date=timezone.now(), host='h', address='',
+            owner=Writer.objects.get(user=self.other_user), num_packets=1,
+            distribution=self.dist)
+        Tossup.objects.create(
+            author=self.owner, question_set=other, question_type=self.acf,
+            tossup_text='Their clue.', tossup_answer='_Theirs_', category=self.debris,
+            created_date=datetime.now(), last_changed_date=datetime.now())
+        self.client.post(self._url(), {'action': 'apply'})
+        self.tu.refresh_from_db()
+        self.assertEqual(self.tu.category, self.good[('RMP', 'Mythology')])
+        self.assertTrue(DistributionEntry.objects.filter(id=self.debris.id).exists())
+
+    def test_real_categories_are_never_touched(self):
+        keep = Tossup.objects.create(
+            author=self.owner, question_set=self.qset, question_type=self.acf,
+            tossup_text='A good clue.', tossup_answer='_Good_',
+            category=self.good[('History', 'American')],
+            created_date=datetime.now(), last_changed_date=datetime.now())
+        self.client.post(self._url(), {'action': 'apply'})
+        keep.refresh_from_db()
+        self.assertEqual(keep.category, self.good[('History', 'American')])
+        self.assertEqual(DistributionEntry.objects.filter(
+            distribution=self.dist).count(), len(self.good))
+
+    def test_a_clean_set_has_nothing_to_do(self):
+        self.debris.delete()
+        resp = self.client.get(self._url())
+        self.assertEqual(resp.context['plan'], [])
+
+    def test_only_owners_and_editors_can_tidy(self):
+        self.client.logout()
+        self.client.login(username='tidy_other', password='pw')
+        body = self.client.get(self._url()).content.decode()
+        self.assertIn('Only an owner or editor', body)
+        self.tu.refresh_from_db()
+        self.assertEqual(self.tu.category, self.debris)
+
+    def test_the_category_issues_page_points_at_it(self):
+        body = self.client.get('/category_problems/{0}/'.format(self.qset.id)).content.decode()
+        self.assertIn('/tidy_categories/{0}/'.format(self.qset.id), body)

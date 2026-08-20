@@ -29,6 +29,34 @@
   the decision is about the account. Approving, declining and deleting are
   unchanged, on the review page each row links to.
 
+## 2026-08-20 (import fixes) — Imports respect the set they're going into
+
+- **Importing packets into an existing set no longer invents categories.** The
+  set's distribution is the list its editors work to; an imported packet names
+  its categories the way *its* set did. The importer used to add every incoming
+  name as a new category, so a set could end up with its own distribution plus a
+  shadow one — and, where the packet put everything on one metadata line, that
+  shadow list carried the packet's question ids and editor credits as category
+  names. Nothing in an import can add to a set's distribution now.
+- **Incoming categories are mapped onto the nearest one the set already has.**
+  "RMP - World Mythology" is your RMP - Mythology, "History - American -
+  1865-1945" is History - American, "Fine Arts - Music - Classical" and
+  "Fine Arts - Opera" are Fine Arts - Audio, "Geography - World" is
+  Other - Geography, "Current Events - U.S." is Other - Current Events. Where a
+  whole category has no counterpart the question goes to the set's general
+  bucket, and where there isn't one either it's left uncategorized and named in
+  the import summary rather than quietly filed somewhere wrong.
+- **The metadata is read properly.** YAPP hands over the whole post-question
+  line, and packets routinely put several bracketed groups on it —
+  `<Author, Category> ~25806~ <Editor: Name>`. Only the author and the category
+  are read now; the question id and the editor are not part of a category name.
+- **Tidy imported categories** (owners and editors, linked from Category Issues)
+  repairs a set an older import filled up: it shows every leftover category, the
+  category each of its questions would move to, and applies the lot on
+  confirmation. A leftover category is removed once nothing anywhere still uses
+  it — a distribution can be shared, and another set's questions aren't this
+  page's business.
+
 ## 2026-08-20 (later still) — Selected text is readable in dark mode
 
 - **Highlighting a row went pale blue with pale text on it.** The page never

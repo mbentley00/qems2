@@ -37,6 +37,7 @@ from qems2.qsub.packet_parser import parse_packet_data, is_answer, is_bpart, ans
 from qems2.qsub.utils import (QUESTION_CREATE, ACF_STYLE_TOSSUP, ACF_STYLE_BONUS,
                               InvalidTossup, InvalidBonus)
 from qems2.qsub import signals as qems_signals
+from qems2.qsub import category_mapper
 
 
 SUPPORTED_EXTS = ('.json', '.docx', '.pdf')
@@ -203,16 +204,19 @@ def _html_to_qems(html, is_answer):
 def _split_metadata(meta):
     """Return (author, category, subcategory). Only treats text after the first
     comma as the category (YAPP packets that put just an author there, with no
-    comma, leave the question uncategorized rather than inventing a category)."""
+    comma, leave the question uncategorized rather than inventing a category).
+
+    The category is cleaned by `category_mapper.split_path`, because YAPP hands
+    over the whole post-question metadata line and packets routinely put more
+    than one bracketed group on it: ``Jaimie Carlson, RMP - World Mythology>
+    ~25806~ <Editor: Sinecio Morales`` is one author, one category, a question
+    id and an editor, and only the first two belong here."""
     meta = (meta or '').strip()
     if not meta or ',' not in meta:
         return meta, '', ''
     author, cat = meta.split(',', 1)
-    author, cat = author.strip(), cat.strip()
-    if ' - ' in cat:
-        category, subcategory = cat.split(' - ', 1)
-        return author, category.strip(), subcategory.strip()
-    return author, cat, ''
+    category, subcategory = category_mapper.split_path(cat)
+    return author.strip(), category, subcategory
 
 
 def _metadata_category(meta):
@@ -239,8 +243,7 @@ def _metadata_category(meta):
         _author, cat, sub = _split_metadata(meta)
         return (cat, sub) if cat else None
     if ' - ' in meta:
-        cat, sub = meta.split(' - ', 1)
-        cat, sub = cat.strip(), sub.strip()
+        cat, sub = category_mapper.split_path(meta)
         return (cat, sub) if cat else None
     return None
 
@@ -322,7 +325,28 @@ def _answer_category_for_question(q, is_bonus):
     return None
 
 
+def _resolve_entry(cat, sub, lookup):
+    """The distribution entry for an incoming category name, or None.
+
+    An exact name (including one already resolved earlier in this run) first,
+    then `category_mapper`, which tries the specific readings before the loose
+    ones. The old `_find_entry` is not consulted ahead of it: its "any category
+    with this subcategory" rule is eager enough to send "Geography - World" to
+    "Literature - World", which is how a set ends up with questions filed by
+    coincidence.
+    """
+    exact = lookup.get((cat, sub))
+    if exact is not None:
+        return exact
+    for (c, s2), e in lookup.items():
+        if (c or '').strip().lower() == (cat or '').strip().lower() and                 (s2 or '').strip().lower() == (sub or '').strip().lower():
+            return e
+    return category_mapper.best_entry(cat, sub, lookup.values())
+
+
 def _find_entry(cat, sub, lookup):
+    """Deprecated in favour of category_mapper.best_entry; kept as the exact/
+    partial-path fallback it always was."""
     """Map a (category, subcategory) onto an existing distribution entry,
     tolerating case and partial paths (e.g. a bare ``Biology`` from an answer
     line resolving to a ``Science - Biology`` entry). Returns the entry or
@@ -350,7 +374,7 @@ def _question_category(q, is_bonus, lookup):
     """Resolve the distribution entry for a YAPP question, preferring its
     ``metadata`` category and falling back to a tag in the answer line."""
     cs = _metadata_category(q.get('metadata')) or _answer_category_for_question(q, is_bonus)
-    return _find_entry(cs[0], cs[1], lookup) if cs else None
+    return _resolve_entry(cs[0], cs[1], lookup) if cs else None
 
 
 def _prepare_yapp_categories(qset, json_payloads, lookup, is_new):
@@ -360,17 +384,33 @@ def _prepare_yapp_categories(qset, json_payloads, lookup, is_new):
     as canonical, so answer-line categories are merged onto them when they
     resolve (a bare ``Biology`` onto an existing ``Science - Biology``) rather
     than creating duplicates. For a brand-new set, seeds the per-category
-    tossup/bonus counts; existing sets keep their distribution targets."""
+    tossup/bonus counts; existing sets keep their distribution targets.
+
+    Returns the set of incoming (category, subcategory) names that had no near
+    match in an existing set's distribution, so the summary can say which
+    questions were left for a person to place."""
     counts = {}
+    unmatched = set()
 
     def resolve_or_create(cat, sub, idx):
-        entry = _find_entry(cat, sub, lookup)
+        entry = _resolve_entry(cat, sub, lookup)
         if entry is None:
+            if not is_new:
+                # Importing into a set that already has a distribution: its
+                # categories are the ones its editors work to, and an imported
+                # packet's names are its own set's. Nothing here is allowed to
+                # add to that list — a question with no near match is left
+                # uncategorized for a person to place.
+                unmatched.add((cat, sub))
+                return
             entry = DistributionEntry.objects.create(
                 distribution=qset.distribution, category=cat, subcategory=sub)
             SetWideDistributionEntry.objects.create(
                 question_set=qset, dist_entry=entry, num_tossups=0, num_bonuses=0)
             lookup[(cat, sub)] = entry
+        # Remember the incoming name too, so the next question carrying it is
+        # answered from the map rather than matched again.
+        lookup.setdefault((cat, sub), entry)
         counts.setdefault(entry.id, [0, 0])[idx] += 1
 
     # Pass 1: metadata categories establish the canonical entries. Defer the
@@ -395,7 +435,7 @@ def _prepare_yapp_categories(qset, json_payloads, lookup, is_new):
         for entry_id, (n_tu, n_bs) in counts.items():
             SetWideDistributionEntry.objects.filter(dist_entry_id=entry_id).update(
                 num_tossups=n_tu, num_bonuses=n_bs)
-    return lookup
+    return unmatched
 
 
 # --- YAPP question builders ------------------------------------------------
@@ -829,8 +869,22 @@ def import_packets_from_files(uploaded_files, set_name=None, owner=None, existin
                 category_lookup = {
                     (e.category, e.subcategory): e
                     for e in DistributionEntry.objects.filter(distribution=qset.distribution)}
-                _prepare_yapp_categories(qset, json_payloads, category_lookup, is_new=False)
-                _ensure_categories(qset, docx_categories, category_lookup)
+                own_entries = list(category_lookup.values())
+                unmatched = _prepare_yapp_categories(
+                    qset, json_payloads, category_lookup, is_new=False)
+                # A .docx carries its categories the same way and gets the same
+                # treatment: map onto the set's own list, never extend it.
+                for cat, sub in sorted(docx_categories):
+                    entry = _resolve_entry(cat, sub, category_lookup)
+                    if entry is None:
+                        unmatched.add((cat, sub))
+                    else:
+                        category_lookup.setdefault((cat, sub), entry)
+                for cat, sub in sorted(unmatched):
+                    summary['errors'].append(
+                        'No category in this set matches "{0}" — those questions '
+                        'were left uncategorized.'.format(
+                            '{0} - {1}'.format(cat, sub).strip(' -')))
                 used_names = set(p.packet_name for p in qset.packet_set.all())
 
             acf_tu = QuestionType.objects.filter(question_type=ACF_STYLE_TOSSUP).first()

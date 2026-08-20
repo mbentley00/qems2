@@ -32,6 +32,7 @@ from .model_utils import *
 from .utils import *
 from .packet_parser import parse_packet_data
 from . import answer_structure
+from . import category_mapper
 from .duplicate_checker import find_duplicates, find_internal_issues, find_topic_repeats, find_answer_matches, CRITICAL, WARNING, INFO
 from django.utils.safestring import mark_safe
 from django_comments.models import Comment
@@ -9662,6 +9663,98 @@ def save_tag_selection(request, qset, question, dist_entry, is_tossup):
             relation.remove(question)
 
 @login_required
+def tidy_categories(request, qset_id):
+    """Put imported questions back into the set's own categories.
+
+    An import used to invent a category for every name it found, so a set could
+    end up with its own distribution plus a shadow one carrying another set's
+    names — and its question ids and editors, where the packet had put them all
+    on one metadata line. This finds those, works out the nearest real category
+    for each question under them (`category_mapper`), and clears them out.
+
+    Nothing is guessed twice: the proposal is shown first, and applying it moves
+    the questions, then deletes the emptied categories — but only ones no
+    question anywhere still uses, since a distribution can be shared.
+    """
+    user = request.user.writer
+    qset = QuestionSet.objects.get(id=qset_id)
+    if not (qset.is_owner(user) or user in qset.editor.all()):
+        return render(request, 'failure.html',
+                      {'message': 'Only an owner or editor can tidy a set\'s categories.',
+                       'message_class': 'alert-box alert'})
+
+    entries = list(qset.distribution.distributionentry_set.all()
+                   .order_by('category', 'subcategory')) if qset.distribution_id else []
+    debris = [e for e in entries if category_mapper.looks_like_debris(e)]
+    keep = [e for e in entries if e not in debris]
+
+    # Questions of this set sitting under a debris category, and where each
+    # would go. Grouped by category so the page reads as a plan, not a list of
+    # several hundred questions.
+    plan = []
+    for entry in debris:
+        tossups = list(qset.tossup_set.filter(category=entry))
+        bonuses = list(qset.bonus_set.filter(category=entry))
+        cat, sub = category_mapper.split_path(
+            '{0} - {1}'.format(entry.category, entry.subcategory).strip(' -'))
+        target = category_mapper.best_entry(cat, sub, keep)
+        # Questions in *other* sets using this category are not ours to move,
+        # and their presence is what stops the category being deleted.
+        elsewhere = (Tossup.objects.filter(category=entry).exclude(question_set=qset).count() +
+                     Bonus.objects.filter(category=entry).exclude(question_set=qset).count())
+        plan.append({
+            'entry': entry,
+            'cleaned': '{0} - {1}'.format(cat, sub).strip(' -'),
+            'target': target,
+            'tossups': len(tossups),
+            'bonuses': len(bonuses),
+            'elsewhere': elsewhere,
+        })
+
+    message = message_class = ''
+    if request.method == 'POST' and request.POST.get('action') == 'apply':
+        moved = deleted = stranded = 0
+        with transaction.atomic():
+            for row in plan:
+                entry = row['entry']
+                target = row['target']
+                if target is not None:
+                    moved += qset.tossup_set.filter(category=entry).update(category=target)
+                    moved += qset.bonus_set.filter(category=entry).update(category=target)
+                else:
+                    stranded += row['tossups'] + row['bonuses']
+                still_used = (Tossup.objects.filter(category=entry).exists() or
+                              Bonus.objects.filter(category=entry).exists())
+                if not still_used:
+                    SetWideDistributionEntry.objects.filter(dist_entry=entry).delete()
+                    TieBreakDistributionEntry.objects.filter(dist_entry=entry).delete()
+                    entry.delete()
+                    deleted += 1
+        cache.clear()
+        parts = ['Moved {0} question{1} into the set\'s own categories.'.format(
+            moved, '' if moved == 1 else 's')]
+        if deleted:
+            parts.append('Removed {0} leftover categor{1}.'.format(
+                deleted, 'y' if deleted == 1 else 'ies'))
+        if stranded:
+            parts.append('{0} question(s) had no near match and kept their category; '
+                         'place them by hand.'.format(stranded))
+        message, message_class = ' '.join(parts), 'alert-box success'
+        # Rebuild the view of what's left.
+        entries = list(qset.distribution.distributionentry_set.all()
+                       .order_by('category', 'subcategory'))
+        debris = [e for e in entries if category_mapper.looks_like_debris(e)]
+        plan = []
+
+    return render(request, 'tidy_categories.html',
+                  {'user': user, 'qset': qset, 'plan': plan,
+                   'keep_count': len(keep),
+                   'movable': sum(1 for r in plan if r['target'] is not None),
+                   'total_questions': sum(r['tossups'] + r['bonuses'] for r in plan),
+                   'message': message, 'message_class': message_class})
+
+
+@login_required
 def category_problems(request, qset_id):
     """Questions whose category is missing or belongs to a different
     distribution than the set's current one (e.g. after switching
@@ -9678,6 +9771,10 @@ def category_problems(request, qset_id):
     valid_entries = (list(qset.distribution.distributionentry_set.all()
                           .order_by('category', 'subcategory'))
                      if qset.distribution_id else [])
+    # Categories an import left behind are a different problem from a question
+    # with the wrong category, and have their own page; point at it from here,
+    # which is where someone looking at a mess like that lands first.
+    debris_count = sum(1 for e in valid_entries if category_mapper.looks_like_debris(e))
 
     message = ''
     message_class = ''
@@ -9743,6 +9840,7 @@ def category_problems(request, qset_id):
     return render(request, 'category_problems.html',
                   {'qset': qset, 'user': user, 'problems': problems,
                    'valid_entries': valid_entries, 'can_assign': can_assign,
+                   'debris_count': debris_count,
                    'message': message, 'message_class': message_class,
                    'extra_crumb': 'Category Issues',
                    'extra_crumb_url': '/category_problems/{0}/'.format(qset.id)})

@@ -16,6 +16,14 @@
 
 {% if message %}<div class="{{ message_class }}">{{ message }}</div>{% endif %}
 
+{% if debris_count %}
+<div class="alert-box warning">
+    This set's distribution carries <strong>{{ debris_count }}</strong> categor{{ debris_count|pluralize:"y,ies" }}
+    left behind by an import &mdash; another set's names, with its question ids and editors on them.
+    <a href="/tidy_categories/{{ qset.id }}/">Tidy them up</a> to put those questions back into your own categories.
+</div>
+{% endif %}
+
 {% if not problems %}
 <div class="alert-box success">Every question has a valid category from this set's distribution. Nice work!</div>
 {% else %}

@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% block title %}Tidy Categories - QEMS3{% endblock %}
+
+{% block content %}
+
+<h3 class="page-header">Tidy imported categories: {{ qset.name }}</h3>
+
+{% if message %}<div class="{{ message_class }}">{{ message }}</div>{% endif %}
+
+<div class="panel radius">
+    <p>An import used to invent a category for every name it found in a packet, so a set
+    could end up with its own distribution plus a shadow one carrying another set's names
+    &mdash; and, where the packet put everything on one metadata line, its question ids and
+    editors too. This finds those, works out the nearest of <strong>your</strong>
+    {{ keep_count }} categories for each question under them, and clears them out.</p>
+    <p class="home-note">Questions are only moved within this set. A leftover category is
+    deleted once nothing anywhere uses it &mdash; a distribution can be shared, and another
+    set's questions are not this page's business.</p>
+</div>
+
+{% if plan %}
+<p class="home-note">{{ plan|length }} leftover categor{{ plan|length|pluralize:"y,ies" }},
+holding {{ total_questions }} question{{ total_questions|pluralize }} of this set.
+{{ movable }} of them have a match to move to.</p>
+
+<div class="home-card">
+<table class="table-striped" id="tidy-categories-table">
+    <thead>
+        <tr>
+            <th>Leftover category</th>
+            <th>Reads as</th>
+            <th>Questions here</th>
+            <th>Moves to</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for row in plan %}
+        <tr{% if not row.target %} class="tidy-nomatch"{% endif %}>
+            <td class="tidy-debris">{{ row.entry.category }} - {{ row.entry.subcategory }}</td>
+            <td>{{ row.cleaned }}</td>
+            <td>{{ row.tossups }} tossup{{ row.tossups|pluralize }},
+                {{ row.bonuses }} bonus{{ row.bonuses|pluralize:"es" }}
+                {% if row.elsewhere %}<span class="home-note">({{ row.elsewhere }} in other sets stay put)</span>{% endif %}</td>
+            <td>{% if row.target %}<strong>{{ row.target.category }} - {{ row.target.subcategory }}</strong>
+                {% else %}<em>no near match &mdash; left alone</em>{% endif %}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+
+<form method="post" action="" class="tidy-apply">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="apply">
+    <input type="submit" class="button primary" value="Move the questions and remove these categories"
+           onclick="return confirm('Move {{ total_questions }} question(s) into this set’s own categories and delete the leftover ones?');">
+    <a href="/edit_question_set/{{ qset.id }}/" class="button secondary">Back to the set</a>
+</form>
+{% else %}
+<div class="alert-box success">Nothing to tidy: every category in this set's distribution
+reads as a category somebody chose.</div>
+<p><a href="/edit_question_set/{{ qset.id }}/" class="button small secondary">Back to the set</a></p>
+{% endif %}
+
+<style>
+.tidy-debris { font-family: monospace; font-size: 0.8rem; word-break: break-word; max-width: 30em; }
+#tidy-categories-table tr.tidy-nomatch td { opacity: 0.75; }
+.tidy-apply { display: flex; gap: 8px; align-items: center; margin-top: 12px; }
+.tidy-apply input, .tidy-apply a { margin: 0; }
+</style>
+
+{% endblock %}
