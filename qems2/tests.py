@@ -9436,3 +9436,159 @@ class SuggestionQualityTests(TestCase):
         self.client.login(username='sq_admin', password='pw')
         self.assertIn('/suggestion_quality/',
                       self.client.get('/question_sets/').content.decode())
+
+
+class ReferenceQualityTests(TestCase):
+    """The confidence signals behind the reference-data review screen."""
+
+    def setUp(self):
+        from qems2.qsub import reference_quality
+        self.rq = reference_quality
+        self.rq.reset_cache()
+
+    def _pron_rows(self):
+        return {r['key']: r for r in self.rq.pronunciation_report()}
+
+    def test_a_guide_that_reads_as_an_ordinary_word_is_least_confidence(self):
+        """The Koch case: one guide can't serve Robert (KOKH), Ed (KOTCH) and
+        the brothers (COKE), and 'cock' is what gets written into a question."""
+        rows = self._pron_rows()
+        row = rows.get('koch')
+        self.assertIsNotNone(row, 'the bundled dictionary should still hold Koch')
+        self.assertIn('guide_is_common_word', row['signals'])
+        self.assertEqual(row['tier'], self.rq.TIER_LOW)
+
+    def test_a_stress_marked_respelling_is_not_treated_as_a_repeat(self):
+        """'AIL-er-ons' shares its letters with 'ailerons' but says where the
+        stress falls, which is the whole job of a guide."""
+        row = self._pron_rows().get('ailerons')
+        if row is not None:
+            self.assertNotIn('guide_repeats_spelling', row['signals'])
+
+    def test_the_tiers_partition_every_entry(self):
+        rows = self.rq.pronunciation_report()
+        tiers, _ = self.rq.summarize(rows)
+        self.assertEqual(sum(tiers.values()), len(rows))
+        self.assertTrue(tiers[self.rq.TIER_LOW] > 0)
+        self.assertTrue(tiers[self.rq.TIER_HIGH] > tiers[self.rq.TIER_LOW])
+
+    def test_an_entry_with_no_signal_is_left_alone(self):
+        rows = [r for r in self.rq.pronunciation_report() if not r['signals']]
+        self.assertTrue(rows)
+        self.assertTrue(all(r['tier'] == self.rq.TIER_HIGH for r in rows))
+
+    def test_an_alternate_that_repeats_the_head_is_least_confidence(self):
+        rows = [r for r in self.rq.answer_report() if 'alt_repeats_head' in r['signals']]
+        for r in rows:
+            self.assertEqual(r['tier'], self.rq.TIER_LOW)
+
+    def test_an_ordinary_word_alternate_is_only_worth_reviewing(self):
+        """'eight' for 8 is an ordinary word and perfectly correct, so it can't
+        be graded as evidence of anything."""
+        rows = [r for r in self.rq.answer_report()
+                if r['signals'] == ['alt_is_common_word']]
+        self.assertTrue(rows)
+        self.assertTrue(all(r['tier'] == self.rq.TIER_REVIEW for r in rows))
+
+    def test_digits_in_an_alternate_do_not_invent_a_word(self):
+        """Stripping the digits out of '1600s AD' leaves 'sad', which is not
+        what the alternate says."""
+        rows = {r['key']: r for r in self.rq.answer_report()}
+        row = rows.get('17th century')
+        if row is not None:
+            self.assertNotIn('alt_is_common_word', row['signals'])
+
+
+class ReferenceReviewScreenTests(TestCase):
+    """The screen itself: administrators only, worst first, and the edit and
+    delete actions come back to where they were used."""
+
+    def setUp(self):
+        self.admin_user = User.objects.create_superuser('rr_admin', 'rr@t.com', 'pw')
+        Writer.objects.get_or_create(user=self.admin_user)
+        self.ou = User.objects.create_user('rr_other', password='pw', email='rro@t.com')
+        Writer.objects.get_or_create(user=self.ou)
+        from qems2.qsub import reference_quality
+        reference_quality.reset_cache()
+
+    def test_an_ordinary_user_is_turned_away(self):
+        self.client.login(username='rr_other', password='pw')
+        resp = self.client.get('/reference_review/pron/')
+        self.assertEqual(resp.status_code, 302)
+
+    def test_an_administrator_sees_the_worst_entries_first(self):
+        self.client.login(username='rr_admin', password='pw')
+        resp = self.client.get('/reference_review/pron/?tier=low')
+        self.assertEqual(resp.status_code, 200)
+        rows = resp.context['rows']
+        self.assertTrue(rows)
+        self.assertTrue(all(r['tier'] == 'low' for r in rows))
+        self.assertTrue(all(r['reasons'] for r in rows))
+
+    def test_editor_rejections_outrank_the_heuristics(self):
+        SuggestionFeedback.objects.create(
+            code='pronunciation', token='Question|Aachen', accepted=0, rejected=5)
+        self.client.login(username='rr_admin', password='pw')
+        rows = self.client.get('/reference_review/pron/').context['rows']
+        self.assertEqual(rows[0]['key'], 'aachen')
+        self.assertEqual(rows[0]['rejected'], 5)
+
+    def test_the_rejected_filter_shows_only_what_editors_threw_out(self):
+        SuggestionFeedback.objects.create(
+            code='pronunciation', token='Question|Aachen', rejected=2)
+        self.client.login(username='rr_admin', password='pw')
+        rows = self.client.get('/reference_review/pron/?rejected=1').context['rows']
+        self.assertEqual([r['key'] for r in rows], ['aachen'])
+
+    def test_editing_a_guide_from_the_review_screen_sticks(self):
+        from qems2.qsub import pron_dict
+        self.client.login(username='rr_admin', password='pw')
+        resp = self.client.post('/reference_data/pron/save/', {
+            'key': 'koch', 'term': 'Koch', 'value': 'KOKH',
+            'next': '/reference_review/pron/?tier=low'})
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp['Location'], '/reference_review/pron/?tier=low')
+        self.assertEqual(pron_dict.get_entry('koch')['pron'], 'KOKH')
+
+    def test_deleting_an_entry_from_the_review_screen_withdraws_it(self):
+        from qems2.qsub import pron_dict
+        self.client.login(username='rr_admin', password='pw')
+        resp = self.client.post('/reference_data/pron/suppress/', {
+            'key': 'koch', 'term': 'Koch',
+            'next': '/reference_review/pron/?tier=low'})
+        self.assertEqual(resp['Location'], '/reference_review/pron/?tier=low')
+        self.assertIsNone(pron_dict.get_entry('koch'))
+
+    def test_an_edit_shows_up_in_the_report_without_a_restart(self):
+        from qems2.qsub import reference_quality
+        self.client.login(username='rr_admin', password='pw')
+        self.client.post('/reference_data/pron/save/', {
+            'key': 'koch', 'term': 'Koch', 'value': 'KOKH',
+            'next': '/reference_review/pron/'})
+        rows = {r['key']: r for r in reference_quality.pronunciation_report()}
+        self.assertEqual(rows['koch']['value'], 'KOKH')
+        self.assertEqual(rows['koch']['source'], 'edited')
+        self.assertNotIn('guide_is_common_word', rows['koch']['signals'])
+
+    def test_the_answer_line_screen_works_the_same_way(self):
+        self.client.login(username='rr_admin', password='pw')
+        resp = self.client.get('/reference_review/answer/')
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.context['is_pron'])
+        self.assertTrue(resp.context['rows'])
+
+    def test_a_signal_filter_narrows_the_list(self):
+        self.client.login(username='rr_admin', password='pw')
+        rows = self.client.get(
+            '/reference_review/pron/?signal=surname_of_full_name').context['rows']
+        self.assertTrue(rows)
+        self.assertTrue(all('surname_of_full_name' in r['signals'] for r in rows))
+
+    def test_the_home_page_links_it_for_administrators_only(self):
+        self.client.login(username='rr_other', password='pw')
+        self.assertNotIn('/reference_review/',
+                         self.client.get('/question_sets/').content.decode())
+        self.client.logout()
+        self.client.login(username='rr_admin', password='pw')
+        self.assertIn('/reference_review/',
+                      self.client.get('/question_sets/').content.decode())

@@ -29,6 +29,34 @@
   the decision is about the account. Approving, declining and deleting are
   unchanged, on the review page each row links to.
 
+## 2026-08-20 (later) — Reviewing the reference data by how much it can be trusted
+
+- **A review screen for the pronunciation dictionary and the answer-line
+  database** (administrators only, on the home page as *Review Reference Data*).
+  The search screen answers "what does the dictionary say about X"; this one
+  answers the question that actually gets bad entries fixed — which entries look
+  wrong, worst first — and lets you correct or withdraw one on the spot.
+- **Entries are graded by the confidence analysis.** An entry whose guide is an
+  ordinary English word (`Koch` → "cock", which serves Robert KOKH, Ed KOTCH and
+  the brothers COKE equally badly), spells the term out letter by letter, or just
+  repeats the spelling with no syllable break, is objectively carrying no
+  information; two entries that sound the same spelling differently disagree with
+  each other. Those land in **least confidence** (114 guides). A bare surname the
+  dictionary also knows a full name for, a one-chunk guide on a capitalised name,
+  or a term the dictionary sounds differently inside a longer name is a shape that
+  often goes wrong rather than proof of anything: **worth reviewing** (344).
+  Answer lines get the same treatment — an alternate that repeats the head answer
+  or duplicates another alternate is objectively empty; an ordinary-word alternate
+  ("eight" for 8), a one-or-two-character alternate, an alternate that is a
+  different answer in its own right, or a wall of alternates is worth a look.
+- **What editors actually threw out comes first.** The suggestion counters added
+  earlier feed this screen, so an entry editors have rejected outranks every
+  heuristic, and there's a filter for exactly those.
+- Filter by tier, by individual signal, or by search; edit and delete return you
+  to the list where you were rather than to the search screen.
+- **Nothing here checks an entry against an outside authority.** "Nothing against
+  it" means no signal fired, not that the guide was verified correct.
+
 ## 2026-08-20 — Dark mode reaches the rest of the app, and suggestions get a report card
 
 - **Dark mode covers the pages Foundation styles.** Foundation puts its colours

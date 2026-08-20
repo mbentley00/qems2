@@ -33,6 +33,8 @@ urlpatterns = [
     # Admin-only management of the bundled pronunciation / answer-line data
     re_path(r'^reference_data/$', reference_data),
     re_path(r'^reference_data/(?P<dataset>pron|answer)/$', reference_data),
+    re_path(r'^reference_review/$', reference_review),
+    re_path(r'^reference_review/(?P<dataset>pron|answer)/$', reference_review),
     re_path(r'^reference_data/(?P<dataset>pron|answer)/save/$', reference_data_save),
     re_path(r'^reference_data/(?P<dataset>pron|answer)/suppress/$', reference_data_suppress),
     re_path(r'^create_question_set/$', create_question_set),

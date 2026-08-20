@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% block title %}Review Reference Data - QEMS3{% endblock %}
+
+{% block content %}
+
+<h3 class="page-header">Review {% if is_pron %}pronunciation guides{% else %}answer lines{% endif %}</h3>
+
+<ul class="button-group even" style="max-width:560px;">
+    <li><a href="/reference_review/pron/" class="button small{% if is_pron %} primary{% else %} secondary{% endif %}">Pronunciation guides</a></li>
+    <li><a href="/reference_review/answer/" class="button small{% if is_pron %} secondary{% else %} primary{% endif %}">Answer lines</a></li>
+    <li><a href="/reference_data/{{ dataset }}/" class="button small secondary">Search instead</a></li>
+</ul>
+
+<div class="panel radius">
+    <p>Both datasets are applied automatically &mdash; a guide is offered for any dictionary
+    term found in a question, and an answer's standard alternates for any answer we know
+    &mdash; so a bad entry writes something wrong into a question rather than merely failing
+    to help. This lists all {{ entry_total }} entries worst-first: what editors have actually
+    thrown out comes before any heuristic, then the tiers below.</p>
+    <p class="home-note">Nothing here checks an entry against an outside authority.
+    &ldquo;Nothing against it&rdquo; means no signal fired, not that it was verified.</p>
+</div>
+
+<div class="rr-filters">
+    <span class="rr-filter-label">Tier</span>
+    <a href="/reference_review/{{ dataset }}/" class="rr-chip{% if not tier and not signal and not rejected_only %} rr-chip-on{% endif %}">All ({{ entry_total }})</a>
+    {% for t in tiers %}
+    <a href="/reference_review/{{ dataset }}/?tier={{ t.key }}" class="rr-chip rr-tier-{{ t.key }}{% if tier == t.key %} rr-chip-on{% endif %}">{{ t.label }} ({{ t.count }})</a>
+    {% endfor %}
+    <a href="/reference_review/{{ dataset }}/?rejected=1" class="rr-chip rr-tier-low{% if rejected_only %} rr-chip-on{% endif %}">Rejected by editors</a>
+</div>
+
+<div class="rr-filters">
+    <span class="rr-filter-label">Signal</span>
+    {% for s in signals %}
+    <a href="/reference_review/{{ dataset }}/?signal={{ s.key }}" class="rr-chip rr-grade-{{ s.grade }}{% if signal == s.key %} rr-chip-on{% endif %}" title="{{ s.grade }} signal">{{ s.label }} ({{ s.count }})</a>
+    {% endfor %}
+</div>
+
+<form method="get" action="/reference_review/{{ dataset }}/" class="rr-search">
+    <input type="search" name="q" value="{{ query }}" placeholder="Find a term or a guide&hellip;">
+    {% if tier %}<input type="hidden" name="tier" value="{{ tier }}">{% endif %}
+    {% if signal %}<input type="hidden" name="signal" value="{{ signal }}">{% endif %}
+    <input type="submit" value="Search" class="button small secondary">
+</form>
+
+<p class="home-note">{{ total }} entr{{ total|pluralize:"y,ies" }} match. Showing page {{ page }}.</p>
+
+{% if rows %}
+<div class="home-card">
+<table class="table-striped" id="reference-review-table">
+    <thead>
+        <tr>
+            <th>{% if is_pron %}Term{% else %}Answer{% endif %}</th>
+            <th>{% if is_pron %}Guide{% else %}Standard line{% endif %}</th>
+            <th>Why it's here</th>
+            <th>Editors</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for row in rows %}
+        <tr class="rr-row rr-tier-row-{{ row.tier }}">
+            <td class="rr-term">
+                {{ row.term }}
+                {% if row.source != 'bundled' %}<span class="rr-source">{{ row.source }}</span>{% endif %}
+            </td>
+            <td>
+                <form method="post" action="/reference_data/{{ dataset }}/save/" class="rr-edit">
+                    {% csrf_token %}
+                    <input type="hidden" name="key" value="{{ row.key }}">
+                    <input type="hidden" name="term" value="{{ row.term }}">
+                    <input type="hidden" name="next" value="/reference_review/{{ dataset }}/?{{ querystring }}&page={{ page }}">
+                    <input type="text" name="value" value="{{ row.value }}" class="rr-value">
+                    <button type="submit" class="button tiny secondary">Save</button>
+                </form>
+            </td>
+            <td class="rr-reasons">
+                {% for reason in row.reasons %}<span class="rr-reason">{{ reason }}</span>{% empty %}
+                <span class="rr-reason rr-reason-none">nothing against it</span>{% endfor %}
+            </td>
+            <td class="rr-verdicts">
+                {% if row.rejected %}<span class="rr-rejected">{{ row.rejected }} rejected</span>{% endif %}
+                {% if row.accepted %}<span class="rr-accepted">{{ row.accepted }} taken</span>{% endif %}
+                {% if not row.rejected and not row.accepted %}<span class="rr-reason-none">&mdash;</span>{% endif %}
+            </td>
+            <td class="rr-actions">
+                <form method="post" action="/reference_data/{{ dataset }}/suppress/">
+                    {% csrf_token %}
+                    <input type="hidden" name="key" value="{{ row.key }}">
+                    <input type="hidden" name="term" value="{{ row.term }}">
+                    <input type="hidden" name="next" value="/reference_review/{{ dataset }}/?{{ querystring }}&page={{ page }}">
+                    <button type="submit" class="button tiny alert"
+                            title="Stop this entry being suggested. It can be restored from the search screen.">Delete</button>
+                </form>
+            </td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+
+<p class="rr-pager">
+    {% if has_prev %}<a href="/reference_review/{{ dataset }}/?{{ querystring }}&page={{ page|add:"-1" }}" class="button small secondary">&laquo; Previous</a>{% endif %}
+    {% if has_next %}<a href="/reference_review/{{ dataset }}/?{{ querystring }}&page={{ page|add:"1" }}" class="button small secondary">Next &raquo;</a>{% endif %}
+</p>
+{% else %}
+<div class="alert-box info">Nothing matches those filters.</div>
+{% endif %}
+
+<style>
+.rr-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; }
+.rr-filter-label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--qx-muted, #8a8f9c); margin-right: 4px; min-width: 3.5em; }
+.rr-chip { display: inline-block; padding: 2px 10px; border-radius: 11px; font-size: 0.8rem;
+    border: 1px solid var(--qx-border, #e9e9ef); background: var(--qx-card, #fff); }
+.rr-chip-on { border-color: var(--qx-primary, #6d28d9); font-weight: bold; }
+.rr-tier-low, .rr-grade-objective, .rr-grade-strong { border-left: 4px solid #c0392b; }
+.rr-tier-review, .rr-grade-mixed, .rr-grade-heuristic { border-left: 4px solid #d4870c; }
+.rr-tier-high { border-left: 4px solid #43ac6a; }
+.rr-search { display: flex; gap: 6px; align-items: center; max-width: 520px; margin: 10px 0; }
+.rr-search input[type=search] { margin: 0; }
+.rr-search input[type=submit] { margin: 0; }
+#reference-review-table td { vertical-align: middle; }
+.rr-term { font-weight: bold; white-space: nowrap; }
+.rr-source { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--qx-muted, #8a8f9c); margin-left: 6px; }
+.rr-edit { display: flex; gap: 6px; align-items: center; margin: 0; }
+.rr-edit .rr-value { margin: 0; font-size: 0.85rem; min-width: 220px; }
+.rr-edit button, .rr-actions button { margin: 0; }
+.rr-reasons { max-width: 320px; }
+.rr-reason { display: block; font-size: 0.78rem; color: var(--qx-muted, #8a8f9c); }
+.rr-reason-none { font-style: italic; }
+.rr-verdicts { white-space: nowrap; font-size: 0.8rem; }
+.rr-rejected { color: #c0392b; font-weight: bold; margin-right: 6px; }
+.rr-accepted { color: #1c7c3e; }
+.rr-tier-row-low .rr-term { color: #c0392b; }
+.rr-pager { display: flex; gap: 8px; }
+</style>
+<style>
+html[data-theme="dark"] .rr-tier-row-low .rr-term { color: #f08c8c; }
+html[data-theme="dark"] .rr-rejected { color: #f08c8c; }
+html[data-theme="dark"] .rr-accepted { color: #86d29d; }
+</style>
+
+{% endblock %}

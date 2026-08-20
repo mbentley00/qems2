@@ -615,6 +615,117 @@ def suggestion_quality(request):
                    'user': request.user.writer})
 
 
+def _reference_verdicts(dataset):
+    """{entry key: {'accepted': n, 'rejected': n}} from the suggestion counters.
+
+    The counters are keyed by the style-check token, which names the thing the
+    suggestion was about — a dictionary term, or an answer database key — so
+    they line up with the reference entries once the term is normalized.
+    """
+    from . import pron_dict
+    code = 'pronunciation' if dataset == ReferenceDataOverride.PRONUNCIATION else 'answer_alts'
+    out = {}
+    for fb in SuggestionFeedback.objects.filter(code=code):
+        parts = (fb.token or '').split('|')
+        subject = parts[1] if len(parts) > 1 else ''
+        if not subject:
+            continue
+        key = (pron_dict.normalize_term(subject)
+               if code == 'pronunciation' else subject.strip().lower())
+        row = out.setdefault(key, {'accepted': 0, 'rejected': 0})
+        row['accepted'] += fb.accepted
+        row['rejected'] += fb.rejected
+    return out
+
+
+@login_required
+def reference_review(request, dataset='pron'):
+    """Work through the bundled reference data by how much it can be trusted.
+
+    The search screen answers "what does the dictionary say about X". This one
+    answers the question that actually gets bad entries fixed: which entries
+    look wrong, worst first. Entries editors have thrown out come first of all —
+    that is evidence rather than a heuristic — then the tiers.
+    """
+    from . import reference_quality
+
+    denied = _reference_admin_only(request)
+    if denied is not None:
+        return denied
+    if dataset not in (ReferenceDataOverride.PRONUNCIATION, ReferenceDataOverride.ANSWER_LINE):
+        dataset = ReferenceDataOverride.PRONUNCIATION
+
+    rows, signal_labels = reference_quality.report(dataset)
+    tier_counts, signal_counts = reference_quality.summarize(rows)
+    verdicts = _reference_verdicts(dataset)
+
+    tier = request.GET.get('tier', '')
+    signal = request.GET.get('signal', '')
+    query = (request.GET.get('q') or '').strip().lower()
+    rejected_only = request.GET.get('rejected') == '1'
+
+    shown = []
+    for row in rows:
+        if tier and row['tier'] != tier:
+            continue
+        if signal and signal not in row['signals']:
+            continue
+        if query and query not in row['key'] and query not in (row['value'] or '').lower():
+            continue
+        verdict = verdicts.get(row['key'], {})
+        if rejected_only and not verdict.get('rejected'):
+            continue
+        shown.append(dict(row,
+                          accepted=verdict.get('accepted', 0),
+                          rejected=verdict.get('rejected', 0),
+                          reasons=[signal_labels[s][1] for s in row['signals']
+                                   if s in signal_labels]))
+
+    tier_rank = {reference_quality.TIER_LOW: 0, reference_quality.TIER_REVIEW: 1,
+                 reference_quality.TIER_HIGH: 2}
+    shown.sort(key=lambda r: (-r['rejected'], tier_rank.get(r['tier'], 3),
+                              -len(r['signals']), r['key']))
+
+    try:
+        page = max(1, int(request.GET.get('page', '1')))
+    except ValueError:
+        page = 1
+    per_page = 100
+    total = len(shown)
+    start = (page - 1) * per_page
+    page_rows = shown[start:start + per_page]
+
+    filters = []
+    for name, value in (('tier', tier), ('signal', signal), ('q', query),
+                        ('rejected', '1' if rejected_only else '')):
+        if value:
+            filters.append('{0}={1}'.format(name, quote(value)))
+    querystring = '&'.join(filters)
+
+    return render(request, 'reference_review.html',
+                  {'user': request.user.writer,
+                   'dataset': dataset,
+                   'is_pron': dataset == ReferenceDataOverride.PRONUNCIATION,
+                   'rows': page_rows,
+                   'total': total,
+                   'page': page,
+                   'has_prev': page > 1,
+                   'has_next': start + per_page < total,
+                   'tier': tier,
+                   'signal': signal,
+                   'query': query,
+                   'rejected_only': rejected_only,
+                   'querystring': querystring,
+                   'tier_counts': tier_counts,
+                   'tiers': [{'key': k, 'label': l, 'count': tier_counts.get(k, 0)}
+                             for k, l in reference_quality.TIER_LABELS],
+                   'signals': [{'key': k, 'label': signal_labels[k][1],
+                                'grade': signal_labels[k][0],
+                                'count': signal_counts.get(k, 0)}
+                               for k in signal_labels if signal_counts.get(k)],
+                   'entry_total': len(rows)})
+
+
 @login_required
 def pending_sets(request):
     """Every set waiting on an administrator, so approval doesn't depend on an
@@ -10240,9 +10351,10 @@ def _reference_key(dataset, term):
 
 
 def _reference_reset_caches():
-    from . import pron_dict, answer_db
+    from . import pron_dict, answer_db, reference_quality
     pron_dict.reset_cache()
     answer_db.reset_cache()
+    reference_quality.reset_cache()
 
 
 @login_required
@@ -10270,6 +10382,9 @@ def reference_data_save(request, dataset):
         _reference_reset_caches()
         messages.success(request, 'Saved "{0}".'.format(term))
 
+    nxt = (request.POST.get('next') or '').strip()
+    if nxt.startswith('/reference_review/'):
+        return HttpResponseRedirect(nxt)
     return HttpResponseRedirect('/reference_data/{0}/?q={1}'.format(
         dataset, quote(request.POST.get('q') or term)))
 
@@ -10301,5 +10416,8 @@ def reference_data_suppress(request, dataset):
             messages.success(request, 'Withdrew "{0}".'.format(term or key))
         _reference_reset_caches()
 
+    nxt = (request.POST.get('next') or '').strip()
+    if nxt.startswith('/reference_review/'):
+        return HttpResponseRedirect(nxt)
     return HttpResponseRedirect('/reference_data/{0}/?q={1}'.format(
         dataset, quote(request.POST.get('q') or '')))
