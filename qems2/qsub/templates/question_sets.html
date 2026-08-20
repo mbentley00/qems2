@@ -54,7 +54,8 @@
 
 {% if public_sets %}
 <h4 class="page-header">Public question sets</h4>
-<p style="color:#888;">Sets others have made public. Request to join and the owner will be emailed.</p>
+<p class="home-note">Sets others have made public. Request to join and the owner will be emailed.</p>
+<div class="home-card">
 <table class="tablesorter table-striped table-hover" id="public-sets-table">
     <thead>
         <tr><th>Question Set</th><th>Date</th><th>Host</th><th></th></tr>
@@ -70,6 +71,7 @@
     {% endfor %}
     </tbody>
 </table>
+</div>
 <script>
 $(function () {
     $('.request-join-btn').on('click', function (e) {
@@ -89,7 +91,7 @@ $(function () {
 </script>
 {% endif %}
 
-<p class="home-about" style="margin-top:2.5rem; padding-top:1rem; border-top:1px solid #ececf0; color:#888; font-size:0.9rem;">
+<p class="home-about">
     <a href="/about/">About QEMS3</a>
 </p>
 

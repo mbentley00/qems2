@@ -1004,6 +1004,30 @@ body.app-authed a.app-nav-item:hover { color: var(--qx-ink); }
    bulk of the work; the rules below cover the hardcoded light surfaces and the
    Foundation defaults (panels, tables, inputs, buttons) that don't.
    ============================================================================ */
+
+/* ---- Home page: public sets ------------------------------------------------
+   The public list is a plain table on the page while everything above it sits
+   in a panel, so it read as a different page. It gets the same card the rest of
+   the app uses, and its note/footer colours come from the theme rather than
+   from inline styles that only ever knew about the light one. */
+.home-card {
+    background: var(--qx-card, #fff);
+    border: 1px solid var(--qx-border, #e9e9ef);
+    border-radius: 12px;
+    padding: 6px 18px 2px;
+    margin: 0 0 1.25rem;
+    box-shadow: 0 1px 2px rgba(20, 20, 40, .04);
+}
+.home-card table { margin-bottom: 0.5rem; }
+.home-note { color: var(--qx-muted, #8a8f9c); }
+.home-about {
+    margin-top: 2.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--qx-border, #ececf0);
+    color: var(--qx-muted, #8a8f9c);
+    font-size: 0.9rem;
+}
+
 html[data-theme="dark"] {
     --qx-primary: #8b5cf6;
     --qx-primary-dark: #7c3aed;
@@ -1105,6 +1129,80 @@ html[data-theme="dark"] .app-content .alert-box { background: var(--qx-elevate);
 html[data-theme="dark"] .app-content .alert-box.success { background: #16301f; }
 html[data-theme="dark"] .app-content .alert-box.warning { background: #3a2e12; }
 html[data-theme="dark"] .app-content .alert-box.alert { background: #3a1d1d; }
+
+
+/* Foundation colours table cells (#222) and their borders (white) on the cell
+   itself, not on the table, so the dark fill above wasn't enough: text sat
+   almost invisibly on it and every border drew as a white grid line. */
+html[data-theme="dark"] .app-content table:not(.packet-grid) td,
+html[data-theme="dark"] .app-content table:not(.packet-grid) th { color: var(--qx-ink); }
+html[data-theme="dark"] .app-content table:not(.packet-grid) tbody tr td { border-color: var(--qx-border); }
+html[data-theme="dark"] .app-content table:not(.packet-grid) tr:nth-of-type(even) { background: #23252d; }
+
+/* Foundation accordions (the set lists on the home page). Foundation paints the
+   title bar, the open panel and the cells inside it light, with no dark variant
+   of its own, so the whole block arrived as a bright slab. */
+html[data-theme="dark"] .app-content .accordion .accordion-navigation > a,
+html[data-theme="dark"] .app-content .accordion dd > a {
+    background: var(--qx-elevate);
+    color: var(--qx-ink);
+}
+html[data-theme="dark"] .app-content .accordion .accordion-navigation.active > a,
+html[data-theme="dark"] .app-content .accordion dd.active > a,
+html[data-theme="dark"] .app-content .accordion .accordion-navigation > a:hover,
+html[data-theme="dark"] .app-content .accordion dd > a:hover { background: var(--qx-hover); }
+html[data-theme="dark"] .app-content .accordion .accordion-navigation > .content,
+html[data-theme="dark"] .app-content .accordion .accordion-navigation > .content.active,
+html[data-theme="dark"] .app-content .accordion dd > .content,
+html[data-theme="dark"] .app-content .accordion dd > .content.active {
+    background: var(--qx-card);
+    color: var(--qx-ink);
+}
+html[data-theme="dark"] .app-content .accordion table tbody tr td { background-color: transparent; }
+html[data-theme="dark"] .app-content .accordion table thead tr th,
+html[data-theme="dark"] .app-content .accordion table tbody tr td { border-color: var(--qx-border); }
+
+/* Foundation puts #333 on a panel's children, not on the panel, so panel text
+   stayed dark on the dark fill the theme gives it. */
+html[data-theme="dark"] .app-content .panel h1,
+html[data-theme="dark"] .app-content .panel h2,
+html[data-theme="dark"] .app-content .panel h3,
+html[data-theme="dark"] .app-content .panel h4,
+html[data-theme="dark"] .app-content .panel h5,
+html[data-theme="dark"] .app-content .panel h6,
+html[data-theme="dark"] .app-content .panel p,
+html[data-theme="dark"] .app-content .panel li,
+html[data-theme="dark"] .app-content .panel dl { color: var(--qx-ink); }
+
+/* Foundation's progress track is white on white; on dark it was a bright pill
+   with a sliver of green in it. */
+html[data-theme="dark"] .app-content .progress {
+    background-color: var(--qx-elevate);
+    border-color: var(--qx-border);
+}
+
+/* Home page cards */
+html[data-theme="dark"] .home-card { background: var(--qx-card); border-color: var(--qx-border); box-shadow: none; }
+
+/* Set Information card (edit_question_set). Its own stylesheet is inline in the
+   template and was written in light-theme hex, so the card stayed white while
+   everything in it went dark. */
+html[data-theme="dark"] .set-info-card {
+    background: var(--qx-card);
+    border-color: var(--qx-border);
+    box-shadow: none;
+}
+html[data-theme="dark"] .set-info-heading { color: var(--qx-ink); }
+html[data-theme="dark"] .set-info-field > label { color: var(--qx-muted); }
+html[data-theme="dark"] .set-info-checks { border-top-color: var(--qx-border); }
+html[data-theme="dark"] .set-info-check { color: var(--qx-ink); }
+html[data-theme="dark"] .set-info-check small { color: var(--qx-muted); }
+/* Same stylesheet, same problem: the Writers-and-Editors tag chips and the
+   join-link box. */
+html[data-theme="dark"] .editor-tag { background: #2f323c; color: var(--qx-ink); }
+html[data-theme="dark"] .editor-tag-cat { background: #1f3a26; color: #a5d6a7; }
+html[data-theme="dark"] .join-link-row input { background: var(--qx-elevate); color: var(--qx-ink); }
+html[data-theme="dark"] .join-link-off { color: #f0a868; }
 
 /* Secondary buttons on dark */
 html[data-theme="dark"] .app-content .button.secondary,
