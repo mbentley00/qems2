@@ -29,6 +29,35 @@
   the decision is about the account. Approving, declining and deleting are
   unchanged, on the review page each row links to.
 
+## 2026-08-20 — Dark mode reaches the rest of the app, and suggestions get a report card
+
+- **Dark mode covers the pages Foundation styles.** Foundation puts its colours
+  on the inner elements rather than on the container, so the theme's dark fills
+  sat under light text and light cells: table cells carry their own `#222` ink
+  and white borders, `.panel` colours its headings and paragraphs rather than
+  itself, accordions paint the title bar and open panel light, and the progress
+  track is white on white. The home page's set lists and public sets, the
+  duplicate checker, the writers and editors table and the set-completion bar
+  were the worst of it, and all of them read properly now.
+- **The pages with their own stylesheets got the same treatment**: the Set
+  Information card, the packet grid (its own surface, striping, tiebreaker
+  rows, drop targets, unpacketized panel and the flash the live refresh paints),
+  the document view — which deliberately looks like a sheet of paper and so
+  arrived as a glaring white slab whose headings had vanished into it — and the
+  style checker's bulk bar and fix chips.
+- **Public question sets look like the rest of the home page**, in a card rather
+  than as a bare table, with its note and footer taking theme colours instead of
+  hardcoded grey.
+- **Suggestion quality (administrators only).** Every style-check suggestion an
+  editor applies or dismisses is now counted, and **Suggestion Quality** on the
+  home page shows which ones keep getting thrown out — a pronunciation guide for
+  a name nobody mispronounces, an answer-line alternate that doesn't belong.
+  Rejected three or more times and rejected most of the time marks a suggestion
+  as worth a look, which is the cue to pull it rather than have every editor
+  dismiss it separately. Restoring a dismissal takes the rejection back. Which
+  set a verdict came from is deliberately never recorded, so this reports on the
+  suggestions and never on anyone's tournament.
+
 ## 2026-08-19 — The first account on the install can be added to a set
 
 - **Whoever holds Writer #1 was missing from every member picker.** Add

@@ -9300,3 +9300,139 @@ class PendingSetListTests(TestCase):
     def test_the_home_page_offers_nothing_to_an_ordinary_user(self):
         self.client.login(username='ps_new', password='pw')
         self.assertNotIn('/pending_sets/', self.client.get('/question_sets/').content.decode())
+
+
+class SuggestionQualityTests(TestCase):
+    """Verdicts on style-check suggestions are counted, and an administrator can
+    see which suggestions keep getting thrown out — without seeing whose set
+    they came from."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('sq_owner', password='pw', email='sq@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.admin_user = User.objects.create_superuser('sq_admin', 'sqa@t.com', 'pw')
+        Writer.objects.get_or_create(user=self.admin_user)
+        self.dist = Distribution.objects.create(name='SQ dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='History', subcategory='European')
+        self.qset = QuestionSet.objects.create(
+            name='Very Secret Set', date=timezone.now(), host='h', address='',
+            owner=self.owner, num_packets=1, distribution=self.dist)
+        self.tu = Tossup.objects.create(
+            author=self.owner, question_set=self.qset, question_type=self.acf,
+            tossup_text='This king revoked the Edict of Nantes. For 10 points, name him.',
+            tossup_answer='_Louis XIV_', category=self.de,
+            created_date=datetime.now(), last_changed_date=datetime.now())
+        self.client.login(username='sq_owner', password='pw')
+
+    def _dismiss(self, code='pronunciation', token='Question|Koch', **extra):
+        data = {'question_type': 'tossup', 'question_id': self.tu.id,
+                'code': code, 'token': token}
+        data.update(extra)
+        return self.client.post('/dismiss_style_issue/', data)
+
+    def _feedback(self, code='pronunciation', token='Question|Koch'):
+        return SuggestionFeedback.objects.filter(code=code, token=token).first()
+
+    def test_a_dismissal_is_counted_as_a_rejection(self):
+        self._dismiss()
+        fb = self._feedback()
+        self.assertIsNotNone(fb)
+        self.assertEqual(fb.rejected, 1)
+        self.assertEqual(fb.accepted, 0)
+
+    def test_dismissals_of_the_same_suggestion_add_up(self):
+        self._dismiss()
+        other = Tossup.objects.create(
+            author=self.owner, question_set=self.qset, question_type=self.acf,
+            tossup_text='Another question about the same person.',
+            tossup_answer='_Koch_', category=self.de,
+            created_date=datetime.now(), last_changed_date=datetime.now())
+        self.client.post('/dismiss_style_issue/', {
+            'question_type': 'tossup', 'question_id': other.id,
+            'code': 'pronunciation', 'token': 'Question|Koch'})
+        self.assertEqual(self._feedback().rejected, 2)
+
+    def test_a_set_wide_dismissal_counts_once(self):
+        self._dismiss(scope='all')
+        self.assertEqual(self._feedback().rejected, 1)
+
+    def test_restoring_a_dismissal_takes_the_rejection_back(self):
+        self._dismiss()
+        self._dismiss(action='restore')
+        self.assertEqual(self._feedback().rejected, 0)
+
+    def test_a_restore_never_goes_negative(self):
+        self._dismiss(action='restore')
+        fb = self._feedback()
+        if fb is not None:
+            self.assertEqual(fb.rejected, 0)
+
+    def test_nothing_records_which_set_it_came_from(self):
+        self._dismiss()
+        fb = self._feedback()
+        stored = [f.name for f in fb._meta.get_fields()]
+        for leak in ('question_set', 'question', 'question_id', 'writer', 'dismissed_by'):
+            self.assertNotIn(leak, stored)
+
+    def test_the_page_is_administrators_only(self):
+        body = self.client.get('/suggestion_quality/').content.decode()
+        self.assertIn('Only a site administrator', body)
+
+    def test_an_administrator_sees_the_rejected_suggestion(self):
+        self._dismiss()
+        self.client.logout()
+        self.client.login(username='sq_admin', password='pw')
+        body = self.client.get('/suggestion_quality/').content.decode()
+        self.assertIn('Koch', body)
+        self.assertIn('Pronunciation-guide suggestions', body)
+
+    def test_the_page_never_names_the_set(self):
+        self._dismiss()
+        self.client.logout()
+        self.client.login(username='sq_admin', password='pw')
+        body = self.client.get('/suggestion_quality/').content.decode()
+        # The sidebar shows the admin's own active set, so scope to the report.
+        report = body.split('Suggestion quality')[1].split('Question sets')[0]
+        self.assertNotIn('Very Secret Set', report)
+        self.assertNotIn('sq_owner', report)
+
+    def test_a_repeatedly_rejected_suggestion_is_flagged(self):
+        SuggestionFeedback.objects.create(
+            code='answer_alts', token='Answer|boston', accepted=0, rejected=4)
+        self.client.logout()
+        self.client.login(username='sq_admin', password='pw')
+        body = self.client.get('/suggestion_quality/?kind=answers').content.decode()
+        self.assertIn('worth a look', body)
+        self.assertIn('boston', body)
+
+    def test_a_suggestion_people_take_is_not_flagged(self):
+        SuggestionFeedback.objects.create(
+            code='answer_alts', token='Answer|paris', accepted=9, rejected=1)
+        self.client.logout()
+        self.client.login(username='sq_admin', password='pw')
+        body = self.client.get('/suggestion_quality/?kind=answers').content.decode()
+        self.assertIn('paris', body)
+        self.assertNotIn('worth a look', body)
+
+    def test_the_kind_filter_separates_guides_from_answer_lines(self):
+        SuggestionFeedback.objects.create(code='pronunciation', token='Question|Koch', rejected=2)
+        SuggestionFeedback.objects.create(code='answer_alts', token='Answer|boston', rejected=2)
+        self.client.logout()
+        self.client.login(username='sq_admin', password='pw')
+        pg = self.client.get('/suggestion_quality/?kind=pronunciation').content.decode()
+        self.assertIn('Koch', pg)
+        self.assertNotIn('boston', pg)
+        answers = self.client.get('/suggestion_quality/?kind=answers').content.decode()
+        self.assertIn('boston', answers)
+        self.assertNotIn('Koch', answers)
+
+    def test_the_home_page_offers_it_to_administrators_only(self):
+        self.assertNotIn('/suggestion_quality/',
+                         self.client.get('/question_sets/').content.decode())
+        self.client.logout()
+        self.client.login(username='sq_admin', password='pw')
+        self.assertIn('/suggestion_quality/',
+                      self.client.get('/question_sets/').content.decode())

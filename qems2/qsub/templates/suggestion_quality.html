@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% block title %}Suggestion Quality - QEMS3{% endblock %}
+
+{% block content %}
+
+<h3 class="page-header">Suggestion quality</h3>
+
+{% comment %}
+No set, question or writer appears here — that is the point of the page, and
+the stored counts don't carry them either. What's shown is the suggestion, and
+how editors have voted on it.
+{% endcomment %}
+<div class="panel radius">
+    <p>How often each style-check suggestion has been taken or thrown out, across every
+    set. A suggestion rejected again and again is usually the suggestion's fault &mdash; a
+    pronunciation guide for a name nobody mispronounces, an answer-line alternate that
+    doesn't belong &mdash; and pulling it beats having every editor dismiss it separately.</p>
+    <p class="home-note">Applying a fix counts as taken; dismissing it, for one question or
+    for a whole set, counts as rejected. Restoring a dismissal takes the rejection back.
+    Which set a verdict came from is deliberately not recorded.</p>
+</div>
+
+<ul class="button-group even" style="max-width:640px;">
+    <li><a href="/suggestion_quality/" class="button small{% if kind == 'all' %} primary{% else %} secondary{% endif %}">All suggestions</a></li>
+    <li><a href="/suggestion_quality/?kind=pronunciation" class="button small{% if kind == 'pronunciation' %} primary{% else %} secondary{% endif %}">Pronunciation guides</a></li>
+    <li><a href="/suggestion_quality/?kind=answers" class="button small{% if kind == 'answers' %} primary{% else %} secondary{% endif %}">Answer lines</a></li>
+</ul>
+
+<p class="home-note">{{ totals.tracked }} suggestion{{ totals.tracked|pluralize }} with a verdict
+&middot; {{ totals.accepted }} taken &middot; {{ totals.rejected }} rejected
+{% if totals.suspect %}&middot; <strong>{{ totals.suspect }} worth a look</strong>{% endif %}</p>
+
+{% if rows %}
+<div class="home-card">
+<table class="tablesorter table-striped table-hover" id="suggestion-quality-table">
+    <thead>
+        <tr>
+            <th>Suggestion</th>
+            <th>Rule</th>
+            <th>Taken</th>
+            <th>Rejected</th>
+            <th>Rejection rate</th>
+            <th>Last verdict</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for row in rows %}
+        <tr{% if row.suspect %} class="sq-suspect"{% endif %}>
+            <td>{{ row.subject }}</td>
+            <td class="sq-rule">{{ row.rule }}</td>
+            <td>{{ row.accepted }}</td>
+            <td>{{ row.rejected }}</td>
+            <td>{{ row.rate|floatformat:0 }}%{% if row.suspect %} <span class="label alert">worth a look</span>{% endif %}</td>
+            <td class="sq-rule">{{ row.last|date:"M j, Y" }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+{% if truncated %}<p class="home-note">Showing the 400 most-rejected suggestions.</p>{% endif %}
+{% else %}
+<div class="alert-box info">No suggestion has been taken or dismissed yet.</div>
+{% endif %}
+
+<p><a href="/question_sets/" class="button small secondary">Question sets</a></p>
+
+<style>
+.sq-rule { color: var(--qx-muted, #8a8f9c); font-size: 0.9em; }
+#suggestion-quality-table tr.sq-suspect td:first-child { font-weight: bold; }
+</style>
+
+{% endblock %}

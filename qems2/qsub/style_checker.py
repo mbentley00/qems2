@@ -101,6 +101,7 @@ _TOKEN_SUBJECT_PART = {
     'pg_span': 2,           # Question|0|("DID-er-OW")
     'pg_possessive': 2,     # Question|0|("SAH-chee")
     'prompt_undirected': 1,  # Answer|Louis
+    'answer_alts': 1,       # Answer|boston
     'late_identifier': 1,   # Question|this composer
     'mixed_identifier': 1,  # Question|animal
 }

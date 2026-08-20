@@ -560,6 +560,62 @@ def _notify_new_set_pending(qset):
 
 
 @login_required
+def suggestion_quality(request):
+    """Which style-check suggestions editors keep throwing out.
+
+    A suggestion rejected again and again is usually the suggestion's fault:
+    the bundled pronunciation dictionary offering a guide for a name nobody
+    mispronounces, or an answer-line alternate that doesn't belong. This is the
+    only view of that, and it is deliberately about the suggestion rather than
+    about anyone's set -- no set, question or writer appears here, by design
+    and in the stored data.
+    """
+    if not request.user.is_superuser:
+        return render(request, 'failure.html',
+                      {'message': 'Only a site administrator can review suggestion quality.',
+                       'message_class': 'alert-box alert'})
+
+    from . import style_checker
+    KINDS = {'pronunciation': ('pronunciation',),
+             'answers': ('answer_alts',)}
+    kind = request.GET.get('kind', 'all')
+    rows_qs = SuggestionFeedback.objects.all()
+    if kind in KINDS:
+        rows_qs = rows_qs.filter(code__in=KINDS[kind])
+
+    rows = []
+    for fb in rows_qs:
+        described = style_checker.describe_dismissal(fb.code, fb.token)
+        rows.append({
+            'code': fb.code,
+            'rule': described['rule'],
+            'subject': described['subject'] or described['field'] or '(whole rule)',
+            'accepted': fb.accepted,
+            'rejected': fb.rejected,
+            'total': fb.total(),
+            'rate': fb.rejection_rate(),
+            'last': fb.last_action_date,
+            # Rejected several times and taken rarely or never: the shape of a
+            # suggestion that should be pulled from the dictionary rather than
+            # dismissed one editor at a time.
+            'suspect': fb.rejected >= 3 and fb.rejection_rate() >= 75,
+        })
+    # Worst first: most rejected, then by how one-sided the verdicts are.
+    rows.sort(key=lambda r: (-r['rejected'], -r['rate'], r['subject']))
+
+    totals = {
+        'tracked': len(rows),
+        'rejected': sum(r['rejected'] for r in rows),
+        'accepted': sum(r['accepted'] for r in rows),
+        'suspect': sum(1 for r in rows if r['suspect']),
+    }
+    return render(request, 'suggestion_quality.html',
+                  {'rows': rows[:400], 'totals': totals, 'kind': kind,
+                   'truncated': len(rows) > 400,
+                   'user': request.user.writer})
+
+
+@login_required
 def pending_sets(request):
     """Every set waiting on an administrator, so approval doesn't depend on an
     e-mail arriving. Deliberately says nothing about what is *in* a set: who
@@ -9039,6 +9095,40 @@ def _can_edit_question(user, qset, question):
     return (question.author_id == user.id) and not question.locked
 
 
+def _record_suggestion_verdict(code, token, accepted):
+    """Count one editor's verdict on one suggestion.
+
+    Nothing about who, which question or which set is stored -- see
+    SuggestionFeedback. Failures are swallowed: a bookkeeping row is never a
+    reason to fail the edit the writer actually asked for.
+    """
+    from django.db.models import F
+    if not code:
+        return
+    try:
+        obj, created = SuggestionFeedback.objects.get_or_create(
+            code=code, token=token or '',
+            defaults={'accepted': 1 if accepted else 0,
+                      'rejected': 0 if accepted else 1})
+        if not created:
+            field = 'accepted' if accepted else 'rejected'
+            SuggestionFeedback.objects.filter(pk=obj.pk).update(
+                **{field: F(field) + 1, 'last_action_date': timezone.now()})
+    except Exception:
+        print('Could not record suggestion verdict:', sys.exc_info()[0], sys.exc_info()[1])
+
+
+def _unrecord_suggestion_rejection(code, token):
+    """Undo a rejection when a dismissal is restored, so an editor changing
+    their mind doesn't leave the suggestion looking worse than it is."""
+    from django.db.models import F
+    try:
+        SuggestionFeedback.objects.filter(code=code, token=token or '', rejected__gt=0).update(
+            rejected=F('rejected') - 1, last_action_date=timezone.now())
+    except Exception:
+        print('Could not unrecord suggestion verdict:', sys.exc_info()[0], sys.exc_info()[1])
+
+
 @login_required
 def apply_style_fix(request):
     """Auto-apply an easy style fix (e.g. insert a missing pronunciation guide)
@@ -9072,6 +9162,7 @@ def apply_style_fix(request):
     if not style_checker.apply_fix(question, fix):
         return HttpResponse(json.dumps({'ok': False, 'error': 'Could not apply automatically'}), status=400)
     question.save_question(edit_type=QUESTION_EDIT, changer=user)
+    _record_suggestion_verdict(code, token, accepted=True)
     # The edit page uses these to update the field in place instead of
     # reloading (a reload on a page rendered from a POST resubmits the stale
     # form and overwrites the fix).
@@ -9118,6 +9209,13 @@ def dismiss_style_issue(request):
         StyleIssueDismissal.objects.get_or_create(
             question_type=qtype, question_id=question.id, code=code, token=token,
             defaults={'question_set': qset, 'dismissed_by': user})
+
+    # One verdict per act of dismissing, whether it covered this question or
+    # the whole set: both are one editor deciding the suggestion is wrong.
+    if restore:
+        _unrecord_suggestion_rejection(code, token)
+    else:
+        _record_suggestion_verdict(code, token, accepted=False)
     # The description says what was actually silenced (one term's guide, not the
     # whole pronunciation rule), so the page can report it rather than leaving
     # the editor to guess how wide the dismissal went.
@@ -9162,6 +9260,7 @@ def restore_style_dismissal(request):
         StyleIssueDismissal.objects.filter(
             question_set=qset, question_type=qtype, question_id=int(qid),
             code=code, token=token).delete()
+    _unrecord_suggestion_rejection(code, token)
     return HttpResponse(json.dumps({'ok': True}))
 
 

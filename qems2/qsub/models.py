@@ -1945,6 +1945,41 @@ class SetApiKey(models.Model):
         return 'API key for {0!s}'.format(self.question_set)
 
 
+class SuggestionFeedback(models.Model):
+    """How often one style-check suggestion has been taken or thrown out.
+
+    A suggestion an editor keeps rejecting is usually a bad suggestion — the
+    bundled pronunciation dictionary offering a guide for a name that doesn't
+    need one, or an answer-line alternate nobody wants. Counting the verdicts
+    is the only way to see that from the outside.
+
+    Deliberately carries no question, no set and no writer: it is a fact about
+    the suggestion, and rolling it up per set would turn a quality signal into
+    a report on somebody's tournament. `code` and `token` are the same pair the
+    dismissal tables key on, so a row means one specific suggestion (one term's
+    guide, one answer line's alternates), not a whole rule.
+    """
+    code = models.CharField(max_length=50, db_index=True)
+    token = models.CharField(max_length=300)
+    accepted = models.PositiveIntegerField(default=0)
+    rejected = models.PositiveIntegerField(default=0)
+    last_action_date = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('code', 'token')
+
+    def total(self):
+        return self.accepted + self.rejected
+
+    def rejection_rate(self):
+        total = self.total()
+        return (100.0 * self.rejected / total) if total else 0.0
+
+    def __str__(self):
+        return '{0}/{1}: {2} taken, {3} rejected'.format(
+            self.code, self.token, self.accepted, self.rejected)
+
+
 class DiscordCommentRef(models.Model):
     """Links a comment created by the Discord bot to the external id it was sent
     with, so the same comment isn't posted twice on retries/re-syncs."""
