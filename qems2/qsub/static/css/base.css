@@ -1028,6 +1028,13 @@ body.app-authed a.app-nav-item:hover { color: var(--qx-ink); }
     font-size: 0.9rem;
 }
 
+/* Selected text. The page never said what selection should look like, so the
+   browser painted its own pale blue behind whatever colour the theme had given
+   the text — which on dark meant light ink on a light band, i.e. a row you
+   can't read the moment you drag across it. */
+::selection { background: #ddd0ff; color: #20232e; }
+::-moz-selection { background: #ddd0ff; color: #20232e; }
+
 html[data-theme="dark"] {
     --qx-primary: #8b5cf6;
     --qx-primary-dark: #7c3aed;
@@ -1451,6 +1458,9 @@ html[data-theme="dark"] .rich-editor-toolbar a.rich-editor-btn.active {
     background-color: #33384a;
 }
 html[data-theme="dark"] .rich-editor-toolbar a.rich-editor-btn.rich-editor-pg { color: #f0a868; }
+
+html[data-theme="dark"] ::selection { background: #4a3a80; color: #f4f2fb; }
+html[data-theme="dark"] ::-moz-selection { background: #4a3a80; color: #f4f2fb; }
 
 /* Secondary buttons on dark */
 html[data-theme="dark"] .app-content .button.secondary,

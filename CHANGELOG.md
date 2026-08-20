@@ -29,6 +29,14 @@
   the decision is about the account. Approving, declining and deleting are
   unchanged, on the review page each row links to.
 
+## 2026-08-20 (later still) — Selected text is readable in dark mode
+
+- **Highlighting a row went pale blue with pale text on it.** The page never
+  said what selected text should look like, so the browser used its own pale
+  blue behind whatever colour the theme had given the text — fine on a white
+  page, unreadable on a dark one, and worst on a table row, where the whole
+  band fills. Selection now has its own colours in both themes.
+
 ## 2026-08-21 — Character counts while you type questions
 
 - **The Type Questions box counts as you type**, the way the edit page does.
