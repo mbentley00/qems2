@@ -1162,6 +1162,11 @@ html[data-theme="dark"] .app-content .accordion table tbody tr td { background-c
 html[data-theme="dark"] .app-content .accordion table thead tr th,
 html[data-theme="dark"] .app-content .accordion table tbody tr td { border-color: var(--qx-border); }
 
+/* Foundation gives every label #4d4d4d, which on dark is barely there. Rules
+   further down deliberately mute particular labels (the Set Information field
+   captions); those are equally specific and come later, so they still win. */
+html[data-theme="dark"] .app-content label { color: var(--qx-ink); }
+
 /* Foundation puts #333 on a panel's children, not on the panel, so panel text
    stayed dark on the dark fill the theme gives it. */
 html[data-theme="dark"] .app-content .panel h1,
@@ -1309,6 +1314,143 @@ html[data-theme="dark"] .ai-grammar-msg strong,
 html[data-theme="dark"] .ai-grammar-msg .ai-alt-ans,
 html[data-theme="dark"] .style-panel-issues .grammar-fix { color: #86d29d; }
 html[data-theme="dark"] .ai-grammar-msg del { color: #f08c8c; }
+
+
+/* ---- Templates that style themselves in light-theme hex ------------------
+   Swept mechanically (scratchpad audit_greys.py / gen_dark.py) rather than one
+   page at a time: neutral greys take the theme's tokens, and a light tint that
+   is carrying meaning — the pale green of a correct bonus part, the pale blue
+   of a callout — keeps its hue and moves to a dark version of it. */
+/* _comment_discord.html */
+html[data-theme="dark"] .comment-discord { background: #16303f; }
+html[data-theme="dark"] tr.comment-discord { background: #16303f; }
+
+/* _new_question_checks.html */
+html[data-theme="dark"] .nq-checks { background: #16303f; }
+
+/* _playtest_results.html */
+html[data-theme="dark"] .pt-heard { color: var(--qx-muted); }
+html[data-theme="dark"] .result-idk { color: var(--qx-muted); }
+
+/* _suggested_changes.html */
+html[data-theme="dark"] .suggested-changes .suggestion-item { background: var(--qx-card); }
+html[data-theme="dark"] .suggested-changes .suggestion-meta { color: var(--qx-muted); }
+html[data-theme="dark"] .suggested-changes .suggestion-note { color: var(--qx-muted); }
+
+/* _swap_dialog.html */
+html[data-theme="dark"] .edit-swap-candidate .swap-cand-category { color: var(--qx-muted); }
+
+/* api_access.html */
+html[data-theme="dark"] .key-meta { color: var(--qx-muted); }
+
+/* attach_role_group.html */
+html[data-theme="dark"] .arg-option { background: var(--qx-card); }
+html[data-theme="dark"] .arg-attached:hover { border-color: var(--qx-border); }
+html[data-theme="dark"] .arg-badge { background: #1c3527; }
+
+/* bonus_history.html */
+html[data-theme="dark"] .history-version-highlight { background: #16303f; }
+
+/* category_document.html */
+html[data-theme="dark"] .cat-doc-meta { color: var(--qx-muted); }
+html[data-theme="dark"] .cat-doc-text .pronunciation-guide { color: var(--qx-muted); }
+html[data-theme="dark"] .cat-doc-meta a { color: var(--qx-ink); }
+
+/* category_overview.html */
+html[data-theme="dark"] .cat-editor-tag { background: #1c3527; }
+
+/* category_problems.html */
+html[data-theme="dark"] .cp-intro { color: var(--qx-muted); }
+html[data-theme="dark"] .cp-bulk-bar { background: var(--qx-card); }
+
+/* compare_repeats.html */
+html[data-theme="dark"] .cr-legend { color: var(--qx-muted); }
+html[data-theme="dark"] .cr-answer { color: var(--qx-ink); }
+html[data-theme="dark"] .cr-preview { color: var(--qx-muted); }
+
+/* create_question_set.html */
+html[data-theme="dark"] .cqs-card { background: var(--qx-card); }
+
+/* edit_packet.html */
+html[data-theme="dark"] #packet-status-tossup-table .status-subcat td:first-child, html[data-theme="dark"] #packet-status-bonus-table .status-subcat td:first-child { color: var(--qx-muted); }
+
+/* packet_grid.html */
+html[data-theme="dark"] .grid-cell:hover .swap-btn { color: var(--qx-muted); }
+html[data-theme="dark"] .packet-grid th.num-col, html[data-theme="dark"] .packet-grid td.num-col { background: var(--qx-elevate); }
+html[data-theme="dark"] .unplaced-item .unp-category { color: var(--qx-muted); }
+
+/* play.html */
+html[data-theme="dark"] .cats-hint { color: var(--qx-muted); }
+html[data-theme="dark"] .loaded-count { color: var(--qx-muted); }
+html[data-theme="dark"] #scoreboard { background: var(--qx-card); }
+html[data-theme="dark"] .play-card { background: var(--qx-card); }
+html[data-theme="dark"] .reveal-hint { color: var(--qx-muted); }
+html[data-theme="dark"] .reveal-answer { background: #16303f; }
+html[data-theme="dark"] .bonus-part .part-answer { background: #16303f; }
+html[data-theme="dark"] .bonus-part.part-correct { background: #1c3527; }
+html[data-theme="dark"] .bonus-part.part-incorrect { background: #3a1d1d; }
+html[data-theme="dark"] .post-card { background: var(--qx-card); }
+html[data-theme="dark"] .posted-comment { background: #16303f; }
+html[data-theme="dark"] #play-meta { color: var(--qx-muted); }
+
+/* quick_search.html */
+html[data-theme="dark"] .qs-meta { color: var(--qx-muted); }
+
+/* recap.html */
+html[data-theme="dark"] .recap-since-visit { background: #16303f; }
+
+/* reference_data.html */
+html[data-theme="dark"] .refdata-source { background: var(--qx-elevate); }
+html[data-theme="dark"] .refdata-source-edited { background: #16303f; }
+html[data-theme="dark"] .refdata-source-added { background: #1c3527; }
+
+/* role_groups.html */
+html[data-theme="dark"] .member-search-results { background: var(--qx-card); }
+html[data-theme="dark"] .member-search-item:hover, html[data-theme="dark"] .member-search-item.active { background: #16303f; }
+
+/* splash.html */
+html[data-theme="dark"] .splash-tagline { color: var(--qx-muted); }
+html[data-theme="dark"] .splash-lineage { color: var(--qx-muted); }
+
+/* style_ignored.html */
+html[data-theme="dark"] .si-intro { color: var(--qx-muted); }
+html[data-theme="dark"] .si-note { color: var(--qx-muted); }
+html[data-theme="dark"] .si-code { background: var(--qx-elevate); color: var(--qx-muted); }
+html[data-theme="dark"] .si-table th { color: var(--qx-muted); }
+
+/* view_packet.html */
+html[data-theme="dark"] .swap-row-answer { color: var(--qx-ink); }
+html[data-theme="dark"] .doc-question .pronunciation-guide { color: var(--qx-muted); }
+html[data-theme="dark"] .doc-placeholder { background: #16303f; }
+html[data-theme="dark"] .doc-comment-card { background: var(--qx-card); }
+html[data-theme="dark"] .doc-comment-author { color: var(--qx-ink); }
+html[data-theme="dark"] .doc-comment-text { color: var(--qx-ink); }
+html[data-theme="dark"] .doc-comment-reply .doc-comment-author { color: var(--qx-muted); }
+html[data-theme="dark"] .doc-resolved-badge { background: #1c3527; }
+html[data-theme="dark"] .doc-comment-box { background: var(--qx-card); }
+html[data-theme="dark"] .doc-anchor-quote { color: var(--qx-muted); }
+
+/* The rich editor's toolbar (base.css, not a template) was the last light slab
+   on the edit pages: a white bar of white buttons over a dark editor. */
+html[data-theme="dark"] .rich-editor-toolbar {
+    background-color: var(--qx-elevate);
+    border-color: var(--qx-border);
+}
+html[data-theme="dark"] .rich-editor-toolbar a.rich-editor-btn {
+    background-color: var(--qx-card);
+    border-color: var(--qx-border);
+    color: var(--qx-ink);
+    box-shadow: none;
+}
+html[data-theme="dark"] .rich-editor-toolbar a.rich-editor-btn:hover {
+    background-color: var(--qx-hover);
+    border-color: #4a4f5c;
+}
+html[data-theme="dark"] .rich-editor-toolbar a.rich-editor-btn:active,
+html[data-theme="dark"] .rich-editor-toolbar a.rich-editor-btn.active {
+    background-color: #33384a;
+}
+html[data-theme="dark"] .rich-editor-toolbar a.rich-editor-btn.rich-editor-pg { color: #f0a868; }
 
 /* Secondary buttons on dark */
 html[data-theme="dark"] .app-content .button.secondary,
