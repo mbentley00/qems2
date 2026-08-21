@@ -15,9 +15,7 @@
 
     {% block content %}
 
-    <h3 class="page-header">{{ category }}
-        {% if category %}<a href="/category_doc/{{ qset.id }}/{{ category.id }}/" class="button tiny secondary right" style="margin:0;"><i class="fa fa-file-lines"></i> Document view</a>{% endif %}
-    </h3>
+    <h3 class="page-header">{{ category }}</h3>
     {% if category %}
     <ul class="breadcrumbs">
         <li><a href="/edit_question_set/{{ qset.id }}/">{{ qset.name }}</a></li>
@@ -26,9 +24,15 @@
         <li class="current">{{ category.subcategory }}</li>
     </ul>
     {% endif %}
+    {% if category %}
+    <p class="cat-actions">
+        <a href="/category_doc/{{ qset.id }}/{{ category.id }}/" class="button small secondary"><i class="fa fa-file-lines"></i> Document view</a>
+    </p>
+    {% endif %}
     <p>Overall Percent: {{ category_status|overall_percent}}<br />
     Tossups Remaining: {{ category_status|tossups_remaining }}, Tossup Completion: {{ category_status.tu_in_cat|percent:category_status.tu_req }}<br />
     Bonuses Remaining: {{ category_status|bonuses_remaining }}, Bonus Completion: {{ category_status.bs_in_cat|percent:category_status.bs_req }}</p>
+    {% include "_category_comments.html" %}
     <p><a href="#bonuses">Jump to bonuses</a></p>
     <div id="tossups">
         <div class="panel header radius text-center"><strong>Tossups</strong></div>    

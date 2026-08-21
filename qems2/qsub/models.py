@@ -909,6 +909,32 @@ class CategoryTag(models.Model):
     def __str__(self):
         return '{0!s}: {1!s} ({2!s})'.format(self.question_set, self.name, self.category_path)
 
+class CategoryComment(models.Model):
+    """A note about a category rather than about a question.
+
+    "Keep the 20th-century tossups away from the Cold War, we have three
+    already" belongs to Fine Arts - Audio itself, not to any one question in
+    it, and needs to be where the people writing that category are looking:
+    the category page, its tags, and its document view.
+
+    Keyed by the same category path string the tags use, so a comment survives
+    a distribution entry being renamed or rebuilt.
+    """
+    question_set = models.ForeignKey(QuestionSet, on_delete=models.CASCADE,
+                                     related_name='category_comments')
+    category_path = models.CharField(max_length=500, db_index=True)
+    author = models.ForeignKey('Writer', on_delete=models.CASCADE,
+                               related_name='category_comments')
+    comment = models.TextField()
+    created_date = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_date']
+
+    def __str__(self):
+        return '{0!s} on {1!s}'.format(self.author, self.category_path)
+
+
 class QuestionType(models.Model):
 
     question_type = models.CharField(max_length=500)

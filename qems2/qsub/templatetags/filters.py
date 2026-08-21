@@ -248,6 +248,20 @@ def commenter_name(comment):
     name = '{0} ("{1}")'.format(real, user.username) if real else user.username
     return mark_safe(_escape_text(name))
 
+@register.filter(name='writer_name')
+def writer_name(writer):
+    """A writer's real name, falling back to their username. Escaped and marked
+    safe for the same reason `commenter_name` is: it is user-supplied text and
+    several templates around it turn autoescaping off."""
+    if writer is None:
+        return ''
+    user = getattr(writer, 'user', None)
+    if user is None:
+        return mark_safe(_escape_text(str(writer)))
+    real = '{0} {1}'.format(user.first_name or '', user.last_name or '').strip()
+    return mark_safe(_escape_text(real or user.username))
+
+
 @register.filter(name='commenter_tags')
 def commenter_tags(comment, qset):
     """The commenter's editor tags on this set, as small chips to sit beside

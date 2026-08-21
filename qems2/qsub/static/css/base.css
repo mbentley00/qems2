@@ -1036,6 +1036,11 @@ body.app-authed a.app-nav-item:hover { color: var(--qx-ink); }
 ::-moz-selection { background: #ddd0ff; color: #20232e; }
 
 
+/* A page's actions sit in their own row under the breadcrumbs. Floating one
+   into the <h3> put it on top of the heading's underline. */
+.cat-actions { margin: 0 0 12px; }
+.cat-actions .button, .cat-doc-btn { margin: 0; }
+
 /* Rows that head a group in the category tables, and the soft amber panels.
    These used to be inline style attributes, which no theme can override —
    an inline colour beats every stylesheet rule. */
@@ -1118,6 +1123,12 @@ html[data-theme="dark"] .app-content table:not(.packet-grid) td,
 html[data-theme="dark"] .app-content table:not(.packet-grid) th { border-color: var(--qx-border); }
 html[data-theme="dark"] .app-content .table-striped tbody tr:nth-child(even),
 html[data-theme="dark"] .app-content table:not(.packet-grid) tbody tr:nth-child(even) { background: #23252d; }
+/* Foundation puts the hover fill on the CELLS (.table-hover tbody tr:hover td),
+   so a rule on the row is painted straight over — which is why a hovered row
+   stayed pale blue on dark however dark the row itself was. */
+html[data-theme="dark"] .app-content .table-hover tbody tr.even:hover td,
+html[data-theme="dark"] .app-content .table-hover tbody tr:nth-child(even):hover td,
+html[data-theme="dark"] .app-content .table-hover tbody tr:hover td,
 html[data-theme="dark"] .app-content .table-hover tbody tr:hover,
 html[data-theme="dark"] .app-content table:not(.packet-grid) tbody tr:hover { background: var(--qx-hover); }
 

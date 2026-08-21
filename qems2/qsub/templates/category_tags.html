@@ -81,6 +81,10 @@
 <p><a href="/category_tags/{{ qset.id }}/" class="button small secondary">&laquo; All categories</a></p>
 {% endif %}
 
+{% if focus_path %}
+{% include "_category_comments.html" %}
+{% endif %}
+
 {% if not groups %}
 <div class="panel callout"><p>{% if focus_path %}No tags in {{ focus_path }} yet.{% else %}No tags defined yet.{% endif %}</p></div>
 {% endif %}

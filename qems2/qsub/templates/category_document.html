@@ -8,6 +8,7 @@
 {% block body_class %}edit-page-wide{% endblock %}
 
 {% block content %}
+{% load filters %}
 <h3 class="page-header">{{ title }} &mdash; Document</h3>
 <ul class="breadcrumbs">
     <li><a href="/edit_question_set/{{ qset.id }}/">{{ qset.name }}</a></li>
@@ -21,6 +22,8 @@
     <span>{{ bonuses|length }}</span> bonus{{ bonuses|length|pluralize }}).
     <span class="right"><a href="javascript:window.print()" class="button tiny secondary">Print</a></span>
 </div>
+
+{% include "_category_comments.html" %}
 
 <div class="cat-doc-page">
     {% if tossups %}

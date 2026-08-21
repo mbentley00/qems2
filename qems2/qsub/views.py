@@ -1298,14 +1298,15 @@ def categories(request, qset_id, category_id):
         attach_question_comments({t.id: t for t in tossups}, {b.id: b for b in bonuses})
 
     return render(request, 'categories.html',
-        {
+        dict({
         'user': user,
         'tossups': tossups,
         'bonuses': bonuses,
         'category_status': category_status,
         'qset': qset,
         'message': message,
-        'category': category_object})
+        'category': category_object},
+        **_category_comment_context(request, qset, str(category_object) if category_object else '')))
 
 @login_required
 def top_category(request, qset_id, category_name):
@@ -1389,10 +1390,14 @@ def category_document(request, qset_id, category_id=None, category_name=None):
 
     tossups = [item(t, 'tossup') for t in tu_qs]
     bonuses = [item(b, 'bonus') for b in bs_qs]
-    return render(request, 'category_document.html', {
+    return render(request, 'category_document.html', dict({
         'qset': qset, 'title': title, 'tossups': tossups, 'bonuses': bonuses,
         'count': len(tossups) + len(bonuses), 'user': user,
-        'category_id': category_id, 'category_name': category_name})
+        'category_id': category_id, 'category_name': category_name},
+        # A whole top-level category shows what was said about its
+        # subcategories too; a subcategory page shows only its own.
+        **_category_comment_context(request, qset, title,
+                                    include_children=category_id is None)))
 
 
 def _dup_fingerprint(qset):
@@ -10009,6 +10014,82 @@ def category_problems(request, qset_id):
                    'extra_crumb_url': '/category_problems/{0}/'.format(qset.id)})
 
 
+def _category_comment_rows(qset, path, include_children=False):
+    """Comments on a category, newest last, ready for the shared partial.
+
+    `include_children` widens it to everything under a top-level category, so
+    the page for all of Fine Arts shows what was said about Fine Arts - Audio
+    as well as about Fine Arts itself.
+    """
+    comments = qset.category_comments.select_related('author__user')
+    if include_children:
+        comments = comments.filter(
+            Q(category_path=path) | Q(category_path__startswith='{0} - '.format(path)))
+    else:
+        comments = comments.filter(category_path=path)
+    return list(comments)
+
+
+def _category_comment_context(request, qset, path, include_children=False):
+    """What every page showing category comments needs."""
+    user = request.user.writer
+    return {
+        'cat_comments': _category_comment_rows(qset, path, include_children),
+        'cat_comment_path': path,
+        'cat_comment_qset': qset,
+        'cat_comment_user': user,
+        'can_comment_on_category': (qset.is_owner(user) or user in qset.editor.all()
+                                    or user in qset.writer.all()),
+    }
+
+
+@login_required
+def category_comment(request, qset_id):
+    """Add or remove a note on a category. POST: category_path, comment, or
+    action=delete with comment_id. Any member of the set may comment; an
+    author may remove their own note, and an editor anybody's."""
+    user = request.user.writer
+    try:
+        qset = QuestionSet.objects.get(id=int(qset_id))
+    except (ValueError, QuestionSet.DoesNotExist):
+        return render(request, 'failure.html',
+                      {'message': 'That set no longer exists.',
+                       'message_class': 'alert-box alert'})
+    if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+        return render(request, 'failure.html',
+                      {'message': 'You are not authorized to comment on this set!',
+                       'message_class': 'alert-box alert'})
+
+    back = (request.POST.get('next') or '').strip()
+    if not back.startswith('/'):
+        back = '/category_overview/{0}/'.format(qset.id)
+
+    if request.method == 'POST':
+        if request.POST.get('action') == 'delete':
+            note = qset.category_comments.filter(id=request.POST.get('comment_id') or 0).first()
+            if note is None:
+                messages.error(request, 'That note no longer exists.')
+            elif not (note.author_id == user.id or qset.is_owner(user)
+                      or user in qset.editor.all()):
+                messages.error(request, 'You can only remove your own notes.')
+            else:
+                note.delete()
+                cache.clear()
+                messages.success(request, 'Note removed.')
+        else:
+            path = (request.POST.get('category_path') or '').strip()
+            text = (request.POST.get('comment') or '').strip()
+            if not path or not text:
+                messages.error(request, 'A note needs a category and some text.')
+            else:
+                CategoryComment.objects.create(
+                    question_set=qset, category_path=path, author=user, comment=text)
+                cache.clear()
+                messages.success(request, 'Note added.')
+
+    return HttpResponseRedirect(back)
+
+
 @login_required
 def category_tags(request, qset_id):
     user = request.user.writer
@@ -10138,17 +10219,21 @@ def category_tags(request, qset_id):
         CategoryTag.objects.filter(question_set=qset)
         .exclude(group_name='').values_list('group_name', flat=True)))
 
-    return render(request, 'category_tags.html',
-                             {'qset': qset,
-                              'user': user,
-                              'groups': groups,
-                              'path_choices': path_choices,
-                              'group_choices': group_choices,
-                              'can_edit': can_edit,
-                              'selected_path': selected_path,
-                              'focus_path': focus_path,
-                              'message': message,
-                              'message_class': message_class})
+    context = {'qset': qset,
+               'user': user,
+               'groups': groups,
+               'path_choices': path_choices,
+               'group_choices': group_choices,
+               'can_edit': can_edit,
+               'selected_path': selected_path,
+               'focus_path': focus_path,
+               'message': message,
+               'message_class': message_class}
+    # Notes belong with the category being worked on, so they show on the
+    # focused view; the all-categories tree stays a list of categories.
+    if focus_path:
+        context.update(_category_comment_context(request, qset, focus_path))
+    return render(request, 'category_tags.html', context)
 
 
 def _member_or_403(request, qset):

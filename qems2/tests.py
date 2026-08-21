@@ -10689,3 +10689,147 @@ class CategoryOverviewTagTests(TestCase):
     def test_the_row_links_to_that_category_s_tags(self):
         body = self._overview().content.decode()
         self.assertIn('/category_tags/{0}/?category=History'.format(self.qset.id), body)
+
+
+class CategoryCommentTests(TestCase):
+    """Notes about a category rather than about a question, shown wherever
+    people work on that category."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('cc_owner', password='pw', email='cc@t.com')
+        self.ou.first_name, self.ou.last_name = 'Cat', 'Owner'
+        self.ou.save()
+        self.owner = Writer.objects.get(user=self.ou)
+        self.wu = User.objects.create_user('cc_writer', password='pw', email='ccw@t.com')
+        self.writer = Writer.objects.get(user=self.wu)
+        self.su = User.objects.create_user('cc_stranger', password='pw', email='ccs@t.com')
+        self.dist = Distribution.objects.create(name='CC dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='Fine Arts', subcategory='Audio',
+            min_tossups=2, min_bonuses=2)
+        self.qset = QuestionSet.objects.create(
+            name='CC Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=2, distribution=self.dist)
+        self.qset.editor.add(self.owner)
+        self.qset.writer.add(self.writer)
+        SetWideDistributionEntry.objects.create(
+            question_set=self.qset, dist_entry=self.de, num_tossups=4, num_bonuses=4)
+        self.path = 'Fine Arts - Audio'
+        self.client.login(username='cc_owner', password='pw')
+
+    def _add(self, text='Keep the Cold War out of this one.', path=None, nxt=None):
+        return self.client.post('/category_comment/{0}/'.format(self.qset.id), {
+            'category_path': path or self.path, 'comment': text,
+            'next': nxt or '/categories/{0}/{1}/'.format(self.qset.id, self.de.id)})
+
+    def test_a_note_can_be_left_on_a_category(self):
+        self._add()
+        note = CategoryComment.objects.get()
+        self.assertEqual(note.category_path, self.path)
+        self.assertEqual(note.author, self.owner)
+
+    def test_the_note_shows_on_the_category_page(self):
+        self._add('Nothing more on Sibelius please')
+        body = self.client.get('/categories/{0}/{1}/'.format(
+            self.qset.id, self.de.id)).content.decode()
+        self.assertIn('Nothing more on Sibelius please', body)
+        self.assertIn('Cat Owner', body)
+
+    def test_the_note_shows_on_the_category_tag_page(self):
+        self._add('Nothing more on Sibelius please')
+        body = self.client.get('/category_tags/{0}/?category={1}'.format(
+            self.qset.id, self.path)).content.decode()
+        self.assertIn('Nothing more on Sibelius please', body)
+
+    def test_the_note_shows_on_the_document_view(self):
+        self._add('Nothing more on Sibelius please')
+        body = self.client.get('/category_doc/{0}/{1}/'.format(
+            self.qset.id, self.de.id)).content.decode()
+        self.assertIn('Nothing more on Sibelius please', body)
+
+    def test_a_top_level_document_view_shows_its_subcategories_notes(self):
+        self._add('Audio note')
+        CategoryComment.objects.create(question_set=self.qset, category_path='Fine Arts',
+                                       author=self.owner, comment='Whole category note')
+        body = self.client.get('/category_doc_top/{0}/Fine Arts/'.format(
+            self.qset.id)).content.decode()
+        self.assertIn('Audio note', body)
+        self.assertIn('Whole category note', body)
+
+    def test_a_subcategory_page_does_not_show_another_subcategory_s_notes(self):
+        other = DistributionEntry.objects.create(
+            distribution=self.dist, category='Fine Arts', subcategory='Visual',
+            min_tossups=1, min_bonuses=1)
+        SetWideDistributionEntry.objects.create(
+            question_set=self.qset, dist_entry=other, num_tossups=2, num_bonuses=2)
+        self._add('Audio only note')
+        body = self.client.get('/categories/{0}/{1}/'.format(
+            self.qset.id, other.id)).content.decode()
+        self.assertNotIn('Audio only note', body)
+
+    def test_a_writer_can_leave_a_note(self):
+        self.client.logout()
+        self.client.login(username='cc_writer', password='pw')
+        self._add('A writer thought')
+        self.assertTrue(CategoryComment.objects.filter(comment='A writer thought').exists())
+
+    def test_somebody_outside_the_set_cannot(self):
+        self.client.logout()
+        self.client.login(username='cc_stranger', password='pw')
+        self._add('Not mine to say')
+        self.assertFalse(CategoryComment.objects.filter(comment='Not mine to say').exists())
+
+    def test_an_author_can_remove_their_own_note(self):
+        self.client.logout()
+        self.client.login(username='cc_writer', password='pw')
+        self._add('Mine to remove')
+        note = CategoryComment.objects.get()
+        self.client.post('/category_comment/{0}/'.format(self.qset.id), {
+            'action': 'delete', 'comment_id': note.id,
+            'next': '/categories/{0}/{1}/'.format(self.qset.id, self.de.id)})
+        self.assertFalse(CategoryComment.objects.filter(id=note.id).exists())
+
+    def test_a_writer_cannot_remove_someone_else_s(self):
+        self._add('The editor said so')          # left by the owner
+        note = CategoryComment.objects.get()
+        self.client.logout()
+        self.client.login(username='cc_writer', password='pw')
+        self.client.post('/category_comment/{0}/'.format(self.qset.id), {
+            'action': 'delete', 'comment_id': note.id,
+            'next': '/categories/{0}/{1}/'.format(self.qset.id, self.de.id)})
+        self.assertTrue(CategoryComment.objects.filter(id=note.id).exists())
+
+    def test_an_editor_can_remove_anybody_s(self):
+        self.client.logout()
+        self.client.login(username='cc_writer', password='pw')
+        self._add('A writer thought')
+        note = CategoryComment.objects.get()
+        self.client.logout()
+        self.client.login(username='cc_owner', password='pw')
+        self.client.post('/category_comment/{0}/'.format(self.qset.id), {
+            'action': 'delete', 'comment_id': note.id,
+            'next': '/categories/{0}/{1}/'.format(self.qset.id, self.de.id)})
+        self.assertFalse(CategoryComment.objects.filter(id=note.id).exists())
+
+    def test_a_note_cannot_be_html(self):
+        self._add('careful <script>alert(1)</script>')
+        body = self.client.get('/categories/{0}/{1}/'.format(
+            self.qset.id, self.de.id)).content.decode()
+        self.assertNotIn('<script>alert(1)</script>', body)
+        self.assertIn('&lt;script&gt;', body)
+
+    def test_a_note_cannot_be_left_on_another_set(self):
+        other_owner = Writer.objects.get(user=self.su)
+        theirs = QuestionSet.objects.create(
+            name='Someone Else', date=timezone.now(), host='h', address='',
+            owner=other_owner, num_packets=1, distribution=self.dist)
+        self.client.post('/category_comment/{0}/'.format(theirs.id), {
+            'category_path': self.path, 'comment': 'not mine',
+            'next': '/category_overview/{0}/'.format(theirs.id)})
+        self.assertFalse(CategoryComment.objects.filter(question_set=theirs).exists())
+
+    def test_an_empty_note_is_refused(self):
+        self._add('   ')
+        self.assertEqual(CategoryComment.objects.count(), 0)

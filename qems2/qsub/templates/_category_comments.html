@@ -1,0 +1,71 @@
+{% load filters %}
+{% comment %}
+Notes about a category rather than about a question, shown wherever people work
+on that category. Include with the context `_category_comment_context` builds:
+cat_comments, cat_comment_path, cat_comment_qset, can_comment_on_category, and
+an optional `comment_return` for where the form should come back to.
+{% endcomment %}
+{% if cat_comment_path %}
+<div class="cat-notes">
+    <div class="cat-notes-head">
+        Notes on {{ cat_comment_path }}
+        {% if cat_comments %}<span class="cat-notes-count">{{ cat_comments|length }}</span>{% endif %}
+    </div>
+
+    {% for note in cat_comments %}
+    <div class="cat-note">
+        <div class="cat-note-meta">
+            <strong>{{ note.author|writer_name }}</strong>
+            <span class="cat-note-date">{{ note.created_date|to_short_datetime }}</span>
+            {% if note.category_path != cat_comment_path %}<span class="cat-note-on">on {{ note.category_path }}</span>{% endif %}
+            {% if can_comment_on_category %}
+            <form method="post" action="/category_comment/{{ cat_comment_qset.id }}/" class="cat-note-del"
+                  onsubmit="return confirm('Remove this note?');">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="delete">
+                <input type="hidden" name="comment_id" value="{{ note.id }}">
+                <input type="hidden" name="next" value="{{ comment_return|default:request.get_full_path }}">
+                <button type="submit" title="Remove this note">&times;</button>
+            </form>
+            {% endif %}
+        </div>
+        <div class="cat-note-body">{{ note.comment|comment_html|linebreaks }}</div>
+    </div>
+    {% empty %}
+    <p class="cat-notes-empty">No notes on this category yet.</p>
+    {% endfor %}
+
+    {% if can_comment_on_category %}
+    <form method="post" action="/category_comment/{{ cat_comment_qset.id }}/" class="cat-note-add">
+        {% csrf_token %}
+        <input type="hidden" name="category_path" value="{{ cat_comment_path }}">
+        <input type="hidden" name="next" value="{{ comment_return|default:request.get_full_path }}">
+        <textarea name="comment" rows="2" placeholder="A note about this category — what's covered, what to avoid, who's on it&hellip;"></textarea>
+        <button type="submit" class="button small secondary">Add note</button>
+    </form>
+    {% endif %}
+</div>
+{% endif %}
+
+<style>
+.cat-notes { border: 1px solid var(--qx-border, #e9e9ef); border-radius: 6px;
+    background: var(--qx-card, #fff); padding: 10px 14px; margin: 0 0 16px; }
+.cat-notes-head { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--qx-muted, #8a8f9c); margin-bottom: 6px; }
+.cat-notes-count { background: var(--qx-elevate, #eef2f7); border-radius: 9px;
+    padding: 0 6px; margin-left: 4px; }
+.cat-note { border-top: 1px solid var(--qx-border, #f0f0f3); padding: 6px 0; }
+.cat-note:first-of-type { border-top: none; }
+.cat-note-meta { font-size: 0.8rem; display: flex; align-items: baseline; gap: 8px; }
+.cat-note-date, .cat-note-on { color: var(--qx-muted, #8a8f9c); }
+.cat-note-body { font-size: 0.9rem; }
+.cat-note-body p { margin: 0 0 4px; }
+.cat-note-del { display: inline; margin: 0 0 0 auto; }
+.cat-note-del button { border: none; background: none; cursor: pointer; padding: 0 2px;
+    color: var(--qx-muted, #8a8f9c); line-height: 1; }
+.cat-note-del button:hover { color: #c0392b; }
+.cat-notes-empty { color: var(--qx-muted, #8a8f9c); font-size: 0.85rem; margin: 0 0 6px; }
+.cat-note-add { display: flex; gap: 8px; align-items: flex-start; margin: 8px 0 0; }
+.cat-note-add textarea { margin: 0; flex: 1 1 auto; font-size: 0.9rem; }
+.cat-note-add button { margin: 0; flex: 0 0 auto; }
+</style>

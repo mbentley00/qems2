@@ -57,6 +57,23 @@
   it — a distribution can be shared, and another set's questions aren't this
   page's business.
 
+## 2026-08-21 (later) — Notes on a category, and the hover that stayed blue
+
+- **A category can carry notes.** &ldquo;Keep the Cold War out of this one&rdquo; is about
+  Fine Arts - Audio, not about any question in it, and now lives on the category
+  page, its tag page and its document view, with the author and the date. Any
+  member of the set can leave one; you can remove your own, and editors can remove
+  anybody’s. A document view of a whole top-level category shows its subcategories’
+  notes as well as its own.
+- **The hovered row stopped being pale blue on dark.** Foundation paints the hover
+  fill on the table *cells*, so the dark rule on the row was painted straight over
+  it. That is why the highlight survived every previous attempt.
+- The tossup/bonus count boxes on the overview’s add-a-tag row are wide enough for
+  their number now that the browser’s spinner sits inside them.
+- **Document view** on a category page sat on top of the heading’s underline,
+  floated into the `<h3>`. It has its own row under the breadcrumbs now, on both
+  the subcategory and the whole-category pages.
+
 ## 2026-08-21 — Category tags grow an axis, a tree, and a home on the overview
 
 - **Tags can say which axis they run along.** A category’s tags are usually more

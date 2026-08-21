@@ -11,15 +11,17 @@
 
 {% block content %}
 
-<h3 class="page-header">{{ category_name }}
-    <a href="/category_doc_top/{{ qset.id }}/{{ category_name }}/" class="button tiny secondary right" style="margin:0;"><i class="fa fa-file-lines"></i> Document view (all {{ category_name }})</a>
-</h3>
+<h3 class="page-header">{{ category_name }}</h3>
 
 <ul class="breadcrumbs">
     <li><a href="/edit_question_set/{{ qset.id }}/">{{ qset.name }}</a></li>
     <li><a href="/category_overview/{{ qset.id }}/">Category Overview</a></li>
     <li class="current">{{ category_name }}</li>
 </ul>
+
+<p class="cat-actions">
+    <a href="/category_doc_top/{{ qset.id }}/{{ category_name }}/" class="button small secondary cat-doc-btn"><i class="fa fa-file-lines"></i> Document view (all {{ category_name }})</a>
+</p>
 
 <table class="tablesorter table-striped table-hover">
     <thead>

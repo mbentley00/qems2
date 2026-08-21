@@ -301,7 +301,7 @@
 </datalist>
 
 <style>
-.cat-tags-cell { min-width: 22em; }
+.cat-tags-cell { min-width: 25em; }
 .cat-tag-axis { margin-bottom: 3px; }
 .cat-tag-axis-name { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em;
     color: var(--qx-muted, #8a8f9c); margin-right: 4px; }
@@ -316,8 +316,11 @@
 .cat-tag-del button:hover { color: #c0392b; }
 .cat-tag-none { color: var(--qx-muted, #8a8f9c); }
 .cat-tag-add { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin: 4px 0 0; }
-.cat-tag-add input[type=text] { width: 8em; margin: 0; font-size: 0.8em; height: 26px; }
-.cat-tag-add input[type=number] { width: 4em; margin: 0; font-size: 0.8em; height: 26px; }
+.cat-tag-add input[type=text] { width: 7.5em; margin: 0; font-size: 0.8em; height: 26px; }
+/* Wide enough for a two-digit count next to the browser's spinner, which sits
+   inside the box and was clipping a single "0". */
+.cat-tag-add input[type=number] { width: 5em; margin: 0; font-size: 0.8em; height: 26px;
+    padding-right: 2px; }
 .cat-tag-add button { margin: 0; }
 .cat-tag-more { font-size: 0.75em; }
 </style>
