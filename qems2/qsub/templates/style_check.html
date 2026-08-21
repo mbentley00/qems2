@@ -95,7 +95,7 @@
 {% for r in results %}
 <div class="sc-q">
     <div class="sc-q-head">
-        <a href="{{ r.edit_url }}" target="_blank" rel="noopener" class="sc-ans">{% autoescape off %}{{ r.label }}{% endautoescape %}</a>
+        <a href="{{ r.edit_url }}" target="_blank" rel="noopener" class="sc-ans">{% autoescape off %}{{ r.label|escape }}{% endautoescape %}</a>
         <span class="sc-loc">{% if r.type == 'tossup' %}Tossup{% else %}Bonus{% endif %}{% if r.packet %} · {{ r.packet }} #{{ r.number }}{% endif %}</span>
     </div>
     <ul class="sc-issues">

@@ -10256,3 +10256,236 @@ class ImportTargetSetScopeTests(TestCase):
         self.client.post('/import_packets/', {
             'set_name': '', 'target_set': str(self.mine.id), 'packet_files': upload})
         self.assertEqual(self.mine.tossup_set.count(), 1)
+
+
+class CrossSetActionTests(TestCase):
+    """Acting on another set's questions and comments.
+
+    Every one of these was possible: the view read a `qset_id` out of the same
+    POST that named the object and checked the caller against *that*, so being
+    an editor of a set you made yourself authorized you against everyone's."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        self.acf = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.dist = Distribution.objects.create(name='xset dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='History', subcategory='American',
+            min_tossups=1, min_bonuses=1)
+
+        self.au = User.objects.create_user('xs_attacker', password='pw', email='xa@t.com')
+        self.attacker = Writer.objects.get(user=self.au)
+        self.mine = QuestionSet.objects.create(
+            name='Attacker Set', date=timezone.now(), host='h', address='',
+            owner=self.attacker, num_packets=1, distribution=self.dist)
+        self.mine.editor.add(self.attacker)
+
+        self.vu = User.objects.create_user('xs_victim', password='pw', email='xv@t.com')
+        self.victim = Writer.objects.get(user=self.vu)
+        self.theirs = QuestionSet.objects.create(
+            name='Victim Set', date=timezone.now(), host='h', address='',
+            owner=self.victim, num_packets=1, distribution=self.dist)
+        self.theirs.editor.add(self.victim)
+        self.their_tu = Tossup.objects.create(
+            author=self.victim, question_set=self.theirs, question_type=self.acf,
+            tossup_text='Their careful clue. For 10 points, name it.',
+            tossup_answer='_Theirs_', category=self.de,
+            created_date=datetime.now(), last_changed_date=datetime.now())
+        self.their_comment = self._comment_on(self.their_tu, 'Their private feedback')
+        self.client.login(username='xs_attacker', password='pw')
+
+    def _comment_on(self, question, text):
+        from django.contrib.contenttypes.models import ContentType
+        from django.contrib.sites.models import Site
+        from django_comments.models import Comment
+        return Comment.objects.create(
+            content_type=ContentType.objects.get_for_model(type(question)),
+            object_pk=str(question.id), site=Site.objects.get_current(),
+            user=self.vu, comment=text, submit_date=timezone.now())
+
+    # --- comments ------------------------------------------------------------
+
+    def test_cannot_delete_a_comment_in_another_set(self):
+        self.client.post('/delete_comment/', {'qset_id': self.mine.id,
+                                              'comment_id': self.their_comment.id})
+        self.their_comment.refresh_from_db()
+        self.assertFalse(self.their_comment.is_removed)
+
+    def test_cannot_delete_all_comments_in_another_set(self):
+        self.client.post('/delete_all_comments/', {'qset_id': self.mine.id,
+                                                   'question_type': 'tossup',
+                                                   'question_id': self.their_tu.id})
+        self.their_comment.refresh_from_db()
+        self.assertFalse(self.their_comment.is_removed)
+
+    def test_cannot_reply_to_a_comment_in_another_set(self):
+        from django_comments.models import Comment
+        before = Comment.objects.filter(object_pk=str(self.their_tu.id)).count()
+        self.client.post('/reply_to_comment/', {'parent_id': self.their_comment.id,
+                                                'qset_id': self.mine.id,
+                                                'comment_text': 'attacker reply'})
+        self.assertEqual(Comment.objects.filter(object_pk=str(self.their_tu.id)).count(), before)
+
+    # --- questions -----------------------------------------------------------
+
+    def test_cannot_convert_a_tossup_in_another_set(self):
+        self.client.post('/convert_tossup/', {'qset_id': self.mine.id,
+                                              'tossup_id': self.their_tu.id,
+                                              'target_type': ACF_STYLE_BONUS})
+        self.assertTrue(Tossup.objects.filter(id=self.their_tu.id).exists())
+
+    def test_cannot_convert_a_bonus_in_another_set(self):
+        their_bonus = Bonus.objects.create(
+            author=self.victim, question_set=self.theirs,
+            leadin='Their leadin.', part1_text='p1', part1_answer='_a1_',
+            part2_text='p2', part2_answer='_a2_', part3_text='p3', part3_answer='_a3_',
+            category=self.de, created_date=datetime.now(), last_changed_date=datetime.now())
+        self.client.post('/convert_bonus/', {'qset_id': self.mine.id,
+                                             'bonus_id': their_bonus.id,
+                                             'target_type': ACF_STYLE_TOSSUP})
+        self.assertTrue(Bonus.objects.filter(id=their_bonus.id).exists())
+
+    def test_cannot_restore_a_question_in_another_set(self):
+        original = self.their_tu.tossup_text
+        self.their_tu.tossup_text = 'Their improved clue. For 10 points, name it.'
+        self.their_tu.save_question(edit_type=QUESTION_EDIT, changer=self.victim)
+        hist = TossupHistory.objects.filter(
+            question_history=self.their_tu.question_history).order_by('id').first()
+        if hist is None:
+            self.skipTest('no history row to restore from')
+        self.client.post('/restore_tossup/', {'qset_id': self.mine.id, 'th_id': hist.id})
+        self.their_tu.refresh_from_db()
+        self.assertNotEqual(self.their_tu.tossup_text, original)
+
+    # --- and the same actions still work on your own set ---------------------
+
+    def test_an_editor_can_still_delete_a_comment_on_their_own_set(self):
+        mine_tu = Tossup.objects.create(
+            author=self.attacker, question_set=self.mine, question_type=self.acf,
+            tossup_text='My clue. For 10 points, name it.', tossup_answer='_Mine_',
+            category=self.de, created_date=datetime.now(), last_changed_date=datetime.now())
+        my_comment = self._comment_on(mine_tu, 'feedback on mine')
+        self.client.post('/delete_comment/', {'qset_id': self.mine.id,
+                                              'comment_id': my_comment.id})
+        my_comment.refresh_from_db()
+        self.assertTrue(my_comment.is_removed)
+
+    def test_an_editor_can_still_reply_on_their_own_set(self):
+        from django_comments.models import Comment
+        mine_tu = Tossup.objects.create(
+            author=self.attacker, question_set=self.mine, question_type=self.acf,
+            tossup_text='My clue. For 10 points, name it.', tossup_answer='_Mine_',
+            category=self.de, created_date=datetime.now(), last_changed_date=datetime.now())
+        my_comment = self._comment_on(mine_tu, 'feedback on mine')
+        self.client.post('/reply_to_comment/', {'parent_id': my_comment.id,
+                                                'qset_id': self.mine.id,
+                                                'comment_text': 'my reply'})
+        self.assertEqual(Comment.objects.filter(object_pk=str(mine_tu.id)).count(), 2)
+
+    def test_a_tag_only_goes_on_someone_who_is_on_the_set(self):
+        resp = self.client.post('/add_editor_tag/', {
+            'qset_id': self.mine.id, 'editor_id': self.victim.id, 'label': 'Science'})
+        self.assertFalse(json.loads(resp.content.decode())['success'])
+        self.assertEqual(EditorTag.objects.count(), 0)
+
+
+class CommentMarkupIsNotHtmlTests(TestCase):
+    """A comment can say "<script>" without being one.
+
+    Comment text is rendered as HTML — the formatter turns QEMS markup into
+    tags and the templates print the result unescaped — so anything a person
+    types has to stop being able to open a tag."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.u = User.objects.create_user('cm_user', password='pw', email='cm@t.com')
+        self.w = Writer.objects.get(user=self.u)
+        self.dist = Distribution.objects.create(name='cm dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='History', subcategory='American',
+            min_tossups=1, min_bonuses=1)
+        self.qset = QuestionSet.objects.create(
+            name='CM Set', date=timezone.now(), host='h', address='', owner=self.w,
+            num_packets=1, distribution=self.dist)
+        self.qset.editor.add(self.w)
+        self.tu = Tossup.objects.create(
+            author=self.w, question_set=self.qset, question_type=self.acf,
+            tossup_text='A clue. For 10 points, name it.', tossup_answer='_Thing_',
+            category=self.de, created_date=datetime.now(), last_changed_date=datetime.now())
+        self.client.login(username='cm_user', password='pw')
+
+    def _page(self):
+        return self.client.get('/edit_tossup/{0}/'.format(self.tu.id)).content.decode()
+
+    def test_a_script_tag_in_a_comment_does_not_reach_the_page(self):
+        self.client.post('/add_question_comment/', {
+            'question_type': 'tossup', 'question_id': self.tu.id,
+            'comment_text': 'look <script>alert(1)</script>'})
+        page = self._page()
+        self.assertNotIn('<script>alert(1)</script>', page)
+        self.assertIn('&lt;script&gt;alert(1)&lt;/script&gt;', page)
+
+    def test_an_event_handler_attribute_does_not_reach_the_page(self):
+        self.client.post('/add_question_comment/', {
+            'question_type': 'tossup', 'question_id': self.tu.id,
+            'comment_text': '<img src=x onerror=alert(1)>'})
+        self.assertNotIn('<img src=x onerror=alert(1)>', self._page())
+
+    def test_a_reply_is_defused_too(self):
+        from django.contrib.contenttypes.models import ContentType
+        from django.contrib.sites.models import Site
+        from django_comments.models import Comment
+        parent = Comment.objects.create(
+            content_type=ContentType.objects.get_for_model(Tossup),
+            object_pk=str(self.tu.id), site=Site.objects.get_current(),
+            user=self.u, comment='parent', submit_date=timezone.now())
+        self.client.post('/reply_to_comment/', {
+            'parent_id': parent.id, 'qset_id': self.qset.id,
+            'comment_text': 'reply <script>alert(2)</script>'})
+        self.assertNotIn('<script>alert(2)</script>', self._page())
+
+    def test_a_bot_display_name_is_defused(self):
+        """The Discord bot posts under a name it chooses, with a set key that
+        may be shared around."""
+        from django.contrib.contenttypes.models import ContentType
+        from django.contrib.sites.models import Site
+        from django_comments.models import Comment
+        Comment.objects.create(
+            content_type=ContentType.objects.get_for_model(Tossup),
+            object_pk=str(self.tu.id), site=Site.objects.get_current(),
+            user=None, user_name='Cliff<script>alert(3)</script>',
+            comment='bot feedback', submit_date=timezone.now())
+        self.assertNotIn('<script>alert(3)</script>', self._page())
+
+    def test_a_writer_name_is_defused(self):
+        self.u.last_name = 'Bentley<script>alert(4)</script>'
+        self.u.save()
+        self.client.post('/add_question_comment/', {
+            'question_type': 'tossup', 'question_id': self.tu.id,
+            'comment_text': 'ordinary feedback'})
+        self.assertNotIn('<script>alert(4)</script>', self._page())
+
+    def test_the_markup_a_comment_is_meant_to_have_still_renders(self):
+        self.client.post('/add_question_comment/', {
+            'question_type': 'tossup', 'question_id': self.tu.id,
+            'comment_text': 'the answer is ~Hamlet~, not _Macbeth_'})
+        page = self._page()
+        self.assertIn('<i>Hamlet</i>', page)
+
+    def test_an_existing_entity_is_not_double_escaped(self):
+        """Imported comments carry entities already; escaping the ampersand
+        would turn years of threads into visible gibberish."""
+        from django.contrib.contenttypes.models import ContentType
+        from django.contrib.sites.models import Site
+        from django_comments.models import Comment
+        Comment.objects.create(
+            content_type=ContentType.objects.get_for_model(Tossup),
+            object_pk=str(self.tu.id), site=Site.objects.get_current(),
+            user=self.u, comment='it&#x27;s fine', submit_date=timezone.now())
+        page = self._page()
+        # The rendered body keeps the entity as-is. (The in-place editor's
+        # data-raw attribute holds an escaped copy of the same text, where
+        # &amp;#x27; is correct attribute escaping — so this checks the body.)
+        self.assertIn('<p>it&#x27;s fine</p>', page)

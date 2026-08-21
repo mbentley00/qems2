@@ -42,7 +42,7 @@ Reload without ?new=1 and it's gone — the sidebar panel is the ongoing view.
                     <a href="/edit_bonus/{{ m.id }}/" target="_blank" rel="noopener">Bonus {{ m.part_label }}</a>
                 {% endif %}
                 &mdash; <strong>{{ m.answer_html }}</strong>
-                <small>({{ m.category_str|default:"uncategorized" }}{% if m.packet %}, {{ m.packet }}{% endif %} &mdash; {{ m.author }})</small>
+                <small>({{ m.category_str|default:"uncategorized" }}{% if m.packet %}, {{ m.packet }}{% endif %} &mdash; {{ m.author|escape }})</small>
             </li>
             {% endfor %}
             {% endautoescape %}

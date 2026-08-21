@@ -102,7 +102,7 @@
                                 {% if has_packets %}<td>{{ entry.packet }}</td>{% endif %}
                                 <td>{{ entry.answer_html }}</td>
                                 <td>{{ entry.category_str }}</td>
-                                <td>{{ entry.author }}</td>
+                                <td>{{ entry.author|escape }}</td>
                                 <td><small>{{ entry.preview_html }}</small></td>
                             </tr>
                         {% endfor %}
@@ -180,7 +180,7 @@
                                 {% if has_packets %}<td>{{ entry.location }}</td>{% endif %}
                                 <td>{{ entry.answer_html }}</td>
                                 <td>{{ entry.category_str }}</td>
-                                <td>{{ entry.author }}</td>
+                                <td>{{ entry.author|escape }}</td>
                                 <td><small>{{ entry.preview_html }}</small></td>
                             </tr>
                         {% endfor %}

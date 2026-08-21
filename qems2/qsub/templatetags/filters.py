@@ -236,12 +236,17 @@ def track_changes_diff(old, new):
 @register.filter(name='commenter_name')
 def commenter_name(comment):
     """Display a comment author as their real name with username in quotes
-    (e.g. Will Alston ("walston")), or just the username, or a bot's name."""
+    (e.g. Will Alston ("walston")), or just the username, or a bot's name.
+
+    Escaped and marked safe: a name is user-supplied (and a bot's posted name
+    doubly so), and several of the templates that show one have autoescaping
+    turned off for the question markup around it."""
     user = getattr(comment, 'user', None)
     if user is None:
-        return getattr(comment, 'user_name', '') or 'Anonymous'
+        return mark_safe(_escape_text(getattr(comment, 'user_name', '') or 'Anonymous'))
     real = '{0} {1}'.format(user.first_name or '', user.last_name or '').strip()
-    return '{0} ("{1}")'.format(real, user.username) if real else user.username
+    name = '{0} ("{1}")'.format(real, user.username) if real else user.username
+    return mark_safe(_escape_text(name))
 
 @register.filter(name='commenter_tags')
 def commenter_tags(comment, qset):
@@ -280,9 +285,30 @@ def commenter_tags(comment, qset):
 _MENTION_RE = re.compile(r'(^|[\s(])@([A-Za-z0-9_][A-Za-z0-9_.\-@+]*)')
 
 
+# Comment text is whatever somebody typed, and it is rendered as HTML (the
+# formatter turns QEMS markup into tags, and the templates print the result
+# unescaped). Neutralize the two characters that can start a tag before the
+# formatter runs, so a comment can contain "<script>" and *say* "<script>"
+# rather than being one.
+#
+# Only "<" and ">" — not "&". Comments imported from other systems carry
+# entities like &#x27; already, and escaping the ampersand would turn those
+# into visible gibberish in years of existing threads without making anything
+# safer: an ampersand can't open a tag.
+def _defuse_tags(text):
+    return (text or '').replace('<', '&lt;').replace('>', '&gt;')
+
+
+def _escape_text(text):
+    """Escape a plain string for text position. Unlike django's `escape` this
+    leaves quotation marks alone: the values it is used on are names, shown as
+    `Will Alston ("walston")`, and never go inside an attribute."""
+    return (text or '').replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+
 @register.filter(name='comment_html')
 def comment_html(comment):
-    formatted = get_formatted_question_html(comment, False, False, True, False)
+    formatted = get_formatted_question_html(_defuse_tags(comment), False, False, True, False)
     highlighted = _MENTION_RE.sub(
         lambda m: '{0}<span class="at-mention" style="color:#1565c0;font-weight:bold;">@{1}</span>'.format(
             m.group(1), m.group(2)),

@@ -67,7 +67,7 @@ suggestion still appears elsewhere.</p>
 {% for q in per_question %}
 <div class="si-q">
     <div class="si-q-head">
-        <a href="{{ q.edit_url }}" target="_blank" rel="noopener">{% autoescape off %}{{ q.label }}{% endautoescape %}</a>
+        <a href="{{ q.edit_url }}" target="_blank" rel="noopener">{% autoescape off %}{{ q.label|escape }}{% endautoescape %}</a>
         <span class="si-loc">{% if q.qtype == 'tossup' %}Tossup{% else %}Bonus{% endif %}</span>
     </div>
     <ul class="si-list">

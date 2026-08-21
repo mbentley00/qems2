@@ -62,7 +62,7 @@
                 {% if tossup.structured_preview %}{% include "_structure_preview.html" with preview=tossup.structured_preview %}{% endif %}
                 <input type="hidden" name="tossup-text-{{ forloop.counter0 }}" value="{{ tossup.tossup_text|force_escape }}">
                 <input type="hidden" name="tossup-answer-{{ forloop.counter0 }}" value="{{ tossup.tossup_answer|force_escape }}">
-                <input type="hidden" name="tossup-category-{{ forloop.counter0 }}" value="{{ tossup.category|force_escape }}">
+                <input type="hidden" name="tossup-category-{{ forloop.counter0 }}" value="{{ tossup.category|force_escape|escape }}">
                 <input type="hidden" name="tossup-type-{{ forloop.counter0 }}" value="{{ tossup.question_type|force_escape }}">
                 {% endfor %}
             {% endautoescape %}
@@ -76,7 +76,7 @@
 
 
                 <input type="hidden" name="bonus-leadin-{{ forloop.counter0 }}" value="{{ bonus.leadin|force_escape }}">
-                <input type="hidden" name="bonus-category-{{ forloop.counter0 }}" value="{{ bonus.category|force_escape }}">
+                <input type="hidden" name="bonus-category-{{ forloop.counter0 }}" value="{{ bonus.category|force_escape|escape }}">
                 <input type="hidden" name="bonus-type-{{ forloop.counter0 }}" value="{{ bonus.question_type|force_escape }}">
                 <input type="hidden" name="bonus-part1-{{ forloop.counter0 }}" value="{{ bonus.part1_text|force_escape }}">
                 <input type="hidden" name="bonus-answer1-{{ forloop.counter0 }}" value="{{ bonus.part1_answer|force_escape }}">

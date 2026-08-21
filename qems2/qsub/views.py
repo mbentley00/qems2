@@ -3331,6 +3331,36 @@ def delete_set(request):
 
     return HttpResponse(json.dumps({'message': message, 'message_class': message_class}))
 
+def _question_set_of(obj):
+    """The question set an object belongs to, or None.
+
+    Authorization has to come from the thing being changed. Several of these
+    views used to read a `qset_id` out of the same POST that named the object,
+    and check the caller against *that* — so an editor of their own set could
+    name someone else's question and pass the check.
+    """
+    if obj is None:
+        return None
+    qset = getattr(obj, 'question_set', None)
+    if qset is None:
+        target = getattr(obj, 'content_object', None)   # a django_comments Comment
+        qset = getattr(target, 'question_set', None)
+    return qset
+
+
+def _may_edit_set(user, qset):
+    """Owner or editor of that set."""
+    return qset is not None and (qset.is_owner(user) or user in qset.editor.all())
+
+
+def _may_edit_question(user, question):
+    """Owner or editor of the question's set, or the question's own author."""
+    qset = _question_set_of(question)
+    if qset is None:
+        return False
+    return _may_edit_set(user, qset) or question.author_id == user.id
+
+
 @login_required
 def delete_comment(request):
     user = request.user.writer
@@ -3339,17 +3369,17 @@ def delete_comment(request):
     read_only = True
 
     if request.method == 'POST':
-        qset_id = request.POST['qset_id']
-        qset = QuestionSet.objects.get(id=qset_id)
-        qset_editors = qset.editor.all()
         comment_id = request.POST['comment_id']
-        comment = Comment.objects.get(id=comment_id)
+        comment = Comment.objects.filter(id=comment_id).first()
+        # The set is the one the comment is on. The posted qset_id is only
+        # good for going back to the page afterwards.
+        qset = _question_set_of(comment)
 
-        if (comment is None):
+        if (comment is None or qset is None):
             message = 'Error retrieving comment.'
             message_class = 'alert-box warning'
         else:
-            if user in qset_editors:
+            if _may_edit_set(user, qset):
                 comment.is_removed = True
                 comment.save()
                 cache.clear()
@@ -3413,8 +3443,15 @@ def reply_to_comment(request):
 
         try:
             parent_comment = Comment.objects.get(id=parent_id)
-            qset = QuestionSet.objects.get(id=qset_id)
-        except (Comment.DoesNotExist, QuestionSet.DoesNotExist):
+        except Comment.DoesNotExist:
+            message = 'Comment or question set not found.'
+            message_class = 'alert-box warning'
+            return HttpResponse(json.dumps({'message': message, 'message_class': message_class}))
+
+        # A reply belongs to the set the comment it answers is in; the posted
+        # qset_id says nothing about that.
+        qset = _question_set_of(parent_comment)
+        if qset is None:
             message = 'Comment or question set not found.'
             message_class = 'alert-box warning'
             return HttpResponse(json.dumps({'message': message, 'message_class': message_class}))
@@ -3560,22 +3597,23 @@ def delete_all_comments(request):
     bonus_content_type_id = ContentType.objects.get_for_model(Bonus).id
 
     if request.method == 'POST':
-        qset_id = request.POST['qset_id']
-        qset = QuestionSet.objects.get(id=qset_id)
-        qset_editors = qset.editor.all()
         question_type = request.POST['question_type']
         question_id = request.POST['question_id']
 
+        # The set is the question's own, not whatever the form said.
         if (question_type == 'tossup'):
+            question = Tossup.objects.filter(id=question_id).first()
             comment_list = Comment.objects.filter(content_type_id=tossup_content_type_id).filter(object_pk=question_id).order_by('submit_date')
         else:
+            question = Bonus.objects.filter(id=question_id).first()
             comment_list = Comment.objects.filter(content_type_id=bonus_content_type_id).filter(object_pk=question_id).order_by('submit_date')
+        qset = _question_set_of(question)
 
-        if (comment_list is None):
+        if (question is None or qset is None):
             message = 'Error retrieving comments.'
             message_class = 'alert-box warning'
         else:
-            if user in qset_editors:
+            if _may_edit_set(user, qset):
                 comment_list.update(is_removed=True)
                 cache.clear()
 
@@ -6369,15 +6407,15 @@ def restore_tossup(request):
 
     if request.method == 'POST':
         th_id = request.POST['th_id']
-        tossup_history = TossupHistory.objects.get(id=th_id)
-        tossup = Tossup.objects.get(question_history=tossup_history.question_history)
-        if (tossup_history is None):
+        tossup_history = TossupHistory.objects.filter(id=th_id).first()
+        tossup = (Tossup.objects.filter(
+            question_history=tossup_history.question_history).first()
+            if tossup_history is not None else None)
+        if (tossup_history is None or tossup is None):
             message = 'Invalid tossup history restoration!'
             message_class = 'alert-box warning'
         else:
-            qset_id = request.POST['qset_id']
-            qset = QuestionSet.objects.get(id=qset_id)
-            if user == tossup.author or qset.is_owner(user) or user in qset.editor.all():
+            if _may_edit_question(user, tossup):
                 tossup = Tossup.objects.get(question_history=tossup_history.question_history)
                 if (tossup is None):
                     message = 'Invalid tossup restoration!'
@@ -6405,15 +6443,15 @@ def restore_bonus(request):
 
     if request.method == 'POST':
         bh_id = request.POST['bh_id']
-        bonus_history = BonusHistory.objects.get(id=bh_id)
-        bonus = Bonus.objects.get(question_history=bonus_history.question_history)
-        if (bonus_history is None):
+        bonus_history = BonusHistory.objects.filter(id=bh_id).first()
+        bonus = (Bonus.objects.filter(
+            question_history=bonus_history.question_history).first()
+            if bonus_history is not None else None)
+        if (bonus_history is None or bonus is None):
             message = 'Invalid bonus history restoration!'
             message_class = 'alert-box warning'
         else:
-            qset_id = request.POST['qset_id']
-            qset = QuestionSet.objects.get(id=qset_id)
-            if user == bonus.author or qset.is_owner(user) or user in qset.editor.all():
+            if _may_edit_question(user, bonus):
                 bonus = Bonus.objects.get(question_history=bonus_history.question_history)
                 if (bonus is None):
                     message = 'Invalid bonus restoration!'
@@ -6545,14 +6583,13 @@ def convert_tossup(request):
 
     if request.method == 'POST':
         tossup_id = request.POST['tossup_id']
-        tossup = Tossup.objects.get(id=tossup_id)
+        tossup = Tossup.objects.filter(id=tossup_id).first()
         if (tossup is None):
             message = 'Invalid tossup!'
             message_class = 'alert-box warning'
         else:
-            qset_id = request.POST['qset_id']
-            qset = QuestionSet.objects.get(id=qset_id)
-            if user == tossup.author or qset.is_owner(user) or user in qset.editor.all():
+            qset = _question_set_of(tossup)
+            if _may_edit_question(user, tossup):
                 target_type = request.POST['target_type']
                 if (target_type == ACF_STYLE_TOSSUP):
                     tossup_to_tossup(tossup, target_type)
@@ -6580,14 +6617,13 @@ def convert_bonus(request):
 
     if request.method == 'POST':
         bonus_id = request.POST['bonus_id']
-        bonus = Bonus.objects.get(id=bonus_id)
+        bonus = Bonus.objects.filter(id=bonus_id).first()
         if (bonus is None):
             message = 'Invalid bonus!'
             message_class = 'alert-box warning'
         else:
-            qset_id = request.POST['qset_id']
-            qset = QuestionSet.objects.get(id=qset_id)
-            if user == bonus.author or qset.is_owner(user) or user in qset.editor.all():
+            qset = _question_set_of(bonus)
+            if _may_edit_question(user, bonus):
                 target_type = request.POST['target_type']
                 if (target_type == ACF_STYLE_BONUS or target_type == VHSL_BONUS):
                     result = bonus_to_bonus(bonus, target_type)
@@ -8860,6 +8896,10 @@ def add_editor_tag(request):
         return HttpResponse(json.dumps({'success': False, 'message': 'Not found'}))
     if not (qset.is_owner(user) or user in qset.editor.all()):
         return HttpResponse(json.dumps({'success': False, 'message': 'Only owners/editors can manage tags.'}))
+    # The tag says what someone covers on this set, so they have to be on it.
+    if not (qset.is_owner(editor) or editor in qset.editor.all() or editor in qset.writer.all()):
+        return HttpResponse(json.dumps({'success': False,
+                                        'message': 'That writer is not on this set.'}))
     category = (request.POST.get('category') or '').strip()
     label = (request.POST.get('label') or '').strip()[:200]
     if not category and not label:

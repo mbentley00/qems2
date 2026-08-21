@@ -57,6 +57,28 @@
   it — a distribution can be shared, and another set's questions aren't this
   page's business.
 
+## 2026-08-20 (security) — Authorization from the thing being changed
+
+- **Acting on another set’s questions and comments is no longer possible.** Six
+  views read a `qset_id` out of the same form that named the question or comment
+  and checked the caller against *that* set, so being an editor of a set you made
+  yourself authorized you against everyone’s: deleting a comment or every comment
+  on a question, replying into someone else’s thread, converting their tossup to a
+  bonus (which destroys the original), and restoring an old version of their
+  question. Each now takes the set from the object itself. Tests replay all of it.
+- **A comment can say `<script>` without being one.** Comment text is rendered as
+  HTML — the formatter turns QEMS markup into tags and the templates print the
+  result unescaped — and nothing stopped a comment from opening a tag of its own.
+  Anything typed into a comment now has its angle brackets defused before the
+  formatter sees it, and the same goes for replies and for the name a Discord bot
+  posts under. Entities in imported comments (`&#x27;`) still read as they always
+  did, and `~italics~` still work.
+- **Names and categories are escaped in the pages that turn autoescaping off.**
+  51 places printed a writer’s name, a commenter, or a category straight into
+  markup; a writer could put a tag in their own last name and have it run on
+  everyone else’s screen.
+- An editor tag can only be given to somebody who is actually on the set.
+
 ## 2026-08-20 (import fixes, part 3) — The import dialog only offers your sets
 
 - **"Add packets to an existing set" listed every set on the site.** Nearly all of

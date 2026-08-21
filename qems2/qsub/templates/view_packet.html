@@ -101,7 +101,7 @@
     <strong><i class="fa fa-triangle-exclamation"></i> Moderator — read these answer lines carefully:</strong>
     <ul>
         {% for note in careful_notes %}
-        <li><strong>{{ note.label }} {{ note.number }}:</strong> {% autoescape off %}{{ note.answer }}{% endautoescape %}</li>
+        <li><strong>{{ note.label }} {{ note.number }}:</strong> {% autoescape off %}{{ note.answer|escape }}{% endautoescape %}</li>
         {% endfor %}
     </ul>
 </div>

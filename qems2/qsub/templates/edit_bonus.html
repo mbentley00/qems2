@@ -43,12 +43,12 @@
         <div class="anchor-region" data-question-type="bonus" data-question-id="{{ bonus.id }}">
         {{ bonus|bonus_html_verbose }}
         </div>
-            <p><strong>Written by:</strong> {{ bonus.author }} on {{ bonus.created_date }}</p>
+            <p><strong>Written by:</strong> {{ bonus.author|escape }} on {{ bonus.created_date }}</p>
             {% if bonus.edited and bonus.editor %}
-                <p><strong>Edited by:</strong> {{ bonus.editor }} on {{ bonus.edited_date }}</p>
+                <p><strong>Edited by:</strong> {{ bonus.editor|escape }} on {{ bonus.edited_date }}</p>
             {% endif %}
             {% if bonus.proofread and bonus.proofreader %}
-                <p><strong>Proofread by:</strong> {{ bonus.proofreader }} on {{ bonus.proofread_date }}</p>
+                <p><strong>Proofread by:</strong> {{ bonus.proofreader|escape }} on {{ bonus.proofread_date }}</p>
             {% endif %}
             <p><strong>Last modified:</strong> {{ bonus.last_changed_date }}</p>
         </div>
@@ -288,7 +288,7 @@ $(function () {
                 <div class="comment-item{% if comment.id in thread_data.resolved %} comment-resolved{% endif %}{% if comment.is_discord %} comment-discord{% endif %}" data-comment-id="{{ comment.id }}"{% if anchor %} data-anchor-text="{{ anchor.selected_text|force_escape }}" data-anchor-prefix="{{ anchor.prefix|force_escape }}" data-anchor-suffix="{{ anchor.suffix|force_escape }}"{% endif %}>
                     {% if anchor %}<div class="comment-quote" title="Click to locate in question">{{ anchor.selected_text|force_escape }}</div>{% endif %}
                     {% if comment.id in thread_data.resolved %}<span class="label success comment-resolved-badge">Resolved</span>{% endif %}
-                    <strong>{% if comment.is_discord %}<span class="discord-badge">Discord</span>{{ comment.user_name }}{% else %}{{ comment|commenter_name }}{% endif %}{{ comment|commenter_tags:qset }}:</strong> <span class="comment-strikeable" data-comment-id="{{ comment.id }}" data-raw="{{ comment.comment|escape }}">{{ comment.comment|safe|comment_html|linebreaks }}</span> ({{ comment.submit_date }}){% if comment.is_discord and comment.discord_thread_url %} <a href="{{ comment.discord_thread_url }}" target="_blank" rel="noopener" class="discord-thread-link">Open Discord thread</a>{% endif %}
+                    <strong>{% if comment.is_discord %}<span class="discord-badge">Discord</span>{{ comment.user_name|escape }}{% else %}{{ comment|commenter_name }}{% endif %}{{ comment|commenter_tags:qset }}:</strong> <span class="comment-strikeable" data-comment-id="{{ comment.id }}" data-raw="{{ comment.comment|escape }}">{{ comment.comment|safe|comment_html|linebreaks }}</span> ({{ comment.submit_date }}){% if comment.is_discord and comment.discord_thread_url %} <a href="{{ comment.discord_thread_url }}" target="_blank" rel="noopener" class="discord-thread-link">Open Discord thread</a>{% endif %}
                     <div class="comment-actions">
                         {% if role == "editor" %}
                             <a href="/delete_comment/{{ comment.id }}" class="delete_comment" value="{{ comment.id }}" qset="{{ qset.id }}">Delete</a>
@@ -305,7 +305,7 @@ $(function () {
                     <div class="comment-replies">
                         {% for reply in thread_data.replies|get_replies:comment.id %}
                             <div class="comment-item{% if reply.is_discord %} comment-discord{% endif %}" data-comment-id="{{ reply.id }}">
-                                <strong>{% if reply.is_discord %}<span class="discord-badge">Discord</span>{{ reply.user_name }}{% else %}{{ reply|commenter_name }}{% endif %}{{ reply|commenter_tags:qset }}:</strong> <span class="comment-strikeable" data-comment-id="{{ reply.id }}" data-raw="{{ reply.comment|escape }}">{{ reply.comment|safe|comment_html|linebreaks }}</span> ({{ reply.submit_date }}){% if reply.is_discord and reply.discord_thread_url %} <a href="{{ reply.discord_thread_url }}" target="_blank" rel="noopener" class="discord-thread-link">Open Discord thread</a>{% endif %}
+                                <strong>{% if reply.is_discord %}<span class="discord-badge">Discord</span>{{ reply.user_name|escape }}{% else %}{{ reply|commenter_name }}{% endif %}{{ reply|commenter_tags:qset }}:</strong> <span class="comment-strikeable" data-comment-id="{{ reply.id }}" data-raw="{{ reply.comment|escape }}">{{ reply.comment|safe|comment_html|linebreaks }}</span> ({{ reply.submit_date }}){% if reply.is_discord and reply.discord_thread_url %} <a href="{{ reply.discord_thread_url }}" target="_blank" rel="noopener" class="discord-thread-link">Open Discord thread</a>{% endif %}
                                 <div class="comment-actions">
                                     {% if role == "editor" %}
                                         <a href="/delete_comment/{{ reply.id }}" class="delete_comment" value="{{ reply.id }}" qset="{{ qset.id }}">Delete</a>

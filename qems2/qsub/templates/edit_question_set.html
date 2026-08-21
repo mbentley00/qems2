@@ -615,10 +615,10 @@
                     {% autoescape off %}
                         {% for tossup in tossups %}
                         <tr>
-                            <td>{{ tossup.author }}</td>
+                            <td>{{ tossup.author|escape }}</td>
                             <td><a href="/edit_tossup/{{ tossup.id }}">{{ tossup.tossup_text|safe|preview|question_html }}</a></td>
                             <td><a href="/edit_tossup/{{ tossup.id }}">{{ tossup|tossup_answer }}</a></td>
-                            <td><a href="/categories/{{ qset.id }}/{{ tossup.category.id }}">{{ tossup.category }}</a></td>
+                            <td><a href="/categories/{{ qset.id }}/{{ tossup.category.id|escape }}">{{ tossup.category|escape }}</a></td>
                             <td>{% if tossup.packet %}<a href="/view_packet/{{ tossup.packet.id }}/" title="Open this packet">{{ tossup.packet }}</a>{% else %}Not in packet{% endif %}</td>
                             <td>{{ tossup.created_date|to_short_datetime }}</td>
                             <td>{{ tossup.last_changed_date|to_short_datetime }}</td>
@@ -661,7 +661,7 @@
                     {% autoescape off %}
                         {% for bonus in bonuses %}
                         <tr>
-                            <td>{{ bonus.author }}</td>
+                            <td>{{ bonus.author|escape }}</td>
                             <td>
                                 <a href="/edit_bonus/{{ bonus.id }}">
                                     {% if bonus.get_bonus_type == "ACF-style bonus" %}
@@ -672,7 +672,7 @@
                                 </a>
                             </td>
                             <td><a href="/edit_bonus/{{ bonus.id }}">{{ bonus|bonus_answers }}</a></td>
-                            <td><a href="/categories/{{ qset.id }}/{{ bonus.category.id }}">{{ bonus.category }}</a></td>
+                            <td><a href="/categories/{{ qset.id }}/{{ bonus.category.id|escape }}">{{ bonus.category|escape }}</a></td>
                             <td>{% if bonus.packet %}<a href="/view_packet/{{ bonus.packet.id }}/" title="Open this packet">{{ bonus.packet }}</a>{% else %}Not in packet{% endif %}</td>
                             <td>{{ bonus.created_date|to_short_datetime }}</td>
                             <td>{{ bonus.last_changed_date|to_short_datetime }}</td>
