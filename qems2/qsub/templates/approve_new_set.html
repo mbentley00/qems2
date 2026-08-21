@@ -44,7 +44,7 @@
                 <span class="label secondary">{{ qset.get_approval_status_display }}</span>
             {% endif %}
         </p>
-        <p style="color:#555; margin-bottom:0;">
+        <p class="home-note" style="margin-bottom:0">
             {{ qset.date }}{% if qset.host %} &middot; hosted by {{ qset.host }}{% endif %}<br>
             Owner: {{ owner|verbose_username }}{% if owner.user.email %} &middot; {{ owner.user.email }}{% endif %}<br>
             Account created: {{ owner.user.date_joined }}<br>

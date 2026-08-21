@@ -894,6 +894,13 @@ class CategoryTag(models.Model):
     question_set = models.ForeignKey(QuestionSet, on_delete=models.CASCADE)
     category_path = models.CharField(max_length=500)
     name = models.CharField(max_length=200)
+    # What kind of tag this is — "Time", "Location", "Subject". A category's
+    # tags usually run along more than one axis at once (19th Century and
+    # Europe are both History tags but answer different questions about a
+    # packet), and without a name for the axis a long list reads as one flat
+    # pile. Blank means ungrouped, which is what every tag made before this
+    # was.
+    group_name = models.CharField(max_length=100, blank=True, default='')
     num_tossups = models.PositiveIntegerField(default=0)
     num_bonuses = models.PositiveIntegerField(default=0)
     tossups = models.ManyToManyField('Tossup', blank=True, related_name='category_tags')

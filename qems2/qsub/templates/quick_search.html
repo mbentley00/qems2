@@ -15,7 +15,7 @@
     <li class="current">Quick Search</li>
 </ul>
 
-<p style="color:#777; margin-bottom:0.5em;">
+<p class="home-note" style="margin-bottom:0.5em">
     Type to search <strong>answer lines</strong>. Click a result to preview the
     full question; the <i class="fa fa-up-right-from-square"></i> link opens it in a new tab.
 </p>
@@ -29,7 +29,7 @@
     </div>
     <div class="row">
         <div class="small-3 columns">
-            <label style="font-size:0.8rem; color:#777; margin:0;">Set</label>
+            <label class="home-note" style="font-size:0.8rem; margin:0">Set</label>
             <select id="qs-set">
                 <option value="all"{% if selected_qset == 'all' %} selected{% endif %}>All my sets</option>
                 {% for s in q_sets %}
@@ -38,21 +38,21 @@
             </select>
         </div>
         <div class="small-3 columns">
-            <label style="font-size:0.8rem; color:#777; margin:0;">Category</label>
+            <label class="home-note" style="font-size:0.8rem; margin:0">Category</label>
             <select id="qs-category">
                 <option value="">All categories</option>
                 {% for c in category_facets %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
             </select>
         </div>
         <div class="small-3 columns">
-            <label style="font-size:0.8rem; color:#777; margin:0;">Packet</label>
+            <label class="home-note" style="font-size:0.8rem; margin:0">Packet</label>
             <select id="qs-packet">
                 <option value="">All packets</option>
                 {% for p in packet_facets %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
             </select>
         </div>
         <div class="small-3 columns">
-            <label style="font-size:0.8rem; color:#777; margin:0;">Writer</label>
+            <label class="home-note" style="font-size:0.8rem; margin:0">Writer</label>
             <select id="qs-writer">
                 <option value="">All writers</option>
                 {% for w in writer_facets %}<option value="{{ w.id }}">{{ w.name }}</option>{% endfor %}

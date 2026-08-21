@@ -21,7 +21,7 @@
 
     <div class="panel radius">
         <p style="margin-bottom:4px;"><strong>{{ qset.name }}</strong></p>
-        <p style="color:#555; margin-bottom:0;">
+        <p class="home-note" style="margin-bottom:0">
             {{ qset.date }}{% if qset.host %} &middot; hosted by {{ qset.host }}{% endif %}<br>
             Owner: {{ qset.owner|verbose_username }}
         </p>

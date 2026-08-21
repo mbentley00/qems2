@@ -36,11 +36,12 @@
             <th>Tossup Completion</th>
             <th>Bonuses Remaining</th>
             <th>Bonus Completion</th>
+            <th>Tags</th>
         </tr>
     </thead>
     <tbody>
         {% for row in overview_rows %}
-        <tr{% if row.is_group %} style="font-weight: bold; background-color: #f0f0f0;"{% endif %}
+        <tr{% if row.is_group %} class="cat-group-row"{% endif %}
            {% if row.depth == 0 %} data-toplevel="{{ row.short_name }}" data-tu-req="{{ row.tu_req }}" data-tu-written="{{ row.tu_in_cat }}" data-bs-req="{{ row.bs_req }}" data-bs-written="{{ row.bs_in_cat }}"{% endif %}>
             <td style="padding-left: {{ row.padding }}px;">
                 {% if row.is_group %}
@@ -66,6 +67,52 @@
             </td>
             <td>
                 {{ row.bs_in_cat|check_mark_if_100_pct:row.bs_req }} {{ row.bs_in_cat|percent:row.bs_req }}
+            </td>
+            {% comment %}
+            The category's own tags, grouped by the axis they run along. Editors
+            add and remove them here; the full page is still a click away for
+            the answer lines behind each one.
+            {% endcomment %}
+            <td class="cat-tags-cell">
+                {% for tg in row.tag_groups %}
+                <div class="cat-tag-axis">
+                    {% if tg.name %}<span class="cat-tag-axis-name">{{ tg.label }}</span>{% endif %}
+                    {% for entry in tg.tags %}
+                    <span class="cat-tag{% if entry.complete %} cat-tag-done{% endif %}"
+                          title="{{ entry.tu_done }}/{{ entry.tag.num_tossups }} tossups, {{ entry.bs_done }}/{{ entry.tag.num_bonuses }} bonuses">
+                        {{ entry.tag.name }}<span class="cat-tag-count">{{ entry.tu_done }}/{{ entry.tag.num_tossups }}&middot;{{ entry.bs_done }}/{{ entry.tag.num_bonuses }}</span>
+                        {% if can_edit_tags %}
+                        <form action="/category_tags/{{ qset.id }}/" method="post" class="cat-tag-del"
+                              onsubmit="return confirm('Delete the tag '{{ entry.tag.name }}'?');">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="delete">
+                            <input type="hidden" name="tag_id" value="{{ entry.tag.id }}">
+                            <input type="hidden" name="next" value="/category_overview/{{ qset.id }}/">
+                            <button type="submit" title="Remove this tag">&times;</button>
+                        </form>
+                        {% endif %}
+                    </span>
+                    {% endfor %}
+                </div>
+                {% empty %}
+                <span class="cat-tag-none">&mdash;</span>
+                {% endfor %}
+                {% if can_edit_tags and not row.is_group %}
+                <form action="/category_tags/{{ qset.id }}/" method="post" class="cat-tag-add">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="add">
+                    <input type="hidden" name="category_path" value="{{ row.name }}">
+                    <input type="hidden" name="next" value="/category_overview/{{ qset.id }}/">
+                    <input type="text" name="name" placeholder="tag" required>
+                    <input type="text" name="group_name" list="cat-tag-groups" placeholder="group">
+                    <input type="number" name="num_tossups" min="0" value="0" title="Tossups needed">
+                    <input type="number" name="num_bonuses" min="0" value="0" title="Bonuses needed">
+                    <button type="submit" class="button tiny secondary">Add</button>
+                </form>
+                {% endif %}
+                {% if row.tag_count %}
+                <a class="cat-tag-more" href="/category_tags/{{ qset.id }}/?category={{ row.name|urlencode }}">all {{ row.tag_count }} &rarr;</a>
+                {% endif %}
             </td>
         </tr>
         {% endfor %}
@@ -180,7 +227,7 @@
         var $tbody = $('#supergroup-table tbody');
         $tbody.empty();
         $.each(superGroups, function(idx, group) {
-            var row = '<tr style="background-color: #d9edf7;">' +
+            var row = '<tr class="cat-added-row">' +
                 '<td><strong>' + $('<span>').text(group.name).html() + '</strong></td>' +
                 '<td>' + overallPercentStr(group.tu_written, group.tu_req, group.bs_written, group.bs_req) + '</td>' +
                 '<td>' + remainingStr(group.tu_written, group.tu_req) + '</td>' +
@@ -248,5 +295,34 @@
     });
 })();
 </script>
+
+<datalist id="cat-tag-groups">
+    {% for g in group_choices %}<option value="{{ g }}">{% endfor %}
+</datalist>
+
+<style>
+.cat-tags-cell { min-width: 22em; }
+.cat-tag-axis { margin-bottom: 3px; }
+.cat-tag-axis-name { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--qx-muted, #8a8f9c); margin-right: 4px; }
+.cat-tag { display: inline-flex; align-items: center; gap: 4px; margin: 0 4px 3px 0;
+    padding: 1px 7px; border-radius: 10px; font-size: 0.78em;
+    background: var(--qx-elevate, #eef2f7); color: var(--qx-ink, #2b2f3a); }
+.cat-tag-done { background: #e3f0e4; color: #1b5e20; }
+.cat-tag-count { color: var(--qx-muted, #8a8f9c); font-size: 0.9em; }
+.cat-tag-del { display: inline; margin: 0; }
+.cat-tag-del button { border: none; background: none; cursor: pointer; padding: 0 0 0 2px;
+    color: var(--qx-muted, #8a8f9c); font-size: 1em; line-height: 1; }
+.cat-tag-del button:hover { color: #c0392b; }
+.cat-tag-none { color: var(--qx-muted, #8a8f9c); }
+.cat-tag-add { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin: 4px 0 0; }
+.cat-tag-add input[type=text] { width: 8em; margin: 0; font-size: 0.8em; height: 26px; }
+.cat-tag-add input[type=number] { width: 4em; margin: 0; font-size: 0.8em; height: 26px; }
+.cat-tag-add button { margin: 0; }
+.cat-tag-more { font-size: 0.75em; }
+</style>
+<style>
+html[data-theme="dark"] .cat-tag-done { background: #1c3527; color: #86d29d; }
+</style>
 
 {% endblock %}

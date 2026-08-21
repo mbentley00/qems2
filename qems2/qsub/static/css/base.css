@@ -1035,6 +1035,14 @@ body.app-authed a.app-nav-item:hover { color: var(--qx-ink); }
 ::selection { background: #ddd0ff; color: #20232e; }
 ::-moz-selection { background: #ddd0ff; color: #20232e; }
 
+
+/* Rows that head a group in the category tables, and the soft amber panels.
+   These used to be inline style attributes, which no theme can override —
+   an inline colour beats every stylesheet rule. */
+.cat-group-row { font-weight: bold; background-color: #f0f0f0; }
+.cat-added-row { background-color: #d9edf7; }
+.panel-soft-warning { background: #fff8e1; border: 1px solid #f0d99b; }
+
 html[data-theme="dark"] {
     --qx-primary: #8b5cf6;
     --qx-primary-dark: #7c3aed;
@@ -1461,6 +1469,53 @@ html[data-theme="dark"] .rich-editor-toolbar a.rich-editor-btn.rich-editor-pg { 
 
 html[data-theme="dark"] ::selection { background: #4a3a80; color: #f4f2fb; }
 html[data-theme="dark"] ::-moz-selection { background: #4a3a80; color: #f4f2fb; }
+
+
+/* ---- Status tints -------------------------------------------------------
+   The grey sweep left these alone on purpose: the colour is the message
+   (green = done, amber = outstanding, red = removed), so each needs a dark
+   version of its own hue rather than a neutral token. Pale fill + dark ink
+   becomes dark fill + light ink, the same pairs used for the doc-view tags. */
+html[data-theme="dark"] .tag-complete { background-color: #1c3527; color: #86d29d; }
+html[data-theme="dark"] .tag-incomplete { background-color: #33301c; color: #e0c169; }
+html[data-theme="dark"] .tag-group-header { border-bottom-color: var(--qx-border); }
+
+html[data-theme="dark"] .sc-just-fixed { background-color: #1c3527 !important; }
+
+html[data-theme="dark"] .suggested-changes .suggestion-diff del {
+    background: #3a1d1d; color: #f08c8c;
+}
+html[data-theme="dark"] .suggested-changes .suggestion-diff ins {
+    background: #1c3527; color: #86d29d;
+}
+
+html[data-theme="dark"] .edit-swap-candidate:hover { background: #1b3646; }
+html[data-theme="dark"] #qs-results mark { background: #4a4215; color: var(--qx-ink); }
+
+/* Doc view: the swap chip, and the amber "this comment is anchored here" band */
+html[data-theme="dark"] .doc-comment-selection,
+html[data-theme="dark"] .doc-anchor-quote {
+    background: #2b2716;
+    color: #e0c169;
+    border-left-color: #8a6d1e;
+}
+html[data-theme="dark"] .doc-comment-selection .fa { color: #e0c169; }
+html[data-theme="dark"] .doc-question.doc-commented-highlight {
+    background-color: #2b2716;
+    border-color: #8a6d1e;
+}
+
+/* The anchored-comment highlight inside question text (base.css, light hex) */
+html[data-theme="dark"] .anchored-highlight {
+    background-color: #4a4215;
+    border-bottom-color: #e0c169;
+}
+html[data-theme="dark"] .anchored-highlight.active,
+html[data-theme="dark"] .anchored-highlight:hover { background-color: #6b5f1d; }
+
+html[data-theme="dark"] .cat-group-row { background-color: var(--qx-elevate); }
+html[data-theme="dark"] .cat-added-row { background-color: #16303f; }
+html[data-theme="dark"] .panel-soft-warning { background: #33301c; border-color: #6b5b23; }
 
 /* Secondary buttons on dark */
 html[data-theme="dark"] .app-content .button.secondary,

@@ -14,7 +14,8 @@
 <h3 class="page-header">Category Tags: {{ qset.name }}</h3>
 <ul class="breadcrumbs">
     <li><a href="/edit_question_set/{{ qset.id }}/">{{ qset.name }}</a></li>
-    <li class="current"><a href="/category_tags/{{ qset.id }}/">Category Tags</a></li>
+    <li{% if not focus_path %} class="current"{% endif %}><a href="/category_tags/{{ qset.id }}/">Category Tags</a></li>
+    {% if focus_path %}<li class="current">{{ focus_path }}</li>{% endif %}
 </ul>
 
 {% if message %}
@@ -25,6 +26,9 @@
     Tags are editor-defined requirements within a category &mdash; for instance &ldquo;Asian Literature&rdquo;
     under Literature - World with 6 tossups and 6 bonuses needed. Writers fulfill a tag by checking it
     on the question's edit page. Tags with a required count of 0 are informational labels.
+    <p class="home-note">A <strong>group</strong> names the axis a tag runs along &mdash; Time, Location,
+    Subject. A category's tags usually run along more than one at once, and naming the axis is what keeps
+    a long list from reading as one flat pile.</p>
 </div>
 
 {% if can_edit %}
@@ -32,11 +36,11 @@
     {% csrf_token %}
     <input type="hidden" name="action" value="add">
     <div class="row">
-        <div class="small-4 columns">
+        <div class="small-3 columns">
             <label>Category
                 <select name="category_path">
                     {% for path in path_choices %}
-                    <option value="{{ path }}"{% if path == selected_path %} selected{% endif %}>{{ path }}</option>
+                    <option value="{{ path }}"{% if path == selected_path or path == focus_path %} selected{% endif %}>{{ path }}</option>
                     {% endfor %}
                 </select>
             </label>
@@ -47,12 +51,20 @@
             </label>
         </div>
         <div class="small-2 columns">
+            <label>Group
+                <input type="text" name="group_name" list="tag-group-choices" placeholder="e.g. Location">
+                <datalist id="tag-group-choices">
+                    {% for g in group_choices %}<option value="{{ g }}">{% endfor %}
+                </datalist>
+            </label>
+        </div>
+        <div class="small-2 columns">
             <label>Tossups Needed
                 <input type="number" name="num_tossups" min="0" value="0">
             </label>
         </div>
-        <div class="small-2 columns">
-            <label>Bonuses Needed
+        <div class="small-1 columns">
+            <label>Bonuses
                 <input type="number" name="num_bonuses" min="0" value="0">
             </label>
         </div>
@@ -61,68 +73,111 @@
             <input type="submit" value="Add" class="button small primary">
         </div>
     </div>
+    <p class="home-note">Adding a tag that already exists in that category updates its group and counts.</p>
 </form>
 {% endif %}
 
-{% if not groups %}
-<div class="panel callout"><p>No tags defined yet.</p></div>
+{% if focus_path %}
+<p><a href="/category_tags/{{ qset.id }}/" class="button small secondary">&laquo; All categories</a></p>
 {% endif %}
 
+{% if not groups %}
+<div class="panel callout"><p>{% if focus_path %}No tags in {{ focus_path }} yet.{% else %}No tags defined yet.{% endif %}</p></div>
+{% endif %}
+
+{% comment %}
+One <details> per category, so a set with a few hundred tags opens as a list of
+categories rather than as everything at once. A focused view (?category=…) opens
+its one category, since that is the whole page then.
+{% endcomment %}
 {% for group in groups %}
-<h4 class="tag-group-header">{{ group.path }}</h4>
-<table class="table-striped table-hover tag-table">
-    <thead>
-        <tr>
-            <th style="width: 16%;">Tag</th>
-            <th style="width: 7%;">Tossups</th>
-            <th style="width: 31%;">TU Answer Lines</th>
-            <th style="width: 7%;">Bonuses</th>
-            <th style="width: 31%;">Bonus Answer Lines</th>
-            {% if can_edit %}<th style="width: 8%;"></th>{% endif %}
-        </tr>
-    </thead>
-    <tbody>
-        {% for row in group.rows %}
-        <tr>
-            <td><strong>{{ row.tag.name }}</strong></td>
-            <td class="{% if row.tu_complete %}tag-complete{% else %}tag-incomplete{% endif %}">
-                {{ row.tu_done }}{% if row.tag.num_tossups %}/{{ row.tag.num_tossups }}{% endif %}
-            </td>
-            <td>
-                {% for q in row.tossups %}
-                    <a href="/edit_tossup/{{ q.id }}/" title="{{ q.location }}">{{ q.answer }}</a>{% if not forloop.last %}<br>{% endif %}
+<details class="tag-cat" {% if focus_path or groups|length == 1 %}open{% endif %}>
+    <summary class="tag-cat-summary">
+        <span class="tag-cat-name">{{ group.path }}</span>
+        <span class="tag-cat-counts">
+            {{ group.tag_count }} tag{{ group.tag_count|pluralize }}
+            {% if group.tu_required %}&middot; {{ group.tu_done }}/{{ group.tu_required }} tossups{% endif %}
+            {% if group.bs_required %}&middot; {{ group.bs_done }}/{{ group.bs_required }} bonuses{% endif %}
+            {% if group.incomplete %}<span class="tag-cat-open">{{ group.incomplete }} outstanding</span>{% endif %}
+        </span>
+        <a class="tag-cat-only" href="/category_tags/{{ qset.id }}/?category={{ group.path|urlencode }}">Just this category &rarr;</a>
+    </summary>
+
+    {% for tg in group.tag_groups %}
+    <div class="tag-axis">
+        <div class="tag-axis-name">{{ tg.label }}</div>
+        <table class="table-striped table-hover tag-table">
+            <thead>
+                <tr>
+                    <th style="width: 16%;">Tag</th>
+                    <th style="width: 7%;">Tossups</th>
+                    <th style="width: 31%;">TU Answer Lines</th>
+                    <th style="width: 7%;">Bonuses</th>
+                    <th style="width: 31%;">Bonus Answer Lines</th>
+                    {% if can_edit %}<th style="width: 8%;"></th>{% endif %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in tg.rows %}
+                <tr>
+                    <td><strong>{{ row.tag.name }}</strong></td>
+                    <td class="{% if row.tu_complete %}tag-complete{% else %}tag-incomplete{% endif %}">
+                        {{ row.tu_done }}{% if row.tag.num_tossups %}/{{ row.tag.num_tossups }}{% endif %}
+                    </td>
+                    <td>
+                        {% for q in row.tossups %}
+                            <a href="/edit_tossup/{{ q.id }}/" title="{{ q.location }}">{{ q.answer }}</a>{% if not forloop.last %}<br>{% endif %}
+                        {% endfor %}
+                    </td>
+                    <td class="{% if row.bs_complete %}tag-complete{% else %}tag-incomplete{% endif %}">
+                        {{ row.bs_done }}{% if row.tag.num_bonuses %}/{{ row.tag.num_bonuses }}{% endif %}
+                    </td>
+                    <td>
+                        {% for q in row.bonuses %}
+                            <a href="/edit_bonus/{{ q.id }}/" title="{{ q.location }}">{{ q.answer }}</a>{% if not forloop.last %}<br>{% endif %}
+                        {% endfor %}
+                    </td>
+                    {% if can_edit %}
+                    <td>
+                        <form action="" method="post" class="tag-delete-form"
+                              onsubmit="return confirm('Delete the tag \'{{ row.tag.name }}\'? Question assignments to it will be removed.');">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="delete">
+                            <input type="hidden" name="tag_id" value="{{ row.tag.id }}">
+                            <input type="submit" value="Delete" class="button tiny alert">
+                        </form>
+                    </td>
+                    {% endif %}
+                </tr>
                 {% endfor %}
-            </td>
-            <td class="{% if row.bs_complete %}tag-complete{% else %}tag-incomplete{% endif %}">
-                {{ row.bs_done }}{% if row.tag.num_bonuses %}/{{ row.tag.num_bonuses }}{% endif %}
-            </td>
-            <td>
-                {% for q in row.bonuses %}
-                    <a href="/edit_bonus/{{ q.id }}/" title="{{ q.location }}">{{ q.answer }}</a>{% if not forloop.last %}<br>{% endif %}
-                {% endfor %}
-            </td>
-            {% if can_edit %}
-            <td>
-                <form action="" method="post" style="margin: 0;"
-                      onsubmit="return confirm('Delete the tag \'{{ row.tag.name }}\'? Question assignments to it will be removed.');">
-                    {% csrf_token %}
-                    <input type="hidden" name="action" value="delete">
-                    <input type="hidden" name="tag_id" value="{{ row.tag.id }}">
-                    <input type="submit" value="Delete" class="button tiny alert" style="margin: 0;">
-                </form>
-            </td>
-            {% endif %}
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
+            </tbody>
+        </table>
+    </div>
+    {% endfor %}
+</details>
 {% endfor %}
 
 <style>
-.tag-group-header { border-bottom: 2px solid #333; padding-bottom: 4px; margin-top: 25px; }
+.tag-cat { border: 1px solid var(--qx-border, #e9e9ef); border-radius: 6px;
+    margin: 10px 0; background: var(--qx-card, #fff); }
+.tag-cat-summary { cursor: pointer; padding: 10px 14px; display: flex; flex-wrap: wrap;
+    align-items: baseline; gap: 12px; }
+.tag-cat-summary::-webkit-details-marker { margin-right: 6px; }
+.tag-cat-name { font-weight: bold; font-size: 1.05em; }
+.tag-cat-counts { color: var(--qx-muted, #8a8f9c); font-size: 0.85em; }
+.tag-cat-open { color: #c0392b; font-weight: bold; margin-left: 6px; }
+.tag-cat-only { margin-left: auto; font-size: 0.8em; }
+.tag-axis { padding: 0 14px 6px; }
+.tag-axis-name { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--qx-muted, #8a8f9c); margin: 8px 0 2px; }
 .tag-table td { vertical-align: top; font-size: 0.85em; }
+.tag-delete-form { margin: 0; }
+.tag-delete-form input { margin: 0; }
 .tag-complete { background-color: #dff0d8; color: #3c763d; font-weight: bold; }
 .tag-incomplete { background-color: #fcf8e3; color: #8a6d3b; font-weight: bold; }
+</style>
+<style>
+html[data-theme="dark"] .tag-cat-open { color: #f08c8c; }
 </style>
 
 {% endblock %}

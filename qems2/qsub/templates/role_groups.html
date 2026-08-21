@@ -8,7 +8,7 @@
 
 {% block content %}
 <h3 class="page-header">Role Groups</h3>
-<p style="color:#555;">A role group is a named set of people (for example, <em>PACE Editor</em>).
+<p class="home-note">A role group is a named set of people (for example, <em>PACE Editor</em>).
 Attach a group to a question set as editor or writer (from that set's page), and every member
 gets that role. Add someone to the group later and they gain the role on all those sets; remove
 them and they lose it.</p>
@@ -33,7 +33,7 @@ them and they lose it.</p>
     </h5>
 
     {% if g.assignments %}
-    <p style="color:#555; margin-bottom:6px;">Attached to:
+    <p class="home-note" style="margin-bottom:6px">Attached to:
         {% for a in g.assignments %}<strong>{{ a.question_set.name }}</strong> ({{ a.role }}){% if not forloop.last %}, {% endif %}{% endfor %}
     </p>
     {% else %}
@@ -41,7 +41,7 @@ them and they lose it.</p>
     {% endif %}
 
     {% if g.can_manage and g.pending %}
-    <div class="panel radius" style="background:#fff8e1; border:1px solid #f0d99b; padding:8px 10px; margin-bottom:8px;">
+    <div class="panel radius" class="panel-soft-warning" style="padding:8px 10px; margin-bottom:8px;">
         <strong>Pending join requests ({{ g.pending|length }})</strong>
         <table class="table-striped" style="margin:6px 0 0;">
             <tbody>

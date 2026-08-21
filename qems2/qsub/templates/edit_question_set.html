@@ -365,7 +365,7 @@
                 <h5 style="margin-top:0;">Role groups
                     <a href="/role_groups/" class="button tiny secondary right" style="margin:0;">Manage role groups</a>
                 </h5>
-                <p style="color:#555; margin-bottom:6px;">Attach a group (e.g. <em>PACE Editor</em>) so all its
+                <p class="home-note" style="margin-bottom:6px">Attach a group (e.g. <em>PACE Editor</em>) so all its
                 members get a role here. Membership changes to the group take effect on this set automatically.</p>
                 {% if attached_role_groups %}
                 <ul class="no-bullet" style="margin-left:0;">
@@ -398,7 +398,7 @@
 
         {% if is_set_owner %}
             {% if pending_join_requests %}
-            <div class="panel radius" style="background:#fff8e1; border:1px solid #f0d99b;">
+            <div class="panel radius panel-soft-warning">
                 <h5 style="margin-top:0;">Pending access requests ({{ pending_join_requests|length }})</h5>
                 <table class="table-striped" style="margin:0;">
                     <tbody>
@@ -409,7 +409,7 @@
                                 <span style="color:#888;">"{{ r.requester.user.username }}"</span>
                                 {% if r.requester.user.email %}<span style="color:#aaa;">&middot; {{ r.requester.user.email }}</span>{% endif %}
                                 {% if r.via_link %}<small style="color:#888;">(via join link)</small>{% endif %}
-                                {% if r.message %}<br><small style="color:#555;">&ldquo;{{ r.message }}&rdquo;</small>{% endif %}
+                                {% if r.message %}<br><small class="home-note">&ldquo;{{ r.message }}&rdquo;</small>{% endif %}
                             </td>
                             <td style="text-align:right; white-space:nowrap;">
                                 <form method="post" action="/set_join_request/{{ qset.id }}/" style="display:inline;">
@@ -435,7 +435,7 @@
 
             <div class="panel radius">
                 <h5 style="margin-top:0;">Join link</h5>
-                <p style="color:#555; margin-bottom:6px;">Share this link with people who should be on the set.
+                <p class="home-note" style="margin-bottom:6px">Share this link with people who should be on the set.
                 Anyone logged in who opens it can <em>request</em> access &mdash; the link never grants a role on
                 its own, so every request still waits for your approval here.</p>
 

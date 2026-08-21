@@ -17,7 +17,7 @@
 
 {% if messages %}{% for message in messages %}<div class="{{ message.tags }}">{{ message }}</div>{% endfor %}{% endif %}
 
-<p style="color:#555;">Everyone in the group you pick gets the role you choose on
+<p class="home-note">Everyone in the group you pick gets the role you choose on
 <strong>{{ qset.name }}</strong>, and it keeps up with the group: people added to the group later
 get the role too, and people removed lose it (unless they were also added to this set directly).</p>
 

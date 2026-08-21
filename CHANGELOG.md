@@ -57,6 +57,27 @@
   it — a distribution can be shared, and another set's questions aren't this
   page's business.
 
+## 2026-08-21 — Category tags grow an axis, a tree, and a home on the overview
+
+- **Tags can say which axis they run along.** A category’s tags are usually more
+  than one kind of thing at once — 19th Century and Iberia are both History tags but
+  answer different questions about a packet. Give a tag a **group** (Time, Location,
+  Subject) and they list under that heading; previously-made tags are simply
+  ungrouped, and stay listed last.
+- **The Category Tags page is a tree.** A set with a few hundred tags opened as one
+  wall; it now opens as a list of categories, each showing its tag count, its
+  tossup/bonus progress and how many are outstanding, expanding to the tags
+  themselves. **Just this category** narrows the page to one category.
+- **Tags appear on the Category Overview**, grouped by axis, with what each has
+  against what it asks for — and owners and editors add, retag and delete them
+  there without leaving the page.
+- **Dark mode**: the tag progress chips (pale green and cream with dark ink) and
+  everything else in that family — the style-fix flash, suggestion diffs, the
+  doc-view anchor bands and the search highlight — got dark counterparts of their
+  own hue. Inline `style=` attributes, which no stylesheet can override, moved onto
+  classes: the group rows on the category and packetize tables, the soft amber
+  panels, and 18 spots of muted help text.
+
 ## 2026-08-20 (security) — Authorization from the thing being changed
 
 - **Acting on another set’s questions and comments is no longer possible.** Six

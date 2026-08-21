@@ -6699,8 +6699,41 @@ def category_overview(request, qset_id):
         editors_by_cat.setdefault(t.category, [])
         if name not in editors_by_cat[t.category]:
             editors_by_cat[t.category].append(name)
+    # The category's tags belong on the page about categories. Grouped by the
+    # axis they run along, with how many questions each has against what it
+    # asks for, so a row says what is outstanding without a second page.
+    tags_by_path = {}
+    for tag in (CategoryTag.objects.filter(question_set=qset)
+                .order_by('group_name', 'name').prefetch_related('tossups', 'bonuses')):
+        done_tu = tag.tossups.count()
+        done_bs = tag.bonuses.count()
+        tags_by_path.setdefault(tag.category_path, []).append({
+            'tag': tag,
+            'tu_done': done_tu,
+            'bs_done': done_bs,
+            'complete': ((tag.num_tossups == 0 or done_tu >= tag.num_tossups) and
+                         (tag.num_bonuses == 0 or done_bs >= tag.num_bonuses)),
+        })
+
     for row in overview_rows:
         row['editors'] = editors_by_cat.get(row['name'], [])
+        rows_for_path = tags_by_path.get(row['name'], [])
+        by_group, order = {}, []
+        for entry in rows_for_path:
+            key = (entry['tag'].group_name or '').strip()
+            if key not in by_group:
+                by_group[key] = []
+                order.append(key)
+            by_group[key].append(entry)
+        order.sort(key=lambda k: (k == '', k.lower()))
+        row['tag_groups'] = [{'name': k, 'label': k or 'Ungrouped', 'tags': by_group[k]}
+                             for k in order]
+        row['tag_count'] = len(rows_for_path)
+
+    can_edit_tags = qset.is_owner(user) or user in qset.editor.all()
+    group_choices = sorted(set(
+        CategoryTag.objects.filter(question_set=qset)
+        .exclude(group_name='').values_list('group_name', flat=True)))
 
     return render(request, 'category_overview.html',
                              {'user': user,
@@ -6709,6 +6742,8 @@ def category_overview(request, qset_id):
                               'set_pct_progress_bar': '{0:0.0f}%'.format(set_pct_complete),
                               'tu_needed': tu_needed,
                               'bs_needed': bs_needed,
+                              'can_edit_tags': can_edit_tags,
+                              'group_choices': group_choices,
                               'qset': qset})
 
 @login_required
@@ -10001,16 +10036,19 @@ def category_tags(request, qset_id):
                 if action == 'add':
                     path = request.POST.get('category_path', '').strip()
                     name = request.POST.get('name', '').strip()
+                    group_name = request.POST.get('group_name', '').strip()[:100]
                     num_tossups = int(request.POST.get('num_tossups') or 0)
                     num_bonuses = int(request.POST.get('num_bonuses') or 0)
                     if not path or not name:
                         raise ValueError('A category and a tag name are required')
                     tag, created = CategoryTag.objects.get_or_create(
                         question_set=qset, category_path=path, name=name,
-                        defaults={'num_tossups': num_tossups, 'num_bonuses': num_bonuses})
+                        defaults={'num_tossups': num_tossups, 'num_bonuses': num_bonuses,
+                                  'group_name': group_name})
                     if not created:
                         tag.num_tossups = num_tossups
                         tag.num_bonuses = num_bonuses
+                        tag.group_name = group_name
                         tag.save()
                     message = 'Tag "{0}" saved'.format(name)
                     message_class = 'alert-box success'
@@ -10022,13 +10060,30 @@ def category_tags(request, qset_id):
                 message = str(ex) or 'Invalid request'
                 message_class = 'alert-box warning'
 
+        # Tags are edited from the category overview as well as from here.
+        nxt = (request.POST.get('next') or '').strip()
+        if nxt.startswith('/category_overview/'):
+            if message_class.endswith('warning'):
+                messages.error(request, message)
+            elif message:
+                messages.success(request, message)
+            return HttpResponseRedirect(nxt)
+
     # Category path choices from the set's distribution tree
     path_choices = [row['path'] for row in get_packetization_rows(qset)]
+
+    # One category at a time, when the tree asks for it: a set with a few
+    # hundred tags is unreadable as one page, and most of the time you are
+    # working inside one category anyway.
+    focus_path = (request.GET.get('category') or '').strip()
 
     # Group tags by category path with completion status
     groups = []
     tags_by_path = {}
-    for tag in CategoryTag.objects.filter(question_set=qset).order_by('category_path', 'name').prefetch_related('tossups', 'bonuses'):
+    tag_qs = CategoryTag.objects.filter(question_set=qset)
+    if focus_path:
+        tag_qs = tag_qs.filter(category_path=focus_path)
+    for tag in tag_qs.order_by('category_path', 'group_name', 'name').prefetch_related('tossups', 'bonuses'):
         tags_by_path.setdefault(tag.category_path, []).append(tag)
     for path in sorted(tags_by_path):
         rows = []
@@ -10055,15 +10110,43 @@ def category_tags(request, qset_id):
                 'tu_complete': tag.num_tossups == 0 or tu_done >= tag.num_tossups,
                 'bs_complete': tag.num_bonuses == 0 or bs_done >= tag.num_bonuses,
             })
-        groups.append({'path': path, 'rows': rows})
+        # Within a category, tags are shown under the axis they belong to —
+        # "Time", "Location" — with the unnamed ones last under their own head.
+        by_group, order = {}, []
+        for row in rows:
+            key = (row['tag'].group_name or '').strip()
+            if key not in by_group:
+                by_group[key] = []
+                order.append(key)
+            by_group[key].append(row)
+        order.sort(key=lambda k: (k == '', k.lower()))
+        tag_groups = [{'name': k, 'label': k or 'Ungrouped', 'rows': by_group[k]}
+                      for k in order]
+        groups.append({
+            'path': path,
+            'rows': rows,
+            'tag_groups': tag_groups,
+            'tag_count': len(rows),
+            'tu_required': sum(r['tag'].num_tossups for r in rows),
+            'tu_done': sum(r['tu_done'] for r in rows),
+            'bs_required': sum(r['tag'].num_bonuses for r in rows),
+            'bs_done': sum(r['bs_done'] for r in rows),
+            'incomplete': sum(1 for r in rows if not (r['tu_complete'] and r['bs_complete'])),
+        })
+
+    group_choices = sorted(set(
+        CategoryTag.objects.filter(question_set=qset)
+        .exclude(group_name='').values_list('group_name', flat=True)))
 
     return render(request, 'category_tags.html',
                              {'qset': qset,
                               'user': user,
                               'groups': groups,
                               'path_choices': path_choices,
+                              'group_choices': group_choices,
                               'can_edit': can_edit,
                               'selected_path': selected_path,
+                              'focus_path': focus_path,
                               'message': message,
                               'message_class': message_class})
 

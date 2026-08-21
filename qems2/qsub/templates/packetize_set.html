@@ -110,7 +110,7 @@
         </thead>
         <tbody>
             {% for row in rows %}
-            <tr{% if row.is_top %} style="font-weight: bold; background-color: #f0f0f0;"{% endif %}>
+            <tr{% if row.is_top %} class="cat-group-row"{% endif %}>
                 <td style="padding-left: {{ row.padding }}px;">
                     {{ row.short_name }}
                     <input type="hidden" name="row_{{ forloop.counter0 }}_path" value="{{ row.path }}">

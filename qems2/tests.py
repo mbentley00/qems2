@@ -10489,3 +10489,203 @@ class CommentMarkupIsNotHtmlTests(TestCase):
         # data-raw attribute holds an escaped copy of the same text, where
         # &amp;#x27; is correct attribute escaping — so this checks the body.)
         self.assertIn('<p>it&#x27;s fine</p>', page)
+
+
+class CategoryTagGroupingTests(TestCase):
+    """Tags run along more than one axis at once — Time, Location — and saying
+    which is what keeps a category's list from reading as one flat pile."""
+
+    def setUp(self):
+        self.ou = User.objects.create_user('ctg_owner', password='pw', email='ctg@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.wu = User.objects.create_user('ctg_writer', password='pw', email='ctw@t.com')
+        self.writer = Writer.objects.get(user=self.wu)
+        self.dist = Distribution.objects.create(name='CTG dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='History', subcategory='European',
+            min_tossups=2, min_bonuses=2)
+        self.qset = QuestionSet.objects.create(
+            name='CTG Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=2, distribution=self.dist)
+        self.qset.editor.add(self.owner)
+        self.qset.writer.add(self.writer)
+        SetWideDistributionEntry.objects.create(
+            question_set=self.qset, dist_entry=self.de, num_tossups=4, num_bonuses=4)
+        self.client.login(username='ctg_owner', password='pw')
+
+    def _add(self, name, group='', path='History - European', **extra):
+        data = {'action': 'add', 'category_path': path, 'name': name,
+                'group_name': group, 'num_tossups': 1, 'num_bonuses': 1}
+        data.update(extra)
+        return self.client.post('/category_tags/{0}/'.format(self.qset.id), data)
+
+    def test_a_tag_can_carry_a_group(self):
+        self._add('19th Century', 'Time')
+        tag = CategoryTag.objects.get(name='19th Century')
+        self.assertEqual(tag.group_name, 'Time')
+
+    def test_adding_the_same_tag_again_updates_its_group(self):
+        self._add('19th Century', '')
+        self._add('19th Century', 'Time', num_tossups=3)
+        tag = CategoryTag.objects.get(name='19th Century')
+        self.assertEqual(tag.group_name, 'Time')
+        self.assertEqual(tag.num_tossups, 3)
+        self.assertEqual(CategoryTag.objects.filter(name='19th Century').count(), 1)
+
+    def test_the_page_groups_tags_by_axis(self):
+        self._add('19th Century', 'Time')
+        self._add('20th Century', 'Time')
+        self._add('Iberia', 'Location')
+        self._add('Loose end', '')
+        resp = self.client.get('/category_tags/{0}/'.format(self.qset.id))
+        group = resp.context['groups'][0]
+        labels = [g['label'] for g in group['tag_groups']]
+        self.assertEqual(labels, ['Location', 'Time', 'Ungrouped'])
+        time_names = [r['tag'].name for r in group['tag_groups'][1]['rows']]
+        self.assertEqual(time_names, ['19th Century', '20th Century'])
+
+    def test_ungrouped_tags_come_last(self):
+        self._add('Loose end', '')
+        self._add('Iberia', 'Location')
+        resp = self.client.get('/category_tags/{0}/'.format(self.qset.id))
+        labels = [g['label'] for g in resp.context['groups'][0]['tag_groups']]
+        self.assertEqual(labels[-1], 'Ungrouped')
+
+    def test_the_existing_groups_are_offered_for_reuse(self):
+        self._add('19th Century', 'Time')
+        resp = self.client.get('/category_tags/{0}/'.format(self.qset.id))
+        self.assertIn('Time', resp.context['group_choices'])
+
+
+class CategoryTagTreeTests(TestCase):
+    """The page opens as a list of categories, not as every tag at once."""
+
+    def setUp(self):
+        self.ou = User.objects.create_user('ctt_owner', password='pw', email='ctt@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='CTT dist')
+        for cat, sub in [('History', 'European'), ('Science', 'Biology')]:
+            DistributionEntry.objects.create(
+                distribution=self.dist, category=cat, subcategory=sub,
+                min_tossups=2, min_bonuses=2)
+        self.qset = QuestionSet.objects.create(
+            name='CTT Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=2, distribution=self.dist)
+        self.qset.editor.add(self.owner)
+        for entry in self.dist.distributionentry_set.all():
+            SetWideDistributionEntry.objects.create(
+                question_set=self.qset, dist_entry=entry, num_tossups=4, num_bonuses=4)
+        CategoryTag.objects.create(question_set=self.qset, category_path='History - European',
+                                   name='19th Century', group_name='Time', num_tossups=2)
+        CategoryTag.objects.create(question_set=self.qset, category_path='Science - Biology',
+                                   name='Genetics', num_tossups=1)
+        self.client.login(username='ctt_owner', password='pw')
+
+    def test_every_category_with_tags_is_a_section(self):
+        resp = self.client.get('/category_tags/{0}/'.format(self.qset.id))
+        paths = [g['path'] for g in resp.context['groups']]
+        self.assertEqual(paths, ['History - European', 'Science - Biology'])
+        body = resp.content.decode()
+        self.assertIn('<details class="tag-cat"', body)
+
+    def test_a_section_summarises_what_is_inside_it(self):
+        resp = self.client.get('/category_tags/{0}/'.format(self.qset.id))
+        history = resp.context['groups'][0]
+        self.assertEqual(history['tag_count'], 1)
+        self.assertEqual(history['tu_required'], 2)
+        self.assertEqual(history['incomplete'], 1)
+
+    def test_one_category_can_be_looked_at_on_its_own(self):
+        resp = self.client.get(
+            '/category_tags/{0}/?category=Science - Biology'.format(self.qset.id))
+        paths = [g['path'] for g in resp.context['groups']]
+        self.assertEqual(paths, ['Science - Biology'])
+        self.assertEqual(resp.context['focus_path'], 'Science - Biology')
+        self.assertNotIn('19th Century', resp.content.decode())
+
+    def test_the_focused_view_links_back(self):
+        body = self.client.get(
+            '/category_tags/{0}/?category=Science - Biology'.format(self.qset.id)).content.decode()
+        self.assertIn('All categories', body)
+
+
+class CategoryOverviewTagTests(TestCase):
+    """Tags belong on the page about categories, and an editor can work on them
+    without leaving it."""
+
+    def setUp(self):
+        self.ou = User.objects.create_user('cot_owner', password='pw', email='cot@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.wu = User.objects.create_user('cot_writer', password='pw', email='cow@t.com')
+        self.writer = Writer.objects.get(user=self.wu)
+        self.dist = Distribution.objects.create(name='COT dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='History', subcategory='European',
+            min_tossups=2, min_bonuses=2)
+        self.qset = QuestionSet.objects.create(
+            name='COT Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=2, distribution=self.dist)
+        self.qset.editor.add(self.owner)
+        self.qset.writer.add(self.writer)
+        SetWideDistributionEntry.objects.create(
+            question_set=self.qset, dist_entry=self.de, num_tossups=4, num_bonuses=4)
+        self.tag = CategoryTag.objects.create(
+            question_set=self.qset, category_path='History - European',
+            name='19th Century', group_name='Time', num_tossups=2, num_bonuses=1)
+        self.client.login(username='cot_owner', password='pw')
+
+    def _overview(self):
+        return self.client.get('/category_overview/{0}/'.format(self.qset.id))
+
+    def test_the_overview_shows_a_category_s_tags(self):
+        resp = self._overview()
+        body = resp.content.decode()
+        self.assertIn('19th Century', body)
+        self.assertIn('Time', body)
+
+    def test_the_tags_are_grouped_by_axis(self):
+        CategoryTag.objects.create(question_set=self.qset, category_path='History - European',
+                                   name='Iberia', group_name='Location')
+        row = [r for r in self._overview().context['overview_rows']
+               if r['name'] == 'History - European'][0]
+        self.assertEqual([g['label'] for g in row['tag_groups']], ['Location', 'Time'])
+
+    def test_an_editor_can_add_a_tag_from_the_overview(self):
+        resp = self.client.post('/category_tags/{0}/'.format(self.qset.id), {
+            'action': 'add', 'category_path': 'History - European', 'name': 'Iberia',
+            'group_name': 'Location', 'num_tossups': 1, 'num_bonuses': 0,
+            'next': '/category_overview/{0}/'.format(self.qset.id)})
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp['Location'], '/category_overview/{0}/'.format(self.qset.id))
+        tag = CategoryTag.objects.get(name='Iberia')
+        self.assertEqual(tag.group_name, 'Location')
+        self.assertEqual(tag.category_path, 'History - European')
+
+    def test_an_editor_can_delete_a_tag_from_the_overview(self):
+        resp = self.client.post('/category_tags/{0}/'.format(self.qset.id), {
+            'action': 'delete', 'tag_id': self.tag.id,
+            'next': '/category_overview/{0}/'.format(self.qset.id)})
+        self.assertEqual(resp.status_code, 302)
+        self.assertFalse(CategoryTag.objects.filter(id=self.tag.id).exists())
+
+    def test_a_writer_gets_no_editing_controls(self):
+        self.client.logout()
+        self.client.login(username='cot_writer', password='pw')
+        resp = self._overview()
+        self.assertFalse(resp.context['can_edit_tags'])
+        body = resp.content.decode()
+        # The stylesheet still defines the class; what must be absent is a form.
+        self.assertNotIn('class="cat-tag-add"', body)
+        self.assertNotIn('class="cat-tag-del"', body)
+
+    def test_a_writer_cannot_add_a_tag_by_posting(self):
+        self.client.logout()
+        self.client.login(username='cot_writer', password='pw')
+        self.client.post('/category_tags/{0}/'.format(self.qset.id), {
+            'action': 'add', 'category_path': 'History - European', 'name': 'Sneaky',
+            'next': '/category_overview/{0}/'.format(self.qset.id)})
+        self.assertFalse(CategoryTag.objects.filter(name='Sneaky').exists())
+
+    def test_the_row_links_to_that_category_s_tags(self):
+        body = self._overview().content.decode()
+        self.assertIn('/category_tags/{0}/?category=History'.format(self.qset.id), body)
