@@ -10787,6 +10787,23 @@ class CategoryTagEditingTests(TestCase):
         self._post(action='move', tag_id=self.t1200.id, direction='down')
         self.assertEqual(self._time_order(), ['Pre-500 CE', '500-1200', '1200-1453'])
 
+    def test_a_dragged_order_is_saved_whole(self):
+        resp = self.client.post(self.focus, {
+            'action': 'reorder',
+            'order[]': [self.pre.id, self.t500.id, self.t1200.id]},
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(self._time_order(), ['Pre-500 CE', '500-1200', '1200-1453'])
+
+    def test_a_partial_order_keeps_the_rest_behind_it(self):
+        self._post(action='reorder', **{'order[]': [self.pre.id]})
+        self.assertEqual(self._time_order()[0], 'Pre-500 CE')
+
+    def test_tags_from_two_groups_cannot_be_ordered_together(self):
+        resp = self._post(action='reorder', **{'order[]': [self.pre.id, self.china.id]})
+        self.assertContains(resp, 'more than one group')
+        self.assertEqual(self._time_order(), ['1200-1453', '500-1200', 'Pre-500 CE'])
+
     def test_the_page_and_edit_checkboxes_follow_the_order(self):
         from qems2.qsub.views import build_tag_checkboxes
         self._post(action='move', tag_id=self.pre.id, direction='up')

@@ -29,7 +29,7 @@
     <p class="home-note">A <strong>group</strong> names the axis a tag runs along &mdash; Time, Location,
     Subject. A category's tags usually run along more than one at once, and naming the axis is what keeps
     a long list from reading as one flat pile. Tags within a group are alphabetical until you move one
-    with the arrows; from then on the group keeps the order you give it.</p>
+    (drag the handle, or use the arrows); from then on the group keeps the order you give it.</p>
 </div>
 
 {% if can_edit %}
@@ -70,7 +70,7 @@
             </label>
         </div>
         <div class="small-1 columns">
-            <label>Any type
+            <label class="tag-nowrap">Any&nbsp;type
                 <input type="number" name="num_questions" min="0" value="0" title="Questions needed of either type (tossups and bonuses both count)">
             </label>
         </div>
@@ -120,6 +120,7 @@ its one category, since that is the whole page then.
         <table class="table-striped table-hover tag-table">
             <thead>
                 <tr>
+                    {% if can_edit %}<th class="tag-drag-col"></th>{% endif %}
                     <th style="width: 14%;">Tag</th>
                     <th style="width: 7%;">Tossups</th>
                     <th style="width: 29%;">TU Answer Lines</th>
@@ -129,9 +130,10 @@ its one category, since that is the whole page then.
                     {% if can_edit %}<th style="width: 8%;"></th>{% endif %}
                 </tr>
             </thead>
-            <tbody>
+            <tbody class="tag-group-body">
                 {% for row in tg.rows %}
-                <tr>
+                <tr class="tag-row" data-tag-id="{{ row.tag.id }}">
+                    {% if can_edit %}<td class="tag-drag-col"><span class="tag-drag-handle" title="Drag to reorder">&#8942;&#8942;</span></td>{% endif %}
                     <td><strong>{{ row.tag.name }}</strong></td>
                     <td class="{% if row.tu_complete %}tag-complete{% else %}tag-incomplete{% endif %}">
                         {{ row.tu_done }}{% if row.tag.num_tossups %}/{{ row.tag.num_tossups }}{% endif %}
@@ -166,7 +168,7 @@ its one category, since that is the whole page then.
                 </tr>
                 {% if can_edit %}
                 <tr class="tag-edit-row" id="tag-edit-{{ row.tag.id }}" hidden>
-                    <td colspan="7">
+                    <td colspan="8">
                         <form action="" method="post" class="tag-edit-form">
                             {% csrf_token %}
                             <input type="hidden" name="action" value="edit">
@@ -276,6 +278,52 @@ $(function () {
     $('#tag-untagged-only').on('change', function () {
         $('.tag-question-table tbody tr').not('.tag-q-untagged').toggle(!this.checked);
     });
+    // Drag a tag up or down its group. The edit row travels with its tag (it
+    // is the next sibling), so the drag moves the pair and the order posted
+    // is read from the tag rows alone.
+    if ($.fn.sortable) {
+        $('.tag-group-body').sortable({
+            items: '> tr.tag-row',
+            handle: '.tag-drag-handle',
+            axis: 'y',
+            containment: 'parent',
+            placeholder: 'tag-row-placeholder',
+            helper: function (e, tr) {
+                // Keep column widths while the row floats
+                var $orig = tr.children(), $helper = tr.clone();
+                $helper.children().each(function (i) { $(this).width($orig.eq(i).width()); });
+                return $helper;
+            },
+            start: function (e, ui) {
+                ui.placeholder.html('<td colspan="8"></td>');
+                // Park the edit row with its tag so the pair stays together
+                var $edit = $('#tag-edit-' + ui.item.data('tag-id'));
+                ui.item.data('edit-row', $edit.detach());
+            },
+            stop: function (e, ui) {
+                var $edit = ui.item.data('edit-row');
+                if ($edit) { ui.item.after($edit); }
+            },
+            update: function (e, ui) {
+                var $body = $(this);
+                var order = $body.find('> tr.tag-row').map(function () { return $(this).data('tag-id'); }).get();
+                $.ajax({
+                    url: '', type: 'POST', dataType: 'json',
+                    data: { action: 'reorder', 'order[]': order,
+                            csrfmiddlewaretoken: $body.closest('.tag-cat').find('input[name=csrfmiddlewaretoken]').first().val() },
+                    error: function () {
+                        $('<div class="alert-box warning">Could not save the new order &mdash; reload the page to see what is stored.</div>')
+                            .insertBefore($body.closest('.tag-cat'));
+                    }
+                });
+                // The arrows at the ends of the group reflect its new order
+                var $rows = $body.find('> tr.tag-row');
+                $rows.find('.tag-move-form button').prop('disabled', false);
+                $rows.first().find('.tag-move-form button[value=up]').prop('disabled', true);
+                $rows.last().find('.tag-move-form button[value=down]').prop('disabled', true);
+            }
+        });
+    }
 });
 </script>
 
@@ -296,6 +344,14 @@ $(function () {
 .tag-delete-form { margin: 0; display: inline; }
 .tag-delete-form input { margin: 0; }
 .tag-actions { white-space: nowrap; }
+.tag-nowrap { white-space: nowrap; }
+.tag-drag-col { width: 1.6em; padding-right: 0 !important; }
+.tag-drag-handle { cursor: grab; color: var(--qx-muted, #b0b4c0); font-size: 1em; letter-spacing: -0.35em;
+    user-select: none; }
+.tag-drag-handle:hover { color: var(--qx-ink, #2b2f3a); }
+.tag-row-placeholder td { height: 2.4em; background: var(--qx-elevate, #eef2f7) !important;
+    border: 1px dashed var(--qx-border, #c8ccd6); }
+.ui-sortable-helper { background: var(--qx-card, #fff); box-shadow: 0 2px 8px rgba(0,0,0,.18); display: table; }
 .tag-actions .button { margin: 0 0 0 4px; }
 .tag-move-form { display: inline; margin: 0; }
 .tag-move-form button { border: none; background: none; cursor: pointer; padding: 0 2px;

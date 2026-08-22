@@ -9851,6 +9851,31 @@ def _move_tag(tag, direction):
             t.save(update_fields=['sort_order'])
 
 
+def _reorder_tags(qset, ids):
+    """Put a group's tags in the order given (ids, first to last).
+
+    The ids must all be one group's -- one set, one category path, one axis --
+    otherwise the numbering would interleave two groups' orders. A tag of the
+    group left out of the list keeps its place after the ones named.
+    """
+    if not ids:
+        return
+    tags = {t.id: t for t in CategoryTag.objects.filter(question_set=qset, id__in=ids)}
+    if len(tags) != len(set(ids)):
+        raise ValueError('Unknown tag in the order')
+    keys = {(t.category_path, t.group_name) for t in tags.values()}
+    if len(keys) != 1:
+        raise ValueError('Tags from more than one group cannot be ordered together')
+    path, group = keys.pop()
+    ordered = [tags[i] for i in ids]
+    rest = [t for t in CategoryTag.objects.filter(question_set=qset, category_path=path, group_name=group)
+            if t.id not in tags]
+    for n, t in enumerate(ordered + rest):
+        if t.sort_order != (n + 1) * 10:
+            t.sort_order = (n + 1) * 10
+            t.save(update_fields=['sort_order'])
+
+
 def _category_question_rows(qset, path, tag_rows):
     """Every question in the category at ``path`` with the tags it carries.
 
@@ -10381,6 +10406,13 @@ def category_tags(request, qset_id):
                 elif action == 'move':
                     tag = CategoryTag.objects.get(question_set=qset, id=int(request.POST['tag_id']))
                     _move_tag(tag, request.POST.get('direction', ''))
+                    message = ''
+                elif action == 'reorder':
+                    # A whole group's order at once, from a drag on the page.
+                    ids = [int(x) for x in request.POST.getlist('order[]') or request.POST.getlist('order')]
+                    _reorder_tags(qset, ids)
+                    if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+                        return HttpResponse(json.dumps({'ok': True}), content_type='application/json')
                     message = ''
                 elif action in ('assign', 'unassign'):
                     tag = CategoryTag.objects.get(question_set=qset, id=int(request.POST['tag_id']))
