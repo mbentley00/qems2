@@ -58,14 +58,19 @@
                 </datalist>
             </label>
         </div>
-        <div class="small-2 columns">
-            <label>Tossups Needed
-                <input type="number" name="num_tossups" min="0" value="0">
+        <div class="small-1 columns">
+            <label>Tossups
+                <input type="number" name="num_tossups" min="0" value="0" title="Tossups needed">
             </label>
         </div>
         <div class="small-1 columns">
             <label>Bonuses
-                <input type="number" name="num_bonuses" min="0" value="0">
+                <input type="number" name="num_bonuses" min="0" value="0" title="Bonuses needed">
+            </label>
+        </div>
+        <div class="small-1 columns">
+            <label>Any type
+                <input type="number" name="num_questions" min="0" value="0" title="Questions needed of either type (tossups and bonuses both count)">
             </label>
         </div>
         <div class="small-1 columns">
@@ -73,7 +78,7 @@
             <input type="submit" value="Add" class="button small primary">
         </div>
     </div>
-    <p class="home-note">Adding a tag that already exists in that category updates its group and counts.</p>
+    <p class="home-note">Adding a tag that already exists in that category updates its group and counts. &ldquo;Any type&rdquo; asks for questions that may be tossups or bonuses &mdash; leave the typed counts at 0 for &ldquo;two questions on European politics, either kind&rdquo;.</p>
 </form>
 {% endif %}
 
@@ -102,6 +107,7 @@ its one category, since that is the whole page then.
             {{ group.tag_count }} tag{{ group.tag_count|pluralize }}
             {% if group.tu_required %}&middot; {{ group.tu_done }}/{{ group.tu_required }} tossups{% endif %}
             {% if group.bs_required %}&middot; {{ group.bs_done }}/{{ group.bs_required }} bonuses{% endif %}
+            {% if group.q_required %}&middot; {{ group.q_done }}/{{ group.q_required }} of any type{% endif %}
             {% if group.incomplete %}<span class="tag-cat-open">{{ group.incomplete }} outstanding</span>{% endif %}
         </span>
         <a class="tag-cat-only" href="/category_tags/{{ qset.id }}/?category={{ group.path|urlencode }}">Just this category &rarr;</a>
@@ -113,11 +119,12 @@ its one category, since that is the whole page then.
         <table class="table-striped table-hover tag-table">
             <thead>
                 <tr>
-                    <th style="width: 16%;">Tag</th>
+                    <th style="width: 14%;">Tag</th>
                     <th style="width: 7%;">Tossups</th>
-                    <th style="width: 31%;">TU Answer Lines</th>
+                    <th style="width: 29%;">TU Answer Lines</th>
                     <th style="width: 7%;">Bonuses</th>
-                    <th style="width: 31%;">Bonus Answer Lines</th>
+                    <th style="width: 29%;">Bonus Answer Lines</th>
+                    <th style="width: 6%;" title="Questions of either type">Any</th>
                     {% if can_edit %}<th style="width: 8%;"></th>{% endif %}
                 </tr>
             </thead>
@@ -140,6 +147,9 @@ its one category, since that is the whole page then.
                         {% for q in row.bonuses %}
                             <a href="/edit_bonus/{{ q.id }}/" title="{{ q.location }}">{{ q.answer }}</a>{% if not forloop.last %}<br>{% endif %}
                         {% endfor %}
+                    </td>
+                    <td class="{% if row.q_complete %}tag-complete{% else %}tag-incomplete{% endif %}">
+                        {% if row.tag.num_questions %}{{ row.q_done }}/{{ row.tag.num_questions }}{% else %}&mdash;{% endif %}
                     </td>
                     {% if can_edit %}
                     <td>

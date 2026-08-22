@@ -903,11 +903,54 @@ class CategoryTag(models.Model):
     group_name = models.CharField(max_length=100, blank=True, default='')
     num_tossups = models.PositiveIntegerField(default=0)
     num_bonuses = models.PositiveIntegerField(default=0)
+    # Questions of either type. "Two on European politics" does not care
+    # whether they come as tossups or bonuses, and a tag that only asked for
+    # tossups and bonuses separately could not say so. Counted against every
+    # question on the tag, so it sits alongside the typed quotas rather than
+    # on top of them: num_tossups=1, num_questions=2 means at least one
+    # tossup and at least two questions overall.
+    num_questions = models.PositiveIntegerField(default=0)
     tossups = models.ManyToManyField('Tossup', blank=True, related_name='category_tags')
     bonuses = models.ManyToManyField('Bonus', blank=True, related_name='category_tags')
 
     def __str__(self):
         return '{0!s}: {1!s} ({2!s})'.format(self.question_set, self.name, self.category_path)
+
+    @property
+    def has_quota(self):
+        return bool(self.num_tossups or self.num_bonuses or self.num_questions)
+
+    def progress(self, tu_done=None, bs_done=None):
+        """How this tag stands against what it asks for.
+
+        Pass the counts when the caller already has them (it usually does,
+        from the same queryset) so this does not hit the database again.
+        Each quota is met on its own; ``complete`` needs all three.
+        """
+        if tu_done is None:
+            tu_done = self.tossups.count()
+        if bs_done is None:
+            bs_done = self.bonuses.count()
+        q_done = tu_done + bs_done
+        tu_ok = self.num_tossups == 0 or tu_done >= self.num_tossups
+        bs_ok = self.num_bonuses == 0 or bs_done >= self.num_bonuses
+        q_ok = self.num_questions == 0 or q_done >= self.num_questions
+        return {
+            'tu_done': tu_done, 'bs_done': bs_done, 'q_done': q_done,
+            'tu_complete': tu_ok, 'bs_complete': bs_ok, 'q_complete': q_ok,
+            'complete': tu_ok and bs_ok and q_ok,
+        }
+
+    def quota_summary(self):
+        """The requirement in words: "2 tossups, 1 bonus, 2 of any type"."""
+        parts = []
+        if self.num_tossups:
+            parts.append('{0} tossup{1}'.format(self.num_tossups, '' if self.num_tossups == 1 else 's'))
+        if self.num_bonuses:
+            parts.append('{0} bonus{1}'.format(self.num_bonuses, '' if self.num_bonuses == 1 else 'es'))
+        if self.num_questions:
+            parts.append('{0} of any type'.format(self.num_questions))
+        return ', '.join(parts)
 
 class CategoryComment(models.Model):
     """A note about a category rather than about a question.

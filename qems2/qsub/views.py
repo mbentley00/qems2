@@ -6710,15 +6710,9 @@ def category_overview(request, qset_id):
     tags_by_path = {}
     for tag in (CategoryTag.objects.filter(question_set=qset)
                 .order_by('group_name', 'name').prefetch_related('tossups', 'bonuses')):
-        done_tu = tag.tossups.count()
-        done_bs = tag.bonuses.count()
-        tags_by_path.setdefault(tag.category_path, []).append({
-            'tag': tag,
-            'tu_done': done_tu,
-            'bs_done': done_bs,
-            'complete': ((tag.num_tossups == 0 or done_tu >= tag.num_tossups) and
-                         (tag.num_bonuses == 0 or done_bs >= tag.num_bonuses)),
-        })
+        entry = tag.progress(tag.tossups.count(), tag.bonuses.count())
+        entry['tag'] = tag
+        tags_by_path.setdefault(tag.category_path, []).append(entry)
 
     for row in overview_rows:
         row['editors'] = editors_by_cat.get(row['name'], [])
@@ -10120,15 +10114,19 @@ def category_tags(request, qset_id):
                     group_name = request.POST.get('group_name', '').strip()[:100]
                     num_tossups = int(request.POST.get('num_tossups') or 0)
                     num_bonuses = int(request.POST.get('num_bonuses') or 0)
+                    num_questions = int(request.POST.get('num_questions') or 0)
+                    if min(num_tossups, num_bonuses, num_questions) < 0:
+                        raise ValueError('Counts cannot be negative')
                     if not path or not name:
                         raise ValueError('A category and a tag name are required')
                     tag, created = CategoryTag.objects.get_or_create(
                         question_set=qset, category_path=path, name=name,
                         defaults={'num_tossups': num_tossups, 'num_bonuses': num_bonuses,
-                                  'group_name': group_name})
+                                  'num_questions': num_questions, 'group_name': group_name})
                     if not created:
                         tag.num_tossups = num_tossups
                         tag.num_bonuses = num_bonuses
+                        tag.num_questions = num_questions
                         tag.group_name = group_name
                         tag.save()
                     message = 'Tag "{0}" saved'.format(name)
@@ -10180,17 +10178,9 @@ def category_tags(request, qset_id):
                             _grid_answer_preview(b.part3_answer, 20)])),
                         'location': '{0} #{1}'.format(b.packet.packet_name, b.question_number) if b.packet else 'Unassigned'}
                        for b in tag.bonuses.all().select_related('packet')]
-            tu_done = len(tossups)
-            bs_done = len(bonuses)
-            rows.append({
-                'tag': tag,
-                'tossups': tossups,
-                'bonuses': bonuses,
-                'tu_done': tu_done,
-                'bs_done': bs_done,
-                'tu_complete': tag.num_tossups == 0 or tu_done >= tag.num_tossups,
-                'bs_complete': tag.num_bonuses == 0 or bs_done >= tag.num_bonuses,
-            })
+            row = tag.progress(len(tossups), len(bonuses))
+            row.update({'tag': tag, 'tossups': tossups, 'bonuses': bonuses})
+            rows.append(row)
         # Within a category, tags are shown under the axis they belong to —
         # "Time", "Location" — with the unnamed ones last under their own head.
         by_group, order = {}, []
@@ -10212,7 +10202,9 @@ def category_tags(request, qset_id):
             'tu_done': sum(r['tu_done'] for r in rows),
             'bs_required': sum(r['tag'].num_bonuses for r in rows),
             'bs_done': sum(r['bs_done'] for r in rows),
-            'incomplete': sum(1 for r in rows if not (r['tu_complete'] and r['bs_complete'])),
+            'q_required': sum(r['tag'].num_questions for r in rows),
+            'q_done': sum(r['q_done'] for r in rows if r['tag'].num_questions),
+            'incomplete': sum(1 for r in rows if not r['complete']),
         })
 
     group_choices = sorted(set(

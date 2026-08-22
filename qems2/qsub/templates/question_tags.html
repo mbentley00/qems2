@@ -9,7 +9,7 @@
                     <input type="checkbox" name="category_tags" value="{{ item.tag.id }}"
                            {% if item.checked %}checked{% endif %}>
                     {{ item.tag.name }}
-                    <small style="color: #888;">({{ item.tag.category_path }}{% if item.tag.num_tossups or item.tag.num_bonuses %}, {{ item.tag.num_tossups }}/{{ item.tag.num_bonuses }} needed{% endif %})</small>
+                    <small style="color: #888;">({{ item.tag.category_path }}{% if item.tag.has_quota %}, {{ item.tag.quota_summary }} needed{% endif %})</small>
                 </label>
             {% endfor %}
         </div>

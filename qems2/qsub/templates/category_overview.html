@@ -79,8 +79,8 @@
                     {% if tg.name %}<span class="cat-tag-axis-name">{{ tg.label }}</span>{% endif %}
                     {% for entry in tg.tags %}
                     <span class="cat-tag{% if entry.complete %} cat-tag-done{% endif %}"
-                          title="{{ entry.tu_done }}/{{ entry.tag.num_tossups }} tossups, {{ entry.bs_done }}/{{ entry.tag.num_bonuses }} bonuses">
-                        {{ entry.tag.name }}<span class="cat-tag-count">{{ entry.tu_done }}/{{ entry.tag.num_tossups }}&middot;{{ entry.bs_done }}/{{ entry.tag.num_bonuses }}</span>
+                          title="{{ entry.tu_done }}/{{ entry.tag.num_tossups }} tossups, {{ entry.bs_done }}/{{ entry.tag.num_bonuses }} bonuses{% if entry.tag.num_questions %}, {{ entry.q_done }}/{{ entry.tag.num_questions }} of any type{% endif %}">
+                        {{ entry.tag.name }}<span class="cat-tag-count">{% if entry.tag.num_questions and not entry.tag.num_tossups and not entry.tag.num_bonuses %}{{ entry.q_done }}/{{ entry.tag.num_questions }}{% else %}{{ entry.tu_done }}/{{ entry.tag.num_tossups }}&middot;{{ entry.bs_done }}/{{ entry.tag.num_bonuses }}{% if entry.tag.num_questions %}&middot;{{ entry.q_done }}/{{ entry.tag.num_questions }}{% endif %}{% endif %}</span>
                         {% if can_edit_tags %}
                         <form action="/category_tags/{{ qset.id }}/" method="post" class="cat-tag-del"
                               onsubmit="return confirm('Delete the tag '{{ entry.tag.name }}'?');">
@@ -107,6 +107,7 @@
                     <input type="text" name="group_name" list="cat-tag-groups" placeholder="group">
                     <input type="number" name="num_tossups" min="0" value="0" title="Tossups needed">
                     <input type="number" name="num_bonuses" min="0" value="0" title="Bonuses needed">
+                    <input type="number" name="num_questions" min="0" value="0" title="Questions needed of either type">
                     <button type="submit" class="button tiny secondary">Add</button>
                 </form>
                 {% endif %}

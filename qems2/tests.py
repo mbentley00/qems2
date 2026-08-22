@@ -10556,6 +10556,76 @@ class CategoryTagGroupingTests(TestCase):
         resp = self.client.get('/category_tags/{0}/'.format(self.qset.id))
         self.assertIn('Time', resp.context['group_choices'])
 
+    # --- Questions of any type -------------------------------------------
+    # "Two on European politics" does not care whether they arrive as tossups
+    # or bonuses. num_questions counts both kinds together.
+
+    def _tossup(self):
+        return Tossup.objects.create(
+            author=self.writer, question_set=self.qset, tossup_text='t',
+            tossup_answer='_a_', category=self.de,
+            created_date=datetime.now(), last_changed_date=datetime.now())
+
+    def _bonus(self):
+        return Bonus.objects.create(
+            author=self.writer, question_set=self.qset, leadin='l',
+            part1_text='p1', part1_answer='_a1_', part2_text='p2', part2_answer='_a2_',
+            part3_text='p3', part3_answer='_a3_', category=self.de,
+            created_date=datetime.now(), last_changed_date=datetime.now())
+
+    def test_a_tag_can_ask_for_questions_of_any_type(self):
+        self._add('European politics', num_tossups=0, num_bonuses=0, num_questions=2)
+        tag = CategoryTag.objects.get(name='European politics')
+        self.assertEqual(tag.num_questions, 2)
+        self.assertEqual(tag.quota_summary(), '2 of any type')
+
+    def test_a_tossup_and_a_bonus_together_fill_an_any_type_quota(self):
+        self._add('European politics', num_tossups=0, num_bonuses=0, num_questions=2)
+        tag = CategoryTag.objects.get(name='European politics')
+        self.assertFalse(tag.progress()['complete'])
+        tag.tossups.add(self._tossup())
+        self.assertFalse(tag.progress()['complete'])
+        tag.bonuses.add(self._bonus())
+        p = tag.progress()
+        self.assertEqual(p['q_done'], 2)
+        self.assertTrue(p['complete'])
+
+    def test_two_bonuses_also_fill_it(self):
+        self._add('European politics', num_tossups=0, num_bonuses=0, num_questions=2)
+        tag = CategoryTag.objects.get(name='European politics')
+        tag.bonuses.add(self._bonus(), self._bonus())
+        self.assertTrue(tag.progress()['complete'])
+
+    def test_the_any_type_quota_sits_alongside_the_typed_ones(self):
+        # At least one tossup, and two questions overall: two bonuses is not
+        # enough, a tossup and a bonus is.
+        self._add('European politics', num_tossups=1, num_bonuses=0, num_questions=2)
+        tag = CategoryTag.objects.get(name='European politics')
+        tag.bonuses.add(self._bonus(), self._bonus())
+        p = tag.progress()
+        self.assertTrue(p['q_complete'])
+        self.assertFalse(p['tu_complete'])
+        self.assertFalse(p['complete'])
+        tag.tossups.add(self._tossup())
+        self.assertTrue(tag.progress()['complete'])
+
+    def test_the_pages_carry_the_any_type_count(self):
+        self._add('European politics', num_tossups=0, num_bonuses=0, num_questions=2)
+        tag = CategoryTag.objects.get(name='European politics')
+        tag.tossups.add(self._tossup())
+        resp = self.client.get('/category_tags/{0}/'.format(self.qset.id))
+        group = resp.context['groups'][0]
+        self.assertEqual(group['q_required'], 2)
+        self.assertEqual(group['q_done'], 1)
+        self.assertEqual(group['incomplete'], 1)
+        self.assertIn('1/2 of any type', resp.content.decode())
+        resp = self.client.get('/category_overview/{0}/'.format(self.qset.id))
+        row = [r for r in resp.context['overview_rows'] if r['name'] == 'History - European'][0]
+        entry = row['tag_groups'][0]['tags'][0]
+        self.assertEqual(entry['q_done'], 1)
+        self.assertFalse(entry['complete'])
+        self.assertIn('1/2', resp.content.decode())
+
 
 class CategoryTagTreeTests(TestCase):
     """The page opens as a list of categories, not as every tag at once."""
