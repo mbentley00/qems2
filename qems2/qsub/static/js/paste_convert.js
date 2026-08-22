@@ -116,9 +116,15 @@ $(function () {
         // on runs that are visually normal weight, and a substring test for
         // "font-weight" + "bold" would match those and bold the text falsely.
         var fontWeight = cssValue(style, 'font-weight');
-        var isBold = (tag === 'b' || tag === 'strong' ||
-                      fontWeight === 'bold' || fontWeight === 'bolder' ||
-                      (/^\d{3}$/.test(fontWeight) && parseInt(fontWeight, 10) >= 700));
+        // An explicit inline font-weight wins over the tag name. Google Docs
+        // wraps its whole clipboard in <b style="font-weight:normal"
+        // id="docs-internal-guid-..."> -- a <b> that is not bold -- and
+        // trusting the tag bolded entire pasted bonuses. Real bold from Docs
+        // is a <span style="font-weight:700">, which still reads as bold.
+        var isBold = fontWeight
+            ? (fontWeight === 'bold' || fontWeight === 'bolder' ||
+               (/^\d{3}$/.test(fontWeight) && parseInt(fontWeight, 10) >= 700))
+            : (tag === 'b' || tag === 'strong');
         var textDecoration = cssValue(style, 'text-decoration') + ' ' +
                              cssValue(style, 'text-decoration-line');
         var isUnderline = (tag === 'u' || textDecoration.indexOf('underline') !== -1);
