@@ -935,9 +935,9 @@ class CategoryTag(models.Model):
         Each quota is met on its own; ``complete`` needs all three.
         """
         if tu_done is None:
-            tu_done = self.tossups.count()
+            tu_done = self.tossups.filter(question_set_id=self.question_set_id).count()
         if bs_done is None:
-            bs_done = self.bonuses.count()
+            bs_done = self.bonuses.filter(question_set_id=self.question_set_id).count()
         q_done = tu_done + bs_done
         tu_ok = self.num_tossups == 0 or tu_done >= self.num_tossups
         bs_ok = self.num_bonuses == 0 or bs_done >= self.num_bonuses

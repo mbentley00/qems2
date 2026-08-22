@@ -5119,6 +5119,7 @@ def move_tossup(request, q_set_id, tossup_id):
                     tossup.packet = None
 
                     tossup.save()
+                    carry_tags_to_set(tossup, dest_qset)
                     cache.clear()
                     message = "Successfully moved tossup to " + str(dest_qset)
                     message_class = 'alert-box success'
@@ -5229,6 +5230,7 @@ def move_bonus(request, q_set_id, bonus_id):
                     bonus.packet = None
 
                     bonus.save()
+                    carry_tags_to_set(bonus, dest_qset)
                     cache.clear()
                     return render(request, 'move_bonus_success.html',
                                         {'user': user,
@@ -6715,8 +6717,8 @@ def category_overview(request, qset_id):
     # asks for, so a row says what is outstanding without a second page.
     tags_by_path = {}
     for tag in (CategoryTag.objects.filter(question_set=qset)
-                .prefetch_related('tossups', 'bonuses')):
-        entry = tag.progress(tag.tossups.count(), tag.bonuses.count())
+                ):
+        entry = tag.progress()
         entry['tag'] = tag
         tags_by_path.setdefault(tag.category_path, []).append(entry)
 
@@ -7153,6 +7155,7 @@ def bulk_move_question(request, qset_id):
             tossup.subtype = ''
 
             tossup.save()
+            carry_tags_to_set(tossup, new_set)
 
         for bs_num in range(num_bonuses):
             bs_id_name = 'bonus-id-{0}'.format(bs_num)
@@ -7169,6 +7172,7 @@ def bulk_move_question(request, qset_id):
             bonus.subtype = ''
 
             bonus.save()
+            carry_tags_to_set(bonus, new_set)
 
         message = 'Successfully moved questions'
         message_class = 'alert-box success'
@@ -7545,9 +7549,9 @@ def _tag_names_by_question(qset):
     cell; the names alone, since a grid cell has no room for the axis."""
     out = {}
     for tag in CategoryTag.objects.filter(question_set=qset):
-        for tid in tag.tossups.values_list('id', flat=True):
+        for tid in tag.tossups.filter(question_set=qset).values_list('id', flat=True):
             out.setdefault(('tossup', tid), []).append(tag.name)
-        for bid in tag.bonuses.values_list('id', flat=True):
+        for bid in tag.bonuses.filter(question_set=qset).values_list('id', flat=True):
             out.setdefault(('bonus', bid), []).append(tag.name)
     return out
 
@@ -9914,7 +9918,8 @@ def _category_question_rows(qset, path, tag_rows):
             qpath = str(q.category) if q.category_id else ''
             if not (qpath == path or qpath.startswith(path + ' - ')):
                 continue
-            tags = sorted(q.category_tags.all(), key=lambda t: (t.group_name, t.sort_order, t.name))
+            tags = sorted((t for t in q.category_tags.all() if t.question_set_id == qset.id),
+                          key=lambda t: (t.group_name, t.sort_order, t.name))
             have = {t.id for t in tags}
             rows.append({
                 'qtype': qtype,
@@ -9939,6 +9944,27 @@ def _category_question_rows(qset, path, tag_rows):
             'bonuses': sum(1 for r in rows if r['qtype'] == 'bonus')}
 
 
+def carry_tags_to_set(question, dest_qset):
+    """A question moved to another set takes its tags along only where the
+    destination has the same tag -- same category path, same name -- and
+    drops the rest. A tag belongs to one set; left attached, a tag of the
+    old set would count a question it no longer has and turn up on the new
+    set's pages as something the set never defined."""
+    old = list(question.category_tags.all())
+    if not old:
+        return
+    keep = []
+    for tag in old:
+        if tag.question_set_id == dest_qset.id:
+            keep.append(tag)
+            continue
+        twin = CategoryTag.objects.filter(
+            question_set=dest_qset, category_path=tag.category_path, name=tag.name).first()
+        if twin is not None:
+            keep.append(twin)
+    question.category_tags.set(keep)
+
+
 def build_tag_checkboxes(qset, question, dist_entry):
     """The tag checkboxes on the question edit pages, as sections.
 
@@ -9954,7 +9980,8 @@ def build_tag_checkboxes(qset, question, dist_entry):
     if question is None or question.id is None:
         checked_ids = set()
     else:
-        checked_ids = set(question.category_tags.values_list('id', flat=True))
+        checked_ids = set(question.category_tags.filter(question_set=qset)
+                          .values_list('id', flat=True))
 
     def _progress_label(tag, p):
         bits = []
@@ -10486,7 +10513,7 @@ def category_tags(request, qset_id):
     tag_qs = CategoryTag.objects.filter(question_set=qset)
     if focus_path:
         tag_qs = tag_qs.filter(category_path=focus_path)
-    for tag in tag_qs.prefetch_related('tossups', 'bonuses'):
+    for tag in tag_qs:
         tags_by_path.setdefault(tag.category_path, []).append(tag)
     for path in sorted(tags_by_path):
         rows = []
@@ -10494,14 +10521,14 @@ def category_tags(request, qset_id):
             tossups = [{'id': t.id,
                         'answer': _grid_answer_preview(t.tossup_answer),
                         'location': '{0} #{1}'.format(t.packet.packet_name, t.question_number) if t.packet else 'Unassigned'}
-                       for t in tag.tossups.all().select_related('packet')]
+                       for t in tag.tossups.filter(question_set=qset).select_related('packet')]
             bonuses = [{'id': b.id,
                         'answer': ' / '.join(filter(None, [
                             _grid_answer_preview(b.part1_answer, 20),
                             _grid_answer_preview(b.part2_answer, 20),
                             _grid_answer_preview(b.part3_answer, 20)])),
                         'location': '{0} #{1}'.format(b.packet.packet_name, b.question_number) if b.packet else 'Unassigned'}
-                       for b in tag.bonuses.all().select_related('packet')]
+                       for b in tag.bonuses.filter(question_set=qset).select_related('packet')]
             row = tag.progress(len(tossups), len(bonuses))
             row.update({'tag': tag, 'tossups': tossups, 'bonuses': bonuses})
             rows.append(row)

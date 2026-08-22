@@ -10939,6 +10939,75 @@ class CategoryTagEditingTests(TestCase):
         self.assertNotIn(self.tu2, self.pre.tossups.all())
 
 
+class MovedQuestionTagTests(TestCase):
+    """A question moved to another set takes its tags only where the new set
+    has the same tag, and the old set stops counting it."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('mqt_owner', password='pw', email='mqt@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='MQT dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='History', subcategory='World', min_tossups=2, min_bonuses=2)
+        mk = lambda name: QuestionSet.objects.create(
+            name=name, date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.a, self.b = mk('MQT A'), mk('MQT B')
+        for q in (self.a, self.b):
+            q.editor.add(self.owner)
+        self.tu = Tossup.objects.create(
+            question_set=self.a, question_type=self.acf, category=self.de, author=self.owner,
+            tossup_text='This person. (*) end.', tossup_answer='_X_',
+            created_date=timezone.now(), last_changed_date=timezone.now())
+        mt = lambda qset, name: CategoryTag.objects.create(
+            question_set=qset, category_path='History - World', name=name, num_tossups=1)
+        self.a_china, self.a_japan = mt(self.a, 'China'), mt(self.a, 'Japan')
+        self.b_china = mt(self.b, 'China')
+        self.a_china.tossups.add(self.tu)
+        self.a_japan.tossups.add(self.tu)
+        self.client.login(username='mqt_owner', password='pw')
+
+    def _move(self):
+        resp = self.client.post('/move_tossup/{0}/{1}/'.format(self.a.id, self.tu.id),
+                                {'move_sets': self.b.id})
+        self.assertEqual(resp.status_code, 200)
+        self.tu.refresh_from_db()
+        self.assertEqual(self.tu.question_set_id, self.b.id)
+
+    def test_tags_follow_where_the_new_set_has_them_and_drop_otherwise(self):
+        self._move()
+        self.assertEqual(list(self.tu.category_tags.all()), [self.b_china])
+        self.assertEqual(self.a_china.tossups.count(), 0)
+        self.assertEqual(self.a_japan.tossups.count(), 0)
+
+    def test_the_new_set_s_pages_load_and_show_the_carried_tag(self):
+        self._move()
+        resp = self.client.get('/edit_tossup/{0}/'.format(self.tu.id))
+        self.assertEqual(resp.status_code, 200)
+        items = resp.context['available_tags'][0]['groups'][0]['items']
+        self.assertEqual([(i['tag'].name, i['checked']) for i in items], [('China', True)])
+        for url in ('/category_tags/{0}/?category=History%20-%20World'.format(self.b.id),
+                    '/category_overview/{0}/'.format(self.b.id),
+                    '/packet_grid/{0}/'.format(self.b.id)):
+            self.assertEqual(self.client.get(url).status_code, 200, url)
+
+    def test_a_stray_link_from_before_the_fix_is_ignored_everywhere(self):
+        # Simulate the old behaviour: moved, but the old set's tags still attached.
+        Tossup.objects.filter(id=self.tu.id).update(question_set=self.b)
+        self.tu.refresh_from_db()
+        self.assertEqual(self.a_japan.progress()['tu_done'], 0)
+        resp = self.client.get('/edit_tossup/{0}/'.format(self.tu.id))
+        self.assertEqual(resp.status_code, 200)
+        items = resp.context['available_tags'][0]['groups'][0]['items']
+        self.assertEqual([(i['tag'].name, i['checked']) for i in items], [('China', False)])
+        page = self.client.get('/category_tags/{0}/?category=History%20-%20World'.format(self.a.id))
+        self.assertEqual(page.context['groups'][0]['tu_done'], 0)
+        grid = self.client.get('/packet_grid_state/{0}/'.format(self.b.id))
+        self.assertEqual(grid.status_code, 200)
+
+
 class QuestionPageTagTests(TestCase):
     """The tag checkboxes on the edit pages say where each tag stands, sit
     under their axis, and link to the tag page for that category alone."""
