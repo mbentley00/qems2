@@ -12,7 +12,8 @@
                 {% endif %}
                 {% for g in section.groups %}
                 <div class="qtags-axis">
-                    {% if g.name or section.groups|length > 1 %}<span class="qtags-axis-name">{{ g.label }}</span>{% endif %}
+                    {% if g.name or section.groups|length > 1 %}<div class="qtags-axis-name">{{ g.label }}</div>{% endif %}
+                    <div class="qtags-axis-items">
                     {% for item in g.items %}
                     <label class="qtags-item{% if item.checked %} qtags-checked{% endif %}{% if item.complete %} qtags-done{% endif %}">
                         <input type="checkbox" name="category_tags" value="{{ item.tag.id }}"
@@ -23,6 +24,7 @@
                         {% endif %}
                     </label>
                     {% endfor %}
+                    </div>
                 </div>
                 {% endfor %}
             </div>
@@ -31,16 +33,25 @@
     </div>
 </div>
 <style>
-.qtags-panel { padding: 8px 12px; margin-bottom: 12px; }
-.qtags-section { margin-top: 4px; }
+.qtags-panel { padding: 8px 12px 4px; margin-bottom: 12px; }
+.qtags-section { margin-top: 6px; }
 .qtags-path { font-weight: bold; margin: 6px 0 2px; }
-.qtags-axis { margin: 2px 0 4px; }
-.qtags-axis-name { display: inline-block; min-width: 6em; font-size: 0.72rem; text-transform: uppercase;
-    letter-spacing: 0.05em; color: var(--qx-muted, #8a8f9c); margin-right: 6px; }
-.qtags-item { display: inline-block; margin: 0 14px 2px 0; font-weight: normal; }
-.qtags-progress { color: var(--qx-muted, #888); }
+/* One block per axis: its name on a line of its own, a rule down the left so
+   the block's extent is visible, and alternating tints so neighbouring axes
+   read as separate things rather than one wrapped run. */
+.qtags-axis { margin: 0 0 8px; padding: 6px 10px 4px; border-left: 3px solid var(--qx-border, #d8dbe3);
+    border-radius: 0 6px 6px 0; background: var(--qx-elevate, #f5f6fa); }
+.qtags-axis:nth-child(even) { background: transparent; }
+.qtags-axis-name { font-size: 0.72rem; font-weight: bold; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--qx-muted, #6b7080); margin: 0 0 3px; }
+.qtags-axis-items { display: flex; flex-wrap: wrap; gap: 2px 18px; }
+.qtags-item { display: inline-flex; align-items: baseline; gap: 4px; margin: 0; font-weight: normal;
+    font-size: 0.95em; white-space: nowrap; }
+.qtags-item input { margin: 0 2px 0 0; position: relative; top: 1px; }
+.qtags-progress { color: var(--qx-muted, #888); font-size: 0.78em; }
 .qtags-done .qtags-progress { color: #1b5e20; }
 .qtags-checked { font-weight: bold; }
+html[data-theme="dark"] .qtags-axis { border-left-color: #3a3f52; }
 html[data-theme="dark"] .qtags-done .qtags-progress { color: #86d29d; }
 </style>
 {% endif %}
