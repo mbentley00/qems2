@@ -2364,6 +2364,33 @@ def edit_packet(request, packet_id):
          'user': user})
 
 @login_required
+def _last_category_for(user, qset):
+    """The category the writer used most recently in this set, to start the
+    next Add Tossup / Add Bonus form on. A writer works through one category
+    at a time, so the last one saved is the likeliest next; nothing is stored,
+    it is read off the newest question they wrote or changed here. None if
+    they have none yet or it no longer belongs to the set's distribution."""
+    latest = None
+    for model in (Tossup, Bonus):
+        q = (model.objects.filter(question_set=qset, author=user, category__isnull=False)
+             .order_by('-last_changed_date', '-id').first())
+        if q is not None and (latest is None or q.last_changed_date > latest.last_changed_date):
+            latest = q
+    if latest is None:
+        return None
+    if qset.distribution_id and latest.category.distribution_id != qset.distribution_id:
+        return None
+    return latest.category
+
+
+def _add_initial(user, qset, question_type_id):
+    initial = {'question_type': question_type_id}
+    last = _last_category_for(user, qset)
+    if last is not None:
+        initial['category'] = last.id
+    return initial
+
+
 def add_tossups(request, qset_id, packet_id=None):
     user = request.user.writer
     qset = QuestionSet.objects.get(id=qset_id)
@@ -2380,9 +2407,9 @@ def add_tossups(request, qset_id, packet_id=None):
     if request.method == 'GET':
         if user in qset.editor.all() or user in qset.writer.all() or qset.is_owner(user):
             if user in qset.writer.all() and user not in qset.editor.all() and not qset.is_owner(user):
-                tossup_form = TossupForm(qset_id=qset.id, packet_id=packet_id, role='writer', writer=user.user.username, initial={'question_type': question_type_id})
+                tossup_form = TossupForm(qset_id=qset.id, packet_id=packet_id, role='writer', writer=user.user.username, initial=_add_initial(user, qset, question_type_id))
             else:
-                tossup_form = TossupForm(qset_id=qset.id, packet_id=packet_id, writer=user.user.username, initial={'question_type': question_type_id})
+                tossup_form = TossupForm(qset_id=qset.id, packet_id=packet_id, writer=user.user.username, initial=_add_initial(user, qset, question_type_id))
             read_only = False
         else:
             tossup_form = []
@@ -2455,7 +2482,7 @@ def add_tossups(request, qset_id, packet_id=None):
             read_only = True
             
         if (tossup_form is None):
-            tossup_form = TossupForm(qset_id=qset.id, packet_id=packet_id, initial={'question_type': question_type_id})
+            tossup_form = TossupForm(qset_id=qset.id, packet_id=packet_id, initial=_add_initial(user, qset, question_type_id))
 
         # In the error case, return the whole tossup object so you can edit it
         return render(request, 'add_tossups.html',
@@ -2496,7 +2523,7 @@ def add_bonuses(request, qset_id, bonus_type, packet_id=None):
 
     if request.method == 'GET':
         if user in qset.editor.all() or user in qset.writer.all() or qset.is_owner(user):
-            form = BonusForm(qset_id=qset.id, packet_id=packet_id, role=role, initial={'question_type': question_type_id}, writer=user.user.username, question_type=bonus_type)
+            form = BonusForm(qset_id=qset.id, packet_id=packet_id, role=role, initial=_add_initial(user, qset, question_type_id), writer=user.user.username, question_type=bonus_type)
             read_only = False
         else:
             form = None
@@ -2571,7 +2598,7 @@ def add_bonuses(request, qset_id, bonus_type, packet_id=None):
             read_only = True
 
         if (bonus_form is None):
-            bonus_form = BonusForm(qset_id=qset.id, packet_id=packet_id, initial={'question_type': question_type_id}, writer=user.user.username)
+            bonus_form = BonusForm(qset_id=qset.id, packet_id=packet_id, initial=_add_initial(user, qset, question_type_id), writer=user.user.username)
 
         return render(request, 'add_bonuses.html',
                  {'form': bonus_form,

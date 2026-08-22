@@ -11050,6 +11050,56 @@ class MovedQuestionTagTests(TestCase):
         self.assertEqual(grid.status_code, 200)
 
 
+class LastCategoryDefaultTests(TestCase):
+    """Add Tossup / Add Bonus start on the category the writer last used in
+    the set -- read off their newest question, nothing stored."""
+
+    def setUp(self):
+        for qt in (ACF_STYLE_TOSSUP, ACF_STYLE_BONUS):
+            QuestionType.objects.get_or_create(question_type=qt)
+        self.acf = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('lcd_owner', password='pw', email='lcd@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='LCD dist')
+        self.bio = DistributionEntry.objects.create(
+            distribution=self.dist, category='Science', subcategory='Biology', min_tossups=1, min_bonuses=1)
+        self.chem = DistributionEntry.objects.create(
+            distribution=self.dist, category='Science', subcategory='Chemistry', min_tossups=1, min_bonuses=1)
+        self.qset = QuestionSet.objects.create(
+            name='LCD Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.qset.editor.add(self.owner)
+        self.client.login(username='lcd_owner', password='pw')
+
+    def _initial(self, url):
+        return self.client.get(url).context['form'].initial.get('category')
+
+    def test_no_questions_yet_means_no_default(self):
+        self.assertIsNone(self._initial('/add_tossups/{0}/'.format(self.qset.id)))
+
+    def test_the_newest_question_s_category_is_the_default(self):
+        Tossup.objects.create(
+            question_set=self.qset, question_type=self.acf, category=self.chem, author=self.owner,
+            tossup_text='Old. (*) x.', tossup_answer='_a_',
+            created_date=timezone.now() - timedelta(days=1), last_changed_date=timezone.now() - timedelta(days=1))
+        Tossup.objects.create(
+            question_set=self.qset, question_type=self.acf, category=self.bio, author=self.owner,
+            tossup_text='New. (*) x.', tossup_answer='_b_',
+            created_date=timezone.now(), last_changed_date=timezone.now())
+        self.assertEqual(self._initial('/add_tossups/{0}/'.format(self.qset.id)), self.bio.id)
+        self.assertEqual(self._initial('/add_bonuses/{0}/{1}/'.format(self.qset.id, ACF_STYLE_BONUS)), self.bio.id)
+        page = self.client.get('/add_tossups/{0}/'.format(self.qset.id)).content.decode()
+        self.assertRegex(page, r'<option value="{0}"[^>]*selected'.format(self.bio.id))
+
+    def test_another_writer_s_question_does_not_count(self):
+        ou = User.objects.create_user('lcd_other', password='pw', email='lcdo@t.com')
+        Tossup.objects.create(
+            question_set=self.qset, question_type=self.acf, category=self.bio,
+            author=Writer.objects.get(user=ou), tossup_text='x (*) y', tossup_answer='_c_',
+            created_date=timezone.now(), last_changed_date=timezone.now())
+        self.assertIsNone(self._initial('/add_tossups/{0}/'.format(self.qset.id)))
+
+
 class QuestionPageTagTests(TestCase):
     """The tag checkboxes on the edit pages say where each tag stands, sit
     under their axis, and link to the tag page for that category alone."""
