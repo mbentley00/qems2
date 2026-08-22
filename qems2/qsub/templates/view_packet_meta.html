@@ -1,4 +1,4 @@
-{% if q.category %}<div class="doc-category-line">{{ q.category }}</div>{% endif %}
+{% if q.category %}<div class="doc-category-line">{{ q.category }}{% for n in q.tags %}<span class="doc-ctag">{{ n }}</span>{% endfor %}</div>{% endif %}
 <div class="doc-meta">
     <span class="doc-tag">Author: {{ q.author }}</span>
     {% if q.editor %}<span class="doc-tag">Editor: {{ q.editor }}</span>{% endif %}

@@ -7140,6 +7140,18 @@ class PacketGridLiveRefreshTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         return self._json.loads(resp.content.decode())
 
+    def test_cells_carry_the_question_s_tag_names(self):
+        tag = CategoryTag.objects.create(question_set=self.qset, category_path='Science - Biology',
+                                         name='Genetics', group_name='Subject')
+        tag.tossups.add(self.tu)
+        key = 'tossup|{0}|1'.format(self.packet.id)
+        self.assertEqual(self._state()['cells'][key]['tags'], ['Genetics'])
+        page = self.client.get('/packet_grid/{0}/'.format(self.qset.id))
+        self.assertContains(page, '<span class="cell-ctag">Genetics</span>')
+        self.assertNotContains(page, 'Subject')     # the axis stays off the grid
+        doc = self.client.get('/view_packet/{0}/'.format(self.packet.id))
+        self.assertContains(doc, '<span class="doc-ctag">Genetics</span>')
+
     def test_state_reports_what_occupies_each_slot(self):
         data = self._state()
         self.assertTrue(data['ok'])

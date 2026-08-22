@@ -142,7 +142,7 @@
                 <td class="grid-cell{% if cell.empty %} grid-cell-empty{% endif %}" data-qtype="tossup" data-num="{{ row.num }}">
                     {% if cell.id %}
                         <a href="{{ cell.edit_url }}" class="cell-answer" data-qid="{{ cell.id }}" target="_blank" rel="noopener">{{ cell.answer }}</a>
-                        <div class="cell-category">{{ cell.category }}{% if cell.edited %}<span class="cell-tag tag-edited" title="Edited">E</span>{% endif %}{% if cell.proofread %}<span class="cell-tag tag-proofread" title="Proofread">P</span>{% endif %}</div>
+                        <div class="cell-category">{{ cell.category }}{% if cell.edited %}<span class="cell-tag tag-edited" title="Edited">E</span>{% endif %}{% if cell.proofread %}<span class="cell-tag tag-proofread" title="Proofread">P</span>{% endif %}</div>{% if cell.tags %}<div class="cell-ctags">{% for n in cell.tags %}<span class="cell-ctag">{{ n }}</span>{% endfor %}</div>{% endif %}
                         {% if not read_only %}<a href="#" class="swap-btn" title="Swap with a question from another packet">&#8644;</a><a href="#" class="unassign-btn" title="Remove from packet (unassign)">&#10005;</a>{% endif %}
                     {% elif not read_only %}
                         <a href="#" class="grid-add grid-fill" title="Find a question for this empty slot">+ place&hellip;</a>
@@ -175,7 +175,7 @@
                 <td class="grid-cell{% if cell.empty %} grid-cell-empty{% endif %}" data-qtype="bonus" data-num="{{ row.num }}">
                     {% if cell.id %}
                         <a href="{{ cell.edit_url }}" class="cell-answer" data-qid="{{ cell.id }}" target="_blank" rel="noopener">{{ cell.answer }}</a>
-                        <div class="cell-category">{{ cell.category }}{% if cell.edited %}<span class="cell-tag tag-edited" title="Edited">E</span>{% endif %}{% if cell.proofread %}<span class="cell-tag tag-proofread" title="Proofread">P</span>{% endif %}</div>
+                        <div class="cell-category">{{ cell.category }}{% if cell.edited %}<span class="cell-tag tag-edited" title="Edited">E</span>{% endif %}{% if cell.proofread %}<span class="cell-tag tag-proofread" title="Proofread">P</span>{% endif %}</div>{% if cell.tags %}<div class="cell-ctags">{% for n in cell.tags %}<span class="cell-ctag">{{ n }}</span>{% endfor %}</div>{% endif %}
                         {% if not read_only %}<a href="#" class="swap-btn" title="Swap with a question from another packet">&#8644;</a><a href="#" class="unassign-btn" title="Remove from packet (unassign)">&#10005;</a>{% endif %}
                     {% elif not read_only %}
                         <a href="#" class="grid-add grid-fill" title="Find a question for this empty slot">+ place&hellip;</a>
@@ -337,6 +337,10 @@
 .packet-grid .spare-row .num-col { font-style: italic; }
 .cell-answer { display: block; font-weight: bold; }
 .cell-category { color: #777; font-size: 0.9em; }
+/* The question's category tags, names only: the axis would not fit a cell. */
+.cell-ctags { margin-top: 1px; line-height: 1.3; }
+.cell-ctag { display: inline-block; padding: 0 5px; margin: 0 3px 1px 0; border-radius: 8px;
+             font-size: 0.74em; background: var(--qx-elevate, #eef2f7); color: var(--qx-muted, #5d6270); }
 .grid-cell.drag-over { background-color: #d9edf7 !important; outline: 2px dashed #008CBA; }
 .grid-add { display: block; color: #bbb; font-weight: bold; text-align: center; padding: 2px 0; }
 .cell-removed-cat { color: #999; font-size: 0.92em; font-style: italic; text-align: center; padding: 1px 4px 3px; }
@@ -1063,6 +1067,11 @@ $(function() {
         var html = '<a href="' + esc(data.edit_url) + '" class="cell-answer" data-qid="' +
                    esc(data.id) + '" target="_blank" rel="noopener">' + esc(data.answer) + '</a>' +
                    '<div class="cell-category">' + esc(data.category) + tags + '</div>';
+        if (data.tags && data.tags.length) {
+            html += '<div class="cell-ctags">' + data.tags.map(function (n) {
+                return '<span class="cell-ctag">' + esc(n) + '</span>';
+            }).join('') + '</div>';
+        }
         if (!readOnly) {
             html += '<a href="#" class="swap-btn" title="Swap with a question from another packet">&#8644;</a>' +
                     '<a href="#" class="unassign-btn" title="Remove from packet (unassign)">&#10005;</a>';

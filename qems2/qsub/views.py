@@ -7539,7 +7539,20 @@ def _packet_neighbors(question, qtype):
     return {'prev': describe(position - 1), 'next': describe(position + 1)}
 
 
-def _grid_cell_payload(question, qtype):
+def _tag_names_by_question(qset):
+    """{('tossup'|'bonus', question id): [tag names]} for every tagged question
+    of the set, in the tags' own order. One query per type rather than one per
+    cell; the names alone, since a grid cell has no room for the axis."""
+    out = {}
+    for tag in CategoryTag.objects.filter(question_set=qset):
+        for tid in tag.tossups.values_list('id', flat=True):
+            out.setdefault(('tossup', tid), []).append(tag.name)
+        for bid in tag.bonuses.values_list('id', flat=True):
+            out.setdefault(('bonus', bid), []).append(tag.name)
+    return out
+
+
+def _grid_cell_payload(question, qtype, tag_names=None):
     """What the packet grid shows in one occupied slot. Shared by the page
     render and the live-refresh endpoint, so a cell repainted in place looks
     exactly like a freshly loaded one."""
@@ -7557,6 +7570,7 @@ def _grid_cell_payload(question, qtype):
         'edit_url': '/edit_{0}/{1}/'.format(qtype, question.id),
         'edited': question.edited,
         'proofread': question.proofread,
+        'tags': (tag_names or {}).get((qtype, question.id), []),
     }
 
 
@@ -7608,6 +7622,8 @@ def packet_grid(request, qset_id):
     # Read-only viewers get no spare row — there's nothing they could do with it.
     spare_rows = 0 if read_only else 1
 
+    tag_names = _tag_names_by_question(qset)
+
     def build_rows(question_model, preview_func, edit_url, target_rows=0):
         qtype = 'tossup' if question_model is Tossup else 'bonus'
         vacancies = {(v.packet_id, v.question_number): v.category
@@ -7620,7 +7636,7 @@ def packet_grid(request, qset_id):
         for question in (question_model.objects.filter(question_set=qset, packet__in=packets)
                          .select_related('category', 'packet').order_by('question_number', 'id')):
             number = question.question_number or 0
-            cell = _grid_cell_payload(question, qtype)
+            cell = _grid_cell_payload(question, qtype, tag_names)
             # A question with no number, or a duplicate number within its packet,
             # can't be placed in the number-keyed grid — surfacing it here keeps
             # it from silently vanishing (this is how a tiebreaker could "not
@@ -8065,6 +8081,7 @@ def view_packet(request, packet_id):
             'number': number,
             'html': question.to_html(),
             'category': str(question.category) if question.category else '',
+            'tags': tag_names.get((qtype, question.id), []),
             'edit_url': '{0}{1}/'.format(edit_url, question.id),
             'is_tiebreaker': number > per_packet,
             'author': writer_label(question.author),
@@ -8080,6 +8097,7 @@ def view_packet(request, packet_id):
                                else _grid_answer_preview(question.part1_answer, 44)),
         }
 
+    tag_names = _tag_names_by_question(qset)
     packet_tossups = list(packet.tossup_set.order_by('question_number')
                           .select_related('category', 'author__user', 'editor__user'))
     packet_bonuses = list(packet.bonus_set.order_by('question_number')
@@ -8551,6 +8569,7 @@ def packet_grid_state(request, qset_id):
     max_num = {'tossup': 0, 'bonus': 0}
     unplaced = 0
     unpacketized = {}
+    tag_names = _tag_names_by_question(qset)
     for model, qtype in ((Tossup, 'tossup'), (Bonus, 'bonus')):
         # Same ordering as the page build, so a duplicate number resolves to the
         # same winner and the two views never disagree about who holds a slot.
@@ -8563,7 +8582,7 @@ def packet_grid_state(request, qset_id):
                 unplaced += 1
                 continue
             max_num[qtype] = max(max_num[qtype], number)
-            cells[key] = _grid_cell_payload(question, qtype)
+            cells[key] = _grid_cell_payload(question, qtype, tag_names)
         unpacketized[qtype] = model.objects.filter(question_set=qset, packet=None).count()
 
     tu_rows = max(max_num['tossup'], _per_packet_target(qset, 'tossup'))
