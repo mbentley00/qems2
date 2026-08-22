@@ -302,8 +302,12 @@ LOGGING = {
     },
     'loggers': {
 
+        # Request errors go to stdout as well as to ADMINS: on App Service the
+        # container's stdout is what `az webapp log tail` and the downloaded
+        # log bundle show, and without this a 500 in production left no
+        # traceback anywhere we could read.
         'django.request': {
-            'handlers': ['mail_admins'],
+            'handlers': ['mail_admins', 'console'],
             'level': 'ERROR',
             'propagate': True,
         },
