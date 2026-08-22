@@ -9152,6 +9152,42 @@ def _question_issue_map(qset):
     return issues
 
 
+def _bonus_difficulty_orders(qset):
+    """How the set's bonuses order their parts by difficulty -- e/m/h, m/h/e,
+    and so on -- with the bonuses that carry no (or incomplete) difficulty
+    tags listed so they can be given them. A set usually wants its orders
+    mixed rather than always easy-first, and this is where the skew shows.
+    VHSL bonuses have no parts to order and are left out."""
+    from collections import OrderedDict
+    letters = {'e': 'easy', 'm': 'medium', 'h': 'hard'}
+    orders = {}
+    untagged = []
+    total = 0
+    for b in (qset.bonus_set.select_related('packet', 'question_type')
+              .order_by('packet__packet_name', 'question_number', 'id')):
+        if b.get_bonus_type() == VHSL_BONUS:
+            continue
+        total += 1
+        diffs = [(getattr(b, 'part{0}_difficulty'.format(i)) or '').strip().lower() for i in (1, 2, 3)]
+        where = ('{0} #{1}'.format(b.packet.packet_name, b.question_number)
+                 if b.packet_id else 'Unassigned')
+        if all(d in letters for d in diffs):
+            key = '/'.join(diffs)
+            orders.setdefault(key, {'key': key, 'label': '/'.join(letters[d] for d in diffs),
+                                    'count': 0, 'ids': []})
+            orders[key]['count'] += 1
+            orders[key]['ids'].append(b.id)
+        else:
+            untagged.append({'id': b.id, 'where': where,
+                             'answer': _grid_answer_preview(b.part1_answer, 30),
+                             'tags': ''.join(d if d in letters else '-' for d in diffs)})
+    rows = sorted(orders.values(), key=lambda r: (-r['count'], r['key']))
+    tagged = sum(r['count'] for r in rows)
+    for r in rows:
+        r['pct'] = round(100.0 * r['count'] / tagged, 1) if tagged else 0
+    return {'rows': rows, 'untagged': untagged, 'total': total, 'tagged': tagged}
+
+
 @login_required
 def style_check(request, qset_id):
     """Run the style checker over a set's questions. The style guide is
@@ -9238,6 +9274,7 @@ def style_check(request, qset_id):
 
     return render(request, 'style_check.html',
                   {'qset': qset, 'user': user, 'results': results, 'counts': counts,
+                   'difficulty_orders': _bonus_difficulty_orders(qset),
                    'checked': checked, 'flagged': flagged, 'guide': guide,
                    'dismissed_count': dismissed_count, 'show_dismissed': show_dismissed,
                    'guides': style_checker.STYLE_GUIDES,

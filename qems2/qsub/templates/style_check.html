@@ -81,6 +81,47 @@
 </form>
 {% endif %}
 
+{% if difficulty_orders.total %}
+{% comment %}
+Bonus difficulty orders: a set generally wants easy/medium/hard mixed up
+rather than always easy-first, and this is where a skew -- or a bonus with
+no difficulty tags at all -- is visible in one place.
+{% endcomment %}
+<details class="sc-diff-orders"{% if difficulty_orders.untagged %} open{% endif %}>
+    <summary>
+        <strong>Bonus difficulty orders</strong>
+        <span class="sc-guide-note">{{ difficulty_orders.tagged }} of {{ difficulty_orders.total }} bonus{{ difficulty_orders.total|pluralize:"es" }} tagged
+        {% if difficulty_orders.untagged %}&middot; <span class="sc-diff-missing">{{ difficulty_orders.untagged|length }} without difficulty tags</span>{% endif %}</span>
+    </summary>
+    <div class="sc-diff-body">
+        {% if difficulty_orders.rows %}
+        <table class="sc-diff-table">
+            <thead><tr><th>Order</th><th class="sc-num">Bonuses</th><th class="sc-num">Share</th><th></th></tr></thead>
+            <tbody>
+            {% for r in difficulty_orders.rows %}
+                <tr>
+                    <td><code>{{ r.key }}</code> <span class="sc-guide-note">{{ r.label }}</span></td>
+                    <td class="sc-num">{{ r.count }}</td>
+                    <td class="sc-num">{{ r.pct }}%</td>
+                    <td><div class="sc-diff-bar"><div style="width: {{ r.pct }}%;"></div></div></td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+        {% if difficulty_orders.untagged %}
+        <p class="sc-diff-missing-head">Without difficulty tags ({{ difficulty_orders.untagged|length }}) &mdash; give each part an e/m/h:</p>
+        <ul class="sc-diff-missing-list">
+            {% for b in difficulty_orders.untagged %}
+            <li><a href="/edit_bonus/{{ b.id }}/" target="_blank" rel="noopener">{{ b.answer }}</a>
+                <span class="sc-guide-note">{{ b.where }} &middot; tags <code>{{ b.tags }}</code></span></li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+    </div>
+</details>
+{% endif %}
+
 {% if not results %}
 <div class="alert-box success">No style issues found for this guide. Nice work!</div>
 {% else %}
@@ -645,4 +686,20 @@ $(function () {
 });
 </script>
 
+<style>
+.sc-diff-orders { border: 1px solid var(--qx-border, #e9e9ef); border-radius: 6px; padding: 8px 12px;
+    margin: 0 0 18px; background: var(--qx-card, #fff); }
+.sc-diff-orders summary { cursor: pointer; }
+.sc-diff-body { margin-top: 8px; }
+.sc-diff-table { width: auto; min-width: 28em; margin-bottom: 8px; }
+.sc-diff-table td, .sc-diff-table th { padding: 3px 10px 3px 0; font-size: 0.9em; }
+.sc-diff-table .sc-num { text-align: right; }
+.sc-diff-bar { width: 10em; height: 8px; background: var(--qx-elevate, #eef2f7); border-radius: 4px; }
+.sc-diff-bar div { height: 100%; background: #6d3ce8; border-radius: 4px; }
+.sc-diff-missing { color: #c0392b; font-weight: bold; }
+.sc-diff-missing-head { margin: 6px 0 2px; font-size: 0.9em; }
+.sc-diff-missing-list { list-style: none; margin: 0; font-size: 0.9em; }
+.sc-diff-missing-list li { margin: 0 0 2px; }
+html[data-theme="dark"] .sc-diff-missing { color: #f08c8c; }
+</style>
 {% endblock %}

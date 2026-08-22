@@ -3502,6 +3502,43 @@ class NestedMarkupCollapseTests(TestCase):
         self.assertEqual(tu.tossup_text, '\\BThis party (*)\\B rest. For 10 points, name it.')
 
 
+class BonusDifficultyOrderTests(TestCase):
+    """The style check page counts bonuses by the order of their part
+    difficulties and lists the ones with no tags."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        self.acf = QuestionType.objects.get(question_type=ACF_STYLE_BONUS)
+        self.ou = User.objects.create_user('bdo_owner', password='pw', email='bdo@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='BDO dist')
+        self.qset = QuestionSet.objects.create(
+            name='BDO Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.client.login(username='bdo_owner', password='pw')
+
+    def _bonus(self, d1, d2, d3, answer='_x_'):
+        return Bonus.objects.create(
+            question_set=self.qset, question_type=self.acf, author=self.owner, leadin='l',
+            part1_text='p', part1_answer=answer, part2_text='p', part2_answer='_y_',
+            part3_text='p', part3_answer='_z_',
+            part1_difficulty=d1, part2_difficulty=d2, part3_difficulty=d3,
+            created_date=timezone.now(), last_changed_date=timezone.now())
+
+    def test_orders_are_counted_and_untagged_listed(self):
+        self._bonus('e', 'm', 'h'); self._bonus('e', 'm', 'h'); self._bonus('m', 'h', 'e')
+        self._bonus('', '', '', answer='_Untagged one_'); self._bonus('e', 'm', '')
+        resp = self.client.get('/style_check/{0}/'.format(self.qset.id))
+        d = resp.context['difficulty_orders']
+        self.assertEqual(d['total'], 5)
+        self.assertEqual(d['tagged'], 3)
+        self.assertEqual([(r['key'], r['count']) for r in d['rows']], [('e/m/h', 2), ('m/h/e', 1)])
+        self.assertEqual([u['tags'] for u in d['untagged']], ['---', 'em-'])
+        self.assertContains(resp, 'Bonus difficulty orders')
+        self.assertContains(resp, 'Untagged one')
+        self.assertContains(resp, '2 without difficulty tags')
+
+
 class AnswerAlternateInsertionTests(TestCase):
     """The answer_alts fix adds "or X" clauses where they belong -- after the
     plain accepts, before accept-befores, prompts and rejects -- and never
