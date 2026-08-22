@@ -144,13 +144,20 @@ them and they lose it.</p>
     box-shadow: 0 2px 8px rgba(0,0,0,.18); margin-top: 2px; }
 .member-search-item { padding: 6px 9px; cursor: pointer; font-size: 0.82em; }
 .member-search-item:hover, .member-search-item.active { background: #eef2f7; }
+.member-search-note { padding: 6px 9px; font-size: 0.82em; color: #888; font-style: italic; }
 </style>
 <script>
 $(function () {
-    var timer = null;
-    function showResults($form, results) {
+    var timer = null, seq = 0, xhr = null;
+    function showNote($form, text) {
+        $form.find('.member-search-results').empty()
+            .append($('<div class="member-search-note"></div>').text(text)).show();
+    }
+    function showResults($form, results, q) {
         var $box = $form.find('.member-search-results');
-        if (!results.length) { $box.hide().empty(); return; }
+        // An empty list used to hide the box, which looked like the search
+        // had broken once a name was typed past what any account matched.
+        if (!results.length) { showNote($form, 'No one matches \u201c' + q + '\u201d'); return; }
         $box.empty();
         results.forEach(function (r) {
             $('<div class="member-search-item"></div>').text(r.label)
@@ -167,9 +174,17 @@ $(function () {
         clearTimeout(timer);
         if (q.length < 2) { $form.find('.member-search-results').hide().empty(); return; }
         timer = setTimeout(function () {
-            $.getJSON('/user_search/', { q: q }, function (resp) {
-                showResults($form, (resp && resp.results) || []);
-            });
+            // Only the newest request may paint: a slow reply to an earlier,
+            // shorter query must not overwrite (or blank) the current one.
+            var mine = ++seq;
+            if (xhr) { xhr.abort(); }
+            xhr = $.getJSON('/user_search/', { q: q })
+                .done(function (resp) {
+                    if (mine === seq) { showResults($form, (resp && resp.results) || [], q); }
+                })
+                .fail(function (x, status) {
+                    if (mine === seq && status !== 'abort') { showNote($form, 'Search failed \u2014 try again'); }
+                });
         }, 200);
     });
     // mousedown (not click) so the pick registers before the input's blur.

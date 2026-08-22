@@ -5082,6 +5082,33 @@ class RoleGroupSearchTests(TestCase):
             ids = [r['id'] for r in self._json.loads(resp.content)['results']]
             self.assertIn(self.target.id, ids, msg='query=%r' % q)
 
+    def test_legacy_accounts_are_not_offered_anywhere(self):
+        # An inactive -legacy placeholder (what imports make), and an older
+        # one that was made without the inactive flag: neither is a person
+        # you can add.
+        lu = User.objects.create_user('target-person-legacy', first_name='Target', last_name='Person')
+        lu.is_active = False; lu.save()
+        legacy = Writer.objects.get_or_create(user=lu)[0]
+        ou = User.objects.create_user('old-target-legacy', first_name='Target', last_name='Person')
+        old_legacy = Writer.objects.get_or_create(user=ou)[0]
+        self.client.login(username='rgs_owner', password='pw')
+        ids = [r['id'] for r in self._json.loads(
+            self.client.get('/user_search/', {'q': 'Target'}).content)['results']]
+        self.assertIn(self.target.id, ids)
+        self.assertNotIn(legacy.id, ids)
+        self.assertNotIn(old_legacy.id, ids)
+
+        dist = Distribution.objects.create(name='rgs dist')
+        qset = QuestionSet.objects.create(
+            name='RGS Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=dist)
+        for url, key in (('/add_writer/{0}/', 'available_writers'),
+                         ('/add_editor/{0}/', 'available_editors')):
+            offered = self.client.get(url.format(qset.id)).context[key]
+            self.assertIn(self.target, offered, url)
+            self.assertNotIn(legacy, offered, url)
+            self.assertNotIn(old_legacy, offered, url)
+
     def test_add_member_by_writer_id(self):
         g = RoleGroup.objects.create(name='WID Group', created_by=self.owner)
         self.client.login(username='rgs_owner', password='pw')

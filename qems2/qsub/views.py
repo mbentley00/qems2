@@ -1779,10 +1779,9 @@ def add_editor(request, qset_id):
         if qset.is_owner(user):
             current_editors = qset.editor.all()
 
-            available_editors = [writer for writer in Writer.objects.all().order_by('user__last_name', 'user__first_name', 'user__username') #exclude(is_active=False)
+            available_editors = [writer for writer in pickable_writers().order_by('user__last_name', 'user__first_name', 'user__username')
                                  if writer not in current_editors and
-                                    not qset.is_owner(writer)
-                                    and writer.user.is_active]
+                                    not qset.is_owner(writer)]
         else:
             available_editors = []
             return render(request, 'failure.html',
@@ -1821,10 +1820,9 @@ def add_editor(request, qset_id):
                 qset.save()
                 cache.clear()
                 set_editors = qset.editor.all()
-                available_editors = [writer for writer in Writer.objects.all().order_by('user__last_name', 'user__first_name', 'user__username') #exclude(is_active=False)
+                available_editors = [writer for writer in pickable_writers().order_by('user__last_name', 'user__first_name', 'user__username')
                                      if writer not in set_editors and
-                                        not qset.is_owner(writer)
-                                        and writer.user.is_active]
+                                        not qset.is_owner(writer)]
             else:
                 message = 'Invalid data entered!'
                 available_editors = []
@@ -1848,8 +1846,8 @@ def add_co_owner(request, qset_id):
 
     def get_available():
         current_owners = qset.all_owners()
-        return [writer for writer in Writer.objects.all().order_by('user__last_name', 'user__first_name', 'user__username')
-                if writer not in current_owners and writer.user.is_active]
+        return [writer for writer in pickable_writers().order_by('user__last_name', 'user__first_name', 'user__username')
+                if writer not in current_owners]
 
     if not qset.is_owner(user):
         return render(request, 'failure.html',
@@ -1920,10 +1918,9 @@ def add_writer(request, qset_id):
     if request.method == 'GET':
         if qset.is_owner(user):
             set_writers = Writer.objects.filter(Q(question_set_writer=qset) | Q(question_set_editor=qset)).distinct().order_by('user__last_name', 'user__first_name', 'user__username')
-            available_writers = [writer for writer in Writer.objects.all().order_by('user__last_name', 'user__first_name', 'user__username') #exclude(is_active=False)
+            available_writers = [writer for writer in pickable_writers().order_by('user__last_name', 'user__first_name', 'user__username')
                                  if writer not in set_writers and
-                                    not qset.is_owner(writer)
-                                    and writer.user.is_active]
+                                    not qset.is_owner(writer)]
         else:
             available_writers = []
             return render(request, 'failure.html',
@@ -1951,10 +1948,9 @@ def add_writer(request, qset_id):
                 qset.save()
                 cache.clear()
                 set_writers = Writer.objects.filter(Q(question_set_writer=qset) | Q(question_set_editor=qset)).distinct().order_by('user__last_name', 'user__first_name', 'user__username')
-                available_writers = [writer for writer in Writer.objects.all().order_by('user__last_name', 'user__first_name', 'user__username') #exclude(is_active=False)
+                available_writers = [writer for writer in pickable_writers().order_by('user__last_name', 'user__first_name', 'user__username')
                                      if writer not in set_writers and
-                                        not qset.is_owner(writer)
-                                        and writer.user.is_active]
+                                        not qset.is_owner(writer)]
             else:
                 message = 'Invalid data entered!'
                 available_writers = []
@@ -1972,7 +1968,17 @@ def add_writer(request, qset_id):
                                   'user': user})
 
 
-@login_required
+def pickable_writers():
+    """Writers a person can be offered when adding someone to a set or group:
+    current accounts only. Imported sets create inactive "-legacy" placeholder
+    accounts so old questions keep their author's name; those are attribution,
+    not people, and must not turn up in a picker (older imports made the
+    placeholder without the inactive flag, so both marks are checked)."""
+    return (Writer.objects.filter(user__is_active=True)
+            .exclude(user__username__endswith='-legacy')
+            .select_related('user'))
+
+
 @login_required
 def user_search(request):
     """Find writers by username, email, or real name for the role-group member
@@ -1985,8 +1991,7 @@ def user_search(request):
         for term in q.split():
             qobj &= (Q(user__username__icontains=term) | Q(user__email__icontains=term) |
                      Q(user__first_name__icontains=term) | Q(user__last_name__icontains=term))
-        matches = (Writer.objects.filter(qobj).select_related('user')
-                   .order_by('user__username')[:12])
+        matches = pickable_writers().filter(qobj).order_by('user__username')[:12]
         for w in matches:
             name = '{0} {1}'.format(w.user.first_name or '', w.user.last_name or '').strip()
             label = ('{0} ({1})'.format(name, w.user.username) if name else w.user.username)
