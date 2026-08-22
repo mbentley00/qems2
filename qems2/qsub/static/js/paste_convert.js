@@ -636,18 +636,25 @@ $(function () {
      */
     function splitIntoSentences(text) {
         if (!text) return [];
-        // Match runs of text that end with sentence-ending punctuation
-        var matches = text.match(/[^.!?]*[.!?]+(?:\s+|$)/g);
-        if (!matches) return [text];
-        var result = [];
-        for (var i = 0; i < matches.length; i++) {
-            var s = matches[i].trim();
-            if (s) result.push(s);
+        // A sentence ends at . ! or ?, possibly followed by a closing quote,
+        // bracket or Discord markup ("trefoil." / end.** / done.”), and then
+        // whitespace or the end of the text. Positions are tracked, not
+        // re-derived from joined match lengths: the old version could skip a
+        // stretch it failed to match and then cut the "remainder" mid-word,
+        // repeating the giveaway in a second spoiler.
+        var re = /[.!?]+["”’'\)\]*_]*(?=\s+|$)/g;
+        var result = [], last = 0, m;
+        while ((m = re.exec(text)) !== null) {
+            var end = m.index + m[0].length;
+            var chunk = text.substring(last, end);
+            // An initial ("John H. Conway") is not the end of a sentence.
+            if (/(^|\s)[A-Z]\.$/.test(chunk.trim())) { continue; }
+            var s = chunk.trim();
+            if (s) { result.push(s); }
+            last = end;
         }
-        // If there's trailing text without punctuation, include it
-        var joined = matches.join('');
-        var remainder = text.substring(joined.length).trim();
-        if (remainder) result.push(remainder);
+        var remainder = text.substring(last).trim();
+        if (remainder) { result.push(remainder); }
         return result;
     }
 
