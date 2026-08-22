@@ -6,14 +6,14 @@
 
 {% load filters %}
 
-{% block title %}Bot API Access - {{ qset.name }} - QEMS3{% endblock %}
+{% block title %}Discord Bot Settings - {{ qset.name }} - QEMS3{% endblock %}
 
 {% block content %}
 
-<h3 class="page-header">Bot API Access</h3>
+<h3 class="page-header">Discord Bot Settings</h3>
 <ul class="breadcrumbs">
     <li><a href="/edit_question_set/{{ qset.id }}/">{{ qset.name }}</a></li>
-    <li class="current">Bot API Access</li>
+    <li class="current">Discord Bot Settings</li>
 </ul>
 
 {% if messages %}
@@ -60,7 +60,56 @@
     {% endif %}
 </div>
 
-<div class="panel callout radius"><strong>How the bot uses it</strong></div>
+<div class="panel callout radius"><strong>Adding the Discord bot to your playtest server</strong></div>
+<p>
+    The playtest bot (&ldquo;Cliff&rdquo;) reads the <code>T |</code> / <code>B |</code>
+    question threads on a Discord server and posts the feedback, buzz points and
+    bonus results to this set. Linking a server takes three steps.
+</p>
+<ol class="bot-steps">
+    <li>
+        <strong>Invite the bot to the server.</strong> You need <em>Manage Server</em>
+        on the Discord server to do this. Open the bot's invite link (ask whoever
+        runs the bot for it, or build one in the
+        <a href="https://discord.com/developers/applications" target="_blank" rel="noopener">Discord Developer Portal</a>
+        under <em>OAuth2 &rarr; URL Generator</em> with the <code>bot</code> scope)
+        and pick your server. Grant it these permissions &mdash; it needs nothing else:
+        <ul>
+            <li><strong>View Channels</strong> &mdash; to find the playtest channels and their threads</li>
+            <li><strong>Read Message History</strong> &mdash; to read feedback, reactions and the Results posts already in those threads</li>
+            <li><strong>Send Messages</strong> and <strong>Send Messages in Threads</strong> &mdash; to reply when you @mention it</li>
+        </ul>
+        Together these are the permissions integer <code>274877975552</code>. If you
+        build the invite link yourself, the URL is
+        <code>https://discord.com/oauth2/authorize?client_id=&lt;application id&gt;&amp;scope=bot&amp;permissions=274877975552</code>.
+    </li>
+    <li>
+        <strong>Make sure it can see the playtest channels.</strong> A server-level
+        permission is overridden by private channels or categories. If your
+        playtest channels are restricted to a role, add the bot (or its role) to
+        those channels with <em>View Channel</em> and <em>Read Message History</em>.
+        Threads inherit from their channel, so that is enough.
+    </li>
+    <li>
+        <strong>Link the server to this set.</strong> Generate the key above, then
+        DM the bot <code>add</code>. It asks for the server ID (Discord &rarr;
+        <em>Server Settings &rarr; Widget</em>, or right-click the server with
+        Developer Mode on and <em>Copy Server ID</em>) and then for this key, and
+        checks the key against QEMS before saving. <code>test</code> confirms the
+        connection; <code>autosync live</code> makes it sync on its own a few
+        minutes after playtesting goes quiet, or @mention it in any channel to sync
+        right away. <code>help</code> lists everything it understands.
+    </li>
+</ol>
+<p class="key-meta">
+    If you host your own copy of the bot (the <code>discord_qems</code> project)
+    rather than using the shared one, also enable the <strong>Message Content</strong>
+    and <strong>Server Members</strong> privileged gateway intents on your
+    application's <em>Bot</em> page in the Developer Portal &mdash; without them the
+    bot connects but sees no message text and cannot resolve who buzzed.
+</p>
+
+<div class="panel callout radius"><strong>How the bot uses the key</strong></div>
 <p>
     Send the key on every request as a Bearer token. Questions are matched by
     their <strong>answer line</strong> (no QEMS IDs needed); if a question
@@ -120,6 +169,9 @@ POST {{ base_url }}/api/v1/comments
 .key-row { display: flex; gap: 0.5rem; align-items: center; max-width: 640px; }
 #api-key-value { font-family: monospace; margin-bottom: 0; }
 #copy-key { margin-bottom: 0; white-space: nowrap; }
+.bot-steps > li { margin-bottom: 0.7rem; }
+.bot-steps ul { margin: 0.3rem 0 0.3rem 1.2rem; }
+.bot-steps code { word-break: break-all; }
 .key-meta { color: #777; font-size: 0.85rem; margin: 0.4rem 0 0.8rem; }
 .api-docs { background: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.85rem; line-height: 1.5; }
 </style>
