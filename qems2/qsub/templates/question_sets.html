@@ -11,16 +11,16 @@
 
 <h3 class="page-header">Home</h3>
 <ul class="button-group even home-actions">
-    <li><a href="/create_question_set/" class="button">Create Question Set</a></li>
-    <li><a href="/distributions/" class="button">Distribution Entry</a></li>
-    <li><a href="/role_groups/" class="button">Role Groups</a></li>
+    <li><a href="/create_question_set/" class="button">&#x2728; Create Question Set</a></li>
+    <li><a href="/distributions/" class="button">&#x1F4CA; Distribution Entry</a></li>
+    <li><a href="/role_groups/" class="button">&#x1F465; Role Groups</a></li>
     {% if request.user.is_superuser %}
-    <li><a href="/import_set/" class="button">Import Set from TSV</a></li>
-    <li><a href="/import_packets/" class="button">Import Packets (JSON/docx/PDF)</a></li>
-    <li><a href="/reference_data/" class="button">Reference Data</a></li>
-    <li><a href="/pending_sets/" class="button{% if pending_set_count %} alert{% endif %}">Sets Awaiting Approval{% if pending_set_count %} ({{ pending_set_count }}){% endif %}</a></li>
-    <li><a href="/suggestion_quality/" class="button">Suggestion Quality</a></li>
-    <li><a href="/reference_review/pron/" class="button">Review Reference Data</a></li>
+    <li><a href="/import_set/" class="button">&#x1F4E5; Import Set from TSV</a></li>
+    <li><a href="/import_packets/" class="button">&#x1F4E6; Import Packets (JSON/docx/PDF)</a></li>
+    <li><a href="/reference_data/" class="button">&#x1F4DA; Reference Data</a></li>
+    <li><a href="/pending_sets/" class="button{% if pending_set_count %} alert{% endif %}">&#x23F3; Sets Awaiting Approval{% if pending_set_count %} ({{ pending_set_count }}){% endif %}</a></li>
+    <li><a href="/suggestion_quality/" class="button">&#x1F3AF; Suggestion Quality</a></li>
+    <li><a href="/reference_review/pron/" class="button">&#x1F50D; Review Reference Data</a></li>
     {% endif %}
 </ul>
 
