@@ -910,8 +910,15 @@ class CategoryTag(models.Model):
     # on top of them: num_tossups=1, num_questions=2 means at least one
     # tossup and at least two questions overall.
     num_questions = models.PositiveIntegerField(default=0)
+    # Where the tag sits among its group's tags when the editor has put them
+    # in an order of their own (chronological periods, say). Ties -- and
+    # everything made before this existed, all at 0 -- fall back to the name.
+    sort_order = models.IntegerField(default=0)
     tossups = models.ManyToManyField('Tossup', blank=True, related_name='category_tags')
     bonuses = models.ManyToManyField('Bonus', blank=True, related_name='category_tags')
+
+    class Meta:
+        ordering = ['category_path', 'group_name', 'sort_order', 'name']
 
     def __str__(self):
         return '{0!s}: {1!s} ({2!s})'.format(self.question_set, self.name, self.category_path)

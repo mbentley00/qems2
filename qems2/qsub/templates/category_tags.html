@@ -28,7 +28,8 @@
     on the question's edit page. Tags with a required count of 0 are informational labels.
     <p class="home-note">A <strong>group</strong> names the axis a tag runs along &mdash; Time, Location,
     Subject. A category's tags usually run along more than one at once, and naming the axis is what keeps
-    a long list from reading as one flat pile.</p>
+    a long list from reading as one flat pile. Tags within a group are alphabetical until you move one
+    with the arrows; from then on the group keeps the order you give it.</p>
 </div>
 
 {% if can_edit %}
@@ -152,17 +153,42 @@ its one category, since that is the whole page then.
                         {% if row.tag.num_questions %}{{ row.q_done }}/{{ row.tag.num_questions }}{% else %}&mdash;{% endif %}
                     </td>
                     {% if can_edit %}
-                    <td>
+                    <td class="tag-actions">
+                        <form action="" method="post" class="tag-move-form">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="move">
+                            <input type="hidden" name="tag_id" value="{{ row.tag.id }}">
+                            <button type="submit" name="direction" value="up" title="Move up"{% if forloop.first %} disabled{% endif %}>&#9650;</button><button type="submit" name="direction" value="down" title="Move down"{% if forloop.last %} disabled{% endif %}>&#9660;</button>
+                        </form>
+                        <button type="button" class="button tiny secondary tag-edit-toggle" data-target="tag-edit-{{ row.tag.id }}">Edit</button>
+                    </td>
+                    {% endif %}
+                </tr>
+                {% if can_edit %}
+                <tr class="tag-edit-row" id="tag-edit-{{ row.tag.id }}" hidden>
+                    <td colspan="7">
+                        <form action="" method="post" class="tag-edit-form">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="edit">
+                            <input type="hidden" name="tag_id" value="{{ row.tag.id }}">
+                            <label>Name <input type="text" name="name" value="{{ row.tag.name }}" required></label>
+                            <label>Group <input type="text" name="group_name" value="{{ row.tag.group_name }}" list="tag-group-choices" placeholder="none"></label>
+                            <label>Tossups <input type="number" name="num_tossups" min="0" value="{{ row.tag.num_tossups }}"></label>
+                            <label>Bonuses <input type="number" name="num_bonuses" min="0" value="{{ row.tag.num_bonuses }}"></label>
+                            <label>Any type <input type="number" name="num_questions" min="0" value="{{ row.tag.num_questions }}"></label>
+                            <input type="submit" value="Save" class="button tiny primary">
+                            <button type="button" class="button tiny secondary tag-edit-toggle" data-target="tag-edit-{{ row.tag.id }}">Cancel</button>
+                        </form>
                         <form action="" method="post" class="tag-delete-form"
                               onsubmit="return confirm('Delete the tag \'{{ row.tag.name }}\'? Question assignments to it will be removed.');">
                             {% csrf_token %}
                             <input type="hidden" name="action" value="delete">
                             <input type="hidden" name="tag_id" value="{{ row.tag.id }}">
-                            <input type="submit" value="Delete" class="button tiny alert">
+                            <input type="submit" value="Delete tag" class="button tiny alert">
                         </form>
                     </td>
-                    {% endif %}
                 </tr>
+                {% endif %}
                 {% endfor %}
             </tbody>
         </table>
@@ -170,6 +196,88 @@ its one category, since that is the whole page then.
     {% endfor %}
 </details>
 {% endfor %}
+
+{% if focus_questions %}
+{% comment %}
+Every question in the open category, with the tags it carries. This is where
+an editor tags a category in one sitting instead of one question page at a
+time, and where the questions nobody has tagged stand out.
+{% endcomment %}
+<div class="tag-questions">
+    <div class="tag-questions-head">
+        <strong>Questions in {{ focus_path }}</strong>
+        <span class="tag-cat-counts">{{ focus_questions.tossups }} tossup{{ focus_questions.tossups|pluralize }},
+            {{ focus_questions.bonuses }} bonus{{ focus_questions.bonuses|pluralize:"es" }}
+            {% if focus_questions.untagged %}&middot; <span class="tag-cat-open">{{ focus_questions.untagged }} without a tag</span>{% endif %}</span>
+        {% if focus_questions.untagged and focus_questions.untagged != focus_questions.total %}
+        <label class="tag-untagged-filter"><input type="checkbox" id="tag-untagged-only"> Only show untagged</label>
+        {% endif %}
+    </div>
+    {% if not focus_questions.rows %}
+    <p class="home-note">No questions in this category yet.</p>
+    {% else %}
+    <table class="table-striped table-hover tag-table tag-question-table">
+        <thead>
+            <tr>
+                <th style="width: 8%;">Type</th>
+                <th style="width: 24%;">Answer</th>
+                <th style="width: 12%;">Packet</th>
+                <th style="width: 12%;">Author</th>
+                <th>Tags</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for q in focus_questions.rows %}
+            <tr class="{% if q.untagged %}tag-q-untagged{% endif %}">
+                <td>{{ q.qtype|capfirst }}</td>
+                <td><a href="{{ q.edit_url }}">{{ q.answer }}</a></td>
+                <td>{% if q.location %}{{ q.location }}{% else %}<span class="tag-muted">Unassigned</span>{% endif %}</td>
+                <td>{{ q.author }}</td>
+                <td class="tag-q-tags">
+                    {% for tag in q.tags %}
+                    <span class="tag-chip">{{ tag.name }}{% if can_edit %}<form action="" method="post" class="tag-chip-del">{% csrf_token %}<input type="hidden" name="action" value="unassign"><input type="hidden" name="tag_id" value="{{ tag.id }}"><input type="hidden" name="qtype" value="{{ q.qtype }}"><input type="hidden" name="question_id" value="{{ q.id }}"><button type="submit" title="Remove this tag">&times;</button></form>{% endif %}</span>
+                    {% empty %}
+                    <span class="tag-q-flag">No tags</span>
+                    {% endfor %}
+                    {% if can_edit and q.addable %}
+                    <form action="" method="post" class="tag-assign-form">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="assign">
+                        <input type="hidden" name="qtype" value="{{ q.qtype }}">
+                        <input type="hidden" name="question_id" value="{{ q.id }}">
+                        <select name="tag_id">
+                            <option value="">+ tag&hellip;</option>
+                            {% for tag in q.addable %}
+                            <option value="{{ tag.id }}">{% if tag.group_name %}{{ tag.group_name }}: {% endif %}{{ tag.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </form>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+</div>
+{% endif %}
+
+<script>
+$(function () {
+    $('.tag-edit-toggle').on('click', function () {
+        var row = document.getElementById($(this).data('target'));
+        row.hidden = !row.hidden;
+        if (!row.hidden) { $(row).find('input[name=name]').focus(); }
+    });
+    // Picking a tag from the dropdown is the whole gesture; no second button.
+    $('.tag-assign-form select').on('change', function () {
+        if (this.value) { this.form.submit(); }
+    });
+    $('#tag-untagged-only').on('change', function () {
+        $('.tag-question-table tbody tr').not('.tag-q-untagged').toggle(!this.checked);
+    });
+});
+</script>
 
 <style>
 .tag-cat { border: 1px solid var(--qx-border, #e9e9ef); border-radius: 6px;
@@ -185,13 +293,45 @@ its one category, since that is the whole page then.
 .tag-axis-name { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;
     color: var(--qx-muted, #8a8f9c); margin: 8px 0 2px; }
 .tag-table td { vertical-align: top; font-size: 0.85em; }
-.tag-delete-form { margin: 0; }
+.tag-delete-form { margin: 0; display: inline; }
 .tag-delete-form input { margin: 0; }
+.tag-actions { white-space: nowrap; }
+.tag-actions .button { margin: 0 0 0 4px; }
+.tag-move-form { display: inline; margin: 0; }
+.tag-move-form button { border: none; background: none; cursor: pointer; padding: 0 2px;
+    color: var(--qx-muted, #8a8f9c); font-size: 0.8em; line-height: 1; }
+.tag-move-form button:hover { color: var(--qx-ink, #2b2f3a); }
+.tag-move-form button[disabled] { opacity: 0.3; cursor: default; }
+.tag-edit-row td { background: var(--qx-elevate, #f4f6fa) !important; }
+.tag-edit-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; margin: 0 0 4px; }
+.tag-edit-form label { font-size: 0.8em; margin: 0; }
+.tag-edit-form input[type=text] { width: 12em; margin: 0; height: 28px; font-size: 0.9em; }
+.tag-edit-form input[type=number] { width: 5em; margin: 0; height: 28px; font-size: 0.9em; padding-right: 2px; }
+.tag-edit-form .button { margin: 0; }
+.tag-questions { margin-top: 18px; }
+.tag-questions-head { display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline; margin-bottom: 6px; }
+.tag-untagged-filter { margin-left: auto; font-size: 0.85em; }
+.tag-untagged-filter input { margin: 0 4px 0 0; }
+.tag-q-untagged td { background-color: #fff6f6 !important; }
+.tag-q-flag { color: #c0392b; font-weight: bold; font-size: 0.9em; margin-right: 6px; }
+.tag-muted { color: var(--qx-muted, #8a8f9c); }
+.tag-q-tags { line-height: 1.9; }
+.tag-chip { display: inline-flex; align-items: center; gap: 2px; margin: 0 4px 2px 0;
+    padding: 0 7px; border-radius: 10px; font-size: 0.9em;
+    background: var(--qx-elevate, #eef2f7); color: var(--qx-ink, #2b2f3a); }
+.tag-chip-del { display: inline; margin: 0; }
+.tag-chip-del button { border: none; background: none; cursor: pointer; padding: 0 0 0 2px;
+    color: var(--qx-muted, #8a8f9c); font-size: 1em; line-height: 1; }
+.tag-chip-del button:hover { color: #c0392b; }
+.tag-assign-form { display: inline-block; margin: 0; vertical-align: middle; }
+.tag-assign-form select { width: auto; margin: 0; height: 24px; padding: 0 1.5em 0 4px; font-size: 0.8em; }
 .tag-complete { background-color: #dff0d8; color: #3c763d; font-weight: bold; }
 .tag-incomplete { background-color: #fcf8e3; color: #8a6d3b; font-weight: bold; }
 </style>
 <style>
 html[data-theme="dark"] .tag-cat-open { color: #f08c8c; }
+html[data-theme="dark"] .tag-q-untagged td { background-color: #3a2424 !important; }
+html[data-theme="dark"] .tag-q-flag, html[data-theme="dark"] .tag-chip-del button:hover { color: #f08c8c; }
 </style>
 
 {% endblock %}

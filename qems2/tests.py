@@ -10685,6 +10685,136 @@ class CategoryTagGroupingTests(TestCase):
         self.assertIn('1/2', resp.content.decode())
 
 
+class CategoryTagEditingTests(TestCase):
+    """Tags can be renamed, re-counted, regrouped and reordered in place, and
+    the single-category page lists the category's questions with their tags."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('cte_owner', password='pw', email='cte@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='CTE dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='History', subcategory='World',
+            min_tossups=2, min_bonuses=2)
+        self.qset = QuestionSet.objects.create(
+            name='CTE Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=2, distribution=self.dist)
+        self.qset.editor.add(self.owner)
+        self.path = 'History - World'
+        self.url = '/category_tags/{0}/'.format(self.qset.id)
+        self.focus = self.url + '?category=History%20-%20World'
+
+        def mk(name, group, **kw):
+            return CategoryTag.objects.create(
+                question_set=self.qset, category_path=self.path, name=name, group_name=group, **kw)
+        self.t500 = mk('500-1200', 'Time', num_tossups=2)
+        self.t1200 = mk('1200-1453', 'Time', num_tossups=3)
+        self.pre = mk('Pre-500 CE', 'Time', num_tossups=3)
+        self.china = mk('China', 'Location', num_tossups=2)
+        self.tu = Tossup.objects.create(
+            question_set=self.qset, question_type=self.acf, category=self.de,
+            author=self.owner, tossup_text='Stem. (*) end.', tossup_answer='_Mao_',
+            created_date=timezone.now(), last_changed_date=timezone.now())
+        self.tu2 = Tossup.objects.create(
+            question_set=self.qset, question_type=self.acf, category=self.de,
+            author=self.owner, tossup_text='Stem. (*) end.', tossup_answer='_Ashoka_',
+            created_date=timezone.now(), last_changed_date=timezone.now())
+        self.china.tossups.add(self.tu)
+        self.client.login(username='cte_owner', password='pw')
+
+    def _post(self, **data):
+        return self.client.post(self.focus, data)
+
+    def _time_order(self):
+        return [t.name for t in CategoryTag.objects.filter(
+            question_set=self.qset, group_name='Time')]
+
+    def test_a_tag_can_be_renamed_and_recounted(self):
+        self._post(action='edit', tag_id=self.china.id, name='Greater China', group_name='Location',
+                   num_tossups=1, num_bonuses=2, num_questions=4)
+        tag = CategoryTag.objects.get(id=self.china.id)
+        self.assertEqual((tag.name, tag.num_tossups, tag.num_bonuses, tag.num_questions),
+                         ('Greater China', 1, 2, 4))
+        self.assertEqual(tag.tossups.count(), 1)   # assignments survive a rename
+
+    def test_renaming_onto_an_existing_tag_is_refused(self):
+        resp = self._post(action='edit', tag_id=self.china.id, name='Pre-500 CE', group_name='Location')
+        self.assertContains(resp, 'already a tag called')
+        self.assertEqual(CategoryTag.objects.get(id=self.china.id).name, 'China')
+
+    def test_a_tag_can_change_group(self):
+        self._post(action='edit', tag_id=self.china.id, name='China', group_name='Region',
+                   num_tossups=2, num_bonuses=0, num_questions=0)
+        self.assertEqual(CategoryTag.objects.get(id=self.china.id).group_name, 'Region')
+
+    def test_tags_start_alphabetical_and_can_be_moved(self):
+        self.assertEqual(self._time_order(), ['1200-1453', '500-1200', 'Pre-500 CE'])
+        self._post(action='move', tag_id=self.pre.id, direction='up')
+        self.assertEqual(self._time_order(), ['1200-1453', 'Pre-500 CE', '500-1200'])
+        self._post(action='move', tag_id=self.pre.id, direction='up')
+        self.assertEqual(self._time_order(), ['Pre-500 CE', '1200-1453', '500-1200'])
+        self._post(action='move', tag_id=self.pre.id, direction='up')   # already first: no-op
+        self.assertEqual(self._time_order(), ['Pre-500 CE', '1200-1453', '500-1200'])
+        self._post(action='move', tag_id=self.t1200.id, direction='down')
+        self.assertEqual(self._time_order(), ['Pre-500 CE', '500-1200', '1200-1453'])
+
+    def test_the_page_and_edit_checkboxes_follow_the_order(self):
+        from qems2.qsub.views import build_tag_checkboxes
+        self._post(action='move', tag_id=self.pre.id, direction='up')
+        self._post(action='move', tag_id=self.pre.id, direction='up')
+        resp = self.client.get(self.focus)
+        time_group = [g for g in resp.context['groups'][0]['tag_groups'] if g['name'] == 'Time'][0]
+        self.assertEqual([r['tag'].name for r in time_group['rows']],
+                         ['Pre-500 CE', '1200-1453', '500-1200'])
+        sections = build_tag_checkboxes(self.qset, self.tu, self.de)
+        time_items = [g for g in sections[0]['groups'] if g['name'] == 'Time'][0]['items']
+        self.assertEqual([i['tag'].name for i in time_items],
+                         ['Pre-500 CE', '1200-1453', '500-1200'])
+
+    def test_a_new_tag_joins_a_hand_ordered_group_at_the_end(self):
+        self._post(action='move', tag_id=self.pre.id, direction='up')
+        self._post(action='add', category_path=self.path, name='1453-1700', group_name='Time',
+                   num_tossups=1, num_bonuses=0)
+        self.assertEqual(self._time_order()[-1], '1453-1700')
+
+    def test_a_new_tag_in_an_untouched_group_stays_alphabetical(self):
+        self._post(action='add', category_path=self.path, name='Africa', group_name='Location',
+                   num_tossups=1, num_bonuses=0)
+        self.assertEqual([t.name for t in CategoryTag.objects.filter(
+            question_set=self.qset, group_name='Location')], ['Africa', 'China'])
+
+    def test_the_category_page_lists_its_questions_with_tags(self):
+        resp = self.client.get(self.focus)
+        fq = resp.context['focus_questions']
+        self.assertEqual(fq['total'], 2)
+        self.assertEqual(fq['untagged'], 1)
+        by_id = {r['id']: r for r in fq['rows']}
+        self.assertEqual([t.name for t in by_id[self.tu.id]['tags']], ['China'])
+        self.assertTrue(by_id[self.tu2.id]['untagged'])
+        self.assertNotIn(self.china, by_id[self.tu.id]['addable'])
+        self.assertIn(self.china, by_id[self.tu2.id]['addable'])
+        self.assertContains(resp, '1 without a tag')
+
+    def test_the_whole_set_page_has_no_question_list(self):
+        resp = self.client.get(self.url)
+        self.assertIsNone(resp.context['focus_questions'])
+
+    def test_tags_can_be_assigned_and_removed_from_the_list(self):
+        self._post(action='assign', tag_id=self.pre.id, qtype='tossup', question_id=self.tu2.id)
+        self.assertIn(self.tu2, self.pre.tossups.all())
+        self._post(action='unassign', tag_id=self.china.id, qtype='tossup', question_id=self.tu.id)
+        self.assertNotIn(self.tu, self.china.tossups.all())
+
+    def test_a_writer_cannot_assign_from_the_list(self):
+        wu = User.objects.create_user('cte_writer', password='pw', email='ctew@t.com')
+        self.qset.writer.add(Writer.objects.get(user=wu))
+        self.client.login(username='cte_writer', password='pw')
+        self._post(action='assign', tag_id=self.pre.id, qtype='tossup', question_id=self.tu2.id)
+        self.assertNotIn(self.tu2, self.pre.tossups.all())
+
+
 class QuestionPageTagTests(TestCase):
     """The tag checkboxes on the edit pages say where each tag stands, sit
     under their axis, and link to the tag page for that category alone."""

@@ -6710,7 +6710,7 @@ def category_overview(request, qset_id):
     # asks for, so a row says what is outstanding without a second page.
     tags_by_path = {}
     for tag in (CategoryTag.objects.filter(question_set=qset)
-                .order_by('group_name', 'name').prefetch_related('tossups', 'bonuses')):
+                .prefetch_related('tossups', 'bonuses')):
         entry = tag.progress(tag.tossups.count(), tag.bonuses.count())
         entry['tag'] = tag
         tags_by_path.setdefault(tag.category_path, []).append(entry)
@@ -9812,8 +9812,83 @@ def get_applicable_tags(qset, dist_entry):
     if dist_entry is None:
         return []
     path = str(dist_entry)
-    return [tag for tag in CategoryTag.objects.filter(question_set=qset).order_by('category_path', 'name')
+    return [tag for tag in CategoryTag.objects.filter(question_set=qset)
             if _tag_matches_path(tag.category_path, path)]
+
+def _next_tag_sort_order(qset, path, group_name):
+    """Where a tag arriving in this group goes: the end, if the editor has
+    put the group in an order of their own; otherwise 0, which keeps an
+    untouched group alphabetical as it always was."""
+    last = (CategoryTag.objects.filter(question_set=qset, category_path=path, group_name=group_name)
+            .order_by('-sort_order').values_list('sort_order', flat=True).first())
+    return last + 10 if last else 0
+
+
+def _move_tag(tag, direction):
+    """Swap a tag with its neighbour in the group's current order.
+
+    The group's tags are renumbered 10, 20, 30... on every move, so the order
+    the page shows (sort_order, then name) is the order that gets edited --
+    a group still at all-zeros moves exactly as it reads.
+    """
+    if direction not in ('up', 'down'):
+        raise ValueError('Unknown direction')
+    siblings = list(CategoryTag.objects.filter(
+        question_set=tag.question_set, category_path=tag.category_path,
+        group_name=tag.group_name))
+    idx = next(i for i, t in enumerate(siblings) if t.id == tag.id)
+    other = idx - 1 if direction == 'up' else idx + 1
+    if 0 <= other < len(siblings):
+        siblings[idx], siblings[other] = siblings[other], siblings[idx]
+    for n, t in enumerate(siblings):
+        if t.sort_order != (n + 1) * 10:
+            t.sort_order = (n + 1) * 10
+            t.save(update_fields=['sort_order'])
+
+
+def _category_question_rows(qset, path, tag_rows):
+    """Every question in the category at ``path`` with the tags it carries.
+
+    The tags offered for assignment are the ones on this page (those at the
+    path itself); a tag a question carries from a parent or child path still
+    shows, it just cannot be added from here.
+    """
+    page_tags = [r['tag'] for r in tag_rows]
+    page_tag_ids = {t.id for t in page_tags}
+    rows = []
+    for model, qtype, edit_url in ((Tossup, 'tossup', '/edit_tossup/'),
+                                   (Bonus, 'bonus', '/edit_bonus/')):
+        qs = (model.objects.filter(question_set=qset)
+              .select_related('category', 'packet', 'author__user')
+              .prefetch_related('category_tags'))
+        for q in qs:
+            qpath = str(q.category) if q.category_id else ''
+            if not (qpath == path or qpath.startswith(path + ' - ')):
+                continue
+            tags = sorted(q.category_tags.all(), key=lambda t: (t.group_name, t.sort_order, t.name))
+            have = {t.id for t in tags}
+            rows.append({
+                'qtype': qtype,
+                'id': q.id,
+                'edit_url': '{0}{1}/'.format(edit_url, q.id),
+                'answer': (_grid_answer_preview(q.tossup_answer) if model is Tossup else
+                           ' / '.join(filter(None, [_grid_answer_preview(q.part1_answer, 20),
+                                                    _grid_answer_preview(q.part2_answer, 20),
+                                                    _grid_answer_preview(q.part3_answer, 20)]))),
+                'location': '{0} #{1}'.format(q.packet.packet_name, q.question_number) if q.packet_id else '',
+                'packet_key': (0, q.packet.packet_name, q.question_number or 0) if q.packet_id else (1, '', q.id),
+                'author': str(q.author) if q.author_id else '',
+                'tags': tags,
+                'addable': [t for t in page_tags if t.id not in have],
+                'untagged': not any(t.id in page_tag_ids for t in tags),
+            })
+    rows.sort(key=lambda r: (r['packet_key'], r['qtype'] != 'tossup'))
+    return {'rows': rows,
+            'total': len(rows),
+            'untagged': sum(1 for r in rows if r['untagged']),
+            'tossups': sum(1 for r in rows if r['qtype'] == 'tossup'),
+            'bonuses': sum(1 for r in rows if r['qtype'] == 'bonus')}
+
 
 def build_tag_checkboxes(qset, question, dist_entry):
     """The tag checkboxes on the question edit pages, as sections.
@@ -10264,7 +10339,8 @@ def category_tags(request, qset_id):
                     tag, created = CategoryTag.objects.get_or_create(
                         question_set=qset, category_path=path, name=name,
                         defaults={'num_tossups': num_tossups, 'num_bonuses': num_bonuses,
-                                  'num_questions': num_questions, 'group_name': group_name})
+                                  'num_questions': num_questions, 'group_name': group_name,
+                                  'sort_order': _next_tag_sort_order(qset, path, group_name)})
                     if not created:
                         tag.num_tossups = num_tossups
                         tag.num_bonuses = num_bonuses
@@ -10273,10 +10349,60 @@ def category_tags(request, qset_id):
                         tag.save()
                     message = 'Tag "{0}" saved'.format(name)
                     message_class = 'alert-box success'
+                elif action == 'edit':
+                    tag = CategoryTag.objects.get(question_set=qset, id=int(request.POST['tag_id']))
+                    name = request.POST.get('name', '').strip()[:200]
+                    if not name:
+                        raise ValueError('A tag needs a name')
+                    clash = (CategoryTag.objects.filter(question_set=qset, category_path=tag.category_path,
+                                                        name=name).exclude(id=tag.id).exists())
+                    if clash:
+                        raise ValueError('There is already a tag called "{0}" in {1}'.format(
+                            name, tag.category_path))
+                    counts = [int(request.POST.get(f) or 0)
+                              for f in ('num_tossups', 'num_bonuses', 'num_questions')]
+                    if min(counts) < 0:
+                        raise ValueError('Counts cannot be negative')
+                    new_group = request.POST.get('group_name', '').strip()[:100]
+                    if new_group != (tag.group_name or ''):
+                        # Moving between groups: take the end of the new one so
+                        # the order the editor set there stays put.
+                        tag.sort_order = _next_tag_sort_order(qset, tag.category_path, new_group)
+                    tag.name, tag.group_name = name, new_group
+                    tag.num_tossups, tag.num_bonuses, tag.num_questions = counts
+                    tag.save()
+                    message = 'Tag "{0}" updated'.format(name)
+                    message_class = 'alert-box success'
+                elif action == 'move':
+                    tag = CategoryTag.objects.get(question_set=qset, id=int(request.POST['tag_id']))
+                    _move_tag(tag, request.POST.get('direction', ''))
+                    message = ''
+                elif action in ('assign', 'unassign'):
+                    tag = CategoryTag.objects.get(question_set=qset, id=int(request.POST['tag_id']))
+                    qtype = request.POST.get('qtype', '')
+                    qid = int(request.POST['question_id'])
+                    if qtype == 'tossup':
+                        q = Tossup.objects.get(question_set=qset, id=qid)
+                        relation = tag.tossups
+                    elif qtype == 'bonus':
+                        q = Bonus.objects.get(question_set=qset, id=qid)
+                        relation = tag.bonuses
+                    else:
+                        raise ValueError('Unknown question type')
+                    if action == 'assign':
+                        relation.add(q)
+                        message = 'Tagged "{0}"'.format(tag.name)
+                    else:
+                        relation.remove(q)
+                        message = 'Removed "{0}"'.format(tag.name)
+                    message_class = 'alert-box success'
                 elif action == 'delete':
                     CategoryTag.objects.filter(question_set=qset, id=int(request.POST['tag_id'])).delete()
                     message = 'Tag deleted'
                     message_class = 'alert-box success'
+            except (CategoryTag.DoesNotExist, Tossup.DoesNotExist, Bonus.DoesNotExist):
+                message = 'That tag or question no longer exists'
+                message_class = 'alert-box warning'
             except (ValueError, KeyError) as ex:
                 message = str(ex) or 'Invalid request'
                 message_class = 'alert-box warning'
@@ -10304,7 +10430,7 @@ def category_tags(request, qset_id):
     tag_qs = CategoryTag.objects.filter(question_set=qset)
     if focus_path:
         tag_qs = tag_qs.filter(category_path=focus_path)
-    for tag in tag_qs.order_by('category_path', 'group_name', 'name').prefetch_related('tossups', 'bonuses'):
+    for tag in tag_qs.prefetch_related('tossups', 'bonuses'):
         tags_by_path.setdefault(tag.category_path, []).append(tag)
     for path in sorted(tags_by_path):
         rows = []
@@ -10353,9 +10479,16 @@ def category_tags(request, qset_id):
         CategoryTag.objects.filter(question_set=qset)
         .exclude(group_name='').values_list('group_name', flat=True)))
 
+    # With one category open, the page is also where that category's
+    # questions get their tags: every question in it, what it carries, and a
+    # way to add or drop a tag without opening each question.
+    focus_questions = _category_question_rows(qset, focus_path, groups[0]['rows'] if groups else []) \
+        if focus_path else None
+
     context = {'qset': qset,
                'user': user,
                'groups': groups,
+               'focus_questions': focus_questions,
                'path_choices': path_choices,
                'group_choices': group_choices,
                'can_edit': can_edit,
