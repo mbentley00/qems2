@@ -43,7 +43,7 @@ typing <code>@username</code>.</p>
 <p>No one else has changed a question you wrote or edited in this set yet.</p>
 {% else %}
 <table class="table-striped table-hover" style="width:100%;">
-    <thead><tr><th style="width:16%;">When</th><th style="width:16%;">Changed by</th><th>Question</th><th style="width:14%;">Your role</th><th style="width:10%;"></th></tr></thead>
+    <thead><tr><th style="width:14%;">When</th><th style="width:14%;">Changed by</th><th style="width:26%;">Question</th><th>What changed</th><th style="width:12%;">Your role</th><th style="width:10%;"></th></tr></thead>
     <tbody>
     {% autoescape off %}
     {% for c in change_items %}
@@ -51,6 +51,7 @@ typing <code>@username</code>.</p>
             <td>{{ c.date|to_short_datetime }}</td>
             <td>{{ c.by }}</td>
             <td>{{ c.preview }}</td>
+            <td class="activity-summary">{{ c.summary }}</td>
             <td>You {{ c.role }} it</td>
             <td><a href="{{ c.edit_url }}" class="button tiny secondary" style="margin-bottom:0;">View {{ c.qtype }}</a></td>
         </tr>

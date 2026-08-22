@@ -4,7 +4,7 @@ import re
 from django.test import TestCase, override_settings
 from django.core import mail
 from django.contrib.auth.models import AnonymousUser, User
-from datetime import datetime
+from datetime import datetime, timedelta
 from django.utils import timezone
 
 from qems2.qsub.packet_parser import is_answer, is_bpart, is_vhsl_bpart, is_category
@@ -7215,7 +7215,7 @@ class ActivityFeedScopeTests(TestCase):
     def test_author_still_sees_every_change_by_others(self):
         rows = self._changes(self.author)
         self.assertEqual(len(rows), 1)                       # the third party's
-        self.assertEqual(rows[0][3].changer_id, self.third.id)
+        self.assertEqual(rows[0][3][-1].changer_id, self.third.id)
 
     def test_editing_a_question_does_not_backfill_its_history(self):
         self.assertEqual(self._changes(self.editor), [])     # not involved yet
@@ -7233,8 +7233,8 @@ class ActivityFeedScopeTests(TestCase):
         self.tu.save_question(edit_type=QUESTION_CHANGE, changer=self.third)
         rows = self._changes(self.editor)
         self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0][3].changer_id, self.third.id)
-        self.assertIn('Later stem', rows[0][3].tossup_text)
+        self.assertEqual(rows[0][3][-1].changer_id, self.third.id)
+        self.assertIn('Later stem', rows[0][3][-1].tossup_text)
 
     def test_your_own_later_save_clears_what_you_have_seen(self):
         """The cutoff is your *last* change, so re-saving a question you have
@@ -7267,6 +7267,64 @@ class ActivityFeedScopeTests(TestCase):
         resp = self.client.get('/activity/{0}/'.format(self.qset.id))
         self.assertEqual(resp.status_code, 200)
         self.assertNotContains(resp, str(self.third.user.username))
+
+
+class ActivityFeedSummaryTests(ActivityFeedScopeTests):
+    """Each feed row says roughly what changed, and a burst of saves by one
+    person reads as one row rather than one per save."""
+
+    def _save_as_third(self, text, when):
+        self.tu.tossup_text = text
+        self.tu.save_question(edit_type=QUESTION_CHANGE, changer=self.third)
+        latest = TossupHistory.objects.filter(
+            question_history=self.tu.question_history, changer=self.third).order_by('-id').first()
+        TossupHistory.objects.filter(id=latest.id).update(change_date=when)
+
+    def _feed(self):
+        self.client.login(username='af_author', password='pw')
+        return self.client.get('/activity/{0}/'.format(self.qset.id)).context['change_items']
+
+    def test_a_burst_of_saves_is_one_row(self):
+        base = timezone.now()
+        self._save_as_third('Stem 4. (*) end.', base + timedelta(minutes=1))
+        self._save_as_third('Stem 5. (*) end.', base + timedelta(minutes=5))
+        self._save_as_third('Stem 6. (*) end.', base + timedelta(minutes=20))
+        rows = self._changes(self.author)
+        self.assertEqual(len(rows), 1)
+        # setUp's save by the third party (just now) is within the window of
+        # the first of these, so the burst is four saves.
+        self.assertEqual(len(rows[0][3]), 4)
+
+    def test_saves_far_apart_are_separate_rows(self):
+        base = timezone.now()
+        self._save_as_third('Stem 4. (*) end.', base + timedelta(hours=2))
+        self._save_as_third('Stem 5. (*) end.', base + timedelta(hours=5))
+        self.assertEqual(len(self._changes(self.author)), 3)
+
+    def test_the_summary_counts_characters_in_text_and_answer(self):
+        base = timezone.now()
+        self._save_as_third('Stem 3 plus more words. (*) end.', base + timedelta(hours=2))
+        item = self._feed()[0]
+        self.assertIn('in the text', item['summary'])
+        self.assertNotIn('answer line', item['summary'])
+        self.tu.tossup_answer = '_Chloroplasts_'
+        self._save_as_third('Stem 3 plus more words. (*) end.', base + timedelta(hours=5))
+        item = self._feed()[0]
+        self.assertIn('answer line', item['summary'])
+        self.assertNotIn('in the text', item['summary'])
+
+    def test_a_burst_is_measured_end_to_end(self):
+        from qems2.qsub.views import _describe_change
+        base = timezone.now()
+        self._save_as_third('Stem 3. (*) end. Extra.', base + timedelta(hours=2))
+        self._save_as_third('Stem 3. (*) end.', base + timedelta(hours=2, minutes=3))
+        rows = self._changes(self.author)
+        before = TossupHistory.objects.filter(
+            question_history=self.tu.question_history,
+            change_date__lt=rows[0][3][0].change_date).order_by('-change_date').first()
+        summary = _describe_change(Tossup, before, rows[0][3])
+        self.assertTrue(summary.startswith('metadata only'), summary)
+        self.assertIn('2 saves over 3 min', summary)
 
 
 class PacketGridSpareRowTests(TestCase):

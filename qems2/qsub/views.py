@@ -8714,8 +8714,103 @@ def _activity_changes(user, qset, since=None, limit=100):
             kept += 1
             if kept >= limit:
                 break
-    items.sort(key=lambda row: row[3].change_date, reverse=True)
-    return items[:limit]
+    return _group_activity_changes(items)[:limit]
+
+
+# Saves closer together than this, by the same person to the same question,
+# read as one sitting rather than as a list of separate events.
+from datetime import timedelta as _timedelta
+ACTIVITY_GROUP_WINDOW = _timedelta(minutes=30)
+
+
+def _group_activity_changes(items):
+    """Fold a run of saves into one entry.
+
+    Someone editing a question saves it five times in ten minutes; that is one
+    edit to you, not five rows. Consecutive history rows by the same changer on
+    the same question, each within ACTIVITY_GROUP_WINDOW of the one before,
+    become a single (model, hist_model, edit_url, [rows oldest-first], q)
+    tuple. Output is newest-first by each group's latest save.
+    """
+    items = sorted(items, key=lambda row: row[3].change_date)
+    groups, open_by_key = [], {}
+    for model, hist_model, edit_url, h, q in items:
+        key = (model, q.id, h.changer_id)
+        g = open_by_key.get(key)
+        if g is not None and h.change_date - g[3][-1].change_date <= ACTIVITY_GROUP_WINDOW:
+            g[3].append(h)
+            continue
+        g = (model, hist_model, edit_url, [h], q)
+        open_by_key[key] = g
+        groups.append(g)
+    groups.sort(key=lambda g: g[3][-1].change_date, reverse=True)
+    return groups
+
+
+def _history_text_fields(model):
+    """The history columns that hold question text, and those that hold answer
+    lines, for a tossup or bonus history model."""
+    if model is Tossup:
+        return ['tossup_text'], ['tossup_answer']
+    return (['leadin', 'part1_text', 'part2_text', 'part3_text'],
+            ['part1_answer', 'part2_answer', 'part3_answer'])
+
+
+def _chars_changed(before, after):
+    """Characters inserted plus deleted between two strings, markup aside."""
+    import difflib
+    a = strip_markup(before or '')
+    b = strip_markup(after or '')
+    if a == b:
+        return 0
+    changed = 0
+    for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
+        if op != 'equal':
+            changed += (i2 - i1) + (j2 - j1)
+    return changed
+
+
+def _describe_change(model, before, rows):
+    """Say roughly what a run of saves did to a question.
+
+    ``before`` is the history row from just before the run (None if the run
+    starts at the question's creation); ``rows`` are the run's saves, oldest
+    first. The comparison is end-to-end, so a word changed and changed back
+    across two saves counts as nothing -- which is what it was.
+    """
+    after = rows[-1]
+    text_fields, answer_fields = _history_text_fields(model)
+    if before is None:
+        parts = ['created']
+    else:
+        text_delta = sum(_chars_changed(getattr(before, f), getattr(after, f)) for f in text_fields)
+        answer_delta = sum(_chars_changed(getattr(before, f), getattr(after, f)) for f in answer_fields)
+        lines = 'answer line' if model is Tossup else 'answer lines'
+        parts = []
+        if text_delta:
+            parts.append('~{0} character{1} in the text'.format(text_delta, '' if text_delta == 1 else 's'))
+        if answer_delta:
+            if text_delta:
+                parts.append('~{0} in the {1}'.format(answer_delta, lines))
+            else:
+                parts.append('~{0} character{1} in the {2}'.format(
+                    answer_delta, '' if answer_delta == 1 else 's', lines))
+        if before.question_type_id != after.question_type_id:
+            parts.append('question type changed')
+        if model is Bonus and any(getattr(before, f) != getattr(after, f) for f in
+                                  ('part1_difficulty', 'part2_difficulty', 'part3_difficulty')):
+            parts.append('part difficulties changed')
+        if not parts:
+            # The save changed something history does not record -- category,
+            # lock, proofread flag -- or nothing at all.
+            parts.append('metadata only, no text change')
+    summary = ', '.join(parts)
+    if len(rows) > 1:
+        span = rows[-1].change_date - rows[0].change_date
+        minutes = int(round(span.total_seconds() / 60))
+        summary += ' ({0} saves over {1})'.format(
+            len(rows), '{0} min'.format(minutes) if minutes >= 1 else 'a minute')
+    return summary
 
 
 def _new_activity_count(user, qset):
@@ -8779,16 +8874,25 @@ def activity(request, qset_id):
     # --- changes by others to questions you authored or edited, from the point
     # each one became yours (see _activity_changes) ---
     change_items = []
-    for model, _hist_model, edit, h, q in _activity_changes(user, qset):
+    # The row before each run is what the run is measured against: the last
+    # save of the question, by anyone, before the run's first.
+    for model, hist_model, edit, rows, q in _activity_changes(user, qset):
+        first, last = rows[0], rows[-1]
+        before = (hist_model.objects
+                  .filter(question_history_id=first.question_history_id,
+                          change_date__lt=first.change_date)
+                  .order_by('-change_date', '-id').first())
         preview = (_grid_answer_preview(q.tossup_answer) if model is Tossup
                    else _grid_answer_preview(q.part1_answer, 30))
         change_items.append({
-            'date': h.change_date,
-            'by': str(h.changer) if h.changer else 'unknown',
+            'date': last.change_date,
+            'by': str(last.changer) if last.changer else 'unknown',
             'qtype': 'tossup' if model is Tossup else 'bonus',
             'edit_url': '{0}{1}/'.format(edit, q.id),
             'preview': preview,
             'role': 'wrote' if q.author_id == user.id else 'edited',
+            'summary': _describe_change(model, before, rows),
+            'saves': len(rows),
         })
 
     # Mark this set's activity as seen (clears the notification badge).
