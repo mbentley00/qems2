@@ -78,6 +78,10 @@ $(function () {
             window.location.replace(window.location.pathname + window.location.search);
             return;
         }
+        // On the bonus page the unified editor is what is on screen and the
+        // per-part fields only catch up on submit; pull its text down first so
+        // the drift check below compares against what the writer actually has.
+        if (window.qemsSyncBonusUnified) { window.qemsSyncBonusUnified(); }
         // The fix was computed from the SAVED text, so if what's in the box has
         // drifted from that, replacing it would quietly drop those edits.
         var current = $field.val() || '';
@@ -90,13 +94,15 @@ $(function () {
             }
         }
         $field.val(r.text || '').trigger('change').trigger('input');
+        // ...and back up into the unified bonus editor, which is what shows.
+        var $unified = window.qemsRefreshBonusUnified ? window.qemsRefreshBonusUnified() : null;
 
         // Flash whichever of the two is actually on screen (the rich editor
         // replaces the textarea when it's enhanced).
-        var $anchor = $field.closest('div.expanding');
-        if (!$anchor.length) { $anchor = $field; }
+        var $anchor = ($unified || $field).closest('div.expanding');
+        if (!$anchor.length) { $anchor = $unified || $field; }
         var $flash = $anchor.next('.rich-editor-wrapper').find('.rich-editor');
-        if (!$flash.length) { $flash = $field; }
+        if (!$flash.length) { $flash = $unified || $field; }
         $flash.addClass('sc-just-fixed');
         setTimeout(function () { $flash.removeClass('sc-just-fixed'); }, 900);
 

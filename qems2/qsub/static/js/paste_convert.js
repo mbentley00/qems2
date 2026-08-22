@@ -425,6 +425,17 @@ $(function () {
         }
     };
 
+    // The other direction: something changed a per-part field behind the
+    // unified view (a style fix applied to the saved question), so rebuild the
+    // unified text from the fields and push it into the rich editor. Without
+    // this the fix sat in a hidden field and the next save parsed the stale
+    // unified text straight back over it. Returns the editor to flash, if any.
+    window.qemsRefreshBonusUnified = function () {
+        if (!(unifiedMode && $unifiedTextarea && $unifiedTextarea.length)) { return null; }
+        $unifiedTextarea.val(fieldsToUnified()).trigger('change').trigger('input');
+        return $unifiedTextarea;
+    };
+
     function fieldsToUnified() {
         var leadin = ($('#id_leadin').val() || '').trim();
         var parts = [];
