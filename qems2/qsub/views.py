@@ -1,4 +1,5 @@
 import json
+import urllib.parse
 import csv
 import html
 import io
@@ -9815,17 +9816,54 @@ def get_applicable_tags(qset, dist_entry):
             if _tag_matches_path(tag.category_path, path)]
 
 def build_tag_checkboxes(qset, question, dist_entry):
-    """Context rows for the tag checkboxes on the question edit pages."""
+    """The tag checkboxes on the question edit pages, as sections.
+
+    One section per category path the tags sit on (nearly always one), each
+    with its tags grouped by axis the way the Category Tags page shows them,
+    and each tag saying where it stands -- "1/6 tossups, 0/6 bonuses" -- so
+    "6/6 needed" stops reading as if it were already done. The counts include
+    this question when it is checked, which the template points out.
+    """
     tags = get_applicable_tags(qset, dist_entry)
     if not tags:
         return []
-    if question is None:
+    if question is None or question.id is None:
         checked_ids = set()
-    elif isinstance(question, Tossup):
-        checked_ids = set(question.category_tags.values_list('id', flat=True))
     else:
         checked_ids = set(question.category_tags.values_list('id', flat=True))
-    return [{'tag': tag, 'checked': tag.id in checked_ids} for tag in tags]
+
+    def _progress_label(tag, p):
+        bits = []
+        if tag.num_tossups:
+            bits.append('{0}/{1} tossups'.format(p['tu_done'], tag.num_tossups))
+        if tag.num_bonuses:
+            bits.append('{0}/{1} bonuses'.format(p['bs_done'], tag.num_bonuses))
+        if tag.num_questions:
+            bits.append('{0}/{1} of any type'.format(p['q_done'], tag.num_questions))
+        return ', '.join(bits)
+
+    sections, by_path = [], {}
+    for tag in tags:
+        p = tag.progress()
+        item = {'tag': tag, 'checked': tag.id in checked_ids,
+                'progress': p, 'complete': p['complete'] if tag.has_quota else None,
+                'label': _progress_label(tag, p)}
+        by_path.setdefault(tag.category_path, []).append(item)
+    for path in sorted(by_path):
+        by_group, order = {}, []
+        for item in by_path[path]:
+            key = (item['tag'].group_name or '').strip()
+            if key not in by_group:
+                by_group[key] = []
+                order.append(key)
+            by_group[key].append(item)
+        order.sort(key=lambda k: (k == '', k.lower()))
+        sections.append({
+            'path': path,
+            'status_url': '/category_tags/{0}/?category={1}'.format(qset.id, urllib.parse.quote(path)),
+            'groups': [{'name': k, 'label': k or 'Other', 'items': by_group[k]} for k in order],
+        })
+    return sections
 
 def save_tag_selection(request, qset, question, dist_entry, is_tossup):
     """Apply the 'category_tags' checkbox selection from a question edit POST."""

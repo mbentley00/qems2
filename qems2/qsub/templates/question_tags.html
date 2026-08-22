@@ -1,18 +1,46 @@
 {% if available_tags %}
 <div class="row">
     <div class="small-12 columns">
-        <div class="panel" style="padding: 8px 12px; margin-bottom: 12px;">
+        <div class="panel qtags-panel">
             <strong>Category Tags</strong>
-            <small>(check the requirements this question fulfills &mdash; <a href="/category_tags/{{ qset.id }}/">tag status</a>)</small><br>
-            {% for item in available_tags %}
-                <label style="display: inline-block; margin-right: 16px; font-weight: normal;">
-                    <input type="checkbox" name="category_tags" value="{{ item.tag.id }}"
-                           {% if item.checked %}checked{% endif %}>
-                    {{ item.tag.name }}
-                    <small style="color: #888;">({{ item.tag.category_path }}{% if item.tag.has_quota %}, {{ item.tag.quota_summary }} needed{% endif %})</small>
-                </label>
+            <small>(check the requirements this question fulfills &mdash;
+                {% if available_tags|length == 1 %}<a href="{{ available_tags.0.status_url }}">tag status</a>{% else %}tag status per category below{% endif %})</small>
+            {% for section in available_tags %}
+            <div class="qtags-section">
+                {% if available_tags|length > 1 %}
+                <div class="qtags-path">{{ section.path }} &middot; <a href="{{ section.status_url }}">tag status</a></div>
+                {% endif %}
+                {% for g in section.groups %}
+                <div class="qtags-axis">
+                    {% if g.name or section.groups|length > 1 %}<span class="qtags-axis-name">{{ g.label }}</span>{% endif %}
+                    {% for item in g.items %}
+                    <label class="qtags-item{% if item.checked %} qtags-checked{% endif %}{% if item.complete %} qtags-done{% endif %}">
+                        <input type="checkbox" name="category_tags" value="{{ item.tag.id }}"
+                               {% if item.checked %}checked{% endif %}>
+                        {{ item.tag.name }}
+                        {% if item.label %}
+                        <small class="qtags-progress" title="{% if item.complete %}Requirement met{% else %}Still needed{% endif %}{% if item.checked %} (counts include this question){% endif %}">{{ item.label }}{% if item.checked %}, incl. this one{% endif %}{% if item.complete %} &#10003;{% endif %}</small>
+                        {% endif %}
+                    </label>
+                    {% endfor %}
+                </div>
+                {% endfor %}
+            </div>
             {% endfor %}
         </div>
     </div>
 </div>
+<style>
+.qtags-panel { padding: 8px 12px; margin-bottom: 12px; }
+.qtags-section { margin-top: 4px; }
+.qtags-path { font-weight: bold; margin: 6px 0 2px; }
+.qtags-axis { margin: 2px 0 4px; }
+.qtags-axis-name { display: inline-block; min-width: 6em; font-size: 0.72rem; text-transform: uppercase;
+    letter-spacing: 0.05em; color: var(--qx-muted, #8a8f9c); margin-right: 6px; }
+.qtags-item { display: inline-block; margin: 0 14px 2px 0; font-weight: normal; }
+.qtags-progress { color: var(--qx-muted, #888); }
+.qtags-done .qtags-progress { color: #1b5e20; }
+.qtags-checked { font-weight: bold; }
+html[data-theme="dark"] .qtags-done .qtags-progress { color: #86d29d; }
+</style>
 {% endif %}

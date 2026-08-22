@@ -10685,6 +10685,52 @@ class CategoryTagGroupingTests(TestCase):
         self.assertIn('1/2', resp.content.decode())
 
 
+class QuestionPageTagTests(TestCase):
+    """The tag checkboxes on the edit pages say where each tag stands, sit
+    under their axis, and link to the tag page for that category alone."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('qpt_owner', password='pw', email='qpt@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='QPT dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='History', subcategory='World',
+            min_tossups=2, min_bonuses=2)
+        self.qset = QuestionSet.objects.create(
+            name='QPT Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=2, distribution=self.dist)
+        self.qset.editor.add(self.owner)
+        self.tag = CategoryTag.objects.create(
+            question_set=self.qset, category_path='History - World',
+            name='1900+', group_name='Time', num_tossups=6, num_bonuses=6)
+        CategoryTag.objects.create(
+            question_set=self.qset, category_path='History - World',
+            name='China', group_name='Location', num_tossups=2)
+        self.tu = Tossup.objects.create(
+            question_set=self.qset, question_type=self.acf, category=self.de,
+            author=self.owner, tossup_text='Stem. (*) end.', tossup_answer='_Mao_',
+            created_date=timezone.now(), last_changed_date=timezone.now())
+        self.tag.tossups.add(self.tu)
+        self.client.login(username='qpt_owner', password='pw')
+
+    def test_the_tags_are_grouped_and_show_progress(self):
+        from qems2.qsub.views import build_tag_checkboxes
+        sections = build_tag_checkboxes(self.qset, self.tu, self.de)
+        self.assertEqual(len(sections), 1)
+        self.assertEqual([g['label'] for g in sections[0]['groups']], ['Location', 'Time'])
+        item = sections[0]['groups'][1]['items'][0]
+        self.assertTrue(item['checked'])
+        self.assertEqual(item['label'], '1/6 tossups, 0/6 bonuses')
+        self.assertFalse(item['complete'])
+
+    def test_the_status_link_goes_to_this_category(self):
+        resp = self.client.get('/edit_tossup/{0}/'.format(self.tu.id))
+        self.assertContains(resp, '/category_tags/{0}/?category=History%20-%20World'.format(self.qset.id))
+        self.assertContains(resp, '1/6 tossups, 0/6 bonuses, incl. this one')
+
+
 class CategoryTagTreeTests(TestCase):
     """The page opens as a list of categories, not as every tag at once."""
 
