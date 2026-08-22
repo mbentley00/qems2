@@ -11198,6 +11198,33 @@ class CategoryTagTreeTests(TestCase):
         self.assertIn('All categories', body)
 
 
+class CategoryOverviewCollapsedGroupTests(TestCase):
+    """A category with a single subcategory collapses to one row -- which has
+    to sit at the top level under its own name, not indented under the
+    previous category as a bare "Any"."""
+
+    def test_a_lone_subcategory_keeps_its_parent_s_name_and_level(self):
+        from qems2.qsub.model_utils import get_category_overview
+        ou = User.objects.create_user('cog_owner', password='pw', email='cog@t.com')
+        owner = Writer.objects.get(user=ou)
+        dist = Distribution.objects.create(name='COG dist')
+        qset = QuestionSet.objects.create(
+            name='COG Set', date=timezone.now(), host='h', address='', owner=owner,
+            num_packets=1, distribution=dist)
+        for cat, sub in (('Science', 'Biology'), ('Science', 'Physics'), ('Social Science', 'Any')):
+            de = DistributionEntry.objects.create(distribution=dist, category=cat, subcategory=sub,
+                                                  min_tossups=1, min_bonuses=1)
+            SetWideDistributionEntry.objects.create(question_set=qset, dist_entry=de,
+                                                    num_tossups=1, num_bonuses=1)
+        rows = [(r['name'], r['short_name'], r['depth'], r['is_group']) for r in get_category_overview(qset)]
+        self.assertEqual(rows, [
+            ('Science', 'Science', 0, True),
+            ('Science - Biology', 'Biology', 1, False),
+            ('Science - Physics', 'Physics', 1, False),
+            ('Social Science - Any', 'Social Science - Any', 0, False),
+        ])
+
+
 class CategoryOverviewTagTests(TestCase):
     """Tags belong on the page about categories, and an editor can work on them
     without leaving it."""

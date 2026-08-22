@@ -687,21 +687,27 @@ def get_category_overview(qset):
     for key in groups_to_remove:
         del tree[key]
 
-    # Build sorted rows
+    # Build sorted rows. A leaf whose group was collapsed above sits where
+    # the group would have, at the group's depth and carrying the collapsed
+    # part of its path as its label -- "Social Science - Any" -- rather than
+    # as a bare "Any" indented under whatever top-level row sorts before it.
     rows = []
     for key in sorted(tree.keys()):
         node = tree[key]
+        ancestors = [i for i in range(1, len(key)) if tuple(key[:i]) in tree]
+        shown_from = ancestors[-1] if ancestors else 0
+        depth = len(ancestors)
         rows.append({
             'name': ' - '.join(key),
-            'short_name': key[-1],
-            'depth': len(key) - 1,
+            'short_name': ' - '.join(key[shown_from:]),
+            'depth': depth,
             'tu_req': node['tu_req'],
             'tu_in_cat': node['tu_in_cat'],
             'bs_req': node['bs_req'],
             'bs_in_cat': node['bs_in_cat'],
             'is_group': not node['is_leaf'],
             'category_id': node['category_id'],
-            'padding': (len(key) - 1) * 30,
+            'padding': depth * 30,
         })
 
     return rows
