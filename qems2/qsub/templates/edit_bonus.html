@@ -195,18 +195,20 @@
             </ul>
         </div>
 
-        {% if bonus %}
-        <div class="qmeta-actions" style="margin-bottom:16px;">
+        <div class="qmeta-actions">
+            {% if bonus %}
             <a href="/move_bonus/{{ qset.id }}/{{ bonus.id }}" class="button small secondary">Move Set</a>
             {% if role == "editor" %}<a href="#" class="button small secondary edit-swap-btn" data-qtype="bonus" data-qid="{{ bonus.id }}" data-packet="{{ bonus.packet.id }}" data-num="{{ bonus.question_number }}">Swap Packets</a>{% endif %}
             <a href="/bonus_history/{{ bonus.id }}" class="button small secondary">History</a>
-            <a href="/convert_bonus/{{ bonus.id }}" class="button small secondary convert_bonus" value="{{ bonus.id }}" qset-id="{{ qset.id }}" target-type="ACF-style tossup">Convert to ACF tossup</a>
+            <a href="/convert_bonus/{{ bonus.id }}" class="button small secondary convert_bonus" value="{{ bonus.id }}" qset-id="{{ qset.id }}" target-type="ACF-style tossup" title="Convert this bonus into an ACF-style tossup">Tossupify</a>
             {% if question_type == "VHSL bonus" %}<a href="/convert_bonus/{{ bonus.id }}" class="button small secondary convert_bonus" value="{{ bonus.id }}" qset-id="{{ qset.id }}" target-type="ACF-style bonus">Convert to ACF bonus</a>{% endif %}
             <a href="/export_question/bonus/{{ bonus.id }}/yapp-json/" class="button small secondary" title="Download just this bonus as a one-question YAPP JSON packet, readable by MODAQ">YAPP</a>
             <a href="/export_question/bonus/{{ bonus.id }}/yapp2-json/" class="button small secondary" title="Download just this bonus as YAPP2 JSON — the same packet, plus pronunciation-guide anchoring">YAPP2</a>
             <a href="/delete_bonus/{{ bonus.id }}" class="button small alert delete_bonus" value="{{ bonus.id }}" qset-id="{{ qset.id }}">Delete</a>
+            {% endif %}
+            <input type="submit" id="submit-bonus" value="Save" class="button primary qmeta-save" />
+            {% if can_suggest %}<button type="submit" name="save_as_suggestion" value="1" class="button small secondary" title="Save your edits as proposed changes for the author or an editor to review — the question itself isn't changed yet.">Save as Suggested Changes</button>{% endif %}
         </div>
-        {% endif %}
 
         {% include "question_tags.html" %}
 
@@ -217,10 +219,9 @@
 
         <div id="difficulty-warning" class="alert-box warning" style="display:none;"></div>
     {% endif %}
-    {% if form %}
+    {% if form and read_only and can_suggest %}
         <div class="save-actions">
-            {% if not read_only %}<input type="submit" id="submit-bonus" value="Save" class="button primary" />{% endif %}
-            {% if can_suggest %}<button type="submit" name="save_as_suggestion" value="1" class="button secondary" title="Save your edits as proposed changes for the author or an editor to review — the question itself isn't changed yet.">Save as Suggested Changes</button>{% endif %}
+            <button type="submit" name="save_as_suggestion" value="1" class="button secondary" title="Save your edits as proposed changes for the author or an editor to review — the question itself isn't changed yet.">Save as Suggested Changes</button>
         </div>
     {% endif %}
 </form>
