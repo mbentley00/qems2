@@ -1254,6 +1254,8 @@ class Tossup (models.Model):
             self.proofread_date = timezone.now()
 
         self.tossup_answer = strip_answer_from_answer_line(self.tossup_answer)
+        self.tossup_text = collapse_nested_markup(self.tossup_text)
+        self.tossup_answer = collapse_nested_markup(self.tossup_answer)
         tossup_history = TossupHistory()
         tossup_history.tossup_text = self.tossup_text
         tossup_history.tossup_answer = self.tossup_answer
@@ -1669,6 +1671,9 @@ class Bonus(models.Model):
         self.part1_answer = strip_answer_from_answer_line(self.part1_answer)
         self.part2_answer = strip_answer_from_answer_line(self.part2_answer)
         self.part3_answer = strip_answer_from_answer_line(self.part3_answer)
+        for field in ('leadin', 'part1_text', 'part1_answer', 'part2_text', 'part2_answer',
+                      'part3_text', 'part3_answer'):
+            setattr(self, field, collapse_nested_markup(getattr(self, field)))
 
         bonus_history = BonusHistory()
         bonus_history.leadin = self.leadin

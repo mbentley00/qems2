@@ -64,6 +64,15 @@ $(function () {
         return text.split('\n').map(function (segment) {
             var m = segment.match(/^(\s*)([\s\S]*?)(\s*)$/);
             if (!m[2]) { return segment; }
+            // Already wrapped in this marker (a bold run nested in a bold
+            // wrapper): wrapping again would nest the pair, which renders as
+            // literal markers.
+            if (m[2].length > 2 * marker.length &&
+                m[2].slice(0, marker.length) === marker &&
+                m[2].slice(-marker.length) === marker &&
+                m[2].slice(marker.length, -marker.length).indexOf(marker) === -1) {
+                return segment;
+            }
             return m[1] + marker + m[2] + marker + m[3];
         }).join('\n');
     }

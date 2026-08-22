@@ -3460,6 +3460,48 @@ class GenderNeutralIdentifierStyleCheckTests(TestCase):
         self.assertNotIn('singular_they', codes)
 
 
+class NestedMarkupCollapseTests(TestCase):
+    """A bold pair nested inside a bold pair renders as literal \\B; saving a
+    question folds it to one pair."""
+
+    def _c(self, text):
+        from qems2.qsub.utils import collapse_nested_markup
+        return collapse_nested_markup(text)
+
+    def test_doubled_pair_collapses(self):
+        self.assertEqual(self._c('\\B\\BThis party (*)\\B\\B rest'), '\\BThis party (*)\\B rest')
+
+    def test_back_to_back_spans_are_left_alone(self):
+        self.assertEqual(self._c('\\Bfoo\\B\\Bbar\\B'), '\\Bfoo\\B\\Bbar\\B')
+        self.assertEqual(self._c('\\Bfoo\\B\\Bbar\\B\\Bbaz\\B'), '\\Bfoo\\B\\Bbar\\B\\Bbaz\\B')
+
+    def test_plain_and_single_pairs_unchanged(self):
+        for text in ('plain', '\\Bbold\\B and ~it~', '', None):
+            self.assertEqual(self._c(text), text)
+
+    def test_triple_nesting_and_sup(self):
+        self.assertEqual(self._c('\\B\\B\\Bx\\B\\B\\B'), '\\Bx\\B')
+        self.assertEqual(self._c('e = mc\\S\\S2\\S\\S'), 'e = mc\\S2\\S')
+
+    def test_saving_a_tossup_folds_it(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        u = User.objects.create_user('nm_owner', password='pw', email='nm@t.com')
+        w = Writer.objects.get(user=u)
+        dist = Distribution.objects.create(name='nm dist')
+        qset = QuestionSet.objects.create(
+            name='NM Set', date=timezone.now(), host='h', address='', owner=w,
+            num_packets=1, distribution=dist)
+        tu = Tossup.objects.create(
+            question_set=qset, author=w,
+            question_type=QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP),
+            tossup_text='\\B\\BThis party (*)\\B\\B rest. For 10 points, name it.',
+            tossup_answer='_PRI_',
+            created_date=timezone.now(), last_changed_date=timezone.now())
+        tu.save_question(edit_type=QUESTION_CHANGE, changer=w)
+        tu.refresh_from_db()
+        self.assertEqual(tu.tossup_text, '\\BThis party (*)\\B rest. For 10 points, name it.')
+
+
 class MixedIdentifierStyleCheckTests(TestCase):
     """A question names its answer one way: "these animals" and "this animal"
     in the same question leaves the reader guessing what shape to answer in."""

@@ -800,6 +800,52 @@ def get_tossup_type_from_question_type(question_type):
     else:
         return ACF_STYLE_TOSSUP
 
+def collapse_nested_markup(text, markers=('\\B', '\\S', '\\s')):
+    """Fold a marker pair nested directly inside the same marker into one.
+
+    ``\B\Bfoo (*)\B\B`` means bold foo, once; but the display and the rich
+    editor read markers as alternating open/close, so the inner pair renders
+    and the outer one shows as literal "\B" text on either side. (Pasting
+    from Google Docs used to produce exactly this: the real bold span sat
+    inside Docs' own <b> wrapper and was wrapped twice.)
+
+    A run of k adjacent markers with no text between is k opens when outside
+    a span and, inside one, closes the span -- reopening if the run is longer
+    than the depth, so ``\Bfoo\B\Bbar\B`` (two spans back to back) comes
+    through unchanged. Text without a doubled marker is returned as is."""
+    if not text:
+        return text
+    for marker in markers:
+        if marker + marker not in text:
+            continue
+        parts = re.split('((?:' + re.escape(marker) + ')+)', text)
+        out = []
+        depth = 0
+        for part in parts:
+            if not part:
+                continue
+            if part.replace(marker, '') == '':
+                k = len(part) // len(marker)
+                if depth == 0:
+                    out.append(marker)
+                    depth = k
+                elif k >= depth:
+                    out.append(marker)
+                    extra = k - depth
+                    depth = 0
+                    if extra:
+                        out.append(marker)
+                        depth = extra
+                else:
+                    # Fewer closes than opens: the span stays open (the text
+                    # was already unbalanced; leave the remainder alone).
+                    depth -= k
+            else:
+                out.append(part)
+        text = ''.join(out)
+    return text
+
+
 def strip_answer_from_answer_line(line):
     if (line is not None):
         line = line.replace("ANSWER: ", "")
