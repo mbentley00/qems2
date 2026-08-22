@@ -50,6 +50,8 @@ RULE_LABELS = [
     ('imprecise_from', 'Imprecise "from this country" (prefer "born in")'),
     ('late_identifier', 'Identifier comes late in the first sentence'),
     ('mixed_identifier', 'Identifier switches between singular and plural'),
+    ('gendered_identifier', 'Gendered identifier early in a tossup ("this man"; prefer "this person")'),
+    ('singular_they', 'Singular "they" for the answer'),
     ('unbalanced_parens', 'Unbalanced parentheses'),
     ('answer_leak', 'ANSWER: leaked into question text'),
     ('numerals', 'Numerals in "For 10 points"'),
@@ -104,6 +106,8 @@ _TOKEN_SUBJECT_PART = {
     'answer_alts': 1,       # Answer|boston
     'late_identifier': 1,   # Question|this composer
     'mixed_identifier': 1,  # Question|animal
+    'gendered_identifier': 1,  # Question|this man
+    'singular_they': 1,     # Question|their
 }
 
 
@@ -778,6 +782,89 @@ def _mixed_identifier_issues(label, raw):
     return issues
 
 
+# Gendered answer cues and what to say instead. Only the plainly gendered
+# nouns: "this king" or "this actress" carry the gender in the role itself and
+# a writer who chose the role meant it.
+_GENDERED_CUES = {
+    'man': 'person', 'woman': 'person', 'guy': 'person', 'gal': 'person', 'lady': 'person',
+    'gentleman': 'person', 'gentlewoman': 'person', 'boy': 'child', 'girl': 'child',
+    'male': 'person', 'female': 'person',
+    'men': 'people', 'women': 'people', 'guys': 'people', 'gals': 'people', 'ladies': 'people',
+    'gentlemen': 'people', 'gentlewomen': 'people', 'boys': 'children', 'girls': 'children',
+    'males': 'people', 'females': 'people',
+}
+_GENDERED_CUE_RE = re.compile(
+    r'\b(this|these)\s+(' + '|'.join(sorted(_GENDERED_CUES, key=len, reverse=True)) + r')\b',
+    re.IGNORECASE)
+
+# Bare "they" and its forms, as whole words.
+_THEY_RE = re.compile(r"\b(they|them|their|theirs|themselves|themself|they're|they've|they'd|they'll)\b",
+                      re.IGNORECASE)
+
+
+def _first_n_sentences(plain, n):
+    """The opening `n` sentences of `plain`, by the same best-effort split as
+    _first_sentence (. ! ? followed by whitespace)."""
+    end = len(plain)
+    for i, m in enumerate(re.finditer(r'[.!?]\s', plain)):
+        if i == n - 1:
+            end = m.start() + 1
+            break
+    return plain[:end]
+
+
+def _gendered_identifier_issues(label, raw, sentences=3):
+    """Prefer a gender-neutral cue early in a tossup: "this person", not "this
+    man". The opening clues are where the cue does its work of not giving the
+    answer away, and "this man" hands over half of it. Later sentences are left
+    alone -- by the giveaway the question is meant to be narrowing. The
+    suggestion is always a noun ("this person"), never a pronoun: singular
+    "they" is its own violation (see _singular_they_issues)."""
+    text = _plain(raw)
+    if not text:
+        return []
+    head = _first_n_sentences(text.strip(), sentences)
+    issues = []
+    reported = set()
+    for m in _GENDERED_CUE_RE.finditer(head):
+        cue = m.group(0)
+        key = cue.lower()
+        if key in reported:
+            continue
+        reported.add(key)
+        neutral = '{0} {1}'.format(m.group(1), _GENDERED_CUES[m.group(2).lower()])
+        if m.group(1)[0].isupper():
+            neutral = neutral[0].upper() + neutral[1:]
+        message = ('{0}: "{1}" in the first {2} sentences; prefer a gender-neutral cue such as '
+                   '"{3}" so the opening clues do not give away the answer\'s gender'
+                   .format(label, cue, sentences, neutral))
+        issues.append(_issue_at(INFO, message, 'gendered_identifier',
+                                '{0}|{1}'.format(label, key), None, head, m))
+    return issues
+
+
+def _singular_they_issues(label, raw):
+    """Flag "they"/"them"/"their" standing in for a singular answer. A tossup
+    whose cue is singular ("this person") and never plural ("these ...") has no
+    plural answer for "they" to refer to, so a bare "they" is almost always the
+    answer -- and the style is to repeat the cue ("this person", "that person")
+    rather than use a singular "they". Reported once, at the first use."""
+    text = _plain(raw)
+    if not text:
+        return []
+    determiners = {d.lower() for d, _ in _IDENT_CUE_RE.findall(text)}
+    if 'this' not in determiners or 'these' in determiners:
+        return []
+    m = _THEY_RE.search(text)
+    if not m:
+        return []
+    message = ('{0}: "{1}" with a singular answer cue reads as a singular "they"; '
+               'repeat the cue instead ("this person", "that person") or recast the sentence'
+               .format(label, m.group(0)))
+    return [_issue_at(WARNING, message, 'singular_they',
+                      '{0}|{1}'.format(label, m.group(0).lower()), None, text, m)]
+
+
 def check_tossup(tu, guide=DEFAULT_GUIDE, disabled=None):
     enabled = _enabled_codes(guide, disabled)
     issues = []
@@ -789,6 +876,8 @@ def check_tossup(tu, guide=DEFAULT_GUIDE, disabled=None):
     issues += _prose_issues('Question', text, 'tossup_text')
     issues += _late_identifier_issues('Question', text)
     issues += _mixed_identifier_issues('Question', text)
+    issues += _gendered_identifier_issues('Question', text)
+    issues += _singular_they_issues('Question', text)
 
     m = re.search(r'\banswers?\s*:', plain, re.IGNORECASE)
     if m:

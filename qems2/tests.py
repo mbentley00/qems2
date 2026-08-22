@@ -3392,6 +3392,74 @@ class AnswerAltsTests(TestCase):
         self.assertEqual(answer_db.missing_alternates('_Zxqwv Notanswer_'), ('', []))
 
 
+class GenderNeutralIdentifierStyleCheckTests(TestCase):
+    """Early clues prefer "this person" to "this man"; and the fix is never a
+    singular "they", which is flagged on its own."""
+
+    def _gendered(self, text):
+        from qems2.qsub.style_checker import _gendered_identifier_issues
+        return _gendered_identifier_issues('Question', text)
+
+    def _they(self, text):
+        from qems2.qsub.style_checker import _singular_they_issues
+        return _singular_they_issues('Question', text)
+
+    def test_this_man_in_the_opening_is_flagged_with_this_person(self):
+        issues = self._gendered('This man wrote a novel. He also wrote plays. '
+                                'For 10 points, name this author.')
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]['code'], 'gendered_identifier')
+        self.assertEqual(issues[0]['severity'], 'info')
+        self.assertIn('"This man"', issues[0]['message'])
+        self.assertIn('"This person"', issues[0]['message'])
+        self.assertNotIn('they', issues[0]['message'].lower())
+
+    def test_only_the_first_three_sentences_count(self):
+        text = ('One clue here. Another clue here. A third clue here. '
+                'This woman then did a thing. For 10 points, name this woman.')
+        self.assertEqual(self._gendered(text), [])
+        text = ('One clue here. Another clue here. This woman did a thing. '
+                'For 10 points, name this woman.')
+        self.assertEqual(len(self._gendered(text)), 1)
+
+    def test_these_women_suggests_these_people(self):
+        issues = self._gendered('These women founded a movement.')
+        self.assertIn('"These people"', issues[0]['message'])
+
+    def test_roles_are_not_gendered_cues(self):
+        # The role carries the gender on purpose; it is not the rule's business.
+        self.assertEqual(self._gendered('This king lost a war. This actress won an award.'), [])
+        self.assertEqual(self._gendered('This person wrote a novel.'), [])
+
+    def test_each_cue_is_reported_once(self):
+        issues = self._gendered('This man did one thing. This man did another. This man did a third.')
+        self.assertEqual(len(issues), 1)
+
+    def test_singular_they_is_flagged_not_suggested(self):
+        issues = self._they('This person wrote a novel. They later wrote plays. '
+                            'For 10 points, name this author.')
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]['code'], 'singular_they')
+        self.assertEqual(issues[0]['severity'], 'warning')
+        self.assertIn('"They"', issues[0]['message'])
+
+    def test_they_with_a_plural_cue_is_fine(self):
+        self.assertEqual(self._they('These people founded a city. They named it after a river.'), [])
+        # A mixed question already gets mixed_identifier; no second complaint.
+        self.assertEqual(self._they('This person and these people; they met.'), [])
+
+    def test_the_rules_run_on_tossups_and_can_be_switched_off(self):
+        from qems2.qsub import style_checker as sc
+        tu = Tossup(tossup_text='This man wrote a novel. They later wrote plays. (*) For 10 points, name this author.',
+                    tossup_answer='_Author_')
+        codes = {i['code'] for i in sc.check_tossup(tu)}
+        self.assertIn('gendered_identifier', codes)
+        self.assertIn('singular_they', codes)
+        codes = {i['code'] for i in sc.check_tossup(tu, disabled=['gendered_identifier', 'singular_they'])}
+        self.assertNotIn('gendered_identifier', codes)
+        self.assertNotIn('singular_they', codes)
+
+
 class MixedIdentifierStyleCheckTests(TestCase):
     """A question names its answer one way: "these animals" and "this animal"
     in the same question leaves the reader guessing what shape to answer in."""
