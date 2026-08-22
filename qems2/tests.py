@@ -3502,6 +3502,63 @@ class NestedMarkupCollapseTests(TestCase):
         self.assertEqual(tu.tossup_text, '\\BThis party (*)\\B rest. For 10 points, name it.')
 
 
+class AnswerAlternateInsertionTests(TestCase):
+    """The answer_alts fix adds "or X" clauses where they belong -- after the
+    plain accepts, before accept-befores, prompts and rejects -- and never
+    inside another clause."""
+
+    def _ins(self, raw, names, italic=False):
+        from qems2.qsub.style_checker import insert_answer_alternates
+        return insert_answer_alternates(raw, names, italic)
+
+    def test_no_bracket_gets_one(self):
+        self.assertEqual(self._ins('_Bayreuth_', ['Bayreuth Festival']),
+                         '_Bayreuth_ [or _Bayreuth Festival_]')
+
+    def test_after_the_last_plain_accept(self):
+        raw = '_PRI_ [or _Institutional Revolutionary Party_; prompt on _party_]'
+        self.assertEqual(self._ins(raw, ['Partido Revolucionario Institucional']),
+                         '_PRI_ [or _Institutional Revolutionary Party_; or _Partido Revolucionario Institucional_; prompt on _party_]')
+
+    def test_before_accept_before_and_prompts(self):
+        raw = '_Commons_ [accept _House_ before mention; prompt on _Parliament_; reject "Lords"]'
+        self.assertEqual(self._ins(raw, ['House of Commons']),
+                         '_Commons_ [or _House of Commons_; accept _House_ before mention; prompt on _Parliament_; reject "Lords"]')
+
+    def test_never_inside_another_clause(self):
+        raw = '_Commons_ [also accept _Parliament_ of the United Kingdom (or the "UK; Britain"); prompt on _Parliament_]'
+        out = self._ins(raw, ['House of Commons'])
+        self.assertEqual(out,
+                         '_Commons_ [also accept _Parliament_ of the United Kingdom (or the "UK; Britain"); or _House of Commons_; prompt on _Parliament_]')
+
+    def test_italic_titles_stay_italic(self):
+        self.assertEqual(self._ins('~_Ring Cycle_~ [prompt on _Ring_]', ['Der Ring des Nibelungen'], italic=True),
+                         '~_Ring Cycle_~ [or ~_Der Ring des Nibelungen_~; prompt on _Ring_]')
+
+    def test_the_issue_carries_a_fix_for_tossups_and_bonus_parts(self):
+        from qems2.qsub import style_checker as sc
+        from qems2.qsub.answer_db import missing_alternates
+        # Find any database head to drive the rule with real data.
+        head = None
+        for cand in ('Boston', 'Bayreuth', 'Mao Zedong', 'Paris', 'New York City', 'United Kingdom'):
+            if missing_alternates('_{0}_'.format(cand))[1]:
+                head = cand
+                break
+        if head is None:
+            self.skipTest('no answer-database entry with alternates available')
+        tu = Tossup(tossup_text='x (*) y. For 10 points, name it.', tossup_answer='_{0}_'.format(head))
+        alt = [i for i in sc.check_tossup(tu) if i['code'] == 'answer_alts']
+        self.assertEqual(len(alt), 1)
+        self.assertEqual(alt[0]['fix']['field'], 'tossup_answer')
+        self.assertTrue(sc.apply_fix(tu, alt[0]['fix']))
+        self.assertIn('[or _', tu.tossup_answer)
+        self.assertEqual([i for i in sc.check_tossup(tu) if i['code'] == 'answer_alts'], [])
+        b = Bonus(leadin='l', part1_text='p', part1_answer='_{0}_'.format(head),
+                  part2_text='p', part2_answer='_zzz_', part3_text='p', part3_answer='_yyy_')
+        alt = [i for i in sc.check_bonus(b) if i['code'] == 'answer_alts']
+        self.assertEqual(alt[0]['fix']['field'], 'part1_answer')
+
+
 class MixedIdentifierStyleCheckTests(TestCase):
     """A question names its answer one way: "these animals" and "this animal"
     in the same question leaves the reader guessing what shape to answer in."""

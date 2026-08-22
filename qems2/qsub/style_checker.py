@@ -613,10 +613,103 @@ def _prompt_direction_issues(label, raw):
     return issues
 
 
-def _answer_alt_issues(label, raw_answer):
+def _split_clauses(body):
+    """Split a bracket body into its top-level clauses at semicolons -- never
+    inside parentheses, nested brackets or quotes, so a clause such as
+    "also accept _Parliament_ of the United Kingdom (or 'UK')" stays whole."""
+    clauses, depth, quote, start = [], 0, '', 0
+    i = 0
+    while i < len(body):
+        ch = body[i]
+        if quote:
+            if ch == quote:
+                quote = ''
+        elif ch in '"\u201c':
+            quote = '"' if ch == '"' else '\u201d'
+        elif ch in '([':
+            depth += 1
+        elif ch in ')]':
+            depth = max(0, depth - 1)
+        elif ch == ';' and depth == 0:
+            clauses.append(body[start:i])
+            start = i + 1
+        i += 1
+    clauses.append(body[start:])
+    return [c for c in clauses if c.strip()]
+
+
+_ACCEPT_BEFORE_RE = re.compile(r'(?i)\b(before|until|on the first|early)\b')
+_PROMPT_RE = re.compile(r'(?i)\b(anti-?prompt|prompt)\b')
+_REJECT_RE = re.compile(r'(?i)\b(do not accept|do not prompt|reject)\b')
+
+
+def _clause_kind(clause):
+    """Where a clause belongs in the conventional order of an answer line:
+    0 plain accepts ("or X", "accept X", "also accept X"), 1 accepts that hold
+    only before a point in the question ("accept X before mention"), 2 prompts,
+    3 rejects. An unmarked clause reads as a plain accept."""
+    c = clause.strip()
+    if _REJECT_RE.search(c):
+        return 3
+    if _PROMPT_RE.search(c):
+        return 2
+    if _ACCEPT_BEFORE_RE.search(c):
+        return 1
+    return 0
+
+
+def insert_answer_alternates(raw, names, italic=False):
+    """Add "or X" alternates to an answer line, in the right place.
+
+    The conventional order inside the bracket is plain accepts, then accepts
+    that hold only until some point ("accept X before mention"), then
+    prompts, then rejects. New alternates go after the last plain accept --
+    or at the front of the bracket when there is none -- and always between
+    whole clauses, so nothing is ever spliced into the middle of
+    "also accept _Parliament_ of the United Kingdom". A line with no
+    bracket gets one."""
+    raw = raw or ''
+    if not names:
+        return raw
+
+    def fmt(name):
+        m = '_{0}_'.format(name)
+        return '~{0}~'.format(m) if italic else m
+    new = ['or ' + fmt(n) for n in names]
+
+    open_idx = raw.find('[')
+    if open_idx == -1:
+        return raw.rstrip() + ' [' + '; '.join(new) + ']'
+    # The matching close bracket, allowing nested [] inside.
+    depth, close_idx = 0, -1
+    for i in range(open_idx, len(raw)):
+        if raw[i] == '[':
+            depth += 1
+        elif raw[i] == ']':
+            depth -= 1
+            if depth == 0:
+                close_idx = i
+                break
+    if close_idx == -1:
+        # Unclosed bracket: append to whatever is there and close it.
+        return raw.rstrip() + '; ' + '; '.join(new) + ']'
+    body = raw[open_idx + 1:close_idx]
+    clauses = [c.strip() for c in _split_clauses(body)]
+    kinds = [_clause_kind(c) for c in clauses]
+    # After the last plain accept; before everything else if there is none.
+    at = 0
+    for i, k in enumerate(kinds):
+        if k == 0:
+            at = i + 1
+    merged = clauses[:at] + new + clauses[at:]
+    return raw[:open_idx + 1] + '; '.join(merged) + raw[close_idx:]
+
+
+def _answer_alt_issues(label, raw_answer, field=''):
     """Suggest standard acceptable alternates the answer line is missing, looked
-    up by primary answer in the bundled answer database (INFO, not auto-fixed —
-    the editor decides which alternates apply)."""
+    up by primary answer in the bundled answer database (INFO). The fix adds
+    them to the line as "or X" clauses in the conventional position; the
+    editor still chooses whether to apply it."""
     from .answer_db import missing_alternates
     head_key, missing = missing_alternates(raw_answer)
     if not missing:
@@ -632,8 +725,11 @@ def _answer_alt_issues(label, raw_answer):
         h = '<u><b>{0}</b></u>'.format(_escape(name))
         return '<i>{0}</i>'.format(h) if italic else h
 
+    fix = None
+    if field:
+        fix = {'field': field, 'op': 'answer_alts', 'names': list(missing), 'italic': italic}
     return [_issue(INFO, '{0}: also accept {1}{2}'.format(label, '; or '.join(shown), suffix),
-                   'answer_alts', '{0}|{1}'.format(label, head_key),
+                   'answer_alts', '{0}|{1}'.format(label, head_key), fix=fix,
                    message_html='{0}: also accept {1}{2}'.format(
                        _escape(label), '; or '.join(fmt(n) for n in shown), suffix))]
 
@@ -918,7 +1014,7 @@ def check_tossup(tu, guide=DEFAULT_GUIDE, disabled=None):
         issues += _answer_format_issues('Answer', tu.tossup_answer)
 
     if 'answer_alts' in enabled:
-        issues += _answer_alt_issues('Answer', tu.tossup_answer)
+        issues += _answer_alt_issues('Answer', tu.tossup_answer, 'tossup_answer')
 
     if 'prompt_undirected' in enabled:
         issues += _prompt_direction_issues('Answer', tu.tossup_answer)
@@ -981,9 +1077,11 @@ def check_bonus(b, guide=DEFAULT_GUIDE, disabled=None):
             issues += _answer_format_issues(label, ans)
 
     if 'answer_alts' in enabled:
-        for label, ans in (('Answer 1', b.part1_answer), ('Answer 2', b.part2_answer), ('Answer 3', b.part3_answer)):
+        for label, ans, field in (('Answer 1', b.part1_answer, 'part1_answer'),
+                                  ('Answer 2', b.part2_answer, 'part2_answer'),
+                                  ('Answer 3', b.part3_answer, 'part3_answer')):
             if (ans or '').strip():
-                issues += _answer_alt_issues(label, ans)
+                issues += _answer_alt_issues(label, ans, field)
 
     if 'prompt_undirected' in enabled:
         for label, ans in (('Answer 1', b.part1_answer), ('Answer 2', b.part2_answer), ('Answer 3', b.part3_answer)):
@@ -1131,6 +1229,8 @@ def apply_fix(question, fix):
         new = mark_pg_target(text, fix['idx'])
     elif op == 'pg_possessive':
         new = fix_pg_possessive(text, fix['idx'])
+    elif op == 'answer_alts':
+        new = insert_answer_alternates(text, fix.get('names') or [], bool(fix.get('italic')))
     else:
         return False
     if new == text:
