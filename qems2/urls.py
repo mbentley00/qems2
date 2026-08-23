@@ -105,6 +105,8 @@ urlpatterns = [
     re_path(r'^add_co_owner/(?P<qset_id>[0-9]+)/$', add_co_owner),
     re_path(r'^add_writer/(?P<qset_id>[0-9]+)/$', add_writer),
     re_path(r'^clone_distribution/(?P<dist_id>[0-9]+)/$', clone_distribution),
+    re_path(r'^import_distribution/$', import_distribution),
+    re_path(r'^distribution_template/(?P<fmt>xlsx|csv)/$', distribution_template),
     re_path(r'^edit_distribution/(?P<dist_id>[0-9]+)/$', edit_distribution),
     re_path(r'^edit_distribution/$', edit_distribution),
     re_path(r'^edit_tiebreak/(?P<dist_id>[0-9]+)/$', edit_tiebreak),

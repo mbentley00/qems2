@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block title %}Import Distribution - QEMS3{% endblock %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% block content %}
+<h3 class="page-header">Import a Distribution from a Spreadsheet</h3>
+<ul class="breadcrumbs">
+    <li><a href="/distributions/">Distributions</a></li>
+    <li class="current">Import from Spreadsheet</li>
+</ul>
+
+{% if message %}<div class="{{ message_class }}">{{ message }}</div>{% endif %}
+
+<div class="panel radius">
+    <p>One row per category entry, with a header row. Counts are <strong>per packet</strong>.
+    Download a template, fill it in (Excel, Google Sheets &mdash; export as .xlsx or .csv &mdash; or any
+    editor), and upload it here.</p>
+    <p>
+        <a href="/distribution_template/xlsx/" class="button small secondary" style="margin:0 6px 0 0;"><i class="fa fa-file-excel"></i> Template (.xlsx)</a>
+        <a href="/distribution_template/csv/" class="button small secondary" style="margin:0;"><i class="fa fa-file-csv"></i> Template (.csv)</a>
+    </p>
+    <table class="di-example">
+        <thead><tr>{% for key, label in columns %}<th>{{ label }}</th>{% endfor %}</tr></thead>
+        <tbody>
+        {% for r in example_rows %}
+            <tr>{% for c in r %}<td>{{ c }}</td>{% endfor %}</tr>
+        {% endfor %}
+            <tr><td colspan="6" class="di-more">&hellip;</td></tr>
+        </tbody>
+    </table>
+    <ul class="di-notes">
+        <li><strong>Subcategory</strong> may be blank (&ldquo;Religion&rdquo; with no subcategory is one entry). Deeper levels go in the subcategory as &ldquo;World - Drama&rdquo;.</li>
+        <li>A blank <strong>max</strong> takes the min, a blank <strong>min</strong> takes the max; both blank means 0.</li>
+        <li>Column names are matched loosely: &ldquo;Min TU&rdquo;, &ldquo;min_tossups&rdquo; and &ldquo;Minimum Tossups&rdquo; all work, in any column order.</li>
+        <li>The per-packet tossup and bonus totals are the sums of the max columns.</li>
+    </ul>
+</div>
+
+<form method="post" action="" enctype="multipart/form-data" class="panel radius">
+    {% csrf_token %}
+    <div class="row">
+        <div class="small-12 medium-5 columns">
+            <label>Distribution name
+                <input type="text" name="name" value="{{ name }}" required placeholder="e.g. 2027 Regionals">
+            </label>
+        </div>
+        <div class="small-12 medium-5 columns">
+            <label>Spreadsheet (.xlsx, .csv or .tsv)
+                <input type="file" name="sheet" accept=".xlsx,.csv,.tsv,.txt" required>
+            </label>
+        </div>
+        <div class="small-12 medium-2 columns">
+            <label>&nbsp;</label>
+            <input type="submit" value="Import" class="button primary" style="margin:0;">
+        </div>
+    </div>
+    <label><input type="checkbox" name="public" value="1"> Public &mdash; let other people copy this distribution</label>
+</form>
+
+<style>
+.di-example { width: auto; margin: 6px 0 10px; }
+.di-example th, .di-example td { padding: 3px 12px 3px 0; font-size: 0.9em; }
+.di-more { color: var(--qx-muted, #8a8f9c); }
+.di-notes { font-size: 0.9em; margin: 0 0 0 1.2em; }
+</style>
+{% endblock %}

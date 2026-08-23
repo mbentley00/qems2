@@ -3502,6 +3502,89 @@ class NestedMarkupCollapseTests(TestCase):
         self.assertEqual(tu.tossup_text, '\\BThis party (*)\\B rest. For 10 points, name it.')
 
 
+class DistributionImportTests(TestCase):
+    """A distribution can be created from a spreadsheet laid out like the
+    downloadable template."""
+
+    def setUp(self):
+        from datetime import timedelta as _td
+        self.ou = User.objects.create_user('dimp_owner', password='pw', email='dimp@t.com')
+        self.ou.date_joined = timezone.now() - _td(days=30); self.ou.save()
+        self.owner = Writer.objects.get(user=self.ou)
+        self.client.login(username='dimp_owner', password='pw')
+
+    def _parse(self, name, text):
+        from qems2.qsub.distribution_importer import parse_distribution_sheet
+        return parse_distribution_sheet(name, text.encode('utf-8'))
+
+    def test_csv_with_loose_headers_and_blank_sides(self):
+        rows = self._parse('d.csv',
+            'Category,Sub,Min TU,Max TU,min_bonuses,Maximum Bonuses\n'
+            'Science,Biology,1,2,1,1\n'
+            'Religion,,1,,,1\n'
+            'Trash,,,,,\n')
+        self.assertEqual(rows[0], {'category': 'Science', 'subcategory': 'Biology',
+                                   'min_tossups': 1, 'max_tossups': 2, 'min_bonuses': 1, 'max_bonuses': 1})
+        self.assertEqual((rows[1]['min_tossups'], rows[1]['max_tossups'],
+                          rows[1]['min_bonuses'], rows[1]['max_bonuses']), (1, 1, 1, 1))
+        self.assertEqual((rows[2]['min_tossups'], rows[2]['max_bonuses']), (0, 0))
+
+    def test_errors_name_the_line(self):
+        from qems2.qsub.distribution_importer import DistributionImportError
+        with self.assertRaises(DistributionImportError) as cm:
+            self._parse('d.csv', 'Category,Min Tossups\nScience,two\n')
+        self.assertIn('Line 2', str(cm.exception))
+        with self.assertRaises(DistributionImportError) as cm:
+            self._parse('d.csv', 'Category,Min Tossups,Max Tossups\nScience,3,1\n')
+        self.assertIn('more than max', str(cm.exception))
+        with self.assertRaises(DistributionImportError) as cm:
+            self._parse('d.csv', 'Category,Max Tossups\nScience,1\nscience,1\n')
+        self.assertIn('more than once', str(cm.exception))
+        with self.assertRaises(DistributionImportError):
+            self._parse('d.csv', 'Science,1,1\n')   # no header
+
+    def test_the_xlsx_template_round_trips(self):
+        from qems2.qsub import distribution_importer as di
+        entries = di.parse_distribution_sheet('t.xlsx', di.template_xlsx())
+        self.assertEqual(len(entries), len(di.TEMPLATE_ROWS))
+        self.assertEqual(entries[0]['category'], 'Literature')
+        entries = di.parse_distribution_sheet('t.csv', di.template_csv().encode('utf-8'))
+        self.assertEqual(len(entries), len(di.TEMPLATE_ROWS))
+
+    def test_templates_download(self):
+        r = self.client.get('/distribution_template/xlsx/')
+        self.assertEqual(r.status_code, 200)
+        self.assertIn('distribution_template.xlsx', r['Content-Disposition'])
+        r = self.client.get('/distribution_template/csv/')
+        self.assertEqual(r.status_code, 200)
+        self.assertIn('Category,Subcategory,Min Tossups', r.content.decode())
+
+    def test_upload_creates_the_distribution(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        sheet = SimpleUploadedFile('mine.csv', (
+            'Category,Subcategory,Min Tossups,Max Tossups,Min Bonuses,Max Bonuses\n'
+            'Science,Biology,1,1,1,1\nScience,Chemistry,1,2,1,2\nReligion,,1,1,1,1\n').encode('utf-8'))
+        resp = self.client.post('/import_distribution/', {'name': 'Sheet dist', 'sheet': sheet, 'public': '1'})
+        self.assertEqual(resp.status_code, 302)
+        dist = Distribution.objects.get(name='Sheet dist')
+        self.assertEqual(resp['Location'], '/edit_distribution/{0}'.format(dist.id))
+        self.assertEqual(dist.created_by, self.owner)
+        self.assertTrue(dist.public)
+        self.assertEqual(dist.acf_tossup_per_period_count, 4)
+        self.assertEqual(dist.acf_bonus_per_period_count, 4)
+        self.assertEqual(sorted((e.category, e.subcategory, e.max_tossups) for e in dist.distributionentry_set.all()),
+                         [('Religion', '', 1), ('Science', 'Biology', 1), ('Science', 'Chemistry', 2)])
+        self.assertContains(self.client.get('/distributions/'), 'Sheet dist')
+
+    def test_a_bad_upload_reports_and_creates_nothing(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        sheet = SimpleUploadedFile('bad.csv', b'Category,Min Tossups\nScience,lots\n')
+        resp = self.client.post('/import_distribution/', {'name': 'Bad', 'sheet': sheet})
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'Line 2')
+        self.assertFalse(Distribution.objects.filter(name='Bad').exists())
+
+
 class BonusDifficultyOrderTests(TestCase):
     """The style check page counts bonuses by the order of their part
     difficulties and lists the ones with no tags."""

@@ -4087,6 +4087,53 @@ def distributions (request):
                               'user': user})
 
 @login_required
+def import_distribution(request):
+    """Create a distribution from an uploaded spreadsheet (.xlsx/.csv/.tsv),
+    one row per category entry. The page offers a template to fill in."""
+    from . import distribution_importer as di
+    user = request.user.writer
+    if not _account_can_create(request.user):
+        return render(request, 'failure.html',
+                      {'message': _ACCOUNT_TOO_NEW_MSG, 'message_class': 'alert-box alert'})
+    message = message_class = ''
+    name = ''
+    if request.method == 'POST':
+        name = (request.POST.get('name') or '').strip()
+        upload = request.FILES.get('sheet')
+        if not name:
+            message, message_class = 'Give the distribution a name.', 'alert-box warning'
+        elif upload is None:
+            message, message_class = 'Choose a spreadsheet to import.', 'alert-box warning'
+        else:
+            try:
+                dist = di.create_distribution_from_sheet(
+                    upload.name, upload.read(), name, user, public=bool(request.POST.get('public')))
+            except di.DistributionImportError as ex:
+                message, message_class = str(ex), 'alert-box warning'
+            else:
+                messages.success(request, 'Created "{0}" with {1} entries from {2}.'.format(
+                    dist.name, dist.distributionentry_set.count(), upload.name))
+                return HttpResponseRedirect('/edit_distribution/{0}'.format(dist.id))
+    return render(request, 'import_distribution.html',
+                  {'user': user, 'message': message, 'message_class': message_class,
+                   'name': name, 'columns': di.COLUMNS, 'example_rows': di.TEMPLATE_ROWS[:6]})
+
+
+@login_required
+def distribution_template(request, fmt):
+    """The spreadsheet template, as .xlsx or .csv."""
+    from . import distribution_importer as di
+    if fmt == 'xlsx':
+        resp = HttpResponse(di.template_xlsx(),
+                            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    else:
+        resp = HttpResponse(di.template_csv(), content_type='text/csv; charset=utf-8')
+        fmt = 'csv'
+    resp['Content-Disposition'] = 'attachment; filename="distribution_template.{0}"'.format(fmt)
+    return resp
+
+
+@login_required
 def clone_distribution(request, dist_id):
     if request.method != 'POST':
         return HttpResponseRedirect('/distributions/')
