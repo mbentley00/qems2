@@ -30,7 +30,8 @@ from .models import (
     TossupHistory, BonusHistory,
     SetApiKey, DiscordCommentRef, DiscordThread, PLAYTEST_SOURCE_DISCORD,
     DISCORD_BOT_NAME)
-from .utils import get_answer_no_formatting, get_primary_answer
+from .utils import (get_answer_no_formatting, get_primary_answer,
+                    strip_parentheticals)
 
 
 # --- helpers -----------------------------------------------------------------
@@ -85,10 +86,14 @@ def _norm(text):
 
 
 def _answer_forms(text):
-    """The normalized forms a question's answer can be matched by: its primary
-    answer (before any '[...]') and the full answer line."""
+    """The normalized forms an answer can be matched by: its primary answer
+    (before any '[...]'), the full answer line, and the primary answer with
+    parenthesized asides (pronunciation guides, notes) dropped. Applied to both
+    the stored answers and the supplied one, so a note present on only one side
+    no longer defeats the match."""
     forms = set()
-    for variant in (get_primary_answer(text or ''), text or ''):
+    primary = get_primary_answer(text or '')
+    for variant in (primary, text or '', strip_parentheticals(primary)):
         n = _norm(variant)
         if n:
             forms.add(n)
@@ -96,24 +101,31 @@ def _answer_forms(text):
 
 
 def _tossup_index(qset):
+    """(answer-form -> ids) index plus the set's full tossup id set (for direct
+    qid matches, which work even when a question's answer text is unusable)."""
     idx = defaultdict(set)
+    ids = set()
     for t in Tossup.objects.filter(question_set=qset).only('id', 'tossup_answer'):
+        ids.add(t.id)
         for f in _answer_forms(t.tossup_answer):
             idx[f].add(t.id)
-    return idx
+    return idx, ids
 
 
 def _bonus_index(qset):
+    """See _tossup_index; a bonus is indexed by all three part answers."""
     idx = defaultdict(set)
+    ids = set()
     for b in Bonus.objects.filter(question_set=qset).only(
             'id', 'part1_answer', 'part2_answer', 'part3_answer'):
+        ids.add(b.id)
         forms = set()
         forms |= _answer_forms(b.part1_answer)
         forms |= _answer_forms(b.part2_answer)
         forms |= _answer_forms(b.part3_answer)
         for f in forms:
             idx[f].add(b.id)
-    return idx
+    return idx, ids
 
 
 def _latest_history_ids(model, history_model, question_ids):
@@ -130,12 +142,25 @@ def _latest_history_ids(model, history_model, question_ids):
     return {qid: latest_by_qh.get(qh) for qid, qh in qh_by_q.items()}
 
 
-def _resolve(idx, answer):
+def _qid(e):
+    """The optional per-item QEMS question id hint, as a positive int or None."""
+    try:
+        q = int(e.get('qid') or 0)
+    except (TypeError, ValueError):
+        return None
+    return q if q > 0 else None
+
+
+def _resolve(idx, valid_ids, answer, qid=None):
     """Match a supplied answer against an index. Returns ('ok', id),
-    ('unmatched', None), or ('ambiguous', None). Tries both the primary answer
-    (before any '[...]') and the full normalized line, so a caller can send a
-    whole answer line like 'witchcraft [accept ...]' and still match a question
-    stored with differently-worded acceptable answers."""
+    ('unmatched', None), or ('ambiguous', None). A `qid` hint that names a
+    question in this set matches directly, no answer text needed — the recorder
+    reads <qid:N> tags off Discord question posts. Otherwise tries both the
+    primary answer (before any '[...]') and the full normalized line, so a
+    caller can send a whole answer line like 'witchcraft [accept ...]' and
+    still match a question stored with differently-worded acceptable answers."""
+    if qid and qid in valid_ids:
+        return ('ok', qid)
     ids = set()
     for form in _answer_forms(answer):
         ids |= idx.get(form, set())
@@ -146,21 +171,22 @@ def _resolve(idx, answer):
     return ('ok', next(iter(ids)))
 
 
-def _resolve_question(t_idx, b_idx, answer, hint):
-    """Resolve an answer (+ optional qtype hint) to one question. Returns
-    ('ok', 'tossup'|'bonus', id), ('ambiguous', None, None), or
-    ('unmatched', None, None)."""
+def _resolve_question(t_idx, t_ids, b_idx, b_ids, answer, hint, qid=None):
+    """Resolve an answer (+ optional qtype hint and qid hint) to one question.
+    Returns ('ok', 'tossup'|'bonus', id), ('ambiguous', None, None), or
+    ('unmatched', None, None). A qid that exists as both a tossup and a bonus
+    id with no qtype hint comes back ambiguous, like any double match."""
     candidates = []
     if hint in (None, '', 'tossup'):
-        s, qid = _resolve(t_idx, answer)
+        s, qid_ = _resolve(t_idx, t_ids, answer, qid)
         if s == 'ok':
-            candidates.append(('tossup', qid))
+            candidates.append(('tossup', qid_))
         elif s == 'ambiguous':
             candidates.append(('ambiguous', None))
     if hint in (None, '', 'bonus'):
-        s, qid = _resolve(b_idx, answer)
+        s, qid_ = _resolve(b_idx, b_ids, answer, qid)
         if s == 'ok':
-            candidates.append(('bonus', qid))
+            candidates.append(('bonus', qid_))
         elif s == 'ambiguous':
             candidates.append(('ambiguous', None))
     real = [c for c in candidates if c[0] != 'ambiguous']
@@ -212,12 +238,14 @@ def api_buzzes(request):
     a tossup; `player_name` records who buzzed; `answer_given` (optional) stores what
     they said; `dont_know` (optional) marks a heard-but-unanswered question, which is
     never correct, never a neg, and worth 0; `occurred_at` (optional ISO-8601) sets when the buzz happened.
+    Optional `qid` (the QEMS question id, e.g. from a <qid:N> tag on the Discord
+    post) matches the tossup directly, bypassing answer-text matching.
     Re-sending the same `external_id` updates the existing buzz in place."""
     events, err = _load_events(request, 'events')
     if err:
         return err
     qset = request.api_qset
-    idx = _tossup_index(qset)
+    idx, t_ids = _tossup_index(qset)
 
     eids = [e.get('external_id') for e in events if isinstance(e, dict) and e.get('external_id')]
     # Existing rows by external_id, so a re-send UPDATES in place (corrected
@@ -226,7 +254,8 @@ def api_buzzes(request):
                 TossupBuzz.objects.filter(external_id__in=eids)} if eids else {}
 
     # Current question version per matched tossup, fetched once (see history_url).
-    resolved_ids = [_resolve(idx, e.get('answer'))[1] for e in events if isinstance(e, dict)]
+    resolved_ids = [_resolve(idx, t_ids, e.get('answer'), _qid(e))[1]
+                    for e in events if isinstance(e, dict)]
     hist_ids = _latest_history_ids(Tossup, TossupHistory, [q for q in resolved_ids if q])
 
     results = []
@@ -235,7 +264,7 @@ def api_buzzes(request):
             results.append({'external_id': '', 'status': 'error', 'error': 'not an object'})
             continue
         eid = (e.get('external_id') or '').strip()
-        status, qid = _resolve(idx, e.get('answer'))
+        status, qid = _resolve(idx, t_ids, e.get('answer'), _qid(e))
         if status != 'ok':
             results.append({'external_id': eid, 'status': status})
             continue
@@ -291,14 +320,15 @@ def api_buzzes(request):
 def api_bonus_results(request):
     """Record bonus results. Body: {"events": [{external_id, answer, player_name,
     part1_correct, part2_correct, part3_correct, occurred_at}, ...]}. `answer` is
-    matched against any of the bonus's part answers; `occurred_at` (optional
-    ISO-8601) sets when it happened. Re-sending the same `external_id` updates
+    matched against any of the bonus's part answers; optional `qid` matches the
+    bonus directly by QEMS id; `occurred_at` (optional ISO-8601) sets when it
+    happened. Re-sending the same `external_id` updates
     the existing result in place."""
     events, err = _load_events(request, 'events')
     if err:
         return err
     qset = request.api_qset
-    idx = _bonus_index(qset)
+    idx, b_ids = _bonus_index(qset)
 
     eids = [e.get('external_id') for e in events if isinstance(e, dict) and e.get('external_id')]
     # See api_buzzes: re-sends UPDATE the existing row instead of being skipped.
@@ -306,7 +336,8 @@ def api_bonus_results(request):
                 BonusResult.objects.filter(external_id__in=eids)} if eids else {}
 
     # Current question version per matched bonus, fetched once (see history_url).
-    resolved_ids = [_resolve(idx, e.get('answer'))[1] for e in events if isinstance(e, dict)]
+    resolved_ids = [_resolve(idx, b_ids, e.get('answer'), _qid(e))[1]
+                    for e in events if isinstance(e, dict)]
     hist_ids = _latest_history_ids(Bonus, BonusHistory, [q for q in resolved_ids if q])
 
     results = []
@@ -315,7 +346,7 @@ def api_bonus_results(request):
             results.append({'external_id': '', 'status': 'error', 'error': 'not an object'})
             continue
         eid = (e.get('external_id') or '').strip()
-        status, qid = _resolve(idx, e.get('answer'))
+        status, qid = _resolve(idx, b_ids, e.get('answer'), _qid(e))
         if status != 'ok':
             results.append({'external_id': eid, 'status': status})
             continue
@@ -356,14 +387,15 @@ def api_bonus_results(request):
 def api_comments(request):
     """Add comments to questions. Body: {"comments": [{external_id, answer, text,
     author_name, qtype?}, ...]}. `answer` identifies the question; optional
-    `qtype` ('tossup'|'bonus') disambiguates; `author_name` records who said it;
+    `qtype` ('tossup'|'bonus') disambiguates; optional `qid` matches the question
+    directly by QEMS id; `author_name` records who said it;
     `text` is the comment."""
     comments, err = _load_events(request, 'comments')
     if err:
         return err
     qset = request.api_qset
-    t_idx = _tossup_index(qset)
-    b_idx = _bonus_index(qset)
+    t_idx, t_ids = _tossup_index(qset)
+    b_idx, b_ids = _bonus_index(qset)
 
     eids = [c.get('external_id') for c in comments if isinstance(c, dict) and c.get('external_id')]
     existing_refs = {r.external_id: r for r in
@@ -403,13 +435,13 @@ def api_comments(request):
         hint = c.get('qtype')
         candidates = []
         if hint in (None, '', 'tossup'):
-            s, qid = _resolve(t_idx, c.get('answer'))
+            s, qid = _resolve(t_idx, t_ids, c.get('answer'), _qid(c))
             if s == 'ok':
                 candidates.append((tu_ct, qid))
             elif s == 'ambiguous':
                 candidates.append(('ambiguous', None))
         if hint in (None, '', 'bonus'):
-            s, qid = _resolve(b_idx, c.get('answer'))
+            s, qid = _resolve(b_idx, b_ids, c.get('answer'), _qid(c))
             if s == 'ok':
                 candidates.append((bs_ct, qid))
             elif s == 'ambiguous':
@@ -446,14 +478,15 @@ def api_threads(request):
     """Attach Discord thread links to questions, shown on the question itself
     (not inside a comment). Body: {"threads": [{external_id, answer, url, title,
     qtype?}, ...]}. `answer` is matched like comments; optional `qtype`
-    ('tossup'|'bonus') disambiguates. Idempotent per `external_id`; without one,
+    ('tossup'|'bonus') disambiguates; optional `qid` matches directly by QEMS
+    id. Idempotent per `external_id`; without one,
     deduped per (question, url)."""
     threads, err = _load_events(request, 'threads')
     if err:
         return err
     qset = request.api_qset
-    t_idx = _tossup_index(qset)
-    b_idx = _bonus_index(qset)
+    t_idx, t_ids = _tossup_index(qset)
+    b_idx, b_ids = _bonus_index(qset)
 
     eids = [t.get('external_id') for t in threads if isinstance(t, dict) and t.get('external_id')]
     seen = set(DiscordThread.objects.filter(question_set=qset, external_id__in=eids)
@@ -472,7 +505,8 @@ def api_threads(request):
         if not url:
             results.append({'external_id': eid, 'status': 'error', 'error': 'empty url'})
             continue
-        status, qtype, qid = _resolve_question(t_idx, b_idx, t.get('answer'), t.get('qtype'))
+        status, qtype, qid = _resolve_question(
+            t_idx, t_ids, b_idx, b_ids, t.get('answer'), t.get('qtype'), _qid(t))
         if status != 'ok':
             results.append({'external_id': eid, 'status': status})
             continue
