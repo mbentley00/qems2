@@ -5,6 +5,7 @@
 {% endblock %}
 
 {% load filters %}
+{% load static %}
 
 {% block title %}Discord Bot Settings - {{ qset.name }} - QEMS3{% endblock %}
 
@@ -75,14 +76,27 @@
         those channels with <em>View Channel</em> and <em>Read Message History</em>.
     </li>
     <li>
+        <strong>Find your server's ID.</strong> The bot asks for it when you link the server.
+        Discord only shows IDs with Developer Mode on: open <em>User Settings</em> (the gear
+        by your name), search for &ldquo;developer&rdquo;, and switch on <strong>Developer Mode</strong>.
+        <figure class="bot-figure">
+            <img src="{% static 'images/discord/developer_mode.png' %}" alt="Discord user settings with &quot;developer&quot; typed in the search box and the Developer Mode switch turned on">
+            <figcaption>User Settings &rarr; search &ldquo;developer&rdquo; &rarr; Developer Mode on</figcaption>
+        </figure>
+        Then right-click the server's icon in the server list and choose
+        <strong>Copy Server Info &rarr; Copy Server ID</strong>. The ID is a long number, now on your clipboard.
+        <figure class="bot-figure">
+            <img src="{% static 'images/discord/copy_server_id.png' %}" alt="The server's right-click menu, with Copy Server Info opened and Copy Server ID highlighted">
+            <figcaption>Right-click the server &rarr; Copy Server Info &rarr; Copy Server ID</figcaption>
+        </figure>
+    </li>
+    <li>
         <strong>Link the server to this set.</strong> Generate the key above, then
-        DM the bot the message "<code>add</code>". It asks for the server ID (Discord &rarr;
-        <em>Server Settings &rarr; Widget</em>, or right-click the server with
-        Developer Mode on and <em>Copy Server ID</em>) and then for this key, and
-        checks the key against QEMS before saving. <code>test</code> confirms the
-        connection; <code>autosync live</code> makes it sync on its own a few
-        minutes after playtesting goes quiet, or @mention it in any channel to sync
-        right away. <code>help</code> lists everything it understands.
+        DM the bot the message "<code>add</code>". It asks for the server ID you just
+        copied and then for this key, and checks the key against QEMS before saving.
+        <code>test</code> confirms the connection; <code>autosync live</code> makes it
+        sync on its own a few minutes after playtesting goes quiet, or @mention it in
+        any channel to sync right away. <code>help</code> lists everything it understands.
     </li>
 </ol>
 
@@ -94,6 +108,10 @@
 .bot-steps > li { margin-bottom: 0.7rem; }
 .bot-steps ul { margin: 0.3rem 0 0.3rem 1.2rem; }
 .bot-steps code { word-break: break-all; }
+.bot-figure { margin: 0.6rem 0 0.8rem; max-width: 640px; }
+.bot-figure img { display: block; max-width: 100%; height: auto; border: 1px solid var(--qx-border, #d8dbe3);
+    border-radius: 6px; }
+.bot-figure figcaption { font-size: 0.8rem; color: var(--qx-muted, #777); margin-top: 0.3rem; }
 .key-meta { color: #777; font-size: 0.85rem; margin: 0.4rem 0 0.8rem; }
 .api-docs { background: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.85rem; line-height: 1.5; }
 </style>
