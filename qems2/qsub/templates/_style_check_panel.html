@@ -159,6 +159,9 @@ $(function () {
 
     // ---- Grammar (Harper, client-side WASM) — lints the LIVE editor text ----
     function grammarFields() {
+        // The bonus page's unified editor holds the live text; the per-part
+        // fields only catch up on submit.
+        if (window.qemsSyncBonusUnified) { window.qemsSyncBonusUnified(); }
         var fields = [];
         function add(name, sel) {
             var $el = $(sel);

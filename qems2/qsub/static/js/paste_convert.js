@@ -917,6 +917,10 @@ $(function () {
     }
 
     function domBonusArgs() {
+        // The unified editor holds the bonus until submit; on Add Bonus the
+        // per-part fields are empty until then, which copied "[10]" and
+        // nothing else. Pull the unified text down first.
+        if (window.qemsSyncBonusUnified) { window.qemsSyncBonusUnified(); }
         var info = getAuthorAndCategory();
         var parts = [];
         for (var i = 1; i <= 3; i++) {
