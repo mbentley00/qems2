@@ -106,8 +106,13 @@
     </li>
     <li>
         <strong>Link the server to this set.</strong> Generate the key above, then
-        DM the bot the message "<code>add</code>". It asks for the server ID you just
-        copied and then for this key, and checks the key against QEMS before saving.
+        open a direct message with <strong>Cliff</strong> and send "<code>add</code>". It asks
+        first for the server ID you just copied, then for this set's key, and checks the
+        key against QEMS before saving.
+        <figure class="bot-figure">
+            <img src="{% static 'images/discord/link_add.png' %}" alt="A direct message with Cliff: the user sends add, Cliff asks for the server ID and then for the QEMS API key">
+            <figcaption>DM Cliff <code>add</code>, paste the server ID, then paste the key from this page</figcaption>
+        </figure>
         <code>test</code> confirms the connection; <code>autosync live</code> makes it
         sync on its own a few minutes after playtesting goes quiet, or @mention it in
         any channel to sync right away. <code>help</code> lists everything it understands.
