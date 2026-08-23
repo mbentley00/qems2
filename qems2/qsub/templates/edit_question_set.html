@@ -342,7 +342,7 @@
                         {% for comment in comment_tab_list %}
                             {% if not comment.is_removed %}
                                 <tr>
-                                    <td>{{ comment.comment|commenter_name }}</td>
+                                    <td>{{ comment.comment|commenter_short_name }}</td>
                                     <td>{{ comment.comment.comment|comment_html }}</td>
                                     <td>{% if comment.question_type == "packet" %}<span class="packet-comment-badge" title="A comment on the packet itself, not on one question">Packet</span> {% endif %}<a href="/edit_{{ comment.question_type }}/{{ comment.question_id }}">{{ comment.question_text }}</a></td>
                                     <td>{{ comment.comment.submit_date|to_short_datetime }}</td>
@@ -626,7 +626,7 @@
                             <td>{% if tossup.proofread_date %} {{ tossup.proofread_date|to_short_datetime }} {% endif %}</td>
                             <td>
                                 {% for comment in tossup.cached_comments %}
-                                    <strong>{{ comment|commenter_name }}{{ comment|commenter_tags:qset }}:</strong> {{ comment.comment|preview|comment_html }}<br>
+                                    <strong>{{ comment|commenter_short_name }}:</strong> {{ comment.comment|preview|comment_html }}<br>
                                 {% endfor %}
                             </td>
                             <td>{{ tossup|tossup_last_comment_date|to_short_datetime }}</td>
@@ -680,7 +680,7 @@
                             <td>{% if bonus.proofread_date %} {{ bonus.proofread_date|to_short_datetime }} {% endif %}</td>
                             <td>
                                 {% for comment in bonus.cached_comments %}
-                                    <strong>{{ comment|commenter_name }}{{ comment|commenter_tags:qset }}:</strong> {{ comment.comment|preview|comment_html }}<br>
+                                    <strong>{{ comment|commenter_short_name }}:</strong> {{ comment.comment|preview|comment_html }}<br>
                                 {% endfor %}
                             </td>
                             <td>{{ bonus|bonus_last_comment_date|to_short_datetime }}</td>

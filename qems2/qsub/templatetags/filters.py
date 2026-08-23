@@ -248,6 +248,17 @@ def commenter_name(comment):
     name = '{0} ("{1}")'.format(real, user.username) if real else user.username
     return mark_safe(_escape_text(name))
 
+@register.filter(name='commenter_short_name')
+def commenter_short_name(comment):
+    """Just the commenter's real name (username only when they have none),
+    for the tables where a comment is one cell among many and the
+    name-plus-handle-plus-tags form crowds out the comment itself."""
+    user = getattr(comment, 'user', None)
+    if user is None:
+        return mark_safe(_escape_text(getattr(comment, 'user_name', '') or 'Anonymous'))
+    real = '{0} {1}'.format(user.first_name or '', user.last_name or '').strip()
+    return mark_safe(_escape_text(real or user.username))
+
 @register.filter(name='writer_name')
 def writer_name(writer):
     """A writer's real name, falling back to their username. Escaped and marked
