@@ -703,6 +703,13 @@ $(function () {
     // Whether the set wants a question's opening left readable in a spoilered
     // copy: its first sentence, or a bonus's leadin and first part. The page
     // sets the flag from the set's settings; absent, everything is spoilered.
+    // The author select's label is "Real Name (username)"; the Discord footer
+    // wants the name alone. A bare username (no real name set) has no
+    // parenthetical and passes through.
+    function authorDisplayName(author) {
+        return (author || '').replace(/\s*\([^()]*\)\s*$/, '').trim();
+    }
+
     function showFirstClue() {
         return !!window.qemsDiscordShowFirst;
     }
@@ -713,7 +720,7 @@ $(function () {
     function formatTossupForDiscord(text, answer, author, category, qid) {
         text = (text || '').trim();
         answer = (answer || '').trim();
-        var info = { author: author || '', category: category || '' };
+        var info = { author: authorDisplayName(author), category: category || '' };
 
         var discordAnswer = qemsToDiscordMarkup(answer);
         // Bold runs to the last power mark: a (+) superpower precedes the (*) power.
@@ -763,7 +770,7 @@ $(function () {
      * - Difficulty placeholder appended
      */
     function formatBonusForDiscord(leadin, parts, author, category, qid) {
-        var info = { author: author || '', category: category || '' };
+        var info = { author: authorDisplayName(author), category: category || '' };
         // The leadin and first part are the "first clue" of a bonus; the
         // first answer never is.
         var leadinText = qemsToDiscordMarkup((leadin || '').trim());
@@ -980,7 +987,7 @@ $(function () {
      * Clean Discord markdown with category + author for sharing finished questions.
      */
     function formatTossupForDiscordPlain(text, answer, author, category, qid) {
-        var info = { author: author || '', category: category || '' };
+        var info = { author: authorDisplayName(author), category: category || '' };
 
         var rendered = qemsToDiscordMarkup((text || '').trim());
         // Bold the power: everything up to and including the last power marker
@@ -1004,7 +1011,7 @@ $(function () {
      * Format a bonus for Discord without spoiler tags.
      */
     function formatBonusForDiscordPlain(leadin, parts, author, category, qid) {
-        var info = { author: author || '', category: category || '' };
+        var info = { author: authorDisplayName(author), category: category || '' };
         var result = qemsToDiscordMarkup((leadin || '').trim()) + ' For 10 points each:\n';
 
         for (var i = 1; i <= 3; i++) {
