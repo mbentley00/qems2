@@ -119,6 +119,58 @@
     </li>
 </ol>
 
+<div class="panel callout radius"><strong>Using the bot</strong></div>
+<h5>Syncing manually</h5>
+<p>
+    <strong>@mention Cliff in any channel of a linked server</strong> to sync that server right
+    away: it reads the playtest question threads and posts the feedback summaries, buzz
+    points and bonus results to this set. A sync takes a few minutes on a big server;
+    mentioning it again while one is running just tells you it's already at work.
+    Everything else is a <strong>direct message</strong> to the bot:
+</p>
+<ul class="bot-commands">
+    <li><code>add</code> &mdash; link a server to a QEMS set (walks you through the server ID and this page's key)</li>
+    <li><code>list</code> &mdash; the servers currently linked and their autosync mode</li>
+    <li><code>test</code> &mdash; check the connection; <code>test <em>answer</em></code> posts a sample comment to that question so you can watch it land in QEMS</li>
+    <li><code>autosync live</code> / <code>autosync nightly</code> / <code>autosync off</code> &mdash; see below</li>
+    <li><code>remove <em>server id</em></code> &mdash; unlink a server</li>
+    <li><code>help</code> &mdash; everything it understands</li>
+</ul>
+<p>
+    Mentioning Cliff with the word <code>debug</code> (e.g. <code>@Cliff debug</code>) runs a
+    read-only diagnostic: it reports which threads the scanner can see and what it extracted,
+    without posting anything &mdash; the first thing to try when a sync "found nothing".
+</p>
+
+<h5>How automatic syncing works</h5>
+<p>
+    <code>autosync live</code> watches the server and syncs once it has been
+    <strong>quiet for about 10 minutes</strong> &mdash; playtest activity comes in bursts, so
+    this syncs once per session rather than once per message. <code>autosync nightly</code>
+    syncs once a day instead. Autosync never runs while a manual sync is in flight, and the
+    schedule survives the bot restarting. <code>autosync</code> alone (in a DM) shows the
+    current mode per server.
+</p>
+
+<h5>If comments seem to be missing after a sync</h5>
+<ul class="bot-commands">
+    <li><strong>Thread names.</strong> Only threads named like <code>T | ...</code> / <code>B | ...</code>
+        (or ending <code>| T1</code>, <code>| B2</code>) are read as questions; anything else is skipped.</li>
+    <li><strong>Unmatched questions.</strong> Comments attach to a question by its <em>answer line</em>.
+        If the question isn't in this set yet &mdash; or its answer changed since the thread was
+        named &mdash; the item comes back "unmatched" and is retried on a later sync; the sync
+        report in Discord lists a sample of unmatched answers.</li>
+    <li><strong>Already synced.</strong> A thread whose feedback hasn't changed since the last
+        sync is skipped on purpose, so re-syncing doesn't duplicate comments. New messages in
+        the thread make it eligible again.</li>
+    <li><strong>Very short messages.</strong> Trivially short remarks ("lol", "+1") are filtered
+        out of the feedback summary.</li>
+    <li><strong>Permissions.</strong> A channel the bot can't see (see step 2 above) contributes
+        nothing &mdash; <code>@Cliff debug</code> shows exactly which channels it can read.</li>
+    <li><strong>Bot attribution.</strong> Comments posted by the sync appear in QEMS under the
+        bot's name, not the playtester's; the summary credits playtesters in its text.</li>
+</ul>
+
 <style>
 .key-label { font-weight: bold; display: block; margin-bottom: 0.3rem; }
 .key-row { display: flex; gap: 0.5rem; align-items: center; max-width: 640px; }
@@ -131,6 +183,9 @@
 .bot-figure img { display: block; max-width: 100%; height: auto; border: 1px solid var(--qx-border, #d8dbe3);
     border-radius: 6px; }
 .bot-figure figcaption { font-size: 0.8rem; color: var(--qx-muted, #777); margin-top: 0.3rem; }
+.bot-commands { margin: 0.3rem 0 0.8rem 1.3rem; }
+.bot-commands li { margin-bottom: 0.35rem; }
+h5 { margin-top: 1rem; }
 .key-meta { color: #777; font-size: 0.85rem; margin: 0.4rem 0 0.8rem; }
 .api-docs { background: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.85rem; line-height: 1.5; }
 </style>
