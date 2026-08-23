@@ -41,33 +41,9 @@
         {% if form.tossup_answer.errors %}
             {{ form.tossup_answer.errors }}
         {% endif %}
-        <div class="row">
-            <div class="small-6 columns">
-                <div class="row collapse">
-                    <div class="small-4 columns">
-                        <span class="prefix text-left" for="{{ form.category.id_for_label }}">Category</span>
-                    </div>
-                    <div class="small-8 columns">
-                        {{ form.category }}
-                    </div>
-                    {% if form.category.errors %}
-                        {{ form.category.errors }}
-                    {% endif %}
-                </div>
-            </div>
-            <div class="small-6 columns">
-                <div class="row collapse">
-                    <div class="small-4 columns">
-                        <span class="prefix text-left" for="{{ form.author.id_for_label }}">Author</span>
-                    </div>
-                    <div class="small-8 columns">
-                        {{ form.author }}
-                    </div>
-                    {% if form.author.errors %}
-                        {{ form.author.errors }}
-                    {% endif %}
-                </div>
-            </div>
+        <div class="qmeta-fields">
+            <div class="qmeta-field"><label for="{{ form.category.id_for_label }}">Category</label>{{ form.category }}{{ form.category.errors }}</div>
+            <div class="qmeta-field"><label for="{{ form.author.id_for_label }}">Author</label>{{ form.author }}{{ form.author.errors }}</div>
         </div>
         <div class="row" style="display:none">
             <div class="small-6 columns">
@@ -101,8 +77,7 @@
             <input type="submit" id="submit-tossup" value="Submit Tossup" class="button primary right" />
         </div>
         
-        {% include "formatting_guide.html" %}
-        <p>Do not include ANSWER: in your answer line.</p>
+
         
     {% endif %}
 
