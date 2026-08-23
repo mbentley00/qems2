@@ -1127,6 +1127,7 @@ def edit_question_set(request, qset_id):
                 qset.guides_require_quotes = form.cleaned_data['guides_require_quotes']
                 qset.tossups_only = form.cleaned_data['tossups_only']
                 qset.enable_superpower = form.cleaned_data['enable_superpower']
+                qset.discord_show_first_clue = form.cleaned_data['discord_show_first_clue']
                 qset.structured_answers = form.cleaned_data['structured_answers']
                 qset.public = form.cleaned_data['public']
                 qset.max_acf_tossup_length = form.cleaned_data['max_acf_tossup_length']

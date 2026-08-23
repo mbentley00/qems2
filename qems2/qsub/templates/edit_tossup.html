@@ -12,6 +12,7 @@
 {% block body_class %}edit-page-wide{% endblock %}
 
 {% block content %}
+<script>window.qemsDiscordShowFirst = {% if qset.discord_show_first_clue %}true{% else %}false{% endif %};</script>
 {% if qset %}<script>window.QEMS_QSET_ID = {{ qset.id }};</script>{% endif %}
 {% if role == "editor" %}<script>window.QEMS_CAN_STRIKE = true;</script>{% endif %}
 

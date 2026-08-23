@@ -201,6 +201,12 @@ class QuestionSet (models.Model):
     # text and never scores 20.
     enable_superpower = models.BooleanField(default=False)
 
+    # "Copy for Discord" spoilers every sentence of a tossup and every line of a
+    # bonus. With this on, the opening -- a tossup's first sentence, a bonus's
+    # leadin and first part (never its answer) -- is left readable, the way a
+    # playtest channel shows what a question is about before anyone buzzes.
+    discord_show_first_clue = models.BooleanField(default=False)
+
     # When true, answer lines are recorded as structure - a required primary
     # answer plus optional accepts and directed prompts - instead of only as
     # prose. Off by default. The prose line stays canonical either way, so

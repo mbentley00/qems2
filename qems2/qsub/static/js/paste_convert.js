@@ -700,6 +700,16 @@ $(function () {
         return qid ? ' <qid:' + qid + '>' : '';
     }
 
+    // Whether the set wants a question's opening left readable in a spoilered
+    // copy: its first sentence, or a bonus's leadin and first part. The page
+    // sets the flag from the set's settings; absent, everything is spoilered.
+    function showFirstClue() {
+        return !!window.qemsDiscordShowFirst;
+    }
+    function spoil(text, isFirst) {
+        return (isFirst && showFirstClue()) ? text : '||' + text + '||';
+    }
+
     function formatTossupForDiscord(text, answer, author, category, qid) {
         text = (text || '').trim();
         answer = (answer || '').trim();
@@ -718,21 +728,22 @@ $(function () {
             var beforeSentences = splitIntoSentences(qemsToDiscordMarkup(beforePower));
             var afterSentences = splitIntoSentences(qemsToDiscordMarkup(afterPower));
 
-            // Pre-power: bold + spoiler
-            result = '**' + beforeSentences.map(function (s) {
-                return '||' + s + '||';
+            // Pre-power: bold + spoiler (the first sentence readable when the
+            // set asks for it)
+            result = '**' + beforeSentences.map(function (s, i) {
+                return spoil(s, i === 0);
             }).join(' ') + '**';
 
             // Post-power: spoiler only
             if (afterSentences.length > 0) {
-                result += ' ' + afterSentences.map(function (s) {
-                    return '||' + s + '||';
+                result += ' ' + afterSentences.map(function (s, i) {
+                    return spoil(s, beforeSentences.length === 0 && i === 0);
                 }).join(' ');
             }
         } else {
             var sentences = splitIntoSentences(qemsToDiscordMarkup(text));
-            result = sentences.map(function (s) {
-                return '||' + s + '||';
+            result = sentences.map(function (s, i) {
+                return spoil(s, i === 0);
             }).join(' ');
         }
 
@@ -753,7 +764,10 @@ $(function () {
      */
     function formatBonusForDiscord(leadin, parts, author, category, qid) {
         var info = { author: author || '', category: category || '' };
-        var result = qemsToDiscordMarkup((leadin || '').trim()) + '\n';
+        // The leadin and first part are the "first clue" of a bonus; the
+        // first answer never is.
+        var leadinText = qemsToDiscordMarkup((leadin || '').trim());
+        var result = (leadinText ? spoil(leadinText, true) : '') + '\n';
 
         var difficulties = [];
         for (var i = 1; i <= 3; i++) {
@@ -763,11 +777,7 @@ $(function () {
             var diff = (part.diff || '');
 
             var label = '[10' + diff + ']';
-            if (i === 1) {
-                result += label + ' ' + partText + '\n';
-            } else {
-                result += label + ' ||' + partText + '||\n';
-            }
+            result += label + ' ' + spoil(partText, i === 1) + '\n';
             result += 'ANSWER: ||' + partAnswer + '||' + (i === 3 ? qidSuffix(qid) : '') + '\n';
             difficulties.push(diff || '?');
         }

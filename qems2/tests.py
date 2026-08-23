@@ -3585,6 +3585,53 @@ class DistributionImportTests(TestCase):
         self.assertFalse(Distribution.objects.filter(name='Bad').exists())
 
 
+class DiscordFirstClueSettingTests(TestCase):
+    """The set option that leaves the first clue readable in a Discord copy
+    saves from the set page and reaches the pages that copy."""
+
+    def setUp(self):
+        for qt in (ACF_STYLE_TOSSUP, ACF_STYLE_BONUS):
+            QuestionType.objects.get_or_create(question_type=qt)
+        self.ou = User.objects.create_user('dfc_owner', password='pw', email='dfc@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='DFC dist')
+        self.de = DistributionEntry.objects.create(distribution=self.dist, category='History',
+                                                   subcategory='World', min_tossups=1, min_bonuses=1)
+        self.qset = QuestionSet.objects.create(
+            name='DFC Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.qset.editor.add(self.owner)
+        self.tu = Tossup.objects.create(
+            question_set=self.qset, question_type=QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP),
+            category=self.de, author=self.owner, tossup_text='x (*) y', tossup_answer='_a_',
+            created_date=timezone.now(), last_changed_date=timezone.now())
+        self.client.login(username='dfc_owner', password='pw')
+
+    def _save(self, **extra):
+        data = {'name': self.qset.name, 'date': '2026-08-01', 'distribution': self.dist.id,
+                'num_packets': 1, 'max_acf_tossup_length': 750, 'max_acf_bonus_length': 400}
+        data.update(extra)
+        return self.client.post('/edit_question_set/{0}/'.format(self.qset.id), data)
+
+    def test_off_by_default_and_the_page_says_so(self):
+        self.assertFalse(self.qset.discord_show_first_clue)
+        self.assertContains(self.client.get('/edit_tossup/{0}/'.format(self.tu.id)),
+                            'window.qemsDiscordShowFirst = false;')
+        self.assertContains(self.client.get('/edit_question_set/{0}/'.format(self.qset.id)),
+                            'discord_show_first_clue')
+
+    def test_saving_the_option_switches_the_flag_on_the_pages(self):
+        self._save(discord_show_first_clue='on')
+        self.qset.refresh_from_db()
+        self.assertTrue(self.qset.discord_show_first_clue)
+        for url in ('/edit_tossup/{0}/'.format(self.tu.id), '/add_tossups/{0}/'.format(self.qset.id),
+                    '/add_bonuses/{0}/{1}/'.format(self.qset.id, ACF_STYLE_BONUS)):
+            self.assertContains(self.client.get(url), 'window.qemsDiscordShowFirst = true;', msg_prefix=url)
+        self._save()
+        self.qset.refresh_from_db()
+        self.assertFalse(self.qset.discord_show_first_clue)
+
+
 class BonusDifficultyOrderTests(TestCase):
     """The style check page counts bonuses by the order of their part
     difficulties and lists the ones with no tags."""
