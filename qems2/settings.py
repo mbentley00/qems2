@@ -2,6 +2,12 @@
 import os
 
 DEBUG = os.environ.get('DEBUG', 'True') == 'True'
+
+# The distribution editor posts every row of the formset at once, eight
+# fields a row, and Django's default cap of 1000 fields rejected a 144-row
+# distribution with a bare 400 before the view ever ran. Big distributions
+# (one subcategory per line of a long sheet) run to a few hundred rows.
+DATA_UPLOAD_MAX_NUMBER_FIELDS = 20000
 TEMPLATE_DEBUG = DEBUG
 
 ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', '*').split(',')

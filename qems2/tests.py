@@ -6733,6 +6733,22 @@ class DistributionVisibilityTests(TestCase):
         new_dist = Distribution.objects.get(name='dv brand new')
         self.assertFalse(new_dist.public)
 
+    def test_a_distribution_with_hundreds_of_rows_saves(self):
+        # Eight fields a row: 150 rows is well past Django's default cap of
+        # 1000 POST fields, which answered a bare 400 at the 144th row.
+        data = {'name': 'dv huge',
+                'distentry-TOTAL_FORMS': '150', 'distentry-INITIAL_FORMS': '0',
+                'distentry-MIN_NUM_FORMS': '0', 'distentry-MAX_NUM_FORMS': '1000'}
+        for i in range(150):
+            data.update({'distentry-{0}-entry_id'.format(i): '', 'distentry-{0}-DELETE'.format(i): '',
+                         'distentry-{0}-category'.format(i): 'Science',
+                         'distentry-{0}-subcategory'.format(i): 'Sub {0}'.format(i),
+                         'distentry-{0}-min_tossups'.format(i): '1', 'distentry-{0}-max_tossups'.format(i): '1',
+                         'distentry-{0}-min_bonuses'.format(i): '1', 'distentry-{0}-max_bonuses'.format(i): '1'})
+        resp = self.client.post('/edit_distribution/', data)
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(Distribution.objects.get(name='dv huge').distributionentry_set.count(), 150)
+
     def test_publishing_a_distribution_shows_it_to_everyone(self):
         self.own_dist.public = True
         self.own_dist.save()
