@@ -23,10 +23,8 @@
 {% endif %}
 
 <p>
-    This key lets an external service (such as a Discord playtest bot) record
-    buzzes, bonus results, and comments to <strong>{{ qset.name }}</strong>.
-    Treat it like a password &mdash; anyone with it can write playtest data to
-    this set. Regenerating immediately revokes the old key.
+    This key lets the Cliff Discord bot record buzzes, bonus results, and comments to <strong>{{ qset.name }}</strong>.
+    Treat it like a password because anyone with it can write playtest data to this set. Regenerating immediately revokes the old key.
 </p>
 
 <div class="panel radius">
@@ -62,37 +60,23 @@
 
 <div class="panel callout radius"><strong>Adding the Discord bot to your playtest server</strong></div>
 <p>
-    The playtest bot (&ldquo;Cliff&rdquo;) reads the <code>T |</code> / <code>B |</code>
-    question threads on a Discord server and posts the feedback, buzz points and
+    Cliff, the playtest bot, reads the <code>T |</code> / <code>B |</code>
+    question threads on a Discord server (set up with the separate Botero bot) and posts the feedback, buzz points and
     bonus results to this set. Linking a server takes three steps.
 </p>
 <ol class="bot-steps">
     <li>
-        <strong>Invite the bot to the server.</strong> You need <em>Manage Server</em>
-        on the Discord server to do this. Open the bot's invite link (ask whoever
-        runs the bot for it, or build one in the
-        <a href="https://discord.com/developers/applications" target="_blank" rel="noopener">Discord Developer Portal</a>
-        under <em>OAuth2 &rarr; URL Generator</em> with the <code>bot</code> scope)
-        and pick your server. Grant it these permissions &mdash; it needs nothing else:
-        <ul>
-            <li><strong>View Channels</strong> &mdash; to find the playtest channels and their threads</li>
-            <li><strong>Read Message History</strong> &mdash; to read feedback, reactions and the Results posts already in those threads</li>
-            <li><strong>Send Messages</strong> and <strong>Send Messages in Threads</strong> &mdash; to reply when you @mention it</li>
-        </ul>
-        Together these are the permissions integer <code>274877975552</code>. If you
-        build the invite link yourself, the URL is
-        <code>https://discord.com/oauth2/authorize?client_id=&lt;application id&gt;&amp;scope=bot&amp;permissions=274877975552</code>.
+        <strong>Invite the bot to the server.</strong> Click <a href="https://discord.com/oauth2/authorize?client_id=1482579297813266502&scope=bot%20applications.commands&permissions=274878024768">here</a>. You need <em>Manage Server</em> permissions on the Discord server to do this.
     </li>
     <li>
         <strong>Make sure it can see the playtest channels.</strong> A server-level
         permission is overridden by private channels or categories. If your
         playtest channels are restricted to a role, add the bot (or its role) to
         those channels with <em>View Channel</em> and <em>Read Message History</em>.
-        Threads inherit from their channel, so that is enough.
     </li>
     <li>
         <strong>Link the server to this set.</strong> Generate the key above, then
-        DM the bot <code>add</code>. It asks for the server ID (Discord &rarr;
+        DM the bot the message "<code>add</code>". It asks for the server ID (Discord &rarr;
         <em>Server Settings &rarr; Widget</em>, or right-click the server with
         Developer Mode on and <em>Copy Server ID</em>) and then for this key, and
         checks the key against QEMS before saving. <code>test</code> confirms the
@@ -101,68 +85,6 @@
         right away. <code>help</code> lists everything it understands.
     </li>
 </ol>
-<p class="key-meta">
-    If you host your own copy of the bot (the <code>discord_qems</code> project)
-    rather than using the shared one, also enable the <strong>Message Content</strong>
-    and <strong>Server Members</strong> privileged gateway intents on your
-    application's <em>Bot</em> page in the Developer Portal &mdash; without them the
-    bot connects but sees no message text and cannot resolve who buzzed.
-</p>
-
-<div class="panel callout radius"><strong>How the bot uses the key</strong></div>
-<p>
-    Send the key on every request as a Bearer token. Questions are matched by
-    their <strong>answer line</strong> (no QEMS IDs needed); if a question
-    doesn't exist in the set yet, the item comes back <code>unmatched</code> and
-    the bot should retry it later. Include a unique <code>external_id</code> per
-    item so retries don't record duplicates.
-</p>
-
-<pre class="api-docs">Base URL: {{ base_url }}
-Header:   Authorization: Bearer &lt;your key&gt;
-
-# Validate the key
-GET  {{ base_url }}/api/v1/ping
-
-# Record tossup buzzes (who buzzed + optional wrong answer)
-POST {{ base_url }}/api/v1/buzzes
-{
-  "events": [{
-    "external_id": "game42-pkt3-q5-user99",
-    "answer": "Blaise Pascal",
-    "player_name": "someuser#1234",
-    "buzz_word_index": 12, "total_words": 45,
-    "correct": false, "powered": false, "neg": true,
-    "answer_given": "Fermat"
-  }]
-}
-
-# Record bonus results
-POST {{ base_url }}/api/v1/bonus_results
-{
-  "events": [{
-    "external_id": "game42-pkt3-b5-user99",
-    "answer": "Bastille",
-    "player_name": "someuser#1234",
-    "part1_correct": true, "part2_correct": false, "part3_correct": false
-  }]
-}
-
-# Add comments to a question
-POST {{ base_url }}/api/v1/comments
-{
-  "comments": [{
-    "external_id": "game42-pkt3-q5-cmt1",
-    "answer": "Blaise Pascal",
-    "author_name": "someuser#1234",
-    "qtype": "tossup",
-    "text": "Second clue might be too easy."
-  }]
-}
-
-# Each response returns a per-item status:
-# recorded | duplicate | unmatched | ambiguous | error
-</pre>
 
 <style>
 .key-label { font-weight: bold; display: block; margin-bottom: 0.3rem; }
