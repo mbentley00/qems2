@@ -79,8 +79,15 @@
     <li>
         <strong>Make sure it can see the playtest channels.</strong> A server-level
         permission is overridden by private channels or categories. If your
-        playtest channels are restricted to a role, add the bot (or its role) to
-        those channels with <em>View Channel</em> and <em>Read Message History</em>.
+        playtest channels are restricted to a role, give the bot that role:
+        right-click <strong>Cliff</strong> in the member list, open <strong>Roles</strong>,
+        and tick the role your playtest channels are open to (here, <em>Bot</em>).
+        Or add the bot directly to those channels with <em>View Channel</em> and
+        <em>Read Message History</em>.
+        <figure class="bot-figure">
+            <img src="{% static 'images/discord/bot_role.png' %}" alt="Cliff's right-click menu in the member list with Roles opened and the Bot role ticked">
+            <figcaption>Right-click Cliff in the member list &rarr; Roles &rarr; tick the role that can see the playtest channels</figcaption>
+        </figure>
     </li>
     <li>
         <strong>Find your server's ID.</strong> The bot asks for it when you link the server.
