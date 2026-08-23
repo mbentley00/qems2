@@ -11277,6 +11277,86 @@ class LastCategoryDefaultTests(TestCase):
         self.assertIsNone(self._initial('/add_tossups/{0}/'.format(self.qset.id)))
 
 
+class CategoryTagExportImportTests(TestCase):
+    """Tags go out as a sheet and come back into a set by (category, name)."""
+
+    def setUp(self):
+        self.ou = User.objects.create_user('cti_owner', password='pw', email='cti@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='CTI dist')
+        for sub in ('World', 'European'):
+            de = DistributionEntry.objects.create(distribution=self.dist, category='History',
+                                                  subcategory=sub, min_tossups=1, min_bonuses=1)
+        mk = lambda name: QuestionSet.objects.create(
+            name=name, date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.a, self.b = mk('CTI A'), mk('CTI B')
+        for q in (self.a, self.b):
+            q.editor.add(self.owner)
+            for de in self.dist.distributionentry_set.all():
+                SetWideDistributionEntry.objects.create(question_set=q, dist_entry=de,
+                                                        num_tossups=1, num_bonuses=1)
+        CategoryTag.objects.create(question_set=self.a, category_path='History - World',
+                                   name='China', group_name='Location', num_tossups=2, sort_order=10)
+        CategoryTag.objects.create(question_set=self.a, category_path='History - World',
+                                   name='1900+', group_name='Time', num_questions=3)
+        self.client.login(username='cti_owner', password='pw')
+
+    def test_export_has_one_row_per_tag(self):
+        resp = self.client.get('/export_category_tags/{0}/'.format(self.a.id))
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode()
+        self.assertIn('Category,Group,Tag,Tossups,Bonuses,Any Type,Order', body)
+        self.assertIn('History - World,Location,China,2,0,0,10', body)
+        self.assertIn('History - World,Time,1900+,0,0,3,0', body)
+
+    def test_the_export_imports_into_another_set(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        csv_text = self.client.get('/export_category_tags/{0}/'.format(self.a.id)).content
+        resp = self.client.post('/import_category_tags/{0}/'.format(self.b.id),
+                                {'sheet': SimpleUploadedFile('a_tags.csv', csv_text)})
+        self.assertEqual(resp.status_code, 302)
+        tags = {t.name: t for t in CategoryTag.objects.filter(question_set=self.b)}
+        self.assertEqual(set(tags), {'China', '1900+'})
+        self.assertEqual((tags['China'].group_name, tags['China'].num_tossups, tags['China'].sort_order),
+                         ('Location', 2, 10))
+        self.assertEqual(tags['1900+'].num_questions, 3)
+
+    def test_import_updates_existing_tags_and_keeps_their_questions(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        tu = Tossup.objects.create(
+            question_set=self.a, question_type=QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP),
+            category=self.dist.distributionentry_set.first(), author=self.owner,
+            tossup_text='x (*) y', tossup_answer='_a_',
+            created_date=timezone.now(), last_changed_date=timezone.now())
+        china = CategoryTag.objects.get(question_set=self.a, name='China')
+        china.tossups.add(tu)
+        sheet = SimpleUploadedFile('t.csv', b'Category,Group,Tag,Tossups\nHistory - World,Region,China,5\n')
+        self.client.post('/import_category_tags/{0}/'.format(self.a.id), {'sheet': sheet})
+        china.refresh_from_db()
+        self.assertEqual((china.group_name, china.num_tossups), ('Region', 5))
+        self.assertIn(tu, china.tossups.all())
+        self.assertEqual(CategoryTag.objects.filter(question_set=self.a).count(), 2)
+
+    def test_unknown_categories_are_skipped_and_reported(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        sheet = SimpleUploadedFile('t.csv', b'Category,Tag\nScience - Biology,Genetics\nHistory - European,Iberia\n')
+        resp = self.client.post('/import_category_tags/{0}/'.format(self.b.id), {'sheet': sheet}, follow=True)
+        self.assertContains(resp, 'Skipped 1 category')
+        self.assertContains(resp, 'Science - Biology')
+        self.assertEqual([t.name for t in CategoryTag.objects.filter(question_set=self.b)], ['Iberia'])
+
+    def test_writers_cannot_import(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        wu = User.objects.create_user('cti_writer', password='pw', email='ctiw@t.com')
+        self.b.writer.add(Writer.objects.get(user=wu))
+        self.client.login(username='cti_writer', password='pw')
+        sheet = SimpleUploadedFile('t.csv', b'Category,Tag\nHistory - European,Iberia\n')
+        self.client.post('/import_category_tags/{0}/'.format(self.b.id), {'sheet': sheet})
+        self.assertEqual(CategoryTag.objects.filter(question_set=self.b).count(), 0)
+
+
 class QuestionPageTagTests(TestCase):
     """The tag checkboxes on the edit pages say where each tag stands, sit
     under their axis, and link to the tag page for that category alone."""

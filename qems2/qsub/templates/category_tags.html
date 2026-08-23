@@ -21,12 +21,25 @@
 {% if message %}
     <div class="{{ message_class }}">{{ message }}</div>
 {% endif %}
+{% if messages %}{% for m in messages %}<div class="alert-box {% if m.tags == 'error' %}warning{% elif m.tags == 'warning' %}warning{% else %}success{% endif %}">{{ m }}</div>{% endfor %}{% endif %}
 
 <div class="panel radius">
     Tags are editor-defined requirements within a category &mdash; for instance &ldquo;Asian Literature&rdquo;
     under Literature - World with 6 tossups and 6 bonuses needed. Writers fulfill a tag by checking it
     on the question's edit page. Tags with a required count of 0 are informational labels.
     <p class="home-note">Tags can also have groups such as location, time period, or other divisions.</p>
+    <div class="tag-io">
+        <a href="/export_category_tags/{{ qset.id }}/" class="button tiny secondary"><i class="fa fa-file-export"></i> Export tags (.csv)</a>
+        {% if can_edit %}
+        <form action="/import_category_tags/{{ qset.id }}/" method="post" enctype="multipart/form-data" class="tag-io-form">
+            {% csrf_token %}
+            <label class="tag-io-label" for="tag-import-file">Import tags:</label>
+            <input type="file" id="tag-import-file" name="sheet" accept=".csv,.tsv,.xlsx" required>
+            <button type="submit" class="button tiny secondary">Import</button>
+            <span class="home-note">Same columns as the export (Category, Group, Tag, Tossups, Bonuses, Any Type, Order). Existing tags are updated by name and keep their questions; categories this set lacks are skipped.</span>
+        </form>
+        {% endif %}
+    </div>
 </div>
 
 {% if can_edit %}
@@ -341,6 +354,11 @@ $(function () {
 .tag-delete-form { margin: 0; display: inline; }
 .tag-delete-form input { margin: 0; }
 .tag-actions { white-space: nowrap; }
+.tag-io { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 8px; }
+.tag-io .button { margin: 0; }
+.tag-io-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0; }
+.tag-io-form input[type=file] { margin: 0; width: auto; font-size: 0.85em; }
+.tag-io-label { margin: 0; font-size: 0.9em; }
 .tag-nowrap { white-space: nowrap; }
 .tag-drag-col { width: 1.6em; padding-right: 0 !important; }
 .tag-drag-handle { cursor: grab; color: var(--qx-muted, #b0b4c0); font-size: 1em; letter-spacing: -0.35em;

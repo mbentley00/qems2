@@ -9954,6 +9954,56 @@ def get_applicable_tags(qset, dist_entry):
     return [tag for tag in CategoryTag.objects.filter(question_set=qset)
             if _tag_matches_path(tag.category_path, path)]
 
+@login_required
+def export_category_tags(request, qset_id):
+    """The set's category tags as a .csv, for editing or for another set."""
+    from . import tag_importer
+    user = request.user.writer
+    qset = QuestionSet.objects.get(id=qset_id)
+    if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+        return render(request, 'failure.html',
+                      {'message': 'You are not authorized to view this set!',
+                       'message_class': 'alert-box alert'})
+    resp = HttpResponse(tag_importer.export_csv(qset), content_type='text/csv; charset=utf-8')
+    safe = re.sub(r'[^A-Za-z0-9_-]+', '_', qset.name).strip('_') or 'set'
+    resp['Content-Disposition'] = 'attachment; filename="{0}_category_tags.csv"'.format(safe)
+    return resp
+
+
+@login_required
+def import_category_tags(request, qset_id):
+    """Create or update the set's tags from an uploaded sheet (the export
+    layout), then return to the tags page."""
+    from . import tag_importer
+    user = request.user.writer
+    qset = QuestionSet.objects.get(id=qset_id)
+    back = '/category_tags/{0}/'.format(qset.id)
+    if not (qset.is_owner(user) or user in qset.editor.all()):
+        messages.error(request, 'Only editors can import tags.')
+        return HttpResponseRedirect(back)
+    if request.method != 'POST':
+        return HttpResponseRedirect(back)
+    upload = request.FILES.get('sheet')
+    if upload is None:
+        messages.error(request, 'Choose a file to import.')
+        return HttpResponseRedirect(back)
+    try:
+        entries = tag_importer.parse_tag_sheet(upload.name, upload.read())
+    except tag_importer.DistributionImportError as ex:
+        messages.error(request, str(ex))
+        return HttpResponseRedirect(back)
+    known = [row['path'] for row in get_packetization_rows(qset)]
+    created, updated, skipped = tag_importer.import_tags(qset, entries, known)
+    note = 'Imported tags from {0}: {1} created, {2} updated.'.format(upload.name, created, updated)
+    if skipped:
+        note += ' Skipped {0} categor{1} this set does not have: {2}.'.format(
+            len(skipped), 'y' if len(skipped) == 1 else 'ies', ', '.join(skipped[:8]) + (' ...' if len(skipped) > 8 else ''))
+        messages.warning(request, note)
+    else:
+        messages.success(request, note)
+    return HttpResponseRedirect(back)
+
+
 def _next_tag_sort_order(qset, path, group_name):
     """Where a tag arriving in this group goes: the end, if the editor has
     put the group in an order of their own; otherwise 0, which keeps an
