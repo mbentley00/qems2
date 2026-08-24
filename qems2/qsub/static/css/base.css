@@ -537,9 +537,12 @@ body.edit-page-wide .app-content { max-width: none; }
 }
 
 .category-tree-toggle {
-    flex: 0 0 9.5em;
+    /* Wide enough for the longest heading ("SOCIAL SCIENCE" plus its count) to
+       sit on one line; the subcategories still start at the same column. */
+    flex: 0 0 13em;
     display: block;
     width: auto;
+    white-space: nowrap;
     margin: 0;
     padding: 0.25em 0;
     text-align: left;
