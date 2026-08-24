@@ -27,6 +27,10 @@ def record_comment_mentions(sender, instance, created, **kwargs):
     if not created or '@' not in (instance.comment or ''):
         return
     try:
+        # A playtest summary quotes handles freely; those aren't someone
+        # calling a writer over, and Discord already notified the room.
+        if _is_discord_comment(instance):
+            return
         names = set(m.group(1).rstrip('.') for m in _MENTION_RE.finditer(instance.comment))
         if not names:
             return
@@ -108,6 +112,11 @@ def email_on_comments(sender, instance, created, **kwargs):
     try:
         target = instance.content_object
         if not isinstance(target, (Tossup, Bonus)):
+            return
+        # The playtest bot's comments are the playtest the readers were just
+        # in -- Discord already notified them. No mail for these at all (the
+        # old per-user opt-out only trimmed the list).
+        if _is_discord_comment(instance):
             return
 
         mail_set = set()

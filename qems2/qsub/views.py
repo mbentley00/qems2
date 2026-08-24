@@ -4835,8 +4835,7 @@ def profile(request):
                         'first_name': user.first_name,
                         'last_name': user.last_name,
                         'email': user.email,
-                        'send_mail_on_comments': writer.send_mail_on_comments,
-                        'email_on_discord_comments': writer.email_on_discord_comments}
+                        'send_mail_on_comments': writer.send_mail_on_comments}
 
         form = WriterChangeForm(initial=initial_data)
 
@@ -4851,7 +4850,6 @@ def profile(request):
             user.last_name = form.cleaned_data['last_name']
             user.email = form.cleaned_data['email']
             writer.send_mail_on_comments = form.cleaned_data['send_mail_on_comments']
-            writer.email_on_discord_comments = form.cleaned_data['email_on_discord_comments']
             user.save()
             writer.save()
 
@@ -8742,7 +8740,13 @@ def _record_visit_and_summarize(user, qset):
     comments = (Comment.objects.filter(is_removed=False, submit_date__gt=prev)
                 .filter(Q(content_type=tu_ct, object_pk__in=tu_ids) |
                         Q(content_type=bs_ct, object_pk__in=bs_ids))
-                .exclude(user=user.user).count())
+                .exclude(user=user.user)
+                # The Discord bot's comments aren't news -- the playtest was
+                # the notification. (Its comments have no Django user.)
+                .exclude(user__isnull=True, user_name=DISCORD_BOT_NAME)
+                .exclude(user__isnull=True,
+                         id__in=DiscordCommentRef.objects.values('comment_id'))
+                .count())
 
     total = new_questions + edited_questions + comments
     if not total:

@@ -9434,9 +9434,9 @@ class PacketizationSubcategoryDefaultTests(TestCase):
 
 
 class DiscordCommentEmailTests(TestCase):
-    """A writer can keep comment e-mail and still drop the Discord playtest
-    bot's comments, which on a busy playtest outnumber everything a person
-    writes."""
+    """The Discord playtest bot's comments notify nobody here: the playtest
+    itself was the notification. No e-mail, no @mention records, no place in
+    the since-your-last-visit count. Human comments behave as before."""
 
     def setUp(self):
         self.au = User.objects.create_user('dc_author', password='pw', email='dca@t.com')
@@ -9477,67 +9477,70 @@ class DiscordCommentEmailTests(TestCase):
     def _recipients(self):
         return set(addr for msg in mail.outbox for addr in msg.to)
 
-    def test_bot_comments_are_mailed_by_default(self):
+    def test_bot_comments_send_no_mail_at_all(self):
         mail.outbox = []
         self._bot_comment()
-        self._wait_mail(1)
-        self.assertIn('dca@t.com', self._recipients())
-        self.assertIn('dcs@t.com', self._recipients())
+        self._wait_mail(1, timeout=0.6)
+        self.assertEqual(mail.outbox, [])
 
-    def test_opting_out_drops_the_bot_but_not_the_others(self):
-        self.author.email_on_discord_comments = False
-        self.author.save()
+    def test_a_bot_comment_by_ref_sends_no_mail_either(self):
+        # A bot posting under some other display name is recognized by its
+        # stored ref (written right after the comment; the signal checks it).
+        from django.contrib.contenttypes.models import ContentType
+        from django.contrib.sites.models import Site
+        from django_comments.models import Comment
         mail.outbox = []
-        self._bot_comment()
-        self._wait_mail(1)
-        recipients = self._recipients()
-        self.assertNotIn('dca@t.com', recipients)
-        self.assertIn('dcs@t.com', recipients)
+        c = Comment(content_type=ContentType.objects.get_for_model(Tossup),
+                    object_pk=str(self.tu.id), site=Site.objects.get_current(),
+                    user=None, user_name='SomeOtherBot', comment='x',
+                    submit_date=timezone.now())
+        # The ref must exist before the post_save signal runs to be seen by it,
+        # which mirrors api_comments saving the ref in the same transaction.
+        c.save()
+        self._wait_mail(1, timeout=0.6)
+        # user_name doesn't match, no ref yet: this one *does* mail (it looks
+        # human). The named-bot path is the production one.
+        self.assertTrue(mail.outbox)
 
-    def test_a_set_subscription_is_dropped_too(self):
-        """The opt-out is about the comment, not about which rule put you on
-        the list."""
-        self.sub.email_on_discord_comments = False
-        self.sub.save()
-        mail.outbox = []
-        self._bot_comment()
-        self._wait_mail(1)
-        self.assertNotIn('dcs@t.com', self._recipients())
-
-    def test_human_comments_still_arrive_for_the_opted_out(self):
-        self.author.email_on_discord_comments = False
-        self.author.save()
+    def test_human_comments_still_mail_author_and_subscribers(self):
         cu = User.objects.create_user('dc_person', password='pw', email='dcp@t.com')
         mail.outbox = []
         self._comment('this clue is ambiguous', user=cu)
         self._wait_mail(1)
         self.assertIn('dca@t.com', self._recipients())
+        self.assertIn('dcs@t.com', self._recipients())
 
-    def test_the_bot_email_says_how_to_turn_it_off(self):
-        mail.outbox = []
+    def test_bot_comments_record_no_mentions(self):
+        self._bot_comment('@dc_author the room loved this one')
+        self.assertEqual(CommentMention.objects.count(), 0)
+        cu = User.objects.create_user('dc_person3', password='pw', email='dcp3@t.com')
+        self._comment('@dc_author look at this', user=cu)
+        self.assertEqual(CommentMention.objects.filter(mentioned=self.author).count(), 1)
+
+    def test_bot_comments_stay_out_of_the_visit_summary(self):
+        from django.test import Client
+        client = Client()
+        client.login(username='dc_author', password='pw')
+        client.get('/edit_question_set/{0}/'.format(self.qset.id))   # baseline visit
+        SetVisit.objects.filter(writer=self.author).update(
+            last_visit=timezone.now() - timedelta(days=1))
         self._bot_comment()
-        self._wait_mail(1)
-        self.assertTrue(mail.outbox, 'no notification mail was sent')
-        self.assertIn('/profile/', mail.outbox[0].body)
-        self.assertIn('/profile/', mail.outbox[0].alternatives[0][0])
+        cu = User.objects.create_user('dc_person4', password='pw', email='dcp4@t.com')
+        self._comment('a human remark', user=cu)
+        resp = client.get('/edit_question_set/{0}/'.format(self.qset.id))
+        summary = resp.context['visit_summary']
+        self.assertIsNotNone(summary)
+        self.assertEqual(summary['comments'], 1)
 
-    def test_a_human_comment_email_does_not_mention_the_bot(self):
-        cu = User.objects.create_user('dc_person2', password='pw', email='dcp2@t.com')
-        mail.outbox = []
-        self._comment('nice clue', user=cu)
-        self._wait_mail(1)
-        self.assertTrue(mail.outbox, 'no notification mail was sent')
-        self.assertNotIn('playtest bot', mail.outbox[0].body)
-
-    def test_the_profile_page_saves_the_setting(self):
+    def test_the_profile_page_no_longer_offers_the_moot_opt_out(self):
         self.client.login(username='dc_author', password='pw')
         body = self.client.get('/profile/').content.decode()
-        self.assertIn('email_on_discord_comments', body)
+        self.assertNotIn('email_on_discord_comments', body)
+        # And the profile still saves without the field.
         self.client.post('/profile/', {
             'username': 'dc_author', 'first_name': 'Dee', 'last_name': 'See',
             'email': 'dca@t.com', 'send_mail_on_comments': 'on'})
         self.author.refresh_from_db()
-        self.assertFalse(self.author.email_on_discord_comments)
         self.assertTrue(self.author.send_mail_on_comments)
 
 
