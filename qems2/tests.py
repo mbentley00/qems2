@@ -3502,6 +3502,78 @@ class NestedMarkupCollapseTests(TestCase):
         self.assertEqual(tu.tossup_text, '\\BThis party (*)\\B rest. For 10 points, name it.')
 
 
+class LegacyPlaceholderTaggingTests(TestCase):
+    """Imported stand-in accounts are named "<handle>-legacy", and the ones
+    made before that convention can be renamed in place."""
+
+    def _placeholder(self, username, **extra):
+        u = User(username=username, is_active=False, **extra)
+        u.set_unusable_password()
+        u.save()
+        return u
+
+    def test_the_importer_tags_new_commenter_placeholders(self):
+        from qems2.qsub.set_importer import _user_resolver
+        fallback = User.objects.create_user('lp_owner', password='pw', email='lp@t.com')
+        _cache, resolve = _user_resolver(fallback)
+        user = resolve('childofchaotica')
+        self.assertEqual(user.username, 'childofchaotica-legacy')
+        self.assertFalse(user.is_active)
+        self.assertFalse(user.has_usable_password())
+        # A second import finds the same placeholder rather than making another.
+        self.assertEqual(resolve('childofchaotica').id, user.id)
+        self.assertEqual(User.objects.filter(username__startswith='childofchaotica').count(), 1)
+
+    def test_a_real_account_is_used_as_is(self):
+        from qems2.qsub.set_importer import _user_resolver
+        real = User.objects.create_user('realperson', password='pw', email='r@t.com')
+        fallback = User.objects.create_user('lp_owner2', password='pw', email='lp2@t.com')
+        _cache, resolve = _user_resolver(fallback)
+        self.assertEqual(resolve('realperson').id, real.id)
+
+    def test_the_command_renames_only_placeholders(self):
+        from qems2.qsub.management.commands.tag_legacy_placeholders import placeholder_users
+        from django.core.management import call_command
+        import io
+        self._placeholder('childofchaotica')
+        self._placeholder('someoneelse')
+        self._placeholder('alreadytagged-legacy')
+        User.objects.create_user('activeperson', password='pw', email='a@t.com')
+        named = self._placeholder('hasaname', first_name='Real')
+        deactivated = User.objects.create_user('deactivated', password='pw', email='d@t.com')
+        deactivated.is_active = False
+        deactivated.save()
+
+        self.assertEqual(sorted(u.username for u in placeholder_users()),
+                         ['childofchaotica', 'someoneelse'])
+        out = io.StringIO()
+        call_command('tag_legacy_placeholders', stdout=out)          # dry run
+        self.assertIn('would rename childofchaotica', out.getvalue())
+        self.assertTrue(User.objects.filter(username='childofchaotica').exists())
+
+        call_command('tag_legacy_placeholders', '--apply', stdout=io.StringIO())
+        self.assertTrue(User.objects.filter(username='childofchaotica-legacy').exists())
+        self.assertTrue(User.objects.filter(username='someoneelse-legacy').exists())
+        for untouched in ('activeperson', 'hasaname', 'deactivated', 'alreadytagged-legacy'):
+            self.assertTrue(User.objects.filter(username=untouched).exists(), untouched)
+
+    def test_a_collision_is_reported_not_merged(self):
+        from django.core.management import call_command
+        import io
+        self._placeholder('twice')
+        self._placeholder('twice-legacy')
+        out = io.StringIO()
+        call_command('tag_legacy_placeholders', '--apply', stdout=out)
+        self.assertIn('skipped twice', out.getvalue())
+        self.assertTrue(User.objects.filter(username='twice').exists())
+
+    def test_renamed_placeholders_stay_out_of_the_pickers(self):
+        from qems2.qsub.views import pickable_writers
+        u = self._placeholder('childofchaotica')
+        Writer.objects.get_or_create(user=u)
+        self.assertNotIn(u.id, [w.user_id for w in pickable_writers()])
+
+
 class DistributionImportTests(TestCase):
     """A distribution can be created from a spreadsheet laid out like the
     downloadable template."""

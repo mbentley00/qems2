@@ -137,10 +137,28 @@ def _parse_comment_cell(cell):
     return parsed
 
 
+LEGACY_SUFFIX = '-legacy'
+
+
+def legacy_username(username):
+    """The placeholder name for an imported handle: the handle plus
+    ``-legacy``, so a stand-in account is never mistaken for the real person
+    of the same name (and never turns up in a picker)."""
+    name = (username or '').strip()
+    if name.endswith(LEGACY_SUFFIX):
+        return name[:150]
+    return (name + LEGACY_SUFFIX)[:150]
+
+
 def _user_resolver(fallback_user):
     """Returns a function that maps an exported username to a User, creating an
     inactive placeholder for unknown commenters (preserving attribution), and
-    caching results."""
+    caching results.
+
+    An account that already exists under the exported handle is a real person
+    and is used as-is. Otherwise the placeholder is named ``<handle>-legacy``,
+    the same convention imported authors use, and a re-import finds it again
+    rather than making a second one."""
     cache = {}
 
     def resolve(username):
@@ -149,10 +167,11 @@ def _user_resolver(fallback_user):
         if username in cache:
             return cache[username]
         username = username[:150]
-        user = User.objects.filter(username=username).first()
+        user = (User.objects.filter(username=username).first()
+                or User.objects.filter(username=legacy_username(username)).first())
         if user is None:
             try:
-                user = User(username=username, is_active=False)
+                user = User(username=legacy_username(username), is_active=False)
                 user.set_unusable_password()
                 user.save()
             except Exception:
