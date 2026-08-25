@@ -282,6 +282,10 @@ SET_APPROVAL_EMAIL = os.environ.get('SET_APPROVAL_EMAIL', 'bentley.michael.j@gma
 # slash). Override per-deployment with the BASE_URL env var.
 BASE_URL = os.environ.get('BASE_URL', 'https://qems2-bbhfewbrfzhyhvbk.westus3-01.azurewebsites.net').rstrip('/')
 
+# Shown in allauth's e-mails ("Hello from ..."), alongside the domain taken
+# from BASE_URL. bootstrap_deploy writes both onto the django.contrib.sites row.
+SITE_NAME = os.environ.get('SITE_NAME', 'QEMS3')
+
 # A sample logging configuration. The only tangible logging
 # performed by this configuration is to send an email to
 # the site admins on every HTTP 500 error when DEBUG=False.

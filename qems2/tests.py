@@ -3502,6 +3502,46 @@ class NestedMarkupCollapseTests(TestCase):
         self.assertEqual(tu.tossup_text, '\\BThis party (*)\\B rest. For 10 points, name it.')
 
 
+class SiteDomainTests(TestCase):
+    """allauth builds its mail from the Site row, which shipped as
+    "example.com"; bootstrap_deploy points it at this deployment."""
+
+    def test_bootstrap_points_the_site_at_base_url(self):
+        from django.contrib.sites.models import Site
+        from django.test import override_settings
+        from qems2.qsub.management.commands.bootstrap_deploy import sync_site
+        Site.objects.update_or_create(pk=1, defaults={'domain': 'example.com', 'name': 'example.com'})
+        with override_settings(BASE_URL='https://qems3.buzz', SITE_NAME='QEMS3'):
+            sync_site()
+        site = Site.objects.get(pk=1)
+        self.assertEqual(site.domain, 'qems3.buzz')
+        self.assertEqual(site.name, 'QEMS3')
+
+    def test_it_is_idempotent_and_strips_the_scheme(self):
+        from django.contrib.sites.models import Site
+        from django.test import override_settings
+        from qems2.qsub.management.commands.bootstrap_deploy import sync_site
+        with override_settings(BASE_URL='https://qems3.buzz/', SITE_NAME='QEMS3'):
+            sync_site()
+            sync_site()
+        self.assertEqual(Site.objects.get(pk=1).domain, 'qems3.buzz')
+
+    def test_the_password_reset_mail_names_this_site(self):
+        from django.contrib.sites.models import Site
+        from django.test import override_settings
+        from qems2.qsub.management.commands.bootstrap_deploy import sync_site
+        with override_settings(BASE_URL='https://qems3.buzz', SITE_NAME='QEMS3'):
+            sync_site()
+        User.objects.create_user('pw_user', password='pw', email='pwu@t.com')
+        mail.outbox = []
+        resp = self.client.post('/accounts/password/reset/', {'email': 'pwu@t.com'})
+        self.assertIn(resp.status_code, (200, 302))
+        self.assertTrue(mail.outbox, 'no reset mail was sent')
+        body = mail.outbox[0].body
+        self.assertNotIn('example.com', body)
+        self.assertIn('qems3.buzz', body)
+
+
 class LegacyPlaceholderTaggingTests(TestCase):
     """Imported stand-in accounts are named "<handle>-legacy", and the ones
     made before that convention can be renamed in place."""
