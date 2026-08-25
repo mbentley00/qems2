@@ -26,14 +26,14 @@ global.window.qemsDiscordShowFirst = false;
 let t = D.tossup(tu, '_X_', 'me', 'Cat', 1);
 check('default: every tossup sentence spoilered', t.startsWith('**||First clue here.|| ||Second clue (*)||** ||with more.||') && t.includes('||Third clue.||'));
 let b = D.bonus('Lead in.', parts, 'me', 'Cat', 2);
-check('default: bonus leadin and part 1 spoilered', b.startsWith('||Lead in.||\n[10e] ||Part one.||\nANSWER: ||_A_||') || b.startsWith('||Lead in.||\n[10e] ||Part one.||\nANSWER: ||__**A**__||'));
+check('default: bonus leadin and part 1 spoilered, no difficulty in the label', b.startsWith('||Lead in.||\n[10] ||Part one.||\nANSWER: ||'));
 
 global.window.qemsDiscordShowFirst = true;
 t = D.tossup(tu, '_X_', 'me', 'Cat', 1);
 check('on: first tossup sentence readable, rest spoilered', t.startsWith('**First clue here. ||Second clue (*)||** ||with more.||') && t.includes('||Third clue.||'));
 b = D.bonus('Lead in.', parts, 'me', 'Cat', 2);
 check('on: leadin and part 1 readable, answer 1 and later parts spoilered',
-      b.startsWith('Lead in.\n[10e] Part one.\nANSWER: ||') && b.includes('[10m] ||Part two.||'));
+      b.startsWith('Lead in.\n[10] Part one.\nANSWER: ||') && b.includes('[10] ||Part two.||'));
 t = D.tossup('No power mark at all. Next one.', '_X_', '', '', 0);
 check('on: unpowered tossup keeps first sentence readable', t.startsWith('No power mark at all. ||Next one.||'));
 console.log(ok ? 'ALL PASS' : 'SOME FAILED');

@@ -783,7 +783,10 @@ $(function () {
             var partAnswer = qemsToDiscordMarkup((part.answer || '').trim());
             var diff = (part.diff || '');
 
-            var label = '[10' + diff + ']';
+            // Plain '[10]': the difficulty letter would tell a player how hard
+            // the part is before they hear it. The set of difficulties still
+            // goes out, spoilered, on the line under the author.
+            var label = '[10]';
             result += label + ' ' + spoil(partText, i === 1) + '\n';
             result += 'ANSWER: ||' + partAnswer + '||' + (i === 3 ? qidSuffix(qid) : '') + '\n';
             difficulties.push(diff || '?');
