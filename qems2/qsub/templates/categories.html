@@ -66,9 +66,7 @@
                     <td>{% if tossup.edited_date %} {{ tossup.edited_date|to_short_datetime }} {% endif %}</td>
                     <td>{% if tossup.proofread_date %} {{ tossup.proofread_date|to_short_datetime }} {% endif %}</td>
                     <td>
-                    {% for comment in tossup.cached_comments %}
-                        <strong>{{ comment.user|escape }}:</strong> {{ comment.comment|preview|comment_html }}<br>
-                    {% endfor %}
+                    {% include "_comment_cell.html" with comments=tossup.cached_comments more_url="/edit_tossup/{{ tossup.id }}/" %}
                     </td>
                     <td>{{ tossup|tossup_last_comment_date|to_short_datetime }}</td>
                 </tr>
@@ -111,9 +109,7 @@
                     <td>{% if bonus.edited_date %} {{ bonus.edited_date|to_short_datetime }} {% endif %}</td>
                     <td>{% if bonus.proofread_date %} {{ bonus.proofread_date|to_short_datetime }} {% endif %}</td>                    
                     <td>
-                    {% for comment in bonus.cached_comments %}
-                        <strong>{{ comment.user|escape }}:</strong> {{ comment.comment|preview|comment_html }}<br>
-                    {% endfor %}
+                    {% include "_comment_cell.html" with comments=bonus.cached_comments more_url="/edit_bonus/{{ bonus.id }}/" %}
                     </td>
                     <td>{{ bonus|bonus_last_comment_date|to_short_datetime }}</td>
                 </tr>

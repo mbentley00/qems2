@@ -24,6 +24,26 @@
     <div class="panel header radius text-center">
         <strong>Tossups</strong>
     </div>
+    <div class="bulk-toolbar" data-for="bulk-change-tossup-table">
+        <input type="search" class="bulk-search" placeholder="Search tossups&hellip;" autocomplete="off"
+               title="Matches anywhere in the row: text, answer, author, category, packet, comments">
+        <select class="bulk-filter" data-field="author"><option value="">All authors</option></select>
+        <select class="bulk-filter" data-field="category"><option value="">All categories</option></select>
+        <select class="bulk-filter" data-field="packet"><option value="">All packets</option></select>
+        <select class="bulk-status">
+            <option value="">Any status</option>
+            <option value="edited">Edited</option>
+            <option value="unedited">Not edited</option>
+            <option value="commented">Has comments</option>
+            <option value="uncommented">No comments</option>
+            <option value="packeted">In a packet</option>
+            <option value="unpacketized">Not in a packet</option>
+        </select>
+        <span class="bulk-counts"><span class="bulk-shown"></span> shown &middot; <span class="bulk-selected">0</span> selected</span>
+        <button type="button" class="button tiny secondary bulk-select-shown">Select shown</button>
+        <button type="button" class="button tiny secondary bulk-clear">Clear</button>
+        <button type="button" class="button tiny secondary bulk-reset">Reset filters</button>
+    </div>
     <table class="table table-striped table-hover tablesorter" id="bulk-change-tossup-table">
         <thead>
         <tr>
@@ -44,7 +64,10 @@
         <tbody>
         {% autoescape off %}
             {% for tossup in tossups %}
-            <tr>
+            <tr data-author="{{ tossup.author|escape }}"
+                data-category="{{ tossup.category|escape }}"
+                data-packet="{% if tossup.packet %}{{ tossup.packet|escape }}{% endif %}"
+                data-edited="{% if tossup.edited_date %}1{% else %}0{% endif %}">
                 <td>{{ tossup.author|escape }}</td>
                 <td><a href="/edit_tossup/{{ tossup.id }}">{{ tossup.tossup_text|safe|preview|question_html }}</a></td>
                 <td><a href="/edit_tossup/{{ tossup.id }}">{{ tossup.tossup_answer|safe|preview|answer_html }}</a></td>
@@ -56,11 +79,7 @@
                 <td>{% if tossup.edited_date %} {{ tossup.edited_date|to_short_datetime }} {% endif %}</td>
                 <td>
                 {% get_comment_list for tossup as comment_list %}
-                {% for comment in comment_list %}
-                    {% if not comment.is_removed %}
-                        {{ comment.user|escape }}: {{ comment.comment|preview|comment_html }}<br>
-                    {% endif %}
-                {% endfor %}
+                {% include "_comment_cell.html" with comments=comment_list more_url="/edit_tossup/{{ tossup.id }}/" %}
                 </td>
                 <td>{{ tossup|tossup_last_comment_date|to_short_datetime }}</td>
                 <td class="checkbox"><input type="checkbox" name="tossup-checked-{{ forloop.counter0 }}" />
@@ -72,6 +91,26 @@
     </table>
     <div class="panel header radius text-center">
         <strong>Bonuses</strong>
+    </div>
+    <div class="bulk-toolbar" data-for="bulk-change-bonus-table">
+        <input type="search" class="bulk-search" placeholder="Search bonuses&hellip;" autocomplete="off"
+               title="Matches anywhere in the row: text, answer, author, category, packet, comments">
+        <select class="bulk-filter" data-field="author"><option value="">All authors</option></select>
+        <select class="bulk-filter" data-field="category"><option value="">All categories</option></select>
+        <select class="bulk-filter" data-field="packet"><option value="">All packets</option></select>
+        <select class="bulk-status">
+            <option value="">Any status</option>
+            <option value="edited">Edited</option>
+            <option value="unedited">Not edited</option>
+            <option value="commented">Has comments</option>
+            <option value="uncommented">No comments</option>
+            <option value="packeted">In a packet</option>
+            <option value="unpacketized">Not in a packet</option>
+        </select>
+        <span class="bulk-counts"><span class="bulk-shown"></span> shown &middot; <span class="bulk-selected">0</span> selected</span>
+        <button type="button" class="button tiny secondary bulk-select-shown">Select shown</button>
+        <button type="button" class="button tiny secondary bulk-clear">Clear</button>
+        <button type="button" class="button tiny secondary bulk-reset">Reset filters</button>
     </div>
     <table class="table table-striped table-hover tablesorter" id="bulk-change-bonus-table">
         <thead>
@@ -93,7 +132,10 @@
         <tbody>
         {% autoescape off %}
             {% for bonus in bonuses %}
-            <tr>
+            <tr data-author="{{ bonus.author|escape }}"
+                data-category="{{ bonus.category|escape }}"
+                data-packet="{% if bonus.packet %}{{ bonus.packet|escape }}{% endif %}"
+                data-edited="{% if bonus.edited_date %}1{% else %}0{% endif %}">
                 <td>{{ bonus.author|escape }}</td>
                 <td><a href="/edit_bonus/{{ bonus.id }}/">{{ bonus|bonus_leadin }}</a></td>
                 <td><a href="/edit_bonus/{{ bonus.id }}/">{{ bonus|bonus_answers }}</a></td>
@@ -105,11 +147,7 @@
                 <td>{% if bonus.edited_date %} {{ bonus.edited_date|to_short_datetime }} {% endif %}</td>
                 <td>
                 {% get_comment_list for bonus as comment_list %}
-                {% for comment in comment_list %}
-                    {% if not comment.is_removed %}
-                        {{ comment.user|escape }}: {{ comment.comment|preview|comment_html }}<br>
-                    {% endif %}
-                {% endfor %}
+                {% include "_comment_cell.html" with comments=comment_list more_url="/edit_bonus/{{ bonus.id }}/" %}
                 </td>
                 <td>{{ bonus|bonus_last_comment_date|to_short_datetime }}</td>
                 <td class="checkbox"><input type="checkbox" name="bonus-checked-{{ forloop.counter0 }}" />
@@ -144,5 +182,106 @@
         <input type="submit" class="button primary right" value="Submit Changes" />
     {% endif %}
 </form>
+
+<style>
+.bulk-toolbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 6px; }
+.bulk-toolbar input[type=search], .bulk-toolbar select { margin: 0; height: 32px; width: auto;
+    font-size: 0.85em; padding: 2px 6px; }
+.bulk-toolbar input[type=search] { min-width: 16em; flex: 1 1 16em; }
+.bulk-toolbar select { max-width: 14em; }
+.bulk-toolbar .button { margin: 0; }
+.bulk-counts { font-size: 0.85em; color: var(--qx-muted, #8a8f9c); margin-left: auto; white-space: nowrap; }
+.bulk-selected { font-weight: bold; color: var(--qx-ink, #2b2f3a); }
+.bulk-empty td { color: var(--qx-muted, #8a8f9c); font-style: italic; }
+</style>
+
+<script>
+$(function () {
+    // The page renders every question, so filtering happens here rather than
+    // in a round trip. Hidden rows keep their checkbox and id inputs in the
+    // form, so what is submitted is exactly what is ticked -- filtering never
+    // silently drops or adds a question to the change.
+    $('.bulk-toolbar').each(function () {
+        var $bar = $(this);
+        var $table = $('#' + $bar.data('for'));
+        if (!$table.length) { return; }
+        var $rows = $table.find('tbody tr');
+
+        // Each row's searchable text, once.
+        $rows.each(function () {
+            var $r = $(this);
+            $r.data('haystack', ($r.text() || '').replace(/\s+/g, ' ').toLowerCase());
+            $r.data('hascomments', $.trim($r.find('td').eq(9).text()) !== '' ? '1' : '0');
+        });
+
+        // Dropdowns list what is actually in the table.
+        $bar.find('.bulk-filter').each(function () {
+            var field = $(this).data('field'), seen = {}, values = [];
+            $rows.each(function () {
+                var v = $(this).attr('data-' + field) || '';
+                if (v && !seen[v]) { seen[v] = 1; values.push(v); }
+            });
+            values.sort(function (a, b) { return a.localeCompare(b); });
+            var $sel = $(this);
+            $.each(values, function (_, v) { $sel.append($('<option>').attr('value', v).text(v)); });
+            if (field === 'packet') { $sel.append($('<option value="__none__">').text('(not in a packet)')); }
+        });
+
+        var $empty = $('<tr class="bulk-empty"><td colspan="12">No questions match these filters.</td></tr>').hide();
+        $table.find('tbody').append($empty);
+
+        function apply() {
+            var q = $.trim($bar.find('.bulk-search').val() || '').toLowerCase();
+            var want = {}, status = $bar.find('.bulk-status').val() || '';
+            $bar.find('.bulk-filter').each(function () { want[$(this).data('field')] = $(this).val() || ''; });
+            var shown = 0;
+            $rows.each(function () {
+                var $r = $(this), ok = true;
+                if (q && ($r.data('haystack') || '').indexOf(q) === -1) { ok = false; }
+                $.each(want, function (field, value) {
+                    if (!ok || !value) { return; }
+                    var rowValue = $r.attr('data-' + field) || '';
+                    if (value === '__none__') { ok = rowValue === ''; }
+                    else if (rowValue !== value) { ok = false; }
+                });
+                if (ok && status) {
+                    var edited = $r.attr('data-edited') === '1';
+                    var commented = $r.data('hascomments') === '1';
+                    var packeted = ($r.attr('data-packet') || '') !== '';
+                    ok = (status === 'edited' && edited) || (status === 'unedited' && !edited)
+                       || (status === 'commented' && commented) || (status === 'uncommented' && !commented)
+                       || (status === 'packeted' && packeted) || (status === 'unpacketized' && !packeted);
+                }
+                $r.toggle(ok);
+                if (ok) { shown++; }
+            });
+            $empty.toggle(shown === 0);
+            $bar.find('.bulk-shown').text(shown + ' of ' + $rows.length);
+            counts();
+        }
+
+        function counts() {
+            $bar.find('.bulk-selected').text($rows.find('input[type=checkbox]:checked').length);
+        }
+
+        $bar.on('input change', '.bulk-search, .bulk-filter, .bulk-status', apply);
+        $bar.on('click', '.bulk-select-shown', function () {
+            $rows.filter(':visible').find('input[type=checkbox]').prop('checked', true);
+            counts();
+        });
+        $bar.on('click', '.bulk-clear', function () {
+            $rows.find('input[type=checkbox]').prop('checked', false);
+            counts();
+        });
+        $bar.on('click', '.bulk-reset', function () {
+            $bar.find('.bulk-search').val('');
+            $bar.find('.bulk-filter, .bulk-status').val('');
+            apply();
+        });
+        $table.on('change', 'input[type=checkbox]', counts);
+        apply();
+    });
+});
+</script>
 
 {% endblock %}

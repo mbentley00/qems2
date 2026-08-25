@@ -54,11 +54,7 @@ Bonuses Written: {{ writer_status.bonuses_written }}</p>
             <td>{% if tossup.proofread_date %} {{ tossup.proofread_date|to_short_datetime }} {% endif %}</td>
             <td>
             {% get_comment_list for tossup as comment_list %}
-            {% for comment in comment_list %}
-                {% if not comment.is_removed %}
-                    <strong>{{ comment.user|escape }}:</strong> {{ comment.comment|preview|comment_html }}<br>
-                {% endif %}
-            {% endfor %}
+            {% include "_comment_cell.html" with comments=comment_list more_url="/edit_tossup/{{ tossup.id }}/" %}
             </td>
             <td>{{ tossup|tossup_last_comment_date|to_short_datetime }}</td>
         </tr>
@@ -99,11 +95,7 @@ Bonuses Written: {{ writer_status.bonuses_written }}</p>
             <td>{% if bonus.proofread_date %} {{ bonus.proofread_date|to_short_datetime }} {% endif %}</td>
             <td>
             {% get_comment_list for bonus as comment_list %}
-            {% for comment in comment_list %}
-                {% if not comment.is_removed %}
-                    <strong>{{ comment.user|escape }}:</strong> {{ comment.comment|preview|comment_html }}<br>
-                {% endif %}
-            {% endfor %}
+            {% include "_comment_cell.html" with comments=comment_list more_url="/edit_bonus/{{ bonus.id }}/" %}
             </td>
             <td>{{ bonus|bonus_last_comment_date|to_short_datetime }}</td>
         </tr>

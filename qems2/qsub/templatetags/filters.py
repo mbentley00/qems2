@@ -259,6 +259,33 @@ def commenter_short_name(comment):
     real = '{0} {1}'.format(user.first_name or '', user.last_name or '').strip()
     return mark_safe(_escape_text(real or user.username))
 
+COMMENT_PREVIEW_COUNT = 2
+
+
+def _live_comments(comments):
+    """The comment list a question table should count, newest last."""
+    items = [c for c in (comments or []) if not getattr(c, 'is_removed', False)]
+    try:
+        items.sort(key=lambda c: (c.submit_date, c.id))
+    except Exception:
+        pass
+    return items
+
+
+@register.filter(name='recent_comments')
+def recent_comments(comments):
+    """The last few comments on a question, for a list view. A question in a
+    busy playtest can carry a dozen; showing them all makes one row taller
+    than the screen and buries every other column."""
+    return _live_comments(comments)[-COMMENT_PREVIEW_COUNT:]
+
+
+@register.filter(name='older_comment_count')
+def older_comment_count(comments):
+    """How many comments `recent_comments` left out (0 when none)."""
+    return max(0, len(_live_comments(comments)) - COMMENT_PREVIEW_COUNT)
+
+
 @register.filter(name='writer_name')
 def writer_name(writer):
     """A writer's real name, falling back to their username. Escaped and marked

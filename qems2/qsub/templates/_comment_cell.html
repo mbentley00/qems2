@@ -1,0 +1,14 @@
+{% comment %}
+The comments column of a question table: the last few only, with a link to the
+rest on the question itself. A busy playtest leaves a dozen comments on one
+question, and printing them all makes a single row taller than the screen.
+
+Usage: {% include "_comment_cell.html" with comments=<list> more_url=<url> %}
+{% endcomment %}
+{% load filters %}
+{% for comment in comments|recent_comments %}
+    <strong>{{ comment|commenter_short_name }}:</strong> {{ comment.comment|preview|comment_html }}<br>
+{% endfor %}
+{% with older=comments|older_comment_count %}
+    {% if older %}<a class="more-comments" href="{{ more_url }}" title="Open the question to read every comment">+{{ older }} earlier comment{{ older|pluralize }}</a>{% endif %}
+{% endwith %}
