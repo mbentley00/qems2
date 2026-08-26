@@ -170,9 +170,10 @@ def qems_to_yapp_html(text, anchors=False):
     return ''.join(out)
 
 
-def _metadata(question):
+def _metadata(question, tags=None):
     """Build YAPP's ``metadata`` string (shown by the reader after the answer)
-    from the question's author and category, as ``Author, Category - Subcategory``.
+    from the question's author and category, as ``Author, Category - Subcategory``,
+    followed by ``[Tag, Tag]`` when the set prints its category tags.
     Any piece that is missing is dropped."""
     author = ''
     if getattr(question, 'author', None) is not None:
@@ -186,8 +187,12 @@ def _metadata(question):
         s = (question.category.subcategory or '').strip()
         cat = '{0} - {1}'.format(c, s) if s else c
     if author and cat:
-        return '{0}, {1}'.format(author, cat)
-    return cat or author
+        head = '{0}, {1}'.format(author, cat)
+    else:
+        head = cat or author
+    if tags:
+        return '{0} [{1}]'.format(head, ', '.join(tags)).strip()
+    return head
 
 
 def _anchored(node, fields):
@@ -259,7 +264,7 @@ def bold_power_region(html):
     return '<b>{0}{1}</b>{2}{3}'.format(head, closing, reopen, tail)
 
 
-def tossup_to_yapp(tossup, number, version=1):
+def tossup_to_yapp(tossup, number, version=1, tags=None):
     text = tossup.tossup_text or ''
     answer = tossup.tossup_answer or ''
     # Appended after conversion so it lands outside any markup, and to both
@@ -270,7 +275,7 @@ def tossup_to_yapp(tossup, number, version=1):
         'number': number,
         'question': bold_power_region(qems_to_yapp_html(text) + tail),
         'answer': qems_to_yapp_html(answer),
-        'metadata': _metadata(tossup),
+        'metadata': _metadata(tossup, tags),
     }
     if version < 2:
         return node
@@ -281,7 +286,7 @@ def tossup_to_yapp(tossup, number, version=1):
     })
 
 
-def bonus_to_yapp(bonus, number, version=1):
+def bonus_to_yapp(bonus, number, version=1, tags=None):
     parts, answers, values, diffs = [], [], [], []
     a_parts, a_answers = [], []
     for i in range(1, 4):
@@ -304,7 +309,7 @@ def bonus_to_yapp(bonus, number, version=1):
         'parts': parts,
         'answers': answers,
         'values': values,
-        'metadata': _metadata(bonus),
+        'metadata': _metadata(bonus, tags),
     }
     # Only emit difficultyModifiers when at least one part carries one (YAPP
     # makes the field optional).
@@ -334,7 +339,8 @@ def interlaced_reading_order(tossup_count, bonus_count):
     return order
 
 
-def packet_to_yapp(tossups, bonuses, version=1, name=None, interlace=False):
+def packet_to_yapp(tossups, bonuses, version=1, name=None, interlace=False,
+                   tag_names=None):
     """Build a YAPP packet dict from ordered tossup and bonus lists. Question
     numbers come from each question's ``question_number`` (falling back to
     position) so the reader shows the packet's own numbering.
@@ -346,11 +352,17 @@ def packet_to_yapp(tossups, bonuses, version=1, name=None, interlace=False):
     ``interlace`` (YAPP2 only) adds a ``readingOrder`` saying the packet is read
     tossup/bonus/tossup/bonus rather than all tossups then all bonuses. It only
     reorders — the questions themselves are untouched, so a reader that ignores
-    it still gets the whole packet."""
+    it still gets the whole packet.
+
+    ``tag_names`` maps ('tossup'|'bonus', id) to the category tag names to print
+    after the metadata; leave it out for a set that keeps its tags to itself."""
+    tag_names = tag_names or {}
     packet = {
-        'tossups': [tossup_to_yapp(t, t.question_number or i, version=version)
+        'tossups': [tossup_to_yapp(t, t.question_number or i, version=version,
+                                   tags=tag_names.get(('tossup', t.id)))
                     for i, t in enumerate(tossups, 1)],
-        'bonuses': [bonus_to_yapp(b, b.question_number or i, version=version)
+        'bonuses': [bonus_to_yapp(b, b.question_number or i, version=version,
+                                  tags=tag_names.get(('bonus', b.id)))
                     for i, b in enumerate(bonuses, 1)],
     }
     if name:

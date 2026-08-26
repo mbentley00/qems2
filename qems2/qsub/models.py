@@ -215,6 +215,13 @@ class QuestionSet (models.Model):
     # prose. See qsub/answer_structure.py.
     structured_answers = models.BooleanField(default=False)
 
+    # Whether category tag names are printed beside each question in exported
+    # packets (Word, PDF, YAPP). On by default. Turning it off hides every tag
+    # from every export at once; hiding one tag at a time is CategoryTag's own
+    # show_in_output. Neither touches the document view, which always shows the
+    # tags -- that is where the people writing the set look at them.
+    export_category_tags = models.BooleanField(default=True)
+
     class Admin: pass
 
     def is_owner(self, writer):
@@ -907,6 +914,11 @@ class CategoryTag(models.Model):
     # pile. Blank means ungrouped, which is what every tag made before this
     # was.
     group_name = models.CharField(max_length=100, blank=True, default='')
+    # num_* are minimums: how many the tag needs before it is satisfied, with
+    # 0 meaning "no minimum". max_* are the ceilings, and are null when the tag
+    # does not cap that type -- which is not the same as 0, a cap of none at
+    # all. A tag may set either end or both: "at least two tossups", "at most
+    # 7/0", or a range.
     num_tossups = models.PositiveIntegerField(default=0)
     num_bonuses = models.PositiveIntegerField(default=0)
     # Questions of either type. "Two on European politics" does not care
@@ -916,10 +928,20 @@ class CategoryTag(models.Model):
     # on top of them: num_tossups=1, num_questions=2 means at least one
     # tossup and at least two questions overall.
     num_questions = models.PositiveIntegerField(default=0)
+    max_tossups = models.PositiveIntegerField(null=True, blank=True)
+    max_bonuses = models.PositiveIntegerField(null=True, blank=True)
+    max_questions = models.PositiveIntegerField(null=True, blank=True)
     # Where the tag sits among its group's tags when the editor has put them
     # in an order of their own (chronological periods, say). Ties -- and
     # everything made before this existed, all at 0 -- fall back to the name.
     sort_order = models.IntegerField(default=0)
+    # Whether this tag's name is printed beside the question in exported
+    # packets. Most tags are the editors' own bookkeeping ("This Empire
+    # Indicator") and have no business in a packet a field reads, but some
+    # ("19th Century") are worth publishing, so it is per tag. Off here hides
+    # the tag from every export; the working pages and the document view show
+    # it either way.
+    show_in_output = models.BooleanField(default=True)
     tossups = models.ManyToManyField('Tossup', blank=True, related_name='category_tags')
     bonuses = models.ManyToManyField('Bonus', blank=True, related_name='category_tags')
 
@@ -931,14 +953,27 @@ class CategoryTag(models.Model):
 
     @property
     def has_quota(self):
-        return bool(self.num_tossups or self.num_bonuses or self.num_questions)
+        return bool(self.num_tossups or self.num_bonuses or self.num_questions
+                    or self.max_tossups is not None or self.max_bonuses is not None
+                    or self.max_questions is not None)
+
+    def quota_pairs(self):
+        """(minimum, maximum) for tossups, bonuses and any-type, in that
+        order. A maximum of None means the tag does not cap that type."""
+        return ((self.num_tossups, self.max_tossups),
+                (self.num_bonuses, self.max_bonuses),
+                (self.num_questions, self.max_questions))
 
     def progress(self, tu_done=None, bs_done=None):
         """How this tag stands against what it asks for.
 
         Pass the counts when the caller already has them (it usually does,
         from the same queryset) so this does not hit the database again.
-        Each quota is met on its own; ``complete`` needs all three.
+
+        Each of the three quotas is judged on its own: it can fall short of its
+        minimum or run past its maximum, and ``complete`` wants all three
+        inside their range. A tag with a ceiling and no floor ("at most 7
+        tossups") starts out complete and stops being so once it overflows.
         """
         if tu_done is None:
             tu_done = self.tossups.filter(question_set_id=self.question_set_id).count()
@@ -948,21 +983,40 @@ class CategoryTag(models.Model):
         tu_ok = self.num_tossups == 0 or tu_done >= self.num_tossups
         bs_ok = self.num_bonuses == 0 or bs_done >= self.num_bonuses
         q_ok = self.num_questions == 0 or q_done >= self.num_questions
+        tu_over = self.max_tossups is not None and tu_done > self.max_tossups
+        bs_over = self.max_bonuses is not None and bs_done > self.max_bonuses
+        q_over = self.max_questions is not None and q_done > self.max_questions
         return {
             'tu_done': tu_done, 'bs_done': bs_done, 'q_done': q_done,
-            'tu_complete': tu_ok, 'bs_complete': bs_ok, 'q_complete': q_ok,
-            'complete': tu_ok and bs_ok and q_ok,
+            'tu_complete': tu_ok and not tu_over,
+            'bs_complete': bs_ok and not bs_over,
+            'q_complete': q_ok and not q_over,
+            'tu_over': tu_over, 'bs_over': bs_over, 'q_over': q_over,
+            'over': tu_over or bs_over or q_over,
+            'complete': tu_ok and bs_ok and q_ok and not (tu_over or bs_over or q_over),
         }
 
     def quota_summary(self):
-        """The requirement in words: "2 tossups, 1 bonus, 2 of any type"."""
+        """The requirement in words: "2 tossups, 1 bonus, 2 of any type", and
+        with ceilings, "2 to 4 tossups, no bonuses, at most 7 of any type"."""
         parts = []
-        if self.num_tossups:
-            parts.append('{0} tossup{1}'.format(self.num_tossups, '' if self.num_tossups == 1 else 's'))
-        if self.num_bonuses:
-            parts.append('{0} bonus{1}'.format(self.num_bonuses, '' if self.num_bonuses == 1 else 'es'))
-        if self.num_questions:
-            parts.append('{0} of any type'.format(self.num_questions))
+        forms = (('tossup', 'tossups', 'no tossups'),
+                 ('bonus', 'bonuses', 'no bonuses'),
+                 ('of any type', 'of any type', 'nothing of any type'))
+        for (lo, hi), (one, many, none_at_all) in zip(self.quota_pairs(), forms):
+            def noun(n):
+                return one if n == 1 else many
+            if lo and hi is not None:
+                if lo == hi:
+                    parts.append('exactly {0} {1}'.format(lo, noun(lo)))
+                else:
+                    parts.append('{0} to {1} {2}'.format(lo, hi, noun(hi)))
+            elif lo:
+                parts.append('{0} {1}'.format(lo, noun(lo)))
+            elif hi == 0:
+                parts.append(none_at_all)
+            elif hi is not None:
+                parts.append('at most {0} {1}'.format(hi, noun(hi)))
         return ', '.join(parts)
 
 class CategoryComment(models.Model):
@@ -983,6 +1037,8 @@ class CategoryComment(models.Model):
                                related_name='category_comments')
     comment = models.TextField()
     created_date = models.DateTimeField(auto_now_add=True)
+    # Set only when the author rewords the note, so the page can say so
+    edited_date = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ['created_date']

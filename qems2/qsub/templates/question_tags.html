@@ -15,12 +15,12 @@
                     {% if g.name or section.groups|length > 1 %}<div class="qtags-axis-name">{{ g.label }}</div>{% endif %}
                     <div class="qtags-axis-items">
                     {% for item in g.items %}
-                    <label class="qtags-item{% if item.checked %} qtags-checked{% endif %}{% if item.complete %} qtags-done{% endif %}">
+                    <label class="qtags-item{% if item.checked %} qtags-checked{% endif %}{% if item.over %} qtags-over{% elif item.complete %} qtags-done{% endif %}">
                         <input type="checkbox" name="category_tags" value="{{ item.tag.id }}"
                                {% if item.checked %}checked{% endif %}>
                         {{ item.tag.name }}
                         {% if item.label %}
-                        <small class="qtags-progress" title="{% if item.complete %}Requirement met{% else %}Still needed{% endif %}{% if item.checked %} (counts include this question){% endif %}">{{ item.label }}{% if item.checked %}, incl. this one{% endif %}{% if item.complete %} &#10003;{% endif %}</small>
+                        <small class="qtags-progress" title="{% if item.over %}Past what this tag allows{% elif item.complete %}Requirement met{% else %}Still needed{% endif %}{% if item.checked %} (counts include this question){% endif %}">{{ item.label }}{% if item.checked %}, incl. this one{% endif %}{% if item.over %} &#9888;{% elif item.complete %} &#10003;{% endif %}</small>
                         {% endif %}
                     </label>
                     {% endfor %}
@@ -50,8 +50,11 @@
 .qtags-item input { margin: 0 2px 0 0; position: relative; top: 1px; }
 .qtags-progress { color: var(--qx-muted, #888); font-size: 0.78em; }
 .qtags-done .qtags-progress { color: #1b5e20; }
+/* Over a ceiling: the tag has too many already, so adding this one is a warning */
+.qtags-over .qtags-progress { color: #a94442; }
 .qtags-checked { font-weight: bold; }
 html[data-theme="dark"] .qtags-axis { border-left-color: #3a3f52; }
 html[data-theme="dark"] .qtags-done .qtags-progress { color: #86d29d; }
+html[data-theme="dark"] .qtags-over .qtags-progress { color: #e8a49b; }
 </style>
 {% endif %}

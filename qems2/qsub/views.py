@@ -5659,8 +5659,10 @@ def export_question(request, question_type, question_id, output_format):
     # `name` is a YAPP2 addition, so a version-1 file leaves it out — same as the
     # set-wide export, which keeps its plain-YAPP output free of YAPP2 fields.
     name = (question.packet.packet_name if question.packet else qset.name) or None
-    payload = yapp_export.packet_to_yapp(tossups, bonuses, version=version,
-                                         name=name if version >= 2 else None)
+    payload = yapp_export.packet_to_yapp(
+        tossups, bonuses, version=version, name=name if version >= 2 else None,
+        tag_names=(_tag_names_by_question(qset, for_output=True)
+                   if qset.export_category_tags else {}))
 
     # Name the file after the answerline, so a folder of these is readable.
     answer = get_answer_no_formatting(get_primary_answer(
@@ -5816,6 +5818,12 @@ def export_question_set(request, qset_id, output_format):
                 include_ids = _export_opt('ids', True)
                 include_credits = _export_opt('credits', False)
                 smart_quotes = _export_opt('smartq', False)
+                # Category tag names beside each question. The set says whether
+                # they belong in a packet at all; the options form can drop them
+                # from one export without changing the set.
+                include_tags = _export_opt('ctags', qset.export_category_tags)
+                export_tag_names = (_tag_names_by_question(qset, for_output=True)
+                                    if include_tags else {})
                 # Not an export option: whether an unquoted parenthetical is a
                 # pronunciation guide is a property of the set, so the document
                 # has to agree with what the edit pages show.
@@ -5826,8 +5834,9 @@ def export_question_set(request, qset_id, output_format):
 
                 def question_meta(q):
                     """Attribution line in the standard QEMS packet format:
-                    ``<Author, Category - Subcategory> ~Id~ <Editor: Name>``.
-                    Writer name, question id and editor name are each optional."""
+                    ``<Author, Category - Subcategory> [Tags] ~Id~ <Editor: Name>``.
+                    Writer name, category tags, question id and editor name are
+                    each optional."""
                     # get_real_name() pads with spaces and is blank when a writer
                     # has no name, so strip before deciding what to include.
                     author = html.unescape(safe_name(q.author)).strip() if include_writers else ''
@@ -5841,6 +5850,10 @@ def export_question_set(request, qset_id, output_format):
                     else:
                         head = ''
                     parts = [head]
+                    tags = export_tag_names.get(
+                        ('tossup' if isinstance(q, Tossup) else 'bonus', q.id), [])
+                    if tags:
+                        parts.append('[{0}]'.format(', '.join(tags)))
                     if include_ids:
                         parts.append('~{0}~'.format(q.id))
                     if include_editors and q.edited:
@@ -6331,6 +6344,13 @@ def export_question_set(request, qset_id, output_format):
                 # say it, so the option is quietly ignored there.
                 yapp_interlace = (request.GET.get('opts') == '1'
                                   and request.GET.get('interlace') == '1')
+                # Tag names ride along in each question's metadata string, which
+                # is what a YAPP reader shows after the answer.
+                yapp_show_tags = (request.GET.get('ctags') == '1'
+                                  if request.GET.get('opts') == '1'
+                                  else qset.export_category_tags)
+                yapp_tag_names = (_tag_names_by_question(qset, for_output=True)
+                                  if yapp_show_tags else {})
 
                 def _packet_sort_key(pk):
                     nums = re.findall(r'\d+', pk.packet_name or '')
@@ -6367,7 +6387,7 @@ def export_question_set(request, qset_id, output_format):
                         payload = yapp_export.packet_to_yapp(
                             tus, bos, version=yapp_version,
                             name=name if yapp_version >= 2 else None,
-                            interlace=yapp_interlace)
+                            interlace=yapp_interlace, tag_names=yapp_tag_names)
                         base = _safe_filename(name)
                         fname = base
                         n = 2
@@ -6396,6 +6416,9 @@ def export_question_set(request, qset_id, output_format):
                 pdf_opts = {'writers': _o('writers', True), 'editors': _o('editors', True),
                             'ids': _o('ids', True), 'credits': _o('credits', False),
                             'interlace': _o('interlace', False)}
+                pdf_opts['tag_names'] = (
+                    _tag_names_by_question(qset, for_output=True)
+                    if _o('ctags', qset.export_category_tags) else {})
 
                 def _packet_sort_key(pk):
                     nums = re.findall(r'\d+', pk.packet_name or '')
@@ -6793,6 +6816,7 @@ def category_overview(request, qset_id):
                 ):
         entry = tag.progress()
         entry['tag'] = tag
+        entry['count_label'] = _tag_count_label(tag, entry)
         tags_by_path.setdefault(tag.category_path, []).append(entry)
 
     for row in overview_rows:
@@ -7616,12 +7640,45 @@ def _packet_neighbors(question, qtype):
     return {'prev': describe(position - 1), 'next': describe(position + 1)}
 
 
-def _tag_names_by_question(qset):
+def _tag_count_label(tag, p):
+    """The chip-sized progress string -- "2/3", "1/2\u22645", "4\u22647" per type, joined
+    with a middot. A type with no quota at either end is left out, and a tag
+    with no quota at all just counts what it has."""
+    bits = []
+    for (lo, hi), done in zip(tag.quota_pairs(),
+                              (p['tu_done'], p['bs_done'], p['q_done'])):
+        if lo and hi is not None:
+            bits.append('{0}/{1}\u2264{2}'.format(done, lo, hi))
+        elif lo:
+            bits.append('{0}/{1}'.format(done, lo))
+        elif hi is not None:
+            bits.append('{0}\u2264{1}'.format(done, hi))
+        else:
+            bits.append(None)
+    if all(b is None for b in bits):
+        return '{0}\u00b7{1}'.format(p['tu_done'], p['bs_done'])
+    # An any-type quota with nothing said about the typed counts stands alone;
+    # otherwise the typed pair leads and it follows.
+    tu, bs, q = bits
+    if tu is None and bs is None:
+        return q
+    return '\u00b7'.join(x for x in (tu or str(p['tu_done']),
+                                bs or str(p['bs_done']),
+                                q) if x is not None)
+
+
+def _tag_names_by_question(qset, for_output=False):
     """{('tossup'|'bonus', question id): [tag names]} for every tagged question
     of the set, in the tags' own order. One query per type rather than one per
-    cell; the names alone, since a grid cell has no room for the axis."""
+    cell; the names alone, since a grid cell has no room for the axis.
+
+    ``for_output`` narrows it to the tags an exported packet may print (see
+    CategoryTag.show_in_output); the working pages pass nothing and see all."""
     out = {}
-    for tag in CategoryTag.objects.filter(question_set=qset):
+    tags = CategoryTag.objects.filter(question_set=qset)
+    if for_output:
+        tags = tags.filter(show_in_output=True)
+    for tag in tags:
         for tid in tag.tossups.filter(question_set=qset).values_list('id', flat=True):
             out.setdefault(('tossup', tid), []).append(tag.name)
         for bid in tag.bonuses.filter(question_set=qset).values_list('id', flat=True):
@@ -10150,13 +10207,20 @@ def build_tag_checkboxes(qset, question, dist_entry):
                           .values_list('id', flat=True))
 
     def _progress_label(tag, p):
+        """Reads "2/3 tossups", and for a tag that only caps a type, "5 of at
+        most 7 tossups" -- with no minimum there is no denominator to count
+        towards, so the ceiling goes in words."""
         bits = []
-        if tag.num_tossups:
-            bits.append('{0}/{1} tossups'.format(p['tu_done'], tag.num_tossups))
-        if tag.num_bonuses:
-            bits.append('{0}/{1} bonuses'.format(p['bs_done'], tag.num_bonuses))
-        if tag.num_questions:
-            bits.append('{0}/{1} of any type'.format(p['q_done'], tag.num_questions))
+        for (lo, hi), done, noun in zip(tag.quota_pairs(),
+                                        (p['tu_done'], p['bs_done'], p['q_done']),
+                                        ('tossups', 'bonuses', 'of any type')):
+            if lo:
+                bit = '{0}/{1} {2}'.format(done, lo, noun)
+                if hi is not None:
+                    bit += ' (max {0})'.format(hi)
+                bits.append(bit)
+            elif hi is not None:
+                bits.append('{0} of at most {1} {2}'.format(done, hi, noun))
         return ', '.join(bits)
 
     sections, by_path = [], {}
@@ -10164,7 +10228,7 @@ def build_tag_checkboxes(qset, question, dist_entry):
         p = tag.progress()
         item = {'tag': tag, 'checked': tag.id in checked_ids,
                 'progress': p, 'complete': p['complete'] if tag.has_quota else None,
-                'label': _progress_label(tag, p)}
+                'over': p['over'], 'label': _progress_label(tag, p)}
         by_path.setdefault(tag.category_path, []).append(item)
     for path in sorted(by_path):
         by_group, order = {}, []
@@ -10498,9 +10562,12 @@ def _category_comment_context(request, qset, path, include_children=False):
 
 @login_required
 def category_comment(request, qset_id):
-    """Add or remove a note on a category. POST: category_path, comment, or
-    action=delete with comment_id. Any member of the set may comment; an
-    author may remove their own note, and an editor anybody's."""
+    """Add, reword, or remove a note on a category. POST: category_path and
+    comment to add; action=edit with comment_id and comment to reword;
+    action=delete with comment_id to remove. Any member of the set may
+    comment; an author may reword or remove their own note, and an editor may
+    remove anybody's -- rewording somebody else's note would put words in
+    their mouth, so that stays with the author."""
     user = request.user.writer
     try:
         qset = QuestionSet.objects.get(id=int(qset_id))
@@ -10529,6 +10596,22 @@ def category_comment(request, qset_id):
                 note.delete()
                 cache.clear()
                 messages.success(request, 'Note removed.')
+        elif request.POST.get('action') == 'edit':
+            note = qset.category_comments.filter(id=request.POST.get('comment_id') or 0).first()
+            text = (request.POST.get('comment') or '').strip()
+            if note is None:
+                messages.error(request, 'That note no longer exists.')
+            elif note.author_id != user.id:
+                messages.error(request, 'You can only reword your own notes.')
+            elif not text:
+                messages.error(request, 'A note needs some text.')
+            else:
+                if note.comment != text:
+                    note.comment = text
+                    note.edited_date = timezone.now()
+                    note.save(update_fields=['comment', 'edited_date'])
+                    cache.clear()
+                messages.success(request, 'Note updated.')
         else:
             path = (request.POST.get('category_path') or '').strip()
             text = (request.POST.get('comment') or '').strip()
@@ -10541,6 +10624,29 @@ def category_comment(request, qset_id):
                 messages.success(request, 'Note added.')
 
     return HttpResponseRedirect(back)
+
+
+def _tag_maxima(post, minima):
+    """The three ceilings from a tag form, as (max_tossups, max_bonuses,
+    max_questions). An empty box is None -- "no ceiling" -- which is what
+    every tag written before ceilings existed has, and is a different thing
+    from 0, a ceiling of none at all. Raises ValueError on a negative
+    ceiling or one below its own minimum."""
+    out = []
+    for field, label, low in (('max_tossups', 'tossups', minima[0]),
+                              ('max_bonuses', 'bonuses', minima[1]),
+                              ('max_questions', 'any type', minima[2])):
+        raw = (post.get(field) or '').strip()
+        if raw == '':
+            out.append(None)
+            continue
+        value = int(raw)
+        if value < 0:
+            raise ValueError('Counts cannot be negative')
+        if low and value < low:
+            raise ValueError('The {0} maximum cannot be below its minimum'.format(label))
+        out.append(value)
+    return out
 
 
 @login_required
@@ -10576,17 +10682,22 @@ def category_tags(request, qset_id):
                     num_questions = int(request.POST.get('num_questions') or 0)
                     if min(num_tossups, num_bonuses, num_questions) < 0:
                         raise ValueError('Counts cannot be negative')
+                    maxima = _tag_maxima(request.POST,
+                                         (num_tossups, num_bonuses, num_questions))
                     if not path or not name:
                         raise ValueError('A category and a tag name are required')
                     tag, created = CategoryTag.objects.get_or_create(
                         question_set=qset, category_path=path, name=name,
                         defaults={'num_tossups': num_tossups, 'num_bonuses': num_bonuses,
                                   'num_questions': num_questions, 'group_name': group_name,
+                                  'max_tossups': maxima[0], 'max_bonuses': maxima[1],
+                                  'max_questions': maxima[2],
                                   'sort_order': _next_tag_sort_order(qset, path, group_name)})
                     if not created:
                         tag.num_tossups = num_tossups
                         tag.num_bonuses = num_bonuses
                         tag.num_questions = num_questions
+                        tag.max_tossups, tag.max_bonuses, tag.max_questions = maxima
                         tag.group_name = group_name
                         tag.save()
                     message = 'Tag "{0}" saved'.format(name)
@@ -10612,6 +10723,11 @@ def category_tags(request, qset_id):
                         tag.sort_order = _next_tag_sort_order(qset, tag.category_path, new_group)
                     tag.name, tag.group_name = name, new_group
                     tag.num_tossups, tag.num_bonuses, tag.num_questions = counts
+                    (tag.max_tossups, tag.max_bonuses,
+                     tag.max_questions) = _tag_maxima(request.POST, counts)
+                    # Absent checkbox means "keep this tag out of exports"; the
+                    # add form never sends the field and so never changes it.
+                    tag.show_in_output = request.POST.get('show_in_output') == '1'
                     tag.save()
                     message = 'Tag "{0}" updated'.format(name)
                     message_class = 'alert-box success'
@@ -10728,6 +10844,16 @@ def category_tags(request, qset_id):
         CategoryTag.objects.filter(question_set=qset)
         .exclude(group_name='').values_list('group_name', flat=True)))
 
+    # An index of the whole tree, not just the categories that already have
+    # tags: a category with none is exactly the one somebody needs to open in
+    # order to give it some, and it would otherwise be missing from this page.
+    from django.db.models import Count
+    tag_counts = dict(CategoryTag.objects.filter(question_set=qset)
+                      .values_list('category_path')
+                      .annotate(n=Count('id')).values_list('category_path', 'n'))
+    category_index = [{'path': path, 'tag_count': tag_counts.get(path, 0)}
+                      for path in path_choices]
+
     # With one category open, the page is also where that category's
     # questions get their tags: every question in it, what it carries, and a
     # way to add or drop a tag without opening each question.
@@ -10739,6 +10865,7 @@ def category_tags(request, qset_id):
                'groups': groups,
                'focus_questions': focus_questions,
                'path_choices': path_choices,
+               'category_index': category_index,
                'group_choices': group_choices,
                'can_edit': can_edit,
                'selected_path': selected_path,

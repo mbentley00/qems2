@@ -78,9 +78,9 @@
                 <div class="cat-tag-axis">
                     {% if tg.name %}<span class="cat-tag-axis-name">{{ tg.label }}</span>{% endif %}
                     {% for entry in tg.tags %}
-                    <span class="cat-tag{% if entry.complete %} cat-tag-done{% endif %}"
-                          title="{{ entry.tu_done }}/{{ entry.tag.num_tossups }} tossups, {{ entry.bs_done }}/{{ entry.tag.num_bonuses }} bonuses{% if entry.tag.num_questions %}, {{ entry.q_done }}/{{ entry.tag.num_questions }} of any type{% endif %}">
-                        {{ entry.tag.name }}<span class="cat-tag-count">{% if entry.tag.num_questions and not entry.tag.num_tossups and not entry.tag.num_bonuses %}{{ entry.q_done }}/{{ entry.tag.num_questions }}{% else %}{{ entry.tu_done }}/{{ entry.tag.num_tossups }}&middot;{{ entry.bs_done }}/{{ entry.tag.num_bonuses }}{% if entry.tag.num_questions %}&middot;{{ entry.q_done }}/{{ entry.tag.num_questions }}{% endif %}{% endif %}</span>
+                    <span class="cat-tag{% if entry.over %} cat-tag-over{% elif entry.complete %} cat-tag-done{% endif %}"
+                          title="{{ entry.tu_done }} tossups, {{ entry.bs_done }} bonuses{% if entry.tag.has_quota %} &mdash; wants {{ entry.tag.quota_summary }}{% endif %}{% if entry.over %} (over){% endif %}">
+                        {{ entry.tag.name }}<span class="cat-tag-count">{{ entry.count_label }}</span>
                         {% if can_edit_tags %}
                         <form action="/category_tags/{{ qset.id }}/" method="post" class="cat-tag-del"
                               onsubmit="return confirm('Delete the tag '{{ entry.tag.name }}'?');">
@@ -105,9 +105,12 @@
                     <input type="hidden" name="next" value="/category_overview/{{ qset.id }}/">
                     <input type="text" name="name" placeholder="tag" required>
                     <input type="text" name="group_name" list="cat-tag-groups" placeholder="group">
-                    <input type="number" name="num_tossups" min="0" value="0" title="Tossups needed">
-                    <input type="number" name="num_bonuses" min="0" value="0" title="Bonuses needed">
-                    <input type="number" name="num_questions" min="0" value="0" title="Questions needed of either type">
+                    <input type="number" name="num_tossups" min="0" value="0" title="Fewest tossups needed (0 = no minimum)">
+                    <input type="number" name="max_tossups" min="0" placeholder="max" title="Most tossups allowed (empty = no maximum)">
+                    <input type="number" name="num_bonuses" min="0" value="0" title="Fewest bonuses needed (0 = no minimum)">
+                    <input type="number" name="max_bonuses" min="0" placeholder="max" title="Most bonuses allowed (empty = no maximum)">
+                    <input type="number" name="num_questions" min="0" value="0" title="Fewest questions of either type (0 = no minimum)">
+                    <input type="number" name="max_questions" min="0" placeholder="max" title="Most questions of either type (empty = no maximum)">
                     <button type="submit" class="button tiny secondary">Add</button>
                 </form>
                 {% endif %}
@@ -310,6 +313,8 @@
     padding: 1px 7px; border-radius: 10px; font-size: 0.78em;
     background: var(--qx-elevate, #eef2f7); color: var(--qx-ink, #2b2f3a); }
 .cat-tag-done { background: #e3f0e4; color: #1b5e20; }
+/* Past a ceiling: the tag has too many, which reads differently from unfinished */
+.cat-tag-over { background: #f9e3e0; color: #922b21; }
 .cat-tag-count { color: var(--qx-muted, #8a8f9c); font-size: 0.9em; }
 .cat-tag-del { display: inline; margin: 0; }
 .cat-tag-del button { border: none; background: none; cursor: pointer; padding: 0 0 0 2px;
@@ -327,6 +332,7 @@
 </style>
 <style>
 html[data-theme="dark"] .cat-tag-done { background: #1c3527; color: #86d29d; }
+html[data-theme="dark"] .cat-tag-over { background: #3a201d; color: #e8a49b; }
 </style>
 
 {% endblock %}

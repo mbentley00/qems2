@@ -27,19 +27,11 @@
     Tags are editor-defined requirements within a category &mdash; for instance &ldquo;Asian Literature&rdquo;
     under Literature - World with 6 tossups and 6 bonuses needed. Writers fulfill a tag by checking it
     on the question's edit page. Tags with a required count of 0 are informational labels.
+    A tag can set a ceiling instead of (or as well as) a minimum: &ldquo;This Empire Indicator&rdquo;
+    with a maximum of 7 tossups and 0 bonuses asks for none, but goes red once an eighth turns up.
+    Tag names are printed in exported packets unless the tag says otherwise; the document view always
+    shows them.
     <p class="home-note">Tags can also have groups such as location, time period, or other divisions.</p>
-    <div class="tag-io">
-        <a href="/export_category_tags/{{ qset.id }}/" class="button tiny secondary"><i class="fa fa-file-export"></i> Export tags (.csv)</a>
-        {% if can_edit %}
-        <form action="/import_category_tags/{{ qset.id }}/" method="post" enctype="multipart/form-data" class="tag-io-form">
-            {% csrf_token %}
-            <label class="tag-io-label" for="tag-import-file">Import tags:</label>
-            <input type="file" id="tag-import-file" name="sheet" accept=".csv,.tsv,.xlsx" required>
-            <button type="submit" class="button tiny secondary">Import</button>
-            <span class="home-note">Same columns as the export (Category, Group, Tag, Tossups, Bonuses, Any Type, Order). Existing tags are updated by name and keep their questions; categories this set lacks are skipped.</span>
-        </form>
-        {% endif %}
-    </div>
 </div>
 
 {% if can_edit %}
@@ -47,7 +39,7 @@
     {% csrf_token %}
     <input type="hidden" name="action" value="add">
     <div class="row">
-        <div class="small-3 columns">
+        <div class="small-4 columns">
             <label>Category
                 <select name="category_path">
                     {% for path in path_choices %}
@@ -56,12 +48,12 @@
                 </select>
             </label>
         </div>
-        <div class="small-3 columns">
+        <div class="small-4 columns">
             <label>Tag Name
                 <input type="text" name="name" placeholder="e.g. Asian Literature">
             </label>
         </div>
-        <div class="small-2 columns">
+        <div class="small-4 columns">
             <label>Group
                 <input type="text" name="group_name" list="tag-group-choices" placeholder="e.g. Location">
                 <datalist id="tag-group-choices">
@@ -69,32 +61,56 @@
                 </datalist>
             </label>
         </div>
-        <div class="small-1 columns">
-            <label>Tossups
-                <input type="number" name="num_tossups" min="0" value="0" title="Tossups needed">
-            </label>
+    </div>
+    <div class="row">
+        <div class="small-10 columns">
+            <div class="tag-quota-fields">
+                <span class="tag-quota-head">How many:</span>
+                <span class="tag-quota-field">
+                    <span class="tag-quota-name">Tossups</span>
+                    <input type="number" name="num_tossups" min="0" value="0" placeholder="min" title="Fewest tossups this tag needs. 0 asks for no minimum.">
+                    <span class="tag-quota-to">to</span>
+                    <input type="number" name="max_tossups" min="0" placeholder="max" title="Most tossups this tag allows. Empty allows any number; 0 allows none.">
+                </span>
+                <span class="tag-quota-field">
+                    <span class="tag-quota-name">Bonuses</span>
+                    <input type="number" name="num_bonuses" min="0" value="0" placeholder="min" title="Fewest bonuses this tag needs. 0 asks for no minimum.">
+                    <span class="tag-quota-to">to</span>
+                    <input type="number" name="max_bonuses" min="0" placeholder="max" title="Most bonuses this tag allows. Empty allows any number; 0 allows none.">
+                </span>
+                <span class="tag-quota-field">
+                    <span class="tag-quota-name tag-nowrap">Any&nbsp;type</span>
+                    <input type="number" name="num_questions" min="0" value="0" placeholder="min" title="Fewest questions of either type (tossups and bonuses both count). 0 asks for no minimum.">
+                    <span class="tag-quota-to">to</span>
+                    <input type="number" name="max_questions" min="0" placeholder="max" title="Most questions of either type. Empty allows any number.">
+                </span>
+            </div>
         </div>
-        <div class="small-1 columns">
-            <label>Bonuses
-                <input type="number" name="num_bonuses" min="0" value="0" title="Bonuses needed">
-            </label>
-        </div>
-        <div class="small-1 columns">
-            <label class="tag-nowrap">Any&nbsp;type
-                <input type="number" name="num_questions" min="0" value="0" title="Questions needed of either type (tossups and bonuses both count)">
-            </label>
-        </div>
-        <div class="small-1 columns">
-            <label>&nbsp;</label>
-            <input type="submit" value="Add" class="button small primary">
+        <div class="small-2 columns">
+            <input type="submit" value="Add" class="button small primary tag-add-button">
         </div>
     </div>
-    <p class="home-note">Adding a tag that already exists in that category updates its group and counts. &ldquo;Any type&rdquo; asks for questions that may be tossups or bonuses &mdash; leave the typed counts at 0 for &ldquo;two questions on European politics, either kind&rdquo;.</p>
+    <p class="home-note">Adding a tag that already exists in that category updates its group and counts. Each quota has two ends and either may be left off: a minimum of 0 asks for no minimum, and an empty maximum sets no ceiling &mdash; so &ldquo;This Empire Indicator&rdquo; can cap the set at 7/0 without demanding any. &ldquo;Any type&rdquo; counts tossups and bonuses together.</p>
 </form>
 {% endif %}
 
 {% if focus_path %}
 <p><a href="/category_tags/{{ qset.id }}/" class="button small secondary">&laquo; All categories</a></p>
+{% else %}
+<div class="panel radius cat-index">
+    <div class="cat-index-head">Every category in this set &mdash; open one to work on its tags</div>
+    <div class="cat-index-list">
+        {% for c in category_index %}
+        <a class="cat-index-item{% if not c.tag_count %} cat-index-empty{% endif %}"
+           href="/category_tags/{{ qset.id }}/?category={{ c.path|urlencode }}"
+           title="{% if c.tag_count %}{{ c.tag_count }} tag{{ c.tag_count|pluralize }}{% else %}No tags yet{% endif %}">
+            {{ c.path }}<span class="cat-index-count">{% if c.tag_count %}{{ c.tag_count }}{% else %}&mdash;{% endif %}</span>
+        </a>
+        {% empty %}
+        <span class="home-note">This set's distribution has no categories yet.</span>
+        {% endfor %}
+    </div>
+</div>
 {% endif %}
 
 {% if focus_path %}
@@ -144,25 +160,25 @@ its one category, since that is the whole page then.
                 {% for row in tg.rows %}
                 <tr class="tag-row" data-tag-id="{{ row.tag.id }}">
                     {% if can_edit %}<td class="tag-drag-col"><span class="tag-drag-handle" title="Drag to reorder">&#8942;&#8942;</span></td>{% endif %}
-                    <td><strong>{{ row.tag.name }}</strong></td>
-                    <td class="{% if row.tu_complete %}tag-complete{% else %}tag-incomplete{% endif %}">
-                        {{ row.tu_done }}{% if row.tag.num_tossups %}/{{ row.tag.num_tossups }}{% endif %}
+                    <td><strong>{{ row.tag.name }}</strong>{% if not row.tag.show_in_output %}<span class="tag-no-out" title="This tag is not printed in exported packets">not in exports</span>{% endif %}</td>
+                    <td class="{% if row.tu_over %}tag-over{% elif row.tu_complete %}tag-complete{% else %}tag-incomplete{% endif %}">
+                        {{ row.tu_done }}{% if row.tag.num_tossups %}/{{ row.tag.num_tossups }}{% endif %}{% if row.tag.max_tossups != None %}<span class="tag-max" title="At most {{ row.tag.max_tossups }}">&le;{{ row.tag.max_tossups }}</span>{% endif %}
                     </td>
                     <td>
                         {% for q in row.tossups %}
                             <a href="/edit_tossup/{{ q.id }}/" title="{{ q.location }}">{{ q.answer }}</a>{% if not forloop.last %}<br>{% endif %}
                         {% endfor %}
                     </td>
-                    <td class="{% if row.bs_complete %}tag-complete{% else %}tag-incomplete{% endif %}">
-                        {{ row.bs_done }}{% if row.tag.num_bonuses %}/{{ row.tag.num_bonuses }}{% endif %}
+                    <td class="{% if row.bs_over %}tag-over{% elif row.bs_complete %}tag-complete{% else %}tag-incomplete{% endif %}">
+                        {{ row.bs_done }}{% if row.tag.num_bonuses %}/{{ row.tag.num_bonuses }}{% endif %}{% if row.tag.max_bonuses != None %}<span class="tag-max" title="At most {{ row.tag.max_bonuses }}">&le;{{ row.tag.max_bonuses }}</span>{% endif %}
                     </td>
                     <td>
                         {% for q in row.bonuses %}
                             <a href="/edit_bonus/{{ q.id }}/" title="{{ q.location }}">{{ q.answer }}</a>{% if not forloop.last %}<br>{% endif %}
                         {% endfor %}
                     </td>
-                    <td class="{% if row.q_complete %}tag-complete{% else %}tag-incomplete{% endif %}">
-                        {% if row.tag.num_questions %}{{ row.q_done }}/{{ row.tag.num_questions }}{% else %}&mdash;{% endif %}
+                    <td class="{% if row.q_over %}tag-over{% elif row.q_complete %}tag-complete{% else %}tag-incomplete{% endif %}">
+                        {% if row.tag.num_questions %}{{ row.q_done }}/{{ row.tag.num_questions }}{% elif row.tag.max_questions != None %}{{ row.q_done }}{% else %}&mdash;{% endif %}{% if row.tag.max_questions != None %}<span class="tag-max" title="At most {{ row.tag.max_questions }}">&le;{{ row.tag.max_questions }}</span>{% endif %}
                     </td>
                     {% if can_edit %}
                     <td class="tag-actions">
@@ -183,13 +199,28 @@ its one category, since that is the whole page then.
                             {% csrf_token %}
                             <input type="hidden" name="action" value="edit">
                             <input type="hidden" name="tag_id" value="{{ row.tag.id }}">
-                            <label>Name <input type="text" name="name" value="{{ row.tag.name }}" required></label>
-                            <label>Group <input type="text" name="group_name" value="{{ row.tag.group_name }}" list="tag-group-choices" placeholder="none"></label>
-                            <label>Tossups <input type="number" name="num_tossups" min="0" value="{{ row.tag.num_tossups }}"></label>
-                            <label>Bonuses <input type="number" name="num_bonuses" min="0" value="{{ row.tag.num_bonuses }}"></label>
-                            <label>Any type <input type="number" name="num_questions" min="0" value="{{ row.tag.num_questions }}"></label>
-                            <input type="submit" value="Save" class="button tiny primary">
-                            <button type="button" class="button tiny secondary tag-edit-toggle" data-target="tag-edit-{{ row.tag.id }}">Cancel</button>
+                            <label class="tag-field"><span class="tag-field-name">Name</span>
+                                <input type="text" name="name" value="{{ row.tag.name }}" required></label>
+                            <label class="tag-field"><span class="tag-field-name">Group</span>
+                                <input type="text" name="group_name" value="{{ row.tag.group_name }}" list="tag-group-choices" placeholder="none"></label>
+                            <span class="tag-field"><span class="tag-field-name">Tossups</span>
+                                <input type="number" name="num_tossups" min="0" value="{{ row.tag.num_tossups }}" title="Fewest tossups this tag needs; 0 asks for no minimum">
+                                <span class="tag-quota-to">to</span>
+                                <input type="number" name="max_tossups" min="0" placeholder="any" value="{{ row.tag.max_tossups|default_if_none:'' }}" title="Most tossups this tag allows; empty sets no ceiling"></span>
+                            <span class="tag-field"><span class="tag-field-name">Bonuses</span>
+                                <input type="number" name="num_bonuses" min="0" value="{{ row.tag.num_bonuses }}" title="Fewest bonuses this tag needs; 0 asks for no minimum">
+                                <span class="tag-quota-to">to</span>
+                                <input type="number" name="max_bonuses" min="0" placeholder="any" value="{{ row.tag.max_bonuses|default_if_none:'' }}" title="Most bonuses this tag allows; empty sets no ceiling"></span>
+                            <span class="tag-field"><span class="tag-field-name tag-nowrap">Any&nbsp;type</span>
+                                <input type="number" name="num_questions" min="0" value="{{ row.tag.num_questions }}" title="Fewest questions of either type; 0 asks for no minimum">
+                                <span class="tag-quota-to">to</span>
+                                <input type="number" name="max_questions" min="0" placeholder="any" value="{{ row.tag.max_questions|default_if_none:'' }}" title="Most questions of either type; empty sets no ceiling"></span>
+                            <label class="tag-field tag-out-check" title="Print this tag beside its questions in Word, PDF and YAPP exports. The document view shows it either way."><span class="tag-field-name">In exports</span>
+                                <input type="checkbox" name="show_in_output" value="1"{% if row.tag.show_in_output %} checked{% endif %}></label>
+                            <span class="tag-edit-buttons">
+                                <input type="submit" value="Save" class="button tiny primary">
+                                <button type="button" class="button tiny secondary tag-edit-toggle" data-target="tag-edit-{{ row.tag.id }}">Cancel</button>
+                            </span>
                         </form>
                         <form action="" method="post" class="tag-delete-form"
                               onsubmit="return confirm('Delete the tag \'{{ row.tag.name }}\'? Question assignments to it will be removed.');">
@@ -273,6 +304,22 @@ time, and where the questions nobody has tagged stand out.
     {% endif %}
 </div>
 {% endif %}
+
+<div class="panel radius tag-io-panel">
+    <div class="tag-io-head">Tags as a spreadsheet</div>
+    <div class="tag-io">
+        <a href="/export_category_tags/{{ qset.id }}/" class="button tiny secondary"><i class="fa fa-file-export"></i> Export tags (.csv)</a>
+        {% if can_edit %}
+        <form action="/import_category_tags/{{ qset.id }}/" method="post" enctype="multipart/form-data" class="tag-io-form">
+            {% csrf_token %}
+            <label class="tag-io-label" for="tag-import-file">Import tags:</label>
+            <input type="file" id="tag-import-file" name="sheet" accept=".csv,.tsv,.xlsx" required>
+            <button type="submit" class="button tiny secondary">Import</button>
+        </form>
+        {% endif %}
+    </div>
+    <p class="home-note">Same columns as the export (Category, Group, Tag, Tossups, Bonuses, Any Type, Max Tossups, Max Bonuses, Max Any Type, Order, In Exports). The typed columns are minimums; an empty Max column means no ceiling. Existing tags are updated by name and keep their questions; categories this set lacks are skipped.</p>
+</div>
 
 <script>
 $(function () {
@@ -374,11 +421,51 @@ $(function () {
 .tag-move-form button:hover { color: var(--qx-ink, #2b2f3a); }
 .tag-move-form button[disabled] { opacity: 0.3; cursor: default; }
 .tag-edit-row td { background: var(--qx-elevate, #f4f6fa) !important; }
-.tag-edit-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; margin: 0 0 4px; }
-.tag-edit-form label { font-size: 0.8em; margin: 0; }
-.tag-edit-form input[type=text] { width: 12em; margin: 0; height: 28px; font-size: 0.9em; }
-.tag-edit-form input[type=number] { width: 5em; margin: 0; height: 28px; font-size: 0.9em; padding-right: 2px; }
+/* Each field is its own flex row: the name on the left, the box (or the pair of
+   boxes a min/max quota takes) to its right, both centred on the same line.
+   Foundation floats form controls left, which would otherwise throw the label
+   text to the right of its own input and leave the row ragged. */
+.tag-edit-form { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center;
+    margin: 0 0 6px; }
+.tag-edit-form .tag-field { display: inline-flex; align-items: center; gap: 6px;
+    font-size: 0.8em; margin: 0; }
+.tag-field-name { color: var(--qx-muted, #6b7280); }
+.tag-edit-form input { float: none; margin: 0; }
+.tag-edit-form input[type=text] { width: 12em; height: 30px; font-size: 0.9em; }
+.tag-edit-form input[type=number] { width: 4.5em; height: 30px; font-size: 0.9em;
+    padding-right: 2px; }
+.tag-edit-form input[type=checkbox] { margin: 0; }
+.tag-edit-buttons { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
 .tag-edit-form .button { margin: 0; }
+.tag-quota-fields { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px;
+    padding: 4px 0 0; }
+.tag-quota-head { font-size: 0.85em; color: #777; }
+.tag-quota-field { display: inline-flex; align-items: center; gap: 6px; }
+.tag-quota-name { font-size: 0.85em; color: var(--qx-muted, #6b7280); }
+.tag-quota-to { font-size: 0.8em; color: #999; }
+.tag-quota-field input[type=number] { width: 4.5em; margin: 0; height: 30px; font-size: 0.9em;
+    padding-right: 2px; float: none; }
+.tag-add-button { margin-top: 2px; }
+/* The jump list of categories. An untagged one is greyed but still a link --
+   it is the one you most likely came here to open. */
+.cat-index-head { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--qx-muted, #8a8f9c); margin-bottom: 8px; }
+.cat-index-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.cat-index-item { display: inline-flex; align-items: center; gap: 6px; font-size: 0.85em;
+    border: 1px solid var(--qx-border, #e0e4ea); border-radius: 4px; padding: 3px 8px;
+    background: var(--qx-card, #fff); }
+.cat-index-item:hover { border-color: var(--qx-link, #2a6ebb); }
+.cat-index-count { color: var(--qx-muted, #8a8f9c); font-size: 0.9em; }
+.cat-index-empty { color: var(--qx-muted, #8a8f9c); background: transparent;
+    border-style: dashed; }
+.tag-io-panel { margin-top: 18px; }
+.tag-io-head { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--qx-muted, #8a8f9c); margin-bottom: 6px; }
+/* The ceiling rides next to the count it caps, greyed so the count still reads first */
+.tag-max { color: #8a8f9c; font-size: 0.85em; margin-left: 4px; }
+.tag-out-check { white-space: nowrap; }
+.tag-no-out { font-size: 0.72em; text-transform: uppercase; letter-spacing: 0.04em;
+    color: #8a8f9c; background: #f0f0f3; border-radius: 3px; padding: 1px 4px; margin-left: 6px; }
 .tag-questions { margin-top: 18px; }
 .tag-questions-head { display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline; margin-bottom: 6px; }
 .tag-untagged-filter { margin-left: auto; font-size: 0.85em; }
@@ -398,6 +485,9 @@ $(function () {
 .tag-assign-form select { width: auto; margin: 0; height: 24px; padding: 0 1.5em 0 4px; font-size: 0.8em; }
 .tag-complete { background-color: #dff0d8; color: #3c763d; font-weight: bold; }
 .tag-incomplete { background-color: #fcf8e3; color: #8a6d3b; font-weight: bold; }
+/* Over a ceiling, which is a different problem from being unfinished */
+.tag-over { background-color: #f2dede; color: #a94442; font-weight: bold; }
+.tag-over .tag-max { color: #a94442; }
 </style>
 <style>
 html[data-theme="dark"] .tag-cat-open { color: #f08c8c; }

@@ -11555,9 +11555,27 @@ class CategoryTagExportImportTests(TestCase):
         resp = self.client.get('/export_category_tags/{0}/'.format(self.a.id))
         self.assertEqual(resp.status_code, 200)
         body = resp.content.decode()
-        self.assertIn('Category,Group,Tag,Tossups,Bonuses,Any Type,Order', body)
-        self.assertIn('History - World,Location,China,2,0,0,10', body)
-        self.assertIn('History - World,Time,1900+,0,0,3,0', body)
+        self.assertIn('Category,Group,Tag,Tossups,Bonuses,Any Type,Max Tossups,Max Bonuses,'
+                      'Max Any Type,Order,In Exports', body)
+        self.assertIn('History - World,Location,China,2,0,0,,,,10,yes', body)
+        self.assertIn('History - World,Time,1900+,0,0,3,,,,0,yes', body)
+
+    def test_a_tag_kept_out_of_exports_says_so_and_comes_back_that_way(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        CategoryTag.objects.filter(question_set=self.a, name='China').update(show_in_output=False)
+        csv_text = self.client.get('/export_category_tags/{0}/'.format(self.a.id)).content
+        self.assertIn('History - World,Location,China,2,0,0,,,,10,no', csv_text.decode())
+        self.client.post('/import_category_tags/{0}/'.format(self.b.id),
+                         {'sheet': SimpleUploadedFile('a_tags.csv', csv_text)})
+        tags = {t.name: t for t in CategoryTag.objects.filter(question_set=self.b)}
+        self.assertFalse(tags['China'].show_in_output)
+        self.assertTrue(tags['1900+'].show_in_output)
+
+    def test_a_sheet_without_the_column_leaves_tags_in_exports(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        sheet = SimpleUploadedFile('t.csv', b'Category,Tag\nHistory - European,Iberia\n')
+        self.client.post('/import_category_tags/{0}/'.format(self.b.id), {'sheet': sheet})
+        self.assertTrue(CategoryTag.objects.get(question_set=self.b, name='Iberia').show_in_output)
 
     def test_the_export_imports_into_another_set(self):
         from django.core.files.uploadedfile import SimpleUploadedFile
@@ -11605,6 +11623,149 @@ class CategoryTagExportImportTests(TestCase):
         self.client.post('/import_category_tags/{0}/'.format(self.b.id), {'sheet': sheet})
         self.assertEqual(CategoryTag.objects.filter(question_set=self.b).count(), 0)
 
+
+class CategoryTagsInExportTests(TestCase):
+    """Category tag names ride along in exported packets -- Word, PDF and YAPP
+    -- unless the set or the tag itself says to keep them out. The document
+    view shows them either way."""
+
+    def setUp(self):
+        import io as _io, zipfile as _zip, json as _json
+        from docx import Document as _Doc
+        self._io, self._zip, self._json, self._Doc = _io, _zip, _json, _Doc
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        self.acf_tu = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.acf_bn = QuestionType.objects.get(question_type=ACF_STYLE_BONUS)
+        self.ou = User.objects.create_user('cte_owner', password='pw', email='cte@t.com')
+        self.ou.first_name, self.ou.last_name = 'Pat', 'Writer'
+        self.ou.save()
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='CTE dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='History', subcategory='World',
+            min_tossups=1, min_bonuses=1)
+        self.qset = QuestionSet.objects.create(
+            name='CTE Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.qset.editor.add(self.owner)
+        SetWideDistributionEntry.objects.create(question_set=self.qset, dist_entry=self.de,
+                                                num_tossups=1, num_bonuses=1)
+        self.packet = Packet.objects.create(question_set=self.qset, packet_name='Packet 1',
+                                            created_by=self.owner)
+        self.tu = Tossup.objects.create(
+            author=self.owner, question_set=self.qset, packet=self.packet,
+            question_type=self.acf_tu, category=self.de,
+            tossup_text='A stem clue. (*) The end.', tossup_answer='_Rome_',
+            created_date=datetime.now(), last_changed_date=datetime.now(), question_number=1)
+        self.bn = Bonus.objects.create(
+            author=self.owner, question_set=self.qset, packet=self.packet,
+            question_type=self.acf_bn, category=self.de,
+            leadin='Answer these.', part1_text='P1', part1_answer='_Alpha_',
+            part2_text='P2', part2_answer='_Beta_', part3_text='P3', part3_answer='_Gamma_',
+            created_date=datetime.now(), last_changed_date=datetime.now(), question_number=1)
+        self.empire = CategoryTag.objects.create(
+            question_set=self.qset, category_path='History - World',
+            name='This Empire Indicator', group_name='Subject')
+        self.century = CategoryTag.objects.create(
+            question_set=self.qset, category_path='History - World',
+            name='19th Century', group_name='Time')
+        self.empire.tossups.add(self.tu)
+        self.century.tossups.add(self.tu)
+        self.empire.bonuses.add(self.bn)
+        self.client.login(username='cte_owner', password='pw')
+
+    def _docx_text(self, query=''):
+        resp = self.client.get('/export_question_set/{0}/docx-packetized/{1}'.format(
+            self.qset.id, query))
+        self.assertEqual(resp.status_code, 200)
+        zf = self._zip.ZipFile(self._io.BytesIO(resp.content))
+        doc = self._Doc(self._io.BytesIO(zf.read(zf.namelist()[0])))
+        return '\n'.join(p.text for p in doc.paragraphs)
+
+    def _yapp(self, query=''):
+        resp = self.client.get('/export_question_set/{0}/yapp2-json/{1}'.format(
+            self.qset.id, query))
+        self.assertEqual(resp.status_code, 200)
+        zf = self._zip.ZipFile(self._io.BytesIO(resp.content))
+        return self._json.loads(zf.read('Packet 1.json'))
+
+    def test_word_export_prints_the_tags_by_default(self):
+        text = self._docx_text()
+        self.assertIn('[This Empire Indicator, 19th Century]', text)
+
+    def test_the_tags_sit_after_the_category_and_before_the_id(self):
+        text = self._docx_text()
+        line = [l for l in text.split('\n') if 'Empire Indicator' in l][0]
+        self.assertLess(line.index('History - World'), line.index('[This Empire'))
+        self.assertLess(line.index('[This Empire'), line.index('~{0}~'.format(self.tu.id)))
+
+    def test_a_bonus_gets_its_tags_too(self):
+        self.assertIn('[This Empire Indicator]', self._docx_text())
+
+    def test_an_untagged_question_gets_no_brackets(self):
+        self.empire.bonuses.remove(self.bn)
+        text = self._docx_text()
+        self.assertEqual(text.count('[This Empire Indicator]'), 0)
+        self.assertIn('[This Empire Indicator, 19th Century]', text)
+
+    def test_yapp_metadata_carries_the_tags(self):
+        payload = self._yapp()
+        self.assertIn('[This Empire Indicator, 19th Century]',
+                      payload['tossups'][0]['metadata'])
+        self.assertTrue(payload['tossups'][0]['metadata'].startswith('Pat Writer, History - World'))
+
+    def test_a_set_can_keep_its_tags_out_of_every_export(self):
+        self.qset.export_category_tags = False
+        self.qset.save()
+        self.assertNotIn('This Empire Indicator', self._docx_text())
+        self.assertNotIn('This Empire Indicator', self._yapp()['tossups'][0]['metadata'])
+
+    def test_one_tag_can_be_kept_out_while_the_others_print(self):
+        self.empire.show_in_output = False
+        self.empire.save()
+        text = self._docx_text()
+        self.assertNotIn('This Empire Indicator', text)
+        self.assertIn('[19th Century]', text)
+
+    def test_the_options_form_can_drop_the_tags_from_one_export(self):
+        text = self._docx_text('?opts=1&writers=1&editors=1&ids=1')
+        self.assertNotIn('This Empire Indicator', text)
+        self.assertIn('[This Empire Indicator', self._docx_text('?opts=1&ctags=1'))
+
+    def test_the_options_form_starts_from_the_set_s_own_answer(self):
+        body = self.client.get('/edit_question_set/{0}/'.format(self.qset.id)).content.decode()
+        self.assertIn('name="ctags" value="1" checked', body)
+        self.qset.export_category_tags = False
+        self.qset.save()
+        body = self.client.get('/edit_question_set/{0}/'.format(self.qset.id)).content.decode()
+        self.assertIn('name="ctags" value="1">', body)
+
+    def test_the_pdf_meta_line_carries_the_tags(self):
+        from qems2.qsub import pdf_export
+        opts = {'writers': True, 'editors': False, 'ids': False,
+                'tag_names': {('tossup', self.tu.id): ['19th Century']}}
+        self.assertIn('[19th Century]', pdf_export._meta_line(self.tu, opts))
+        self.assertNotIn('[', pdf_export._meta_line(self.bn, opts))
+
+    def test_the_document_view_shows_tags_a_packet_would_not(self):
+        self.qset.export_category_tags = False
+        self.qset.save()
+        self.empire.show_in_output = False
+        self.empire.save()
+        body = self.client.get('/view_packet/{0}/'.format(self.packet.id)).content.decode()
+        self.assertIn('This Empire Indicator', body)
+        self.assertIn('19th Century', body)
+
+    def test_a_single_question_export_follows_the_set(self):
+        payload = self._json.loads(self.client.get(
+            '/export_question/tossup/{0}/yapp2-json/'.format(self.tu.id)).content.decode())
+        self.assertIn('[This Empire Indicator, 19th Century]', payload['tossups'][0]['metadata'])
+        self.qset.export_category_tags = False
+        self.qset.save()
+        payload = self._json.loads(self.client.get(
+            '/export_question/tossup/{0}/yapp2-json/'.format(self.tu.id)).content.decode())
+        self.assertNotIn('[', payload['tossups'][0]['metadata'])
 
 class QuestionPageTagTests(TestCase):
     """The tag checkboxes on the edit pages say where each tag stands, sit
@@ -11813,6 +11974,246 @@ class CategoryOverviewTagTests(TestCase):
         self.assertIn('/category_tags/{0}/?category=History'.format(self.qset.id), body)
 
 
+class CategoryTagMaximumTests(TestCase):
+    """A tag's quota has two ends and either may be left off: "at least two
+    tossups", "at most 7/0 and no minimum at all", or a range between."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        self.acf_tu = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.acf_bn = QuestionType.objects.get(question_type=ACF_STYLE_BONUS)
+        self.ou = User.objects.create_user('ctm_owner', password='pw', email='ctm@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='CTM dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='History', subcategory='European',
+            min_tossups=1, min_bonuses=1)
+        self.qset = QuestionSet.objects.create(
+            name='CTM Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=2, distribution=self.dist)
+        self.qset.editor.add(self.owner)
+        SetWideDistributionEntry.objects.create(
+            question_set=self.qset, dist_entry=self.de, num_tossups=8, num_bonuses=8)
+        self.client.login(username='ctm_owner', password='pw')
+
+    def _post(self, **extra):
+        data = {'action': 'add', 'category_path': 'History - European',
+                'name': 'This Empire Indicator', 'group_name': 'Subject',
+                'num_tossups': 0, 'num_bonuses': 0, 'num_questions': 0}
+        data.update(extra)
+        return self.client.post('/category_tags/{0}/'.format(self.qset.id), data)
+
+    def _tag(self):
+        return CategoryTag.objects.get(name='This Empire Indicator')
+
+    def _tossup(self, n=1):
+        for _ in range(n):
+            yield Tossup.objects.create(
+                author=self.owner, question_set=self.qset, question_type=self.acf_tu,
+                category=self.de, tossup_text='t (*) x', tossup_answer='_a_',
+                created_date=timezone.now(), last_changed_date=timezone.now())
+
+    def _bonus(self):
+        return Bonus.objects.create(
+            author=self.owner, question_set=self.qset, question_type=self.acf_bn,
+            category=self.de, leadin='l', part1_text='p1', part1_answer='_a1_',
+            part2_text='p2', part2_answer='_a2_', part3_text='p3', part3_answer='_a3_',
+            created_date=timezone.now(), last_changed_date=timezone.now())
+
+    # --- a ceiling with no floor -----------------------------------------
+
+    def test_a_tag_can_cap_a_type_without_asking_for_any(self):
+        self._post(max_tossups=7, max_bonuses=0)
+        tag = self._tag()
+        self.assertEqual((tag.num_tossups, tag.max_tossups), (0, 7))
+        self.assertEqual((tag.num_bonuses, tag.max_bonuses), (0, 0))
+        self.assertIsNone(tag.max_questions)
+
+    def test_a_capped_tag_starts_out_satisfied(self):
+        self._post(max_tossups=7)
+        self.assertTrue(self._tag().progress()['complete'])
+
+    def test_going_over_the_cap_is_not_complete(self):
+        self._post(max_tossups=1)
+        tag = self._tag()
+        first, second = list(self._tossup(2))
+        tag.tossups.add(first)
+        self.assertTrue(tag.progress()['complete'])
+        tag.tossups.add(second)
+        p = tag.progress()
+        self.assertTrue(p['tu_over'])
+        self.assertTrue(p['over'])
+        self.assertFalse(p['complete'])
+
+    def test_a_cap_of_none_is_broken_by_the_first_question(self):
+        """"7/0" caps bonuses at none, which is not the same as no cap."""
+        self._post(max_tossups=7, max_bonuses=0)
+        tag = self._tag()
+        self.assertFalse(tag.progress()['bs_over'])
+        tag.bonuses.add(self._bonus())
+        self.assertTrue(tag.progress()['bs_over'])
+
+    def test_an_any_type_cap_counts_both_kinds(self):
+        self._post(max_questions=1)
+        tag = self._tag()
+        tag.tossups.add(next(self._tossup()))
+        self.assertFalse(tag.progress()['q_over'])
+        tag.bonuses.add(self._bonus())
+        self.assertTrue(tag.progress()['q_over'])
+
+    # --- a floor with no ceiling, as before ------------------------------
+
+    def test_a_minimum_alone_still_behaves_as_it_did(self):
+        self._post(num_tossups=2)
+        tag = self._tag()
+        self.assertIsNone(tag.max_tossups)
+        self.assertFalse(tag.progress()['complete'])
+        for t in self._tossup(3):
+            tag.tossups.add(t)
+        p = tag.progress()
+        self.assertTrue(p['complete'])
+        self.assertFalse(p['over'])
+
+    def test_both_ends_together_make_a_range(self):
+        self._post(num_tossups=2, max_tossups=3)
+        tag = self._tag()
+        made = list(self._tossup(4))
+        tag.tossups.add(made[0])
+        self.assertFalse(tag.progress()['complete'])
+        tag.tossups.add(made[1])
+        self.assertTrue(tag.progress()['complete'])
+        tag.tossups.add(made[2])
+        self.assertTrue(tag.progress()['complete'])
+        tag.tossups.add(made[3])
+        self.assertFalse(tag.progress()['complete'])
+
+    # --- editing, validation, wording ------------------------------------
+
+    def test_a_ceiling_can_be_edited_and_taken_off_again(self):
+        self._post(max_tossups=7)
+        tag = self._tag()
+        url = '/category_tags/{0}/'.format(self.qset.id)
+        self.client.post(url, {'action': 'edit', 'tag_id': tag.id, 'name': tag.name,
+                               'group_name': tag.group_name, 'num_tossups': 0,
+                               'num_bonuses': 0, 'num_questions': 0, 'max_tossups': 4,
+                               'show_in_output': '1'})
+        tag.refresh_from_db()
+        self.assertEqual(tag.max_tossups, 4)
+        self.client.post(url, {'action': 'edit', 'tag_id': tag.id, 'name': tag.name,
+                               'group_name': tag.group_name, 'num_tossups': 0,
+                               'num_bonuses': 0, 'num_questions': 0, 'max_tossups': '',
+                               'show_in_output': '1'})
+        tag.refresh_from_db()
+        self.assertIsNone(tag.max_tossups)
+
+    def test_a_ceiling_below_its_own_floor_is_refused(self):
+        resp = self._post(num_tossups=3, max_tossups=1)
+        self.assertEqual(CategoryTag.objects.filter(question_set=self.qset).count(), 0)
+        self.assertIn('cannot be below its minimum', resp.content.decode())
+
+    def test_a_negative_ceiling_is_refused(self):
+        self._post(max_tossups=-1)
+        self.assertEqual(CategoryTag.objects.filter(question_set=self.qset).count(), 0)
+
+    def test_the_quota_reads_as_words(self):
+        self._post(max_tossups=7, max_bonuses=0)
+        self.assertEqual(self._tag().quota_summary(), 'at most 7 tossups, no bonuses')
+        CategoryTag.objects.all().update(num_tossups=2, max_tossups=4, max_bonuses=None)
+        self.assertEqual(self._tag().quota_summary(), '2 to 4 tossups')
+        CategoryTag.objects.all().update(num_tossups=3, max_tossups=3)
+        self.assertEqual(self._tag().quota_summary(), 'exactly 3 tossups')
+
+    def test_a_tag_with_only_a_ceiling_counts_as_having_a_quota(self):
+        self._post(max_bonuses=0)
+        self.assertTrue(self._tag().has_quota)
+
+    # --- what the pages show ---------------------------------------------
+
+    def test_the_tag_page_shows_the_ceiling_and_flags_going_over(self):
+        self._post(max_tossups=1)
+        tag = self._tag()
+        url = '/category_tags/{0}/?category=History - European'.format(self.qset.id)
+        body = self.client.get(url).content.decode()
+        self.assertIn('&le;1', body)
+        self.assertNotIn('class="tag-over"', body)
+        for t in self._tossup(2):
+            tag.tossups.add(t)
+        self.assertIn('class="tag-over"', self.client.get(url).content.decode())
+
+    def test_the_overview_chip_shows_the_ceiling(self):
+        self._post(max_tossups=7, max_bonuses=0)
+        body = self.client.get('/category_overview/{0}/'.format(self.qset.id)).content.decode()
+        self.assertIn('at most 7 tossups, no bonuses', body)
+
+    def test_the_question_page_says_what_a_capped_tag_wants(self):
+        self._post(max_tossups=7)
+        tu = next(self._tossup())
+        body = self.client.get('/edit_tossup/{0}/'.format(tu.id)).content.decode()
+        self.assertIn('of at most 7 tossups', body)
+
+    def test_the_question_page_warns_once_a_tag_is_past_its_cap(self):
+        self._post(max_tossups=1)
+        tag = self._tag()
+        made = list(self._tossup(2))
+        for t in made:
+            tag.tossups.add(t)
+        body = self.client.get('/edit_tossup/{0}/'.format(made[0].id)).content.decode()
+        self.assertIn('qtags-over', body)
+        self.assertIn('Past what this tag allows', body)
+
+    # --- getting to a category that has no tags yet -----------------------
+
+    def test_the_page_links_to_every_category_not_just_tagged_ones(self):
+        """A category with no tags is the one you most need to open."""
+        body = self.client.get('/category_tags/{0}/'.format(self.qset.id)).content.decode()
+        self.assertIn('?category=History%20-%20European', body)
+        self.assertIn('cat-index-empty', body)
+
+    def test_a_tagged_category_is_listed_without_the_empty_marker(self):
+        self._post(max_tossups=7)
+        resp = self.client.get('/category_tags/{0}/'.format(self.qset.id))
+        rows = {c['path']: c['tag_count'] for c in resp.context['category_index']}
+        self.assertEqual(rows['History - European'], 1)
+
+    # --- the sheet --------------------------------------------------------
+
+    def test_the_ceilings_survive_export_and_import(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        self._post(max_tossups=7, max_bonuses=0)
+        other = QuestionSet.objects.create(
+            name='CTM Other', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        other.editor.add(self.owner)
+        SetWideDistributionEntry.objects.create(
+            question_set=other, dist_entry=self.de, num_tossups=4, num_bonuses=4)
+        sheet = self.client.get('/export_category_tags/{0}/'.format(self.qset.id)).content
+        self.assertIn('Max Tossups', sheet.decode())
+        self.client.post('/import_category_tags/{0}/'.format(other.id),
+                         {'sheet': SimpleUploadedFile('tags.csv', sheet)})
+        copied = CategoryTag.objects.get(question_set=other, name='This Empire Indicator')
+        self.assertEqual((copied.max_tossups, copied.max_bonuses, copied.max_questions),
+                         (7, 0, None))
+
+    def test_a_sheet_column_called_tossups_is_still_the_minimum(self):
+        """Sheets written before ceilings existed say "Tossups" for what a tag
+        needs; only an explicit "Max Tossups" is a ceiling."""
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        sheet = SimpleUploadedFile(
+            't.csv', b'Category,Tag,Tossups,Max Tossups\nHistory - European,Iberia,2,5\n')
+        self.client.post('/import_category_tags/{0}/'.format(self.qset.id), {'sheet': sheet})
+        tag = CategoryTag.objects.get(question_set=self.qset, name='Iberia')
+        self.assertEqual((tag.num_tossups, tag.max_tossups), (2, 5))
+
+    def test_a_sheet_ceiling_below_its_floor_is_refused(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        sheet = SimpleUploadedFile(
+            't.csv', b'Category,Tag,Tossups,Max Tossups\nHistory - European,Iberia,4,1\n')
+        resp = self.client.post('/import_category_tags/{0}/'.format(self.qset.id),
+                                {'sheet': sheet}, follow=True)
+        self.assertContains(resp, 'below its minimum')
+        self.assertEqual(CategoryTag.objects.filter(question_set=self.qset).count(), 0)
+
 class CategoryCommentTests(TestCase):
     """Notes about a category rather than about a question, shown wherever
     people work on that category."""
@@ -11845,6 +12246,11 @@ class CategoryCommentTests(TestCase):
         return self.client.post('/category_comment/{0}/'.format(self.qset.id), {
             'category_path': path or self.path, 'comment': text,
             'next': nxt or '/categories/{0}/{1}/'.format(self.qset.id, self.de.id)})
+
+    def _edit(self, note, text):
+        return self.client.post('/category_comment/{0}/'.format(self.qset.id), {
+            'action': 'edit', 'comment_id': note.id, 'comment': text,
+            'next': '/categories/{0}/{1}/'.format(self.qset.id, self.de.id)})
 
     def test_a_note_can_be_left_on_a_category(self):
         self._add()
@@ -11934,6 +12340,89 @@ class CategoryCommentTests(TestCase):
             'action': 'delete', 'comment_id': note.id,
             'next': '/categories/{0}/{1}/'.format(self.qset.id, self.de.id)})
         self.assertFalse(CategoryComment.objects.filter(id=note.id).exists())
+
+    def test_an_author_can_reword_their_own_note(self):
+        self.client.logout()
+        self.client.login(username='cc_writer', password='pw')
+        self._add('Sibelius is fine actually')
+        note = CategoryComment.objects.get()
+        self._edit(note, 'Sibelius is not fine after all')
+        note.refresh_from_db()
+        self.assertEqual(note.comment, 'Sibelius is not fine after all')
+        self.assertIsNotNone(note.edited_date)
+
+    def test_the_reworded_note_shows_on_the_category_page(self):
+        self._add('First thought')
+        note = CategoryComment.objects.get()
+        self._edit(note, 'Second thought')
+        body = self.client.get('/categories/{0}/{1}/'.format(
+            self.qset.id, self.de.id)).content.decode()
+        self.assertIn('Second thought', body)
+        self.assertNotIn('First thought', body)
+        self.assertIn('(edited)', body)
+
+    def test_an_unedited_note_is_not_marked_edited(self):
+        self._add('Left alone')
+        note = CategoryComment.objects.get()
+        self.assertIsNone(note.edited_date)
+        body = self.client.get('/categories/{0}/{1}/'.format(
+            self.qset.id, self.de.id)).content.decode()
+        self.assertNotIn('(edited)', body)
+
+    def test_a_writer_cannot_reword_someone_else_s(self):
+        self._add('The editor said so')          # left by the owner
+        note = CategoryComment.objects.get()
+        self.client.logout()
+        self.client.login(username='cc_writer', password='pw')
+        self._edit(note, 'The editor said no such thing')
+        note.refresh_from_db()
+        self.assertEqual(note.comment, 'The editor said so')
+
+    def test_an_editor_cannot_reword_a_writer_s_note(self):
+        """Editors delete other people's notes but never reword them."""
+        self.client.logout()
+        self.client.login(username='cc_writer', password='pw')
+        self._add('A writer thought')
+        note = CategoryComment.objects.get()
+        self.client.logout()
+        self.client.login(username='cc_owner', password='pw')
+        self._edit(note, 'What the editor would rather they thought')
+        note.refresh_from_db()
+        self.assertEqual(note.comment, 'A writer thought')
+
+    def test_a_note_cannot_be_reworded_to_nothing(self):
+        self._add('Something')
+        note = CategoryComment.objects.get()
+        self._edit(note, '   ')
+        note.refresh_from_db()
+        self.assertEqual(note.comment, 'Something')
+
+    def test_rewording_a_note_left_on_another_set_is_refused(self):
+        other_owner = Writer.objects.get(user=self.su)
+        theirs = QuestionSet.objects.create(
+            name='Someone Else Edit', date=timezone.now(), host='h', address='',
+            owner=other_owner, num_packets=1, distribution=self.dist)
+        note = CategoryComment.objects.create(
+            question_set=theirs, category_path=self.path, author=other_owner,
+            comment='theirs')
+        self.client.post('/category_comment/{0}/'.format(theirs.id), {
+            'action': 'edit', 'comment_id': note.id, 'comment': 'mine now',
+            'next': '/category_overview/{0}/'.format(theirs.id)})
+        note.refresh_from_db()
+        self.assertEqual(note.comment, 'theirs')
+
+    def test_the_edit_box_only_appears_for_your_own_notes(self):
+        self.client.logout()
+        self.client.login(username='cc_writer', password='pw')
+        self._add('A writer thought')
+        note = CategoryComment.objects.get()
+        url = '/categories/{0}/{1}/'.format(self.qset.id, self.de.id)
+        self.assertIn('catNoteEdit({0}'.format(note.id),
+                      self.client.get(url).content.decode())
+        self.client.logout()
+        self.client.login(username='cc_owner', password='pw')
+        self.assertNotIn('catNoteEdit({0}'.format(note.id),
+                         self.client.get(url).content.decode())
 
     def test_a_note_cannot_be_html(self):
         self._add('careful <script>alert(1)</script>')

@@ -13,11 +13,17 @@ an optional `comment_return` for where the form should come back to.
     </div>
 
     {% for note in cat_comments %}
-    <div class="cat-note">
+    <div class="cat-note" id="cat-note-{{ note.id }}">
         <div class="cat-note-meta">
             <strong>{{ note.author|writer_name }}</strong>
             <span class="cat-note-date">{{ note.created_date|to_short_datetime }}</span>
+            {% if note.edited_date %}<span class="cat-note-edited" title="Reworded {{ note.edited_date|to_short_datetime }}">(edited)</span>{% endif %}
             {% if note.category_path != cat_comment_path %}<span class="cat-note-on">on {{ note.category_path }}</span>{% endif %}
+            <span class="cat-note-actions">
+            {% if note.author_id == cat_comment_user.id %}
+            <button type="button" class="cat-note-edit-btn" title="Reword this note"
+                    onclick="catNoteEdit({{ note.id }}, true)">Edit</button>
+            {% endif %}
             {% if can_comment_on_category %}
             <form method="post" action="/category_comment/{{ cat_comment_qset.id }}/" class="cat-note-del"
                   onsubmit="return confirm('Remove this note?');">
@@ -28,8 +34,23 @@ an optional `comment_return` for where the form should come back to.
                 <button type="submit" title="Remove this note">&times;</button>
             </form>
             {% endif %}
+            </span>
         </div>
         <div class="cat-note-body">{{ note.comment|comment_html|linebreaks }}</div>
+        {% if note.author_id == cat_comment_user.id %}
+        <form method="post" action="/category_comment/{{ cat_comment_qset.id }}/" class="cat-note-editor">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="edit">
+            <input type="hidden" name="comment_id" value="{{ note.id }}">
+            <input type="hidden" name="next" value="{{ comment_return|default:request.get_full_path }}">
+            <textarea name="comment" rows="3">{{ note.comment }}</textarea>
+            <div class="cat-note-editor-buttons">
+                <button type="submit" class="button tiny">Save</button>
+                <button type="button" class="button tiny secondary"
+                        onclick="catNoteEdit({{ note.id }}, false)">Cancel</button>
+            </div>
+        </form>
+        {% endif %}
     </div>
     {% empty %}
     <p class="cat-notes-empty">No notes on this category yet.</p>
@@ -60,7 +81,19 @@ an optional `comment_return` for where the form should come back to.
 .cat-note-date, .cat-note-on { color: var(--qx-muted, #8a8f9c); }
 .cat-note-body { font-size: 0.9rem; }
 .cat-note-body p { margin: 0 0 4px; }
-.cat-note-del { display: inline; margin: 0 0 0 auto; }
+.cat-note-edited { color: var(--qx-muted, #8a8f9c); font-style: italic; }
+.cat-note-actions { margin-left: auto; display: flex; align-items: baseline; gap: 6px; }
+.cat-note-edit-btn { border: none; background: none; cursor: pointer; padding: 0 2px;
+    color: var(--qx-muted, #8a8f9c); font-size: 0.75rem; }
+.cat-note-edit-btn:hover { color: var(--qx-link, #2a6ebb); text-decoration: underline; }
+/* The edit box replaces the note body in place; hidden until Edit is clicked */
+.cat-note-editor { display: none; margin: 4px 0 0; }
+.cat-note.editing .cat-note-body { display: none; }
+.cat-note.editing .cat-note-editor { display: block; }
+.cat-note.editing .cat-note-edit-btn { visibility: hidden; }
+.cat-note-editor textarea { margin: 0 0 4px; font-size: 0.9rem; }
+.cat-note-editor-buttons button { margin: 0 4px 0 0; }
+.cat-note-del { display: inline; margin: 0; }
 .cat-note-del button { border: none; background: none; cursor: pointer; padding: 0 2px;
     color: var(--qx-muted, #8a8f9c); line-height: 1; }
 .cat-note-del button:hover { color: #c0392b; }
@@ -69,3 +102,17 @@ an optional `comment_return` for where the form should come back to.
 .cat-note-add textarea { margin: 0; flex: 1 1 auto; font-size: 0.9rem; }
 .cat-note-add button { margin: 0; flex: 0 0 auto; }
 </style>
+
+<script>
+// Swap a note between its rendered text and its edit box. The form posts and
+// redirects like the add/delete forms do, so there is nothing to sync back.
+function catNoteEdit(id, on) {
+    var note = document.getElementById('cat-note-' + id);
+    if (!note) { return; }
+    note.className = on ? 'cat-note editing' : 'cat-note';
+    if (on) {
+        var box = note.querySelector('.cat-note-editor textarea');
+        if (box) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); }
+    }
+}
+</script>

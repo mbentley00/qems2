@@ -101,7 +101,11 @@ def _write_qems(pdf, text, is_answer=False, size=SIZE, all_power=False, allow_su
 
 
 def _meta_line(q, opts):
-    """`<Author, Category> ~id~ <Editor: Name>` with each piece optional."""
+    """`<Author, Category> [Tags] ~id~ <Editor: Name>` with each piece optional.
+
+    Category tags come from ``opts['tag_names']``, keyed ('tossup'|'bonus', id)
+    -- the caller has them in one query, and an empty (or missing) map is how a
+    set that keeps its tags out of its packets says so."""
     author = _real_name(q.author) if opts['writers'] else ''
     cat = str(q.category).strip() if q.category else ''
     if author and cat:
@@ -113,6 +117,10 @@ def _meta_line(q, opts):
     else:
         head = ''
     parts = [head]
+    tags = (opts.get('tag_names') or {}).get(
+        (q.__class__.__name__.lower(), q.id), [])
+    if tags:
+        parts.append('[{0}]'.format(', '.join(tags)))
     if opts['ids']:
         parts.append('~{0}~'.format(q.id))
     if opts['editors'] and getattr(q, 'edited', False) and q.editor:
