@@ -3502,6 +3502,77 @@ class NestedMarkupCollapseTests(TestCase):
         self.assertEqual(tu.tossup_text, '\\BThis party (*)\\B rest. For 10 points, name it.')
 
 
+class BonusifyTests(TestCase):
+    """Converting a tossup to a bonus ("Bonusify"). A full-length tossup used
+    to blow up here: its text went into leadin, a CharField(500), which
+    Postgres rejects outright. SQLite does not enforce the width, so these
+    tests check the lengths themselves rather than trusting the save."""
+
+    def setUp(self):
+        for qt in (ACF_STYLE_TOSSUP, ACF_STYLE_BONUS):
+            QuestionType.objects.get_or_create(question_type=qt)
+        self.ou = User.objects.create_user('bz_owner', password='pw', email='bz@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='bz dist')
+        self.de = DistributionEntry.objects.create(distribution=self.dist, category='History',
+                                                   subcategory='World')
+        self.qset = QuestionSet.objects.create(
+            name='BZ Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.qset.editor.add(self.owner)
+        self.client.login(username='bz_owner', password='pw')
+
+    def _tossup(self, text):
+        return Tossup.objects.create(
+            question_set=self.qset, question_type=QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP),
+            category=self.de, author=self.owner, tossup_text=text, tossup_answer='_Answer_',
+            created_date=timezone.now(), last_changed_date=timezone.now())
+
+    def _assert_fits(self, obj):
+        """No field longer than the column that has to hold it."""
+        for field in obj._meta.get_fields():
+            width = getattr(field, 'max_length', None)
+            if not width or not hasattr(obj, field.name):
+                continue
+            value = getattr(obj, field.name)
+            if isinstance(value, str):
+                self.assertLessEqual(len(value), width,
+                                     '{0} is {1} chars, column holds {2}'.format(
+                                         field.name, len(value), width))
+
+    def test_a_full_length_tossup_converts(self):
+        # 700 characters: legal for a tossup, far past the leadin's 500.
+        text = ('This clue is long. ' * 36) + 'For 10 points, name it.'
+        self.assertGreater(len(text), 500)
+        tu = self._tossup(text)
+        resp = self.client.post('/convert_tossup/', {
+            'tossup_id': tu.id, 'qset_id': self.qset.id, 'target_type': ACF_STYLE_BONUS})
+        self.assertEqual(resp.status_code, 200)
+        bonus = Bonus.objects.get(question_set=self.qset)
+        self.assertEqual(bonus.part1_text, text)      # nothing lost
+        self.assertEqual(bonus.part1_answer, '_Answer_')
+        self._assert_fits(bonus)
+        self._assert_fits(BonusHistory.objects.filter(question_history=bonus.question_history).first())
+        self.assertFalse(Tossup.objects.filter(id=tu.id).exists())
+        self.assertEqual(json.loads(resp.content.decode())['redirect_url'],
+                         '/edit_bonus/{0}/'.format(bonus.id))
+
+    def test_a_short_tossup_converts_the_same_way(self):
+        tu = self._tossup('Short clue. (*) For 10 points, name it.')
+        self.client.post('/convert_tossup/', {
+            'tossup_id': tu.id, 'qset_id': self.qset.id, 'target_type': ACF_STYLE_BONUS})
+        bonus = Bonus.objects.get(question_set=self.qset)
+        self.assertEqual(bonus.part1_text, 'Short clue. (*) For 10 points, name it.')
+        self._assert_fits(bonus)
+
+    def test_the_converted_bonus_page_loads(self):
+        tu = self._tossup(('Another long clue. ' * 30) + 'For 10 points, name it.')
+        self.client.post('/convert_tossup/', {
+            'tossup_id': tu.id, 'qset_id': self.qset.id, 'target_type': ACF_STYLE_BONUS})
+        bonus = Bonus.objects.get(question_set=self.qset)
+        self.assertEqual(self.client.get('/edit_bonus/{0}/'.format(bonus.id)).status_code, 200)
+
+
 class SiteDomainTests(TestCase):
     """allauth builds its mail from the Site row, which shipped as
     "example.com"; bootstrap_deploy points it at this deployment."""

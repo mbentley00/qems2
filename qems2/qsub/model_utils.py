@@ -305,9 +305,15 @@ def tossup_to_bonus(tossup, output_question_type):
         if (tossup.get_tossup_type() == ACF_STYLE_TOSSUP):
             bonus = copy_to_bonus(tossup)
             bonus.question_type = QuestionType.objects.get(question_type=ACF_STYLE_BONUS)
-            bonus.leadin = tossup.tossup_text
+            # The tossup's text becomes part 1, not the leadin: a leadin is a
+            # CharField(500) and a tossup runs to 725 characters, so anything
+            # near full length made the save fail outright on Postgres (SQLite
+            # does not enforce the width, so this only ever broke in
+            # production). part1_text is a TextField, and this matches what the
+            # VHSL conversion below already does.
+            bonus.leadin = ""
             bonus.part1_answer = tossup.tossup_answer
-            bonus.part1_text = ""
+            bonus.part1_text = tossup.tossup_text
             bonus.part2_text = ""
             bonus.part2_answer = ""
             bonus.part3_text = ""
