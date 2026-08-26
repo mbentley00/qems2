@@ -1,9 +1,16 @@
-"""Write a database backup to BACKUP_DIR and rotate old ones.
+"""Write a database backup to BACKUP_DIR, copy it to blob storage, and rotate.
 
 Uses pg_dump (custom format) when available; otherwise falls back to a gzipped
 Django dumpdata fixture so a backup is always produced. Runs from inside Azure
 (the app's container), so it reaches the Postgres server without a public
 firewall rule. Dumps land on App Service's persistent /home by default.
+
+Each dump is then uploaded to the container named by BACKUP_BLOB_CONTAINER in
+the BACKUP_BLOB_ACCOUNT storage account, which is geo-redundant and outside the
+App Service instance -- the local copies share their fate with the app. The
+upload authenticates with the app's managed identity, so there is no key or
+connection string to keep. It is best-effort: a storage outage must never cost
+us the local backup, so a failure is reported and the command still succeeds.
 """
 
 import glob
@@ -60,5 +67,36 @@ class Command(BaseCommand):
                 os.remove(old)
             except OSError:
                 pass
+        self._upload_to_blob(written)
+
         self.stdout.write('backup complete: {0} ({1} retained)'.format(
             os.path.basename(written), min(len(backups), retain)))
+
+    def _upload_to_blob(self, path):
+        """Copy one backup to blob storage. Never raises: the local dump is
+        already written, and losing the off-site copy is not worth losing the
+        run (or the daily loop that calls it)."""
+        account = os.environ.get('BACKUP_BLOB_ACCOUNT')
+        container = os.environ.get('BACKUP_BLOB_CONTAINER', 'qems2-backups')
+        if not account:
+            self.stdout.write('BACKUP_BLOB_ACCOUNT not set; keeping the local copy only.')
+            return
+        try:
+            from azure.identity import DefaultAzureCredential
+            from azure.storage.blob import BlobServiceClient
+        except ImportError:
+            self.stderr.write('azure-storage-blob/azure-identity not installed; '
+                              'skipping the blob upload.')
+            return
+        name = os.path.basename(path)
+        try:
+            client = BlobServiceClient(
+                account_url='https://{0}.blob.core.windows.net'.format(account),
+                credential=DefaultAzureCredential())
+            blob = client.get_blob_client(container=container, blob=name)
+            with open(path, 'rb') as fh:
+                blob.upload_blob(fh, overwrite=True)
+            self.stdout.write('uploaded {0} to {1}/{2}'.format(name, account, container))
+        except Exception as ex:  # noqa: BLE001 - see the docstring
+            self.stderr.write('blob upload failed ({0}: {1}); the local copy is intact.'.format(
+                type(ex).__name__, str(ex)[:200]))

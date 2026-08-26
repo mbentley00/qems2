@@ -22,7 +22,7 @@ python manage.py fix_question_entities || echo "[entrypoint] entity repair skipp
 case "${MAINTENANCE_COMMAND:-}" in
   "")
     ;;
-  "tag_legacy_placeholders"|"tag_legacy_placeholders --apply")
+  "backup_db"|"tag_legacy_placeholders"|"tag_legacy_placeholders --apply")
     echo "[entrypoint] maintenance: ${MAINTENANCE_COMMAND}"
     python manage.py ${MAINTENANCE_COMMAND} || echo "[entrypoint] maintenance command failed"
     ;;

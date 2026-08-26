@@ -17,3 +17,5 @@ whitenoise
 edge-tts
 imageio-ffmpeg
 anthropic==0.112.0
+azure-storage-blob==12.23.1
+azure-identity==1.19.0
