@@ -128,7 +128,7 @@ $(function () {
     var $popup = $(
         '<div id="anchor-comment-popup" style="display:none;">' +
         '  <div class="anchor-popup-quote"></div>' +
-        '  <textarea rows="3" placeholder="Comment on the selected text..."></textarea>' +
+        '  <textarea class="anchor-comment-text" rows="3" placeholder="Comment on the selected text..."></textarea>' +
         '  <button class="button tiny primary anchor-popup-post">Post</button> ' +
         '  <button class="button tiny secondary anchor-popup-cancel">Cancel</button>' +
         '</div>').appendTo('body');

@@ -62,7 +62,13 @@
             <td>{{ form.max_tossups }}</td>
             <td>{{ form.max_bonuses }}</td>
             {% if formset.can_delete %}
-                <td>{{ form.DELETE }}</td>
+                <td class="dist-del-cell">
+                    {% if form.entry_deletable %}
+                        {{ form.DELETE }}
+                    {% else %}
+                        <span class="dist-del-locked" title="{{ form.entry_blockers|join:' ' }}">In use</span>
+                    {% endif %}
+                </td>
             {% endif %}
         </tr>
         {% endfor %}
@@ -76,6 +82,13 @@
 </form>
 
 <style>
+/* A category can only be deleted by whoever made the distribution, and only
+   while nothing depends on it -- the FK cascade would otherwise take the
+   questions filed in it and every set's quota rows with it. */
+.dist-del-cell { text-align: center; }
+.dist-del-locked { font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.04em;
+    color: #8a8f9c; border: 1px dashed #d5d9e0; border-radius: 3px; padding: 1px 5px;
+    cursor: help; }
 .dist-visibility-field { margin: 0.6rem 0 1rem; }
 .dist-visibility-field label { font-weight: bold; display: inline-block; margin: 0; }
 .dist-visibility-field input[type="checkbox"] { margin: 0 0.35em 0 0; vertical-align: baseline; }

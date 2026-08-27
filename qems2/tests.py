@@ -1,3 +1,4 @@
+import io
 import json
 import re
 
@@ -6894,6 +6895,262 @@ class BonusDifficultyTagTests(TestCase):
         self.assertEqual(
             [bonus.part1_difficulty, bonus.part2_difficulty, bonus.part3_difficulty],
             ['', '', ''])
+
+
+class AnchoredCommentMentionTests(TestCase):
+    """An @mention typed into the anchored-comment popover on the edit pages
+    reaches the person named, the same as one typed into the thread below."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('acm_owner', password='pw', email='acm1@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.wu = User.objects.create_user('acm_writer', password='pw', email='acm2@t.com')
+        self.writer = Writer.objects.get(user=self.wu)
+        self.dist = Distribution.objects.create(name='acm dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='Science', subcategory='Biology',
+            min_tossups=1, min_bonuses=1)
+        self.qset = QuestionSet.objects.create(
+            name='ACM Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.qset.editor.add(self.owner)
+        self.qset.writer.add(self.writer)
+        self.tu = Tossup.objects.create(
+            question_set=self.qset, question_type=self.acf, category=self.de,
+            author=self.owner, tossup_text='This conformational constraint is caused by it.',
+            tossup_answer='_proline_',
+            created_date=timezone.now(), last_changed_date=timezone.now())
+        self.client.login(username='acm_owner', password='pw')
+
+    def _post(self, text):
+        return self.client.post('/add_anchored_comment/', {
+            'question_type': 'tossup', 'question_id': self.tu.id,
+            'comment_text': text, 'selected_text': 'This conformational constraint',
+            'prefix': '', 'suffix': ' is caused by it.'})
+
+    def test_a_mention_in_an_anchored_comment_reaches_the_writer(self):
+        self._post('@acm_writer is this right?')
+        from qems2.qsub.models import CommentMention
+        self.assertTrue(CommentMention.objects.filter(mentioned=self.writer).exists())
+
+    def test_the_anchored_comment_itself_is_still_recorded(self):
+        self._post('@acm_writer is this right?')
+        from django_comments.models import Comment
+        self.assertTrue(Comment.objects.filter(comment__contains='@acm_writer').exists())
+
+    def test_an_unknown_name_is_left_alone(self):
+        self._post('@nobody_here look at this')
+        from qems2.qsub.models import CommentMention
+        self.assertEqual(CommentMention.objects.count(), 0)
+
+    def test_the_edit_page_carries_the_mention_autocomplete_into_the_popover(self):
+        """The popover's box must match the autocomplete's selector list, or
+        typing @ there offers nothing."""
+        body = self.client.get('/edit_tossup/{0}/'.format(self.tu.id)).content.decode()
+        self.assertIn('anchored_comments.js', body)
+        self.assertIn('window.QEMS_QSET_ID', body)
+        js = io.open('qems2/qsub/static/js/anchored_comments.js', encoding='utf-8').read()
+        self.assertIn('class="anchor-comment-text"', js)
+        autocomplete = io.open('qems2/qsub/static/js/paste_convert.js', encoding='utf-8').read()
+        self.assertIn('textarea.anchor-comment-text', autocomplete)
+
+
+class DistributionEntryDeleteTests(TestCase):
+    """A category can be taken out of a distribution by whoever made it, but
+    only while nothing depends on it. Both FKs into DistributionEntry cascade,
+    so an unguarded delete would take the questions filed in that category and
+    every set's quota rows with it."""
+
+    def setUp(self):
+        from datetime import timedelta
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        self.acf_tu = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.mu = User.objects.create_user('ded_mine', password='pw', email='ded1@t.com')
+        self.mine = Writer.objects.get(user=self.mu)
+        self.ou = User.objects.create_user('ded_other', password='pw', email='ded2@t.com')
+        self.other = Writer.objects.get(user=self.ou)
+        old = timezone.now() - timedelta(days=5)
+        User.objects.filter(id__in=[self.mu.id, self.ou.id]).update(date_joined=old)
+
+        self.dist = Distribution.objects.create(name='ded dist', created_by=self.mine)
+        self.keep = DistributionEntry.objects.create(
+            distribution=self.dist, category='History', subcategory='American',
+            min_tossups=1, min_bonuses=1, max_tossups=2, max_bonuses=2)
+        self.doomed = DistributionEntry.objects.create(
+            distribution=self.dist, category='Trash', subcategory='',
+            min_tossups=1, min_bonuses=1, max_tossups=1, max_bonuses=1)
+        self.client.login(username='ded_mine', password='pw')
+
+    # --- helpers ----------------------------------------------------------
+
+    def _post(self, delete_ids=()):
+        """Submit the distribution form, ticking Delete on the given entries."""
+        entries = list(self.dist.distributionentry_set.order_by('id'))
+        data = {'name': self.dist.name,
+                'distentry-TOTAL_FORMS': str(len(entries)),
+                'distentry-INITIAL_FORMS': str(len(entries)),
+                'distentry-MIN_NUM_FORMS': '0', 'distentry-MAX_NUM_FORMS': '1000'}
+        for i, e in enumerate(entries):
+            data.update({
+                'distentry-{0}-entry_id'.format(i): str(e.id),
+                'distentry-{0}-category'.format(i): e.category,
+                'distentry-{0}-subcategory'.format(i): e.subcategory,
+                'distentry-{0}-min_tossups'.format(i): str(e.min_tossups or 0),
+                'distentry-{0}-max_tossups'.format(i): str(e.max_tossups or 0),
+                'distentry-{0}-min_bonuses'.format(i): str(e.min_bonuses or 0),
+                'distentry-{0}-max_bonuses'.format(i): str(e.max_bonuses or 0)})
+            if e.id in delete_ids:
+                data['distentry-{0}-DELETE'.format(i)] = 'on'
+        return self.client.post('/edit_distribution/{0}/'.format(self.dist.id), data)
+
+    def _set_for(self, owner, name='ded set'):
+        qset = QuestionSet.objects.create(
+            name=name, date=timezone.now(), host='h', address='', owner=owner,
+            num_packets=1, distribution=self.dist)
+        SetWideDistributionEntry.objects.create(
+            question_set=qset, dist_entry=self.doomed, num_tossups=1, num_bonuses=1)
+        return qset
+
+    def _tossup_in(self, qset, entry):
+        return Tossup.objects.create(
+            question_set=qset, question_type=self.acf_tu, category=entry,
+            author=qset.owner, tossup_text='A stem. (*) End.', tossup_answer='_Answer_',
+            created_date=timezone.now(), last_changed_date=timezone.now())
+
+    # --- the happy path ---------------------------------------------------
+
+    def test_the_creator_can_delete_an_unused_category(self):
+        self._post(delete_ids={self.doomed.id})
+        self.assertFalse(DistributionEntry.objects.filter(id=self.doomed.id).exists())
+        self.assertTrue(DistributionEntry.objects.filter(id=self.keep.id).exists())
+
+    def test_a_category_used_only_by_the_creators_own_set_can_go(self):
+        self._set_for(self.mine)
+        self._post(delete_ids={self.doomed.id})
+        self.assertFalse(DistributionEntry.objects.filter(id=self.doomed.id).exists())
+
+    def test_deleting_takes_the_quota_rows_of_the_creators_own_set(self):
+        qset = self._set_for(self.mine)
+        self._post(delete_ids={self.doomed.id})
+        self.assertFalse(SetWideDistributionEntry.objects
+                         .filter(question_set=qset, dist_entry_id=self.doomed.id).exists())
+
+    def test_a_co_owned_set_does_not_count_as_somebody_elses(self):
+        qset = self._set_for(self.other, name='ded co-owned')
+        qset.co_owners.add(self.mine)
+        self._post(delete_ids={self.doomed.id})
+        self.assertFalse(DistributionEntry.objects.filter(id=self.doomed.id).exists())
+
+    # --- what stops it ----------------------------------------------------
+
+    def test_another_persons_set_stops_the_delete(self):
+        self._set_for(self.other, name='ded theirs')
+        resp = self._post(delete_ids={self.doomed.id})
+        self.assertTrue(DistributionEntry.objects.filter(id=self.doomed.id).exists())
+        body = resp.content.decode()
+        self.assertIn('1 other set uses this distribution', body)
+        self.assertIn('ded theirs', body)
+
+    def test_questions_in_the_category_stop_the_delete(self):
+        qset = self._set_for(self.mine)
+        self._tossup_in(qset, self.doomed)
+        resp = self._post(delete_ids={self.doomed.id})
+        self.assertTrue(DistributionEntry.objects.filter(id=self.doomed.id).exists())
+        self.assertIn('1 question is filed in Trash', resp.content.decode())
+
+    def test_a_refused_delete_leaves_the_questions_alone(self):
+        qset = self._set_for(self.mine)
+        tu = self._tossup_in(qset, self.doomed)
+        self._post(delete_ids={self.doomed.id})
+        self.assertTrue(Tossup.objects.filter(id=tu.id).exists())
+
+    def test_questions_in_another_category_do_not_stop_it(self):
+        qset = self._set_for(self.mine)
+        self._tossup_in(qset, self.keep)
+        self._post(delete_ids={self.doomed.id})
+        self.assertFalse(DistributionEntry.objects.filter(id=self.doomed.id).exists())
+
+    def test_somebody_who_did_not_create_the_distribution_cannot_delete(self):
+        """Editing rights come with set membership; deleting does not."""
+        qset = self._set_for(self.other, name='ded theirs')
+        qset.editor.add(self.mine)
+        self.client.logout()
+        self.client.login(username='ded_other', password='pw')
+        self._post(delete_ids={self.doomed.id})
+        self.assertTrue(DistributionEntry.objects.filter(id=self.doomed.id).exists())
+
+    def test_the_rest_of_the_submission_still_saves_when_a_delete_is_refused(self):
+        self._set_for(self.other, name='ded theirs')
+        entries = list(self.dist.distributionentry_set.order_by('id'))
+        data = {'name': 'ded renamed',
+                'distentry-TOTAL_FORMS': str(len(entries)),
+                'distentry-INITIAL_FORMS': str(len(entries)),
+                'distentry-MIN_NUM_FORMS': '0', 'distentry-MAX_NUM_FORMS': '1000'}
+        for i, e in enumerate(entries):
+            data.update({
+                'distentry-{0}-entry_id'.format(i): str(e.id),
+                'distentry-{0}-category'.format(i): e.category,
+                'distentry-{0}-subcategory'.format(i): e.subcategory,
+                'distentry-{0}-min_tossups'.format(i): '2' if e.id == self.keep.id else str(e.min_tossups or 0),
+                'distentry-{0}-max_tossups'.format(i): str(e.max_tossups or 0),
+                'distentry-{0}-min_bonuses'.format(i): str(e.min_bonuses or 0),
+                'distentry-{0}-max_bonuses'.format(i): str(e.max_bonuses or 0)})
+            if e.id == self.doomed.id:
+                data['distentry-{0}-DELETE'.format(i)] = 'on'
+        self.client.post('/edit_distribution/{0}/'.format(self.dist.id), data)
+        self.dist.refresh_from_db()
+        self.keep.refresh_from_db()
+        self.assertEqual(self.dist.name, 'ded renamed')
+        self.assertEqual(self.keep.min_tossups, 2)
+        self.assertTrue(DistributionEntry.objects.filter(id=self.doomed.id).exists())
+
+    # --- what the page shows ----------------------------------------------
+
+    def test_the_page_offers_a_checkbox_for_a_free_category(self):
+        body = self.client.get('/edit_distribution/{0}/'.format(self.dist.id)).content.decode()
+        self.assertIn('distentry-1-DELETE', body)
+        self.assertNotIn('In use', body)
+
+    def test_the_page_says_why_instead_of_offering_a_dead_checkbox(self):
+        self._set_for(self.other, name='ded theirs')
+        body = self.client.get('/edit_distribution/{0}/'.format(self.dist.id)).content.decode()
+        self.assertIn('In use', body)
+        self.assertIn('other set uses this distribution', body)
+        self.assertNotIn('distentry-1-DELETE', body)
+
+    def test_a_non_creator_editing_the_distribution_gets_no_checkboxes(self):
+        qset = self._set_for(self.other, name='ded theirs')
+        qset.editor.add(self.mine)
+        self.client.logout()
+        self.client.login(username='ded_other', password='pw')
+        body = self.client.get('/edit_distribution/{0}/'.format(self.dist.id)).content.decode()
+        self.assertIn('Only the person who created this distribution', body)
+        self.assertNotIn('distentry-1-DELETE', body)
+
+    # --- the model's own account of it ------------------------------------
+
+    def test_deletion_blockers_is_empty_for_a_free_category(self):
+        self.assertEqual(self.doomed.deletion_blockers(self.mine), [])
+
+    def test_deletion_blockers_names_up_to_three_sets_then_counts(self):
+        for n in range(5):
+            QuestionSet.objects.create(
+                name='ded set {0}'.format(n), date=timezone.now(), host='h', address='',
+                owner=self.other, num_packets=1, distribution=self.dist)
+        blockers = self.doomed.deletion_blockers(self.mine)
+        self.assertIn('5 other sets use this distribution', blockers[0])
+        self.assertIn('and 2 more', blockers[0])
+
+    def test_a_distribution_with_no_creator_is_nobodys_to_delete_from(self):
+        """Distributions predating created_by are null; nobody owns them."""
+        self.dist.created_by = None
+        self.dist.save()
+        self.assertFalse(self.doomed.owned_by(self.mine))
+        self._post(delete_ids={self.doomed.id})
+        self.assertTrue(DistributionEntry.objects.filter(id=self.doomed.id).exists())
 
 
 class DistributionVisibilityTests(TestCase):

@@ -1265,7 +1265,10 @@ $(function () {
     (function () {
         var qsetId = window.QEMS_QSET_ID;
         if (!qsetId) { return; }
-        var SEL = 'textarea[name="comment"], textarea.reply-text, textarea.new-comment-text, textarea.edit-comment-text, .doc-comment-box textarea';
+        // Every box a comment can be written in, the anchored-comment popover
+        // (edit_tossup / edit_bonus) included -- an @mention has to work
+        // wherever the comment is typed, not only in the thread at the bottom.
+        var SEL = 'textarea[name="comment"], textarea.reply-text, textarea.new-comment-text, textarea.edit-comment-text, textarea.anchor-comment-text, .doc-comment-box textarea';
         var members = null, loading = false;
         var $dd = $('<div class="mention-dropdown" style="display:none;"></div>').appendTo('body');
         var activeTa = null, matchStart = -1;

@@ -860,6 +860,49 @@ class DistributionEntry(models.Model):
     def __str__(self):
         return '{0!s} - {1!s}'.format(self.category, self.subcategory)
 
+    def owned_by(self, writer):
+        """True if `writer` made the distribution this entry belongs to.
+
+        Deleting a category is the one thing on a distribution that cannot be
+        undone, so it stays with whoever created the distribution rather than
+        with everyone who may edit it (a distribution is shared, and a plain
+        writer on one set using it should not be able to take a category away
+        from the others).
+        """
+        return (writer is not None and self.distribution.created_by_id is not None
+                and self.distribution.created_by_id == writer.id)
+
+    def deletion_blockers(self, writer=None):
+        """Reasons this entry must not be deleted, as sentences for the person
+        trying to delete it. An empty list means it is safe to remove.
+
+        Both reasons exist because the delete cascades further than it looks:
+        Tossup.category and Bonus.category are CASCADE, so removing a category
+        takes every question filed under it with it, and SetWideDistributionEntry
+        is CASCADE too, so it takes the quota rows of every set on the
+        distribution. Sets owned by `writer` are not "somebody else's" and do
+        not block; questions block wherever they live, including in the
+        writer's own sets, since nothing here can bring them back.
+        """
+        blockers = []
+        others = self.distribution.questionset_set.all()
+        if writer is not None:
+            others = others.exclude(owner=writer).exclude(co_owners=writer)
+        others = others.distinct()
+        count = others.count()
+        if count:
+            names = ', '.join(sorted(qs.name or 'Untitled' for qs in others[:3]))
+            if count > 3:
+                names += ', and {0} more'.format(count - 3)
+            blockers.append('{0} other set{1} use{2} this distribution ({3}).'.format(
+                count, '' if count == 1 else 's', 's' if count == 1 else '', names))
+        questions = self.tossup_set.count() + self.bonus_set.count()
+        if questions:
+            blockers.append('{0} question{1} {2} filed in {3}; move them first.'.format(
+                questions, '' if questions == 1 else 's',
+                'is' if questions == 1 else 'are', self))
+        return blockers
+
 # TODO: This should be deleted eventually
 class TieBreakDistributionEntry(models.Model):
 

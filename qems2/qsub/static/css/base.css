@@ -667,7 +667,9 @@ html[data-theme="dark"] .visit-summary-cta { color: #7cc0f4; }
 /* @mention autocomplete dropdown for comment boxes */
 .mention-dropdown {
     position: absolute;
-    z-index: 1000;
+    /* Above #anchor-comment-popup (1000), which is appended to the body after
+       this dropdown and would otherwise paint over the suggestions. */
+    z-index: 1100;
     max-height: 240px;
     overflow-y: auto;
     background: #fff;

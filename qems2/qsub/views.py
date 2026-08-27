@@ -4071,6 +4071,52 @@ def _writer_distribution_ids(writer):
     return Distribution.member_ids(writer)
 
 
+def _entry_delete_refusal(entry, writer):
+    """Why `writer` may not delete this distribution entry, or None if they may.
+
+    The delete is a cascade (questions, and every set's quota rows), so this is
+    checked on the POST rather than only hidden in the page -- a stale form or a
+    hand-made request must not get past it.
+    """
+    if not entry.owned_by(writer):
+        creator = entry.distribution.created_by
+        who = creator.get_real_name().strip() if creator else ''
+        return '{0}: only {1} can delete a category from this distribution.'.format(
+            entry, who or 'whoever created it')
+    blockers = entry.deletion_blockers(writer)
+    if blockers:
+        return '{0}: {1}'.format(entry, ' '.join(blockers))
+    return None
+
+
+def _annotate_entry_delete_rights(formset, dist, writer):
+    """Tell each row of the distribution formset whether its entry can be
+    deleted, and if not why, so the page can show the reason instead of a
+    checkbox that would be refused."""
+    looked_up = {}
+    for form in formset.forms:
+        try:
+            entry_id = int(form['entry_id'].value())
+        except (TypeError, ValueError):
+            # A row that has never been saved: there is nothing to protect, and
+            # ticking Delete just drops it from the submission.
+            form.entry_deletable, form.entry_blockers = True, []
+            continue
+        if entry_id not in looked_up:
+            entry = (DistributionEntry.objects.filter(id=entry_id, distribution=dist).first()
+                     if dist is not None else None)
+            if entry is None:
+                looked_up[entry_id] = (True, [])
+            elif not entry.owned_by(writer):
+                looked_up[entry_id] = (
+                    False, ['Only the person who created this distribution can delete '
+                            'its categories.'])
+            else:
+                blockers = entry.deletion_blockers(writer)
+                looked_up[entry_id] = (not blockers, blockers)
+        form.entry_deletable, form.entry_blockers = looked_up[entry_id]
+
+
 @login_required
 def distributions (request):
     # Yours (editable) first; public ones from other people are listed
@@ -4263,14 +4309,19 @@ def edit_distribution(request, dist_id=None):
                         dist.save()
 
                         qsets = dist.questionset_set.all()
+                        delete_refusals = []
                         for form in formset:
                             if form.cleaned_data != {}:
                                 if form.cleaned_data['entry_id'] is not None:
                                     entry_id = int(form.cleaned_data['entry_id'])
                                     entry = DistributionEntry.objects.get(id=entry_id)
                                     if form.cleaned_data['DELETE']:
-                                        entry.delete()
-                                        entry = None
+                                        refusal = _entry_delete_refusal(entry, user)
+                                        if refusal:
+                                            delete_refusals.append(refusal)
+                                        else:
+                                            entry.delete()
+                                            entry = None
                                     else:
                                         entry.category = form.cleaned_data['category']
                                         entry.subcategory = form.cleaned_data['subcategory']
@@ -4307,6 +4358,11 @@ def edit_distribution(request, dist_id=None):
                                             new_set_wide_entry.num_bonuses = qset.num_packets * entry.min_bonuses
                                             new_set_wide_entry.save()
 
+                        if delete_refusals:
+                            message = ' '.join(
+                                ['Kept: {0}'.format(delete_refusals[0])] + delete_refusals[1:])
+                            message_class = 'alert-box warning'
+
                         # By creation order — the only order these have. Clones
                         # are written alphabetically, so they list that way.
                         entries = dist.distributionentry_set.order_by('id')
@@ -4326,6 +4382,10 @@ def edit_distribution(request, dist_id=None):
                         dist_form = DistributionForm(instance=dist)
                         formset = DistributionEntryFormset(data=request.POST, prefix='distentry')
 
+            _annotate_entry_delete_rights(
+                formset,
+                Distribution.objects.filter(id=dist_id).first() if dist_id else None,
+                user)
             return render(request, 'edit_distribution.html',
                                      {'form': dist_form,
                                       'formset': formset,
@@ -4351,6 +4411,10 @@ def edit_distribution(request, dist_id=None):
                 dist_form = DistributionForm()
                 formset = DistributionEntryFormset(prefix='distentry')
 
+            _annotate_entry_delete_rights(
+                formset,
+                Distribution.objects.filter(id=dist_id).first() if dist_id else None,
+                user)
             return render(request, 'edit_distribution.html',
                                      {'form': dist_form,
                                       'formset': formset,
@@ -4404,7 +4468,9 @@ def edit_tiebreak(request, dist_id=None):
                             entry_id = int(form.cleaned_data['entry_id'])
                             entry = DistributionEntry.objects.get(id=entry_id)
                             if form.cleaned_data['DELETE']:
-                                entry.delete()
+                                # Same cascade, same guard as the distribution page.
+                                if _entry_delete_refusal(entry, user) is None:
+                                    entry.delete()
                                 entry = None
                             else:
                                 entry.category = form.cleaned_data['category']

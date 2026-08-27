@@ -356,13 +356,21 @@ def packet_to_yapp(tossups, bonuses, version=1, name=None, interlace=False,
 
     ``tag_names`` maps ('tossup'|'bonus', id) to the category tag names to print
     after the metadata; leave it out for a set that keeps its tags to itself."""
-    tag_names = tag_names or {}
+
+    def _tags(kind, question):
+        # Everything else here works on anything shaped like a question, not
+        # only on a saved model, so an id is asked for only when there are tags
+        # to look up.
+        if not tag_names:
+            return None
+        return tag_names.get((kind, getattr(question, 'id', None)))
+
     packet = {
         'tossups': [tossup_to_yapp(t, t.question_number or i, version=version,
-                                   tags=tag_names.get(('tossup', t.id)))
+                                   tags=_tags('tossup', t))
                     for i, t in enumerate(tossups, 1)],
         'bonuses': [bonus_to_yapp(b, b.question_number or i, version=version,
-                                  tags=tag_names.get(('bonus', b.id)))
+                                  tags=_tags('bonus', b))
                     for i, b in enumerate(bonuses, 1)],
     }
     if name:
