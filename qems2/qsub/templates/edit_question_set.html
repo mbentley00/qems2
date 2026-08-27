@@ -149,8 +149,8 @@
                     <span>Enable superpowers (20-point <code>(+)</code> mark)
                         <small>Lets tossups carry a 20-point superpower mark before the 15-point power. Off: a stray (+) is plain text and never scores 20.</small></span></label>
                 <label class="set-info-check">{{ form.discord_show_first_clue }}
-                    <span>Discord copy leaves the first clue readable
-                        <small>With spoilers on, a tossup's first sentence and a bonus's leadin and first part (not its answer) are shown unspoilered. Off: everything is spoilered.</small></span></label>
+                    <span>Discord copy leaves a bonus's opening readable
+                        <small>A bonus's leadin and first part (not its answer) are shown unspoilered, so a playtest channel can see what it is about. Tossups are always fully spoilered: the playtest bot builds its clue list from the spoilered runs alone, so an unspoilered opening would be dropped from the question and skew every buzz position.</small></span></label>
                 <label class="set-info-check">{{ form.structured_answers }}
                     <span>Structured answer lines
                         <small>Records an answer as a primary answer plus its accepts and directed prompts, editable as fields. The printed line is unchanged, and answers typed or pasted as prose are parsed into structure as best they can be.</small></span></label>

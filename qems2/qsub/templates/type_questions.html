@@ -58,12 +58,13 @@
                         </button>
                         <div class="category-tree-children"{% if group.list|length > 5 %} style="display:none;"{% endif %}>
                         {% for dist_entry in group.list %}
-                            <button type="button" class="category-tag-btn" data-tag="{{'{'}}{{ dist_entry }}{{'}'}}" title="{{ dist_entry }}">{% if dist_entry.dist_entry.subcategory %}{{ dist_entry.dist_entry.subcategory }}{% else %}(general){% endif %}</button>
+                            <button type="button" class="category-tag-btn" data-tag="{{'{'}}{{ dist_entry }}{{'}'}}" data-entry-id="{{ dist_entry.dist_entry.id }}" title="{{ dist_entry }}">{% if dist_entry.dist_entry.subcategory %}{{ dist_entry.dist_entry.subcategory }}{% else %}(general){% endif %}</button>
                         {% endfor %}
                         </div>
                     </div>
                 {% endfor %}
                 </div>
+                <div id="tq-category-tags" class="tq-cat-tags" style="display:none;"></div>
             </div>
             {% endif %}
             <input type="submit" class="button primary right" value="Submit">
@@ -102,6 +103,9 @@ $(function () {
     $(document).on('click', '.category-tag-btn', function (e) {
         e.preventDefault();
         var tag = $(this).attr('data-tag');
+        // Before the rich-editor branch below, which returns early when it has
+        // handled the insertion itself.
+        showTagsFor($(this).attr('data-entry-id'), $(this).attr('title'));
 
         // Rich editor handles its own tag insertion
         if (window.QemsRichEditor && window.QemsRichEditor.insertCategoryTag('id_questions', tag)) {
@@ -150,6 +154,25 @@ $(function () {
 
         textarea.focus();
     });
+
+    // What tags the category just inserted has. They are ticked on the preview
+    // page, where each question's category is settled -- here they are shown so
+    // you know, while writing, what this category is asking for.
+    var tagReq = null;
+    function showTagsFor(entryId, path) {
+        var $slot = $('#tq-category-tags');
+        if (!$slot.length || !entryId) { return; }
+        if (tagReq) { tagReq.abort(); }
+        tagReq = $.getJSON('/tags_for_category/{{ qset.id }}/', {category: entryId}, function (data) {
+            var html = (data && data.html) || '';
+            if (!$.trim(html)) { $slot.hide().empty(); return; }
+            $slot.html('<div class="tq-cat-tags-head">Tags available in ' + $('<i>').text(path).html() +
+                       ' &mdash; tick them on the preview after Submit</div>' + html).show();
+            // Reference only at this stage: the questions do not exist yet, so
+            // a box here would have nothing to attach to.
+            $slot.find('input[type=checkbox]').prop('disabled', true);
+        });
+    }
 });
 </script>
 
@@ -237,3 +260,12 @@ html[data-theme="dark"] .tq-counts .tq-over { color: #f08c8c; }
 </style>
 
 {% endblock %}
+
+<style>
+.tq-cat-tags { margin: 8px 0 0; border-top: 1px solid var(--qx-border, #e0e4ea); padding-top: 6px; }
+.tq-cat-tags-head { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--qx-muted, #8a8f9c); margin-bottom: 4px; }
+/* Shown for reference here; the panel's own styles come with the partial. */
+.tq-cat-tags .qtags-panel { margin: 0; background: transparent; border: none; box-shadow: none; padding: 0; }
+.tq-cat-tags .qtags-item { opacity: 0.85; }
+</style>

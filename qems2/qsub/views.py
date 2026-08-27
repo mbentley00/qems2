@@ -2462,6 +2462,9 @@ def add_tossups(request, qset_id, packet_id=None):
                         tossup.question_number = _next_question_number(Tossup, packet_id)
 
                     tossup.save_question(edit_type=QUESTION_CREATE, changer=user)
+                    # Tags ticked on the add page, so a question arrives tagged
+                    # rather than needing a second visit to its edit page.
+                    save_tag_selection(request, qset, tossup, tossup.category, is_tossup=True)
                     cache.clear()
                     # Straight to the new question's edit page, where a one-time
                     # panel reports its style and repeat checks (?new=1).
@@ -2578,6 +2581,7 @@ def add_bonuses(request, qset_id, bonus_type, packet_id=None):
                 try:
                     bonus.is_valid()
                     bonus.save_question(edit_type=QUESTION_CREATE, changer=user)
+                    save_tag_selection(request, qset, bonus, bonus.category, is_tossup=False)
                     cache.clear()
                     # As with tossups: land on the new question with its checks.
                     return HttpResponseRedirect('/edit_bonus/{0}/?new=1'.format(bonus.id))
@@ -4610,6 +4614,12 @@ def type_questions(request, qset_id=None):
                 # record structure
                 _attach_structure_previews(qset, tossups, bonuses)
 
+                # ...and which category tags each question could be given, so
+                # they can be ticked now instead of on a second pass through
+                # every question's edit page.
+                attach_tag_choices(qset, tossups)
+                attach_tag_choices(qset, bonuses)
+
                 return render(request, 'type_questions_preview.html',
                                          {'tossups': tossups,
                                           'bonuses': bonuses,
@@ -4813,6 +4823,8 @@ def complete_upload(request):
             new_tossup.edited = False
 
             new_tossup.save_question(edit_type=QUESTION_CREATE, changer=user)
+            _apply_typed_tags(request, qset, new_tossup,
+                              'tossup-tags-{0}'.format(tu_num), is_tossup=True)
             new_tossups.append(new_tossup)
 
         for bs_num in range(num_bonuses):
@@ -4857,6 +4869,8 @@ def complete_upload(request):
                     break
 
             new_bonus.save_question(edit_type=QUESTION_CREATE, changer=user)
+            _apply_typed_tags(request, qset, new_bonus,
+                              'bonus-tags-{0}'.format(bs_num), is_tossup=False)
             new_bonuses.append(new_bonus)
 
         cache.clear()
@@ -10083,6 +10097,40 @@ def get_applicable_tags(qset, dist_entry):
             if _tag_matches_path(tag.category_path, path)]
 
 @login_required
+def tags_for_category(request, qset_id):
+    """The tag checkboxes for one category, as the HTML the edit pages use.
+
+    The add-a-question pages don't know the category when they are built -- it
+    is chosen on the page -- so they fetch this when the picker changes. Same
+    partial as the edit pages, so a tag looks and posts the same wherever it is
+    ticked.
+    """
+    from django.template.loader import render_to_string
+    user = request.user.writer
+    try:
+        qset = QuestionSet.objects.get(id=int(qset_id))
+    except (ValueError, QuestionSet.DoesNotExist):
+        return HttpResponse(json.dumps({'html': ''}), content_type='application/json')
+    if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+        return HttpResponse(json.dumps({'html': ''}), content_type='application/json')
+
+    entry = None
+    raw = (request.GET.get('category') or '').strip()
+    if raw.isdigit():
+        # Only a category of this set's own distribution: the id arrives from a
+        # form field, so it is the caller's word for it, not to be trusted.
+        entry = DistributionEntry.objects.filter(
+            id=int(raw), distribution_id=qset.distribution_id).first()
+    if entry is None:
+        return HttpResponse(json.dumps({'html': ''}), content_type='application/json')
+
+    html = render_to_string('question_tags.html',
+                            {'available_tags': build_tag_checkboxes(qset, None, entry)},
+                            request=request)
+    return HttpResponse(json.dumps({'html': html}), content_type='application/json')
+
+
+@login_required
 def export_category_tags(request, qset_id):
     """The set's category tags as a .csv, for editing or for another set."""
     from . import tag_importer
@@ -10254,6 +10302,27 @@ def carry_tags_to_set(question, dest_qset):
     question.category_tags.set(keep)
 
 
+def attach_tag_choices(qset, questions):
+    """Give each parsed-but-unsaved question the tag checkboxes for its own
+    category, so the Type Questions preview can offer them.
+
+    The preview is the last point before the questions exist, and it is the one
+    place in that flow where each question's category is already known -- which
+    is what the checkboxes hang off. Anything ticked here is applied as the
+    question is created, so a typed batch arrives tagged.
+    """
+    by_path = {}
+    for q in questions:
+        entry = getattr(q, 'category', None)
+        if entry is None:
+            q.tag_choices = []
+            continue
+        key = str(entry)
+        if key not in by_path:
+            by_path[key] = build_tag_checkboxes(qset, None, entry)
+        q.tag_choices = by_path[key]
+
+
 def build_tag_checkboxes(qset, question, dist_entry):
     """The tag checkboxes on the question edit pages, as sections.
 
@@ -10311,6 +10380,22 @@ def build_tag_checkboxes(qset, question, dist_entry):
             'groups': [{'name': k, 'label': k or 'Other', 'items': by_group[k]} for k in order],
         })
     return sections
+
+def _apply_typed_tags(request, qset, question, field, is_tossup):
+    """Apply the tags ticked for one question on the Type Questions preview.
+
+    Each question has its own field there (they have different categories), and
+    only tags that actually apply to the category it was filed under are
+    honoured -- the ids come from a form, so they are checked rather than
+    trusted.
+    """
+    wanted = {int(v) for v in request.POST.getlist(field) if v.isdigit()}
+    if not wanted:
+        return
+    for tag in get_applicable_tags(qset, question.category):
+        if tag.id in wanted:
+            (tag.tossups if is_tossup else tag.bonuses).add(question)
+
 
 def save_tag_selection(request, qset, question, dist_entry, is_tossup):
     """Apply the 'category_tags' checkbox selection from a question edit POST."""

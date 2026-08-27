@@ -6897,6 +6897,151 @@ class BonusDifficultyTagTests(TestCase):
             ['', '', ''])
 
 
+class TagsWhileAddingQuestionsTests(TestCase):
+    """A question can be tagged as it is written, rather than by going back
+    through its edit page afterwards: the add pages fetch the chosen category's
+    tags, and the Type Questions preview offers them per question."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        self.acf_tu = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.acf_bn = QuestionType.objects.get(question_type=ACF_STYLE_BONUS)
+        self.ou = User.objects.create_user('twa_owner', password='pw', email='twa@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.su = User.objects.create_user('twa_stranger', password='pw', email='twas@t.com')
+        self.dist = Distribution.objects.create(
+            name='twa dist', acf_tossup_per_period_count=1, acf_bonus_per_period_count=1)
+        self.lit = DistributionEntry.objects.create(
+            distribution=self.dist, category='Literature', subcategory='World',
+            min_tossups=1, min_bonuses=1, max_tossups=2, max_bonuses=2)
+        self.sci = DistributionEntry.objects.create(
+            distribution=self.dist, category='Science', subcategory='Biology',
+            min_tossups=1, min_bonuses=1, max_tossups=2, max_bonuses=2)
+        self.qset = QuestionSet.objects.create(
+            name='TWA Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.qset.editor.add(self.owner)
+        for de in (self.lit, self.sci):
+            SetWideDistributionEntry.objects.create(
+                question_set=self.qset, dist_entry=de, num_tossups=2, num_bonuses=2)
+        self.tag = CategoryTag.objects.create(
+            question_set=self.qset, category_path='Literature - World',
+            name='African Literature', num_tossups=2)
+        self.other_tag = CategoryTag.objects.create(
+            question_set=self.qset, category_path='Science - Biology', name='Genetics')
+        self.client.login(username='twa_owner', password='pw')
+
+    # --- the endpoint the add pages call ----------------------------------
+
+    def test_the_endpoint_returns_the_categorys_tags(self):
+        resp = self.client.get('/tags_for_category/{0}/'.format(self.qset.id),
+                               {'category': self.lit.id})
+        html = json.loads(resp.content.decode())['html']
+        self.assertIn('African Literature', html)
+        self.assertNotIn('Genetics', html)
+        self.assertIn('name="category_tags"', html)
+
+    def test_a_category_with_no_tags_returns_nothing(self):
+        DistributionEntry.objects.filter(id=self.other_tag.id).delete()
+        self.other_tag.delete()
+        resp = self.client.get('/tags_for_category/{0}/'.format(self.qset.id),
+                               {'category': self.sci.id})
+        self.assertEqual(json.loads(resp.content.decode())['html'].strip(), '')
+
+    def test_a_category_from_another_distribution_is_refused(self):
+        other_dist = Distribution.objects.create(name='twa other')
+        theirs = DistributionEntry.objects.create(
+            distribution=other_dist, category='History', subcategory='World')
+        resp = self.client.get('/tags_for_category/{0}/'.format(self.qset.id),
+                               {'category': theirs.id})
+        self.assertEqual(json.loads(resp.content.decode())['html'].strip(), '')
+
+    def test_somebody_outside_the_set_gets_nothing(self):
+        self.client.logout()
+        self.client.login(username='twa_stranger', password='pw')
+        resp = self.client.get('/tags_for_category/{0}/'.format(self.qset.id),
+                               {'category': self.lit.id})
+        self.assertEqual(json.loads(resp.content.decode())['html'].strip(), '')
+
+    # --- the add pages ----------------------------------------------------
+
+    def test_the_add_tossup_page_carries_the_panel(self):
+        body = self.client.get('/add_tossups/{0}/'.format(self.qset.id)).content.decode()
+        self.assertIn('category-tag-checkboxes', body)
+        self.assertIn('/tags_for_category/{0}/'.format(self.qset.id), body)
+
+    def test_the_add_bonus_page_carries_the_panel(self):
+        body = self.client.get('/add_bonuses/{0}/ACF-style bonus/'.format(
+            self.qset.id)).content.decode()
+        self.assertIn('category-tag-checkboxes', body)
+
+    def test_a_tossup_added_with_a_tag_ticked_arrives_tagged(self):
+        self.client.post('/add_tossups/{0}/'.format(self.qset.id), {
+            'tossup_text': 'A stem clue about a novel. (*) The end.',
+            'tossup_answer': '_Things Fall Apart_',
+            'category': self.lit.id, 'question_type': self.acf_tu.id,
+            'author': self.owner.id, 'packet': '',
+            'category_tags': [str(self.tag.id)]})
+        tu = Tossup.objects.get(question_set=self.qset)
+        self.assertIn(tu, self.tag.tossups.all())
+
+    def test_a_tossup_added_without_ticking_anything_is_untagged(self):
+        self.client.post('/add_tossups/{0}/'.format(self.qset.id), {
+            'tossup_text': 'A stem clue about a novel. (*) The end.',
+            'tossup_answer': '_Things Fall Apart_',
+            'category': self.lit.id, 'question_type': self.acf_tu.id,
+            'author': self.owner.id, 'packet': ''})
+        tu = Tossup.objects.get(question_set=self.qset)
+        self.assertEqual(tu.category_tags.count(), 0)
+
+    # --- typed questions --------------------------------------------------
+
+    def _preview(self):
+        return self.client.post('/type_questions/{0}/'.format(self.qset.id), {
+            'qset_id': self.qset.id,
+            'questions': ('A typed stem clue. (*) The end.\n'
+                          'ANSWER: _Things Fall Apart_ {Literature - World}\n')})
+
+    def test_the_preview_offers_the_categorys_tags_per_question(self):
+        body = self._preview().content.decode()
+        self.assertIn('African Literature', body)
+        self.assertIn('name="tossup-tags-0"', body)
+        self.assertNotIn('name="tossup-tags-1"', body)
+
+    def test_the_preview_does_not_offer_another_categorys_tags(self):
+        self.assertNotIn('Genetics', self._preview().content.decode())
+
+    def test_a_typed_question_arrives_tagged_when_ticked(self):
+        self.client.post('/complete_upload/', {
+            'qset-id': self.qset.id, 'num-tossups': '1', 'num-bonuses': '0',
+            'tossup-text-0': 'A typed stem clue. (*) The end.',
+            'tossup-answer-0': '_Things Fall Apart_',
+            'tossup-category-0': 'Literature - World',
+            'tossup-type-0': str(self.acf_tu),
+            'tossup-tags-0': str(self.tag.id)})
+        tu = Tossup.objects.get(question_set=self.qset)
+        self.assertIn(tu, self.tag.tossups.all())
+
+    def test_a_tag_from_the_wrong_category_is_not_applied(self):
+        """The ids come off a form, so they are checked against the category
+        the question was actually filed under."""
+        self.client.post('/complete_upload/', {
+            'qset-id': self.qset.id, 'num-tossups': '1', 'num-bonuses': '0',
+            'tossup-text-0': 'A typed stem clue. (*) The end.',
+            'tossup-answer-0': '_Things Fall Apart_',
+            'tossup-category-0': 'Literature - World',
+            'tossup-type-0': str(self.acf_tu),
+            'tossup-tags-0': str(self.other_tag.id)})
+        tu = Tossup.objects.get(question_set=self.qset)
+        self.assertEqual(tu.category_tags.count(), 0)
+
+    def test_the_entry_page_can_ask_for_a_categorys_tags(self):
+        body = self.client.get('/type_questions/{0}/'.format(self.qset.id)).content.decode()
+        self.assertIn('data-entry-id="{0}"'.format(self.lit.id), body)
+        self.assertIn('tq-category-tags', body)
+
+
 class AnchoredCommentMentionTests(TestCase):
     """An @mention typed into the anchored-comment popover on the edit pages
     reaches the person named, the same as one typed into the thread below."""

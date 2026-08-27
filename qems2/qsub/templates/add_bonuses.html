@@ -105,6 +105,31 @@
             <div class="qmeta-field"><label for="{{ form.category.id_for_label }}">Category</label>{{ form.category }}{{ form.category.errors }}</div>
             <div class="qmeta-field"><label for="{{ form.author.id_for_label }}">Author</label>{{ form.author }}{{ form.author.errors }}</div>
         </div>
+<div id="category-tag-checkboxes"></div>
+<script>
+// The category is chosen on this page, so the tags that go with it can only be
+// fetched once it is. Same partial as the edit pages, so what is ticked here
+// posts as category_tags and is saved by the same code.
+$(function () {
+    var $slot = $('#category-tag-checkboxes');
+    var $picker = $('#{{ form.category.auto_id }}');
+    if (!$slot.length || !$picker.length) { return; }
+    var pending = null;
+    function load() {
+        var id = $picker.val();
+        if (!id) { $slot.empty(); return; }
+        if (pending) { pending.abort(); }
+        pending = $.getJSON('/tags_for_category/{{ qset.id }}/', {category: id}, function (data) {
+            $slot.html((data && data.html) || '');
+        });
+    }
+    $picker.on('change', load);
+    // A category already chosen when the page opens (re-shown after an error,
+    // or an initial category) should show its tags straight away.
+    if ($picker.val()) { load(); }
+});
+</script>
+
         <div class="row" style="display:none">
             <div class="small-6 columns">
                 <div class="row collapse">

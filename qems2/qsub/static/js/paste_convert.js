@@ -701,8 +701,13 @@ $(function () {
     }
 
     // Whether the set wants a question's opening left readable in a spoilered
-    // copy: its first sentence, or a bonus's leadin and first part. The page
-    // sets the flag from the set's settings; absent, everything is spoilered.
+    // copy. Bonuses only, and only the leadin and first part: the playtest bot
+    // builds a tossup's clue list out of the ||spoilered|| runs alone, so an
+    // unspoilered opening sentence is not merely unhidden there -- it is
+    // dropped, which shifts every buzz index and inflates the buzz percentages
+    // computed from the remaining text. A tossup is therefore always fully
+    // spoilered regardless of the setting. The page sets the flag from the
+    // set's settings; absent, everything is spoilered.
     // The author select's label is "Real Name (username)"; the Discord footer
     // wants the name alone. A bare username (no real name set) has no
     // parenthetical and passes through.
@@ -715,6 +720,10 @@ $(function () {
     }
     function spoil(text, isFirst) {
         return (isFirst && showFirstClue()) ? text : '||' + text + '||';
+    }
+    // Tossups take this one instead: no opening is ever left readable.
+    function spoilAlways(text) {
+        return '||' + text + '||';
     }
 
     function formatTossupForDiscord(text, answer, author, category, qid) {
@@ -735,22 +744,21 @@ $(function () {
             var beforeSentences = splitIntoSentences(qemsToDiscordMarkup(beforePower));
             var afterSentences = splitIntoSentences(qemsToDiscordMarkup(afterPower));
 
-            // Pre-power: bold + spoiler (the first sentence readable when the
-            // set asks for it)
-            result = '**' + beforeSentences.map(function (s, i) {
-                return spoil(s, i === 0);
+            // Pre-power: bold + spoiler
+            result = '**' + beforeSentences.map(function (s) {
+                return spoilAlways(s);
             }).join(' ') + '**';
 
             // Post-power: spoiler only
             if (afterSentences.length > 0) {
-                result += ' ' + afterSentences.map(function (s, i) {
-                    return spoil(s, beforeSentences.length === 0 && i === 0);
+                result += ' ' + afterSentences.map(function (s) {
+                    return spoilAlways(s);
                 }).join(' ');
             }
         } else {
             var sentences = splitIntoSentences(qemsToDiscordMarkup(text));
-            result = sentences.map(function (s, i) {
-                return spoil(s, i === 0);
+            result = sentences.map(function (s) {
+                return spoilAlways(s);
             }).join(' ');
         }
 
@@ -772,7 +780,8 @@ $(function () {
     function formatBonusForDiscord(leadin, parts, author, category, qid) {
         var info = { author: authorDisplayName(author), category: category || '' };
         // The leadin and first part are the "first clue" of a bonus; the
-        // first answer never is.
+        // first answer never is. Unlike a tossup, a bonus is read whole, so
+        // the bot has no clue list to lose text from.
         var leadinText = qemsToDiscordMarkup((leadin || '').trim());
         var result = (leadinText ? spoil(leadinText, true) : '') + '\n';
 

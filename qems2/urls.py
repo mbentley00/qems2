@@ -106,6 +106,7 @@ urlpatterns = [
     re_path(r'^add_writer/(?P<qset_id>[0-9]+)/$', add_writer),
     re_path(r'^clone_distribution/(?P<dist_id>[0-9]+)/$', clone_distribution),
     re_path(r'^import_distribution/$', import_distribution),
+    re_path(r'^tags_for_category/(?P<qset_id>[0-9]+)/$', tags_for_category),
     re_path(r'^export_category_tags/(?P<qset_id>[0-9]+)/$', export_category_tags),
     re_path(r'^import_category_tags/(?P<qset_id>[0-9]+)/$', import_category_tags),
     re_path(r'^distribution_template/(?P<fmt>xlsx|csv)/$', distribution_template),

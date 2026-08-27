@@ -202,9 +202,16 @@ class QuestionSet (models.Model):
     enable_superpower = models.BooleanField(default=False)
 
     # "Copy for Discord" spoilers every sentence of a tossup and every line of a
-    # bonus. With this on, the opening -- a tossup's first sentence, a bonus's
-    # leadin and first part (never its answer) -- is left readable, the way a
-    # playtest channel shows what a question is about before anyone buzzes.
+    # bonus. With this on, a bonus's opening -- its leadin and first part, never
+    # its answer -- is left readable, the way a playtest channel shows what a
+    # question is about before anyone buzzes.
+    #
+    # Bonuses only. It once did the same to a tossup's first sentence, but the
+    # playtest bot (ani-per/playtesting-bot) builds a tossup's clue list out of
+    # the ||spoilered|| runs alone, so unspoilered text is not read as an
+    # unhidden clue -- it is dropped. That shifted every buzz index by one and
+    # inflated the buzz percentages, which are computed over the clues it did
+    # see. Tossups are fully spoilered until the bot handles it.
     discord_show_first_clue = models.BooleanField(default=False)
 
     # When true, answer lines are recorded as structure - a required primary

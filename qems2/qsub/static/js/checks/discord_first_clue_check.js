@@ -1,5 +1,7 @@
 // Run the Discord formatters under node in both modes of the set option
-// "Discord copy leaves the first clue readable".
+// "Discord copy leaves a bonus's opening readable". The option is bonus-only:
+// an unspoilered tossup sentence is dropped by the playtest bot's clue
+// splitter, so tossups stay fully spoilered either way.
 //   node qems2/qsub/static/js/checks/discord_first_clue_check.js qems2/qsub/static/js/paste_convert.js
 const fs = require('fs');
 const src = fs.readFileSync(process.argv[2], 'utf8');
@@ -30,11 +32,13 @@ check('default: bonus leadin and part 1 spoilered, no difficulty in the label', 
 
 global.window.qemsDiscordShowFirst = true;
 t = D.tossup(tu, '_X_', 'me', 'Cat', 1);
-check('on: first tossup sentence readable, rest spoilered', t.startsWith('**First clue here. ||Second clue (*)||** ||with more.||') && t.includes('||Third clue.||'));
+check('on: tossups stay fully spoilered (the bot drops unspoilered clues)',
+      t.startsWith('**||First clue here.|| ||Second clue (*)||** ||with more.||') && t.includes('||Third clue.||'));
 b = D.bonus('Lead in.', parts, 'me', 'Cat', 2);
 check('on: leadin and part 1 readable, answer 1 and later parts spoilered',
       b.startsWith('Lead in.\n[10] Part one.\nANSWER: ||') && b.includes('[10] ||Part two.||'));
 t = D.tossup('No power mark at all. Next one.', '_X_', '', '', 0);
-check('on: unpowered tossup keeps first sentence readable', t.startsWith('No power mark at all. ||Next one.||'));
+check('on: an unpowered tossup is spoilered too',
+      t.startsWith('||No power mark at all.|| ||Next one.||'));
 console.log(ok ? 'ALL PASS' : 'SOME FAILED');
 process.exit(ok ? 0 : 1);
