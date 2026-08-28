@@ -161,7 +161,7 @@
                     <td>{% if tossup.edited_date %} {{ tossup.edited_date|date:"m/d/y h:i" }} {% endif %}</td>
                     <td>
                         {% get_comment_list for tossup as comment_list %}
-                        {% include "_comment_cell.html" with comments=comment_list more_url="/edit_tossup/{{ tossup.id }}/" %}
+                        {% include "_comment_cell.html" with comments=comment_list kind="tossup" question=tossup %}
                     </td>
                     <td>{{ tossup|tossup_last_comment_date|date:"m/d/y h:i" }}</td>
                 </tr>
@@ -215,7 +215,7 @@
                     <td>{% if bonus.edited_date %} {{ bonus.edited_date|date:"m/d/y h:i" }} {% endif %}</td>
                     <td>
                         {% get_comment_list for bonus as comment_list %}
-                        {% include "_comment_cell.html" with comments=comment_list more_url="/edit_bonus/{{ bonus.id }}/" %}
+                        {% include "_comment_cell.html" with comments=comment_list kind="bonus" question=bonus %}
                     </td>
                     <td>{{ bonus|bonus_last_comment_date|date:"m/d/y h:i" }}</td>
                 </tr>

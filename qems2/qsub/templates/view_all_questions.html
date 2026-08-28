@@ -50,7 +50,7 @@
                     <td>{% if tossup.edited_date %} {{ tossup.edited_date|to_short_datetime }} {% endif %}</td>
                     <td>{% if tossup.proofread_date %} {{ tossup.proofread_date|to_short_datetime }} {% endif %}</td>
                     <td>
-                    {% include "_comment_cell.html" with comments=tossup.cached_comments more_url="/edit_tossup/{{ tossup.id }}/" %}
+                    {% include "_comment_cell.html" with comments=tossup.cached_comments kind="tossup" question=tossup %}
                     </td>
                     <td>{{ tossup|tossup_last_comment_date|to_short_datetime }}</td>
                 </tr>
@@ -95,7 +95,7 @@
                     <td>{% if bonus.edited_date %} {{ bonus.edited_date|to_short_datetime }} {% endif %}</td>
                     <td>{% if bonus.proofread_date %} {{ bonus.proofread_date|to_short_datetime }} {% endif %}</td>
                     <td>
-                    {% include "_comment_cell.html" with comments=bonus.cached_comments more_url="/edit_bonus/{{ bonus.id }}/" %}
+                    {% include "_comment_cell.html" with comments=bonus.cached_comments kind="bonus" question=bonus %}
                     </td>
                     <td>{{ bonus|bonus_last_comment_date|to_short_datetime }}</td>
                 </tr>
