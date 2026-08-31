@@ -403,10 +403,16 @@ ul.button-group.home-actions { display: grid; grid-template-columns: repeat(auto
 ul.button-group.home-actions::before, ul.button-group.home-actions::after { content: none; }
 ul.button-group.home-actions > li { display: block; margin: 0; float: none; }
 /* Fill the cell (equal heights across the row) and center the label, so a
-   long label wrapping to two lines doesn't make one button taller. */
+   long label wrapping to two lines doesn't make one button taller.
+   The gap is what separates the icon from its label: a flex container makes
+   the label an anonymous flex item and strips the leading whitespace of the
+   " Label" text node, so the space typed in the markup never survives. */
 ul.button-group.home-actions > li > .button { display: flex; align-items: center; justify-content: center;
-    text-align: center; width: 100%; height: 100%; margin: 0; border-left: 0; border-radius: 8px;
+    gap: 0.5em; text-align: center; width: 100%; height: 100%; margin: 0; border-left: 0; border-radius: 8px;
     padding: 0.9rem 1rem; }
+/* The icon keeps its own width whatever the label does — a wrapping label
+   must not squeeze it out of shape. */
+ul.button-group.home-actions > li > .button > .fa { flex: 0 0 auto; }
 /* The parenthesized guide itself, ("KAM-uh-flahzh"): a gray aside, never bold.
    The renderer emits it as <strong class="pronunciation-guide"> even inside a
    bolded power region, so font-weight has to be reset here — otherwise an
