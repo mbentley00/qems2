@@ -6330,6 +6330,166 @@ class PronunciationPossessiveTests(TestCase):
             'Question', 'Denis \\PDiderot\\P ("DID-er-OW") wrote.', 'tossup_text'), [])
 
 
+class InlineDocumentEditTests(TestCase):
+    """Editing questions in place in the document view: /inline_save_question/
+    commits one question's prose, and refuses a write whose baseline is stale
+    so the editor can be warned instead of silently overwriting someone."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        self.acf_tu = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.acf_bn = QuestionType.objects.get(question_type=ACF_STYLE_BONUS)
+        self.ou = User.objects.create_user('ide_owner', password='pw', email='ide@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.wu = User.objects.create_user('ide_writer', password='pw', email='idew@t.com')
+        self.writer = Writer.objects.get(user=self.wu)
+        self.dist = Distribution.objects.create(name='ide dist')
+        self.qset = QuestionSet.objects.create(
+            name='IDE Set', date=timezone.now(), host='', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist, max_acf_tossup_length=800)
+        self.qset.writer.add(self.writer)
+        self.packet = Packet.objects.create(question_set=self.qset, packet_name='Packet 01',
+                                            created_by=self.owner)
+        self.tu = Tossup.objects.create(
+            author=self.writer, question_set=self.qset, packet=self.packet,
+            question_type=self.acf_tu, tossup_text='Old stem here.',
+            tossup_answer='_France_', created_date=datetime.now(),
+            last_changed_date=datetime.now(), question_number=1)
+        self.bn = Bonus.objects.create(
+            author=self.writer, question_set=self.qset, packet=self.packet,
+            question_type=self.acf_bn, leadin='Old leadin.',
+            part1_text='P1', part1_answer='_A1_', part2_text='P2', part2_answer='_A2_',
+            part3_text='P3', part3_answer='_A3_', created_date=datetime.now(),
+            last_changed_date=datetime.now(), question_number=1)
+        self.client.login(username='ide_owner', password='pw')
+
+    def _revision(self, q):
+        q.refresh_from_db()
+        return q.last_changed_date.isoformat()
+
+    def _save(self, **extra):
+        data = {'question_type': 'tossup', 'question_id': self.tu.id,
+                'baseline': self._revision(self.tu)}
+        data.update(extra)
+        return self.client.post('/inline_save_question/', data)
+
+    # --- committing -------------------------------------------------------
+
+    def test_commit_saves_the_question_and_returns_it_rendered(self):
+        resp = self._save(tossup_text='New stem here.', tossup_answer='_France_')
+        data = json.loads(resp.content)
+        self.assertTrue(data['ok'])
+        self.tu.refresh_from_db()
+        self.assertEqual(self.tu.tossup_text, 'New stem here.')
+        self.assertIn('New stem here.', data['html'])
+        self.assertEqual(data['fields']['tossup_text'], 'New stem here.')
+        # The revision moves on, so the next commit from the same editor works.
+        self.assertNotEqual(data['revision'], '')
+        self.assertEqual(data['revision'], self._revision(self.tu))
+        self.assertEqual(data['length'], self.tu.character_count())
+        self.assertEqual(data['max_length'], 800)
+        # A history row is what makes the change reviewable afterwards.
+        self.assertTrue(TossupHistory.objects.filter(
+            question_history_id=self.tu.question_history_id,
+            tossup_text='New stem here.').exists())
+
+    def test_commit_saves_a_bonus_part(self):
+        resp = self.client.post('/inline_save_question/', {
+            'question_type': 'bonus', 'question_id': self.bn.id,
+            'baseline': self._revision(self.bn),
+            'leadin': 'New leadin.', 'part1_text': 'P1', 'part1_answer': '_A1_',
+            'part2_text': 'P2', 'part2_answer': '_A2_',
+            'part3_text': 'P3', 'part3_answer': '_A3_'})
+        self.assertTrue(json.loads(resp.content)['ok'])
+        self.bn.refresh_from_db()
+        self.assertEqual(self.bn.leadin, 'New leadin.')
+
+    def test_committing_nothing_changes_nothing(self):
+        before = self._revision(self.tu)
+        resp = self._save(tossup_text='Old stem here.', tossup_answer='_France_')
+        data = json.loads(resp.content)
+        self.assertTrue(data['ok'])
+        self.assertTrue(data['unchanged'])
+        self.assertEqual(self._revision(self.tu), before)  # no history row, no stamp
+
+    def test_an_invalid_question_is_refused(self):
+        resp = self._save(tossup_text='', tossup_answer='_France_')
+        self.assertEqual(resp.status_code, 400)
+        self.tu.refresh_from_db()
+        self.assertEqual(self.tu.tossup_text, 'Old stem here.')
+
+    # --- the warning when it changed underneath you ------------------------
+
+    def test_a_stale_baseline_is_refused_with_their_version(self):
+        stale = self._revision(self.tu)
+        # Somebody else saves in the meantime.
+        self.tu.tossup_text = 'Their stem.'
+        self.tu.save_question(edit_type=QUESTION_CHANGE, changer=self.owner)
+
+        resp = self._save(baseline=stale, tossup_text='My stem.', tossup_answer='_France_')
+        self.assertEqual(resp.status_code, 409)
+        data = json.loads(resp.content)
+        self.assertTrue(data['conflict'])
+        self.assertEqual(data['fields']['tossup_text'], 'Their stem.')  # what they have now
+        self.assertEqual(data['revision'], self._revision(self.tu))
+        self.assertTrue(data['changed_by'])
+        self.tu.refresh_from_db()
+        self.assertEqual(self.tu.tossup_text, 'Their stem.')  # nothing overwritten
+
+    def test_force_overwrites_after_the_warning(self):
+        stale = self._revision(self.tu)
+        self.tu.tossup_text = 'Their stem.'
+        self.tu.save_question(edit_type=QUESTION_CHANGE, changer=self.owner)
+
+        resp = self._save(baseline=stale, tossup_text='My stem.',
+                          tossup_answer='_France_', force='1')
+        self.assertTrue(json.loads(resp.content)['ok'])
+        self.tu.refresh_from_db()
+        self.assertEqual(self.tu.tossup_text, 'My stem.')
+
+    def test_the_poll_reports_each_questions_revision(self):
+        resp = self.client.get('/packet_revision/{0}/'.format(self.packet.id))
+        data = json.loads(resp.content)
+        self.assertEqual(data['questions']['tossup-{0}'.format(self.tu.id)],
+                         self._revision(self.tu))
+        self.assertIn('bonus-{0}'.format(self.bn.id), data['questions'])
+
+    # --- who may do it ----------------------------------------------------
+
+    def test_a_locked_question_is_refused_for_its_author(self):
+        self.tu.locked = True
+        self.tu.save()
+        self.client.logout()
+        self.client.login(username='ide_writer', password='pw')
+        resp = self._save(tossup_text='Writer stem.', tossup_answer='_France_')
+        self.assertEqual(resp.status_code, 403)
+        self.tu.refresh_from_db()
+        self.assertEqual(self.tu.tossup_text, 'Old stem here.')
+
+    def test_a_non_member_is_refused(self):
+        User.objects.create_user('ide_other', password='pw', email='ideo@t.com')
+        self.client.logout()
+        self.client.login(username='ide_other', password='pw')
+        self.assertEqual(self._save(tossup_text='x', tossup_answer='_y_').status_code, 403)
+
+    # --- the page ---------------------------------------------------------
+
+    def test_the_document_view_carries_the_editor_for_an_owner(self):
+        body = self.client.get('/view_packet/{0}/'.format(self.packet.id)).content.decode()
+        self.assertIn('doc-edit-payload', body)
+        self.assertIn('doc_inline_edit.js', body)
+        self.assertIn('data-mode="edit"', body)
+        self.assertIn('Old stem here.', body)
+
+    def test_a_writer_sees_the_document_without_the_editor(self):
+        self.client.logout()
+        self.client.login(username='ide_writer', password='pw')
+        body = self.client.get('/view_packet/{0}/'.format(self.packet.id)).content.decode()
+        self.assertNotIn('doc-edit-payload', body)
+        self.assertNotIn('data-mode="edit"', body)
+
+
 class QbreaderFreqTests(TestCase):
     """Highlighting part of a question looks the phrase up in the qbreader
     database through /qbreader_freq/ — a proxy so the browser never talks to

@@ -8241,10 +8241,33 @@ def _packet_revision(packet):
     return hashlib.md5('|'.join(parts).encode('utf-8')).hexdigest()[:16]
 
 
+def _question_revision(question):
+    """A token for one question's text, for the document view's inline editing.
+
+    It is just the stamp `save_question` writes, which is what "somebody saved
+    this question" means here -- a plain `.save()` (packetizing, renumbering)
+    deliberately does not count, since it leaves the words alone.
+    """
+    changed = getattr(question, 'last_changed_date', None)
+    return changed.isoformat() if changed else ''
+
+
+def _packet_question_revisions(packet):
+    """{'tossup-12': rev} for every question in the packet, so an open inline
+    editor can be told its question moved without reloading the document."""
+    out = {}
+    for qtype, qs in (('tossup', packet.tossup_set.values_list('id', 'last_changed_date')),
+                      ('bonus', packet.bonus_set.values_list('id', 'last_changed_date'))):
+        for qid, changed in qs:
+            out['{0}-{1}'.format(qtype, qid)] = changed.isoformat() if changed else ''
+    return out
+
+
 @login_required
 def packet_revision(request, packet_id):
     """JSON {revision} for the given packet, polled by the document view to
-    detect concurrent changes."""
+    detect concurrent changes. Also carries the per-question revisions, which
+    inline editing uses to flag the one question you are actually typing in."""
     try:
         packet = Packet.objects.select_related('question_set').get(id=packet_id)
     except Packet.DoesNotExist:
@@ -8253,7 +8276,114 @@ def packet_revision(request, packet_id):
     qset = packet.question_set
     if not qset.is_owner(user) and user not in qset.editor.all() and user not in qset.writer.all():
         return HttpResponse(json.dumps({'error': 'forbidden'}), status=403)
-    return HttpResponse(json.dumps({'revision': _packet_revision(packet)}))
+    return HttpResponse(json.dumps({'revision': _packet_revision(packet),
+                                    'questions': _packet_question_revisions(packet)}))
+
+
+def _inline_edit_fields(question, qtype):
+    """The question's editable prose, as the inline editor shows it."""
+    names = [f for f, _label in SUGGESTABLE_FIELDS[qtype]]
+    return {f: (getattr(question, f, '') or '') for f in names}
+
+
+def _question_changer_label(question, qtype):
+    """Who saved this question last, for the conflict warning."""
+    model = TossupHistory if qtype == 'tossup' else BonusHistory
+    if not question.question_history_id:
+        return ''
+    h = (model.objects.filter(question_history_id=question.question_history_id)
+         .order_by('-change_date').select_related('changer__user').first())
+    if h is None or h.changer is None:
+        return ''
+    name = '{0} {1}'.format(h.changer.user.first_name, h.changer.user.last_name).strip()
+    return name or h.changer.user.username
+
+
+@login_required
+def inline_save_question(request):
+    """Save one question's prose from the document view's inline editor.
+
+    The document view can put a question's own fields on the page and write
+    them back here, so a packet can be corrected while it is being read rather
+    than by opening each question's edit page in turn.
+
+    Concurrency is the point of `baseline`: it is the revision the editor was
+    handed when it opened the question, and a mismatch means somebody else
+    saved in the meantime. That is refused with 409 and their current text,
+    rather than silently overwriting them -- the client warns and lets the
+    editor choose. `force=1` is that choice, made deliberately.
+    """
+    if request.method != 'POST':
+        return HttpResponse(json.dumps({'ok': False, 'error': 'POST required'}), status=405)
+    user = request.user.writer
+    qtype = request.POST.get('question_type', '')
+    qid = request.POST.get('question_id', '')
+    if qtype not in SUGGESTABLE_FIELDS or not qid.isdigit():
+        return HttpResponse(json.dumps({'ok': False, 'error': 'No such question'}), status=404)
+    question = _style_question(qtype, qid)
+    if question is None:
+        return HttpResponse(json.dumps({'ok': False, 'error': 'No such question'}), status=404)
+    qset = question.question_set
+    if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+        return HttpResponse(json.dumps({'ok': False, 'error': 'Not authorized'}), status=403)
+    if not _can_edit_question(user, qset, question):
+        return HttpResponse(json.dumps({'ok': False, 'error': 'This question is locked'}), status=403)
+
+    baseline = request.POST.get('baseline', '')
+    current = _question_revision(question)
+    if baseline and baseline != current and request.POST.get('force') != '1':
+        return HttpResponse(json.dumps({
+            'ok': False, 'conflict': True,
+            'error': 'This question changed since you started editing it.',
+            'revision': current,
+            'changed_by': _question_changer_label(question, qtype),
+            'changed_date': timezone.localtime(question.last_changed_date).strftime('%m/%d/%y %H:%M')
+                            if question.last_changed_date else '',
+            'fields': _inline_edit_fields(question, qtype),
+            'html': question.to_html(),
+        }), status=409)
+
+    # Only the prose fields, and only the ones actually sent -- the editor
+    # shows a bonus's parts but a VHSL bonus posts just the one.
+    changed_any = False
+    for field, _label in SUGGESTABLE_FIELDS[qtype]:
+        if field not in request.POST:
+            continue
+        value = strip_markup(request.POST.get(field, ''))
+        if (getattr(question, field, '') or '') != value:
+            setattr(question, field, value)
+            changed_any = True
+    if not changed_any:
+        return HttpResponse(json.dumps({
+            'ok': True, 'unchanged': True, 'revision': current,
+            'fields': _inline_edit_fields(question, qtype), 'html': question.to_html()}))
+
+    try:
+        question.is_valid()
+    except (InvalidTossup, InvalidBonus) as e:
+        return HttpResponse(json.dumps({'ok': False, 'error': str(e)}), status=400)
+
+    question.save_question(edit_type=QUESTION_CHANGE, changer=user)
+    cache.clear()
+
+    length = question.character_count()
+    if qtype == 'tossup':
+        max_length = qset.max_acf_tossup_length
+    else:
+        max_length = (qset.max_vhsl_bonus_length if question.get_bonus_type() == VHSL_BONUS
+                      else qset.max_acf_bonus_length)
+    changed_label = timezone.localtime(question.last_changed_date).strftime('%m/%d/%y %H:%M')
+    name = '{0} {1}'.format(user.user.first_name, user.user.last_name).strip() or user.user.username
+    return HttpResponse(json.dumps({
+        'ok': True,
+        'revision': _question_revision(question),
+        'fields': _inline_edit_fields(question, qtype),
+        'html': question.to_html(),
+        'length': length,
+        'max_length': max_length,
+        'over_length': bool(max_length and length > max_length),
+        'changed_label': '{0} by {1}'.format(changed_label, name),
+    }))
 
 
 @login_required
@@ -8380,6 +8510,20 @@ def view_packet(request, packet_id):
                       {'text': b.part3_text or '', 'answer': b.part3_answer or '', 'diff': b.part3_difficulty or ''}],
             'author': row['author'], 'category': row['category']}
 
+    # Raw fields for inline editing, alongside the revision each editor is
+    # opened against (see inline_save_question).
+    edit_payload = {}
+    if not read_only:
+        for t in packet_tossups:
+            edit_payload['tossup-{0}'.format(t.id)] = {
+                'qtype': 'tossup', 'fields': _inline_edit_fields(t, 'tossup'),
+                'revision': _question_revision(t)}
+        for b in packet_bonuses:
+            edit_payload['bonus-{0}'.format(b.id)] = {
+                'qtype': 'bonus', 'fields': _inline_edit_fields(b, 'bonus'),
+                'bonus_type': 'vhsl' if b.get_bonus_type() == VHSL_BONUS else 'acf',
+                'revision': _question_revision(b)}
+
     interleaved = []
     if order == 'interleaved':
         for i in range(max(len(tossups), len(bonuses))):
@@ -8455,6 +8599,7 @@ def view_packet(request, packet_id):
                               'packet_count': len(siblings),
                               'comment_count': comment_count,
                               'discord_payload': discord_payload,
+                              'edit_payload': edit_payload,
                               'mp3_voices': VOICE_CHOICES,
                               'packet_revision': _packet_revision(packet),
                               'careful_notes': careful_notes,

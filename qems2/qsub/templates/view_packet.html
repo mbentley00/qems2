@@ -29,7 +29,9 @@
         fetch('/packet_revision/' + packetId + '/', { credentials: 'same-origin' })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (j) {
-                if (j && j.revision && j.revision !== current && !dismissed) {
+                if (!j) { return; }
+                if (window.QemsDocEdit) { window.QemsDocEdit.checkRevisions(j.questions); }
+                if (j.revision && j.revision !== current && !dismissed) {
                     banner.style.display = 'block';
                 }
             })
@@ -65,7 +67,7 @@
         {% if not read_only %}<a href="#" id="toggle-swap-panel" class="button tiny secondary" title="Show a compact list of this packet's questions for quick swapping"><i class="fa fa-right-left"></i> Swap Panel</a>{% endif %}
         <a href="/packet_mp3/{{ packet.id }}/?order={{ order }}" id="mp3-link" class="button tiny secondary" title="Download an MP3 reading of this packet"><i class="fa fa-headphones"></i> MP3</a>
         {% if not read_only %}
-        <a href="#" class="button tiny doc-mode-btn" data-mode="comment"><i class="fa fa-comment"></i> Comment</a><a href="#" class="button tiny secondary doc-mode-btn" data-mode="reorder"><i class="fa fa-arrows-up-down"></i> Reorder</a>
+        <a href="#" class="button tiny doc-mode-btn" data-mode="comment"><i class="fa fa-comment"></i> Comment</a><a href="#" class="button tiny secondary doc-mode-btn" data-mode="reorder"><i class="fa fa-arrows-up-down"></i> Reorder</a><a href="#" class="button tiny secondary doc-mode-btn" data-mode="edit"><i class="fa fa-pen"></i> Edit</a>
         {% endif %}
     </div>
     <div class="doc-toolbar-group">
@@ -184,6 +186,11 @@ document.addEventListener('DOMContentLoaded', function () {
     {% endif %}
 </div>
 
+{% if not read_only %}
+{{ edit_payload|json_script:"doc-edit-payload" }}
+<script src="{% static 'js/doc_inline_edit.js' %}?v=1"></script>
+{% endif %}
+
 <div class="doc-gutter" id="doc-gutter">
     {% for q in tossups %}{% include "view_packet_comment_card.html" %}{% endfor %}
     {% for q in bonuses %}{% include "view_packet_comment_card.html" %}{% endfor %}
@@ -270,6 +277,33 @@ document.addEventListener('DOMContentLoaded', function () {
 .doc-packet-count { font-size: 0.85em; color: #555; margin: 0 4px; }
 .doc-mode-hint { font-size: 0.85em; color: #666; margin-bottom: 10px; }
 .doc-mode-btn { margin-bottom: 0; }
+/* ---- inline editing ---- */
+/* In edit mode a question reads as something you can open: the text takes the
+   text cursor and the block lifts on hover. */
+.doc-page.doc-edit-mode .doc-qtext { cursor: pointer; }
+.doc-page.doc-edit-mode .doc-question:hover { background-color: #fffdf3; border-color: #e6d9a8; }
+.doc-question.doc-editing { background-color: #fffdf3 !important; border-color: #e0cf95 !important; }
+/* A question with uncommitted changes is marked down the side, so it stays
+   findable after scrolling away from it. */
+.doc-question.doc-edit-dirty { border-left: 4px solid #d4870c; }
+.doc-question.doc-edit-conflict { border-left: 4px solid #c0392b; }
+.doc-edit-block { margin: 6px 0 2px; }
+.doc-edit-field { margin-bottom: 6px; }
+.doc-edit-label { font-size: 0.72rem; font-weight: bold; text-transform: uppercase;
+    letter-spacing: 0.06em; color: #6b7080; margin: 0 0 2px; }
+.doc-edit-input { width: 100%; font-size: 0.95em; margin: 0; }
+.doc-edit-bar { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.doc-edit-bar .button { margin: 0; }
+.doc-edit-bar .button.disabled { opacity: 0.45; pointer-events: none; }
+.doc-edit-status { flex: 1 1 auto; font-size: 0.8rem; color: #8a8f94; }
+.doc-edit-status-dirty { color: #d4870c; font-weight: bold; }
+.doc-edit-conflict-box { border: 1px solid #e0b4ae; background: #fdf3f2; border-radius: 4px;
+    padding: 8px 10px; margin-bottom: 8px; font-size: 0.88rem; color: #8a3b32; }
+.doc-edit-conflict-acts { margin-top: 6px; display: flex; gap: 6px; }
+.doc-edit-conflict-acts .button { margin: 0; }
+html[data-theme="dark"] .doc-question.doc-editing,
+html[data-theme="dark"] .doc-page.doc-edit-mode .doc-question:hover { background-color: #2b2717 !important; border-color: #4d4529 !important; }
+html[data-theme="dark"] .doc-edit-conflict-box { background: #3a2320; border-color: #6d3f38; color: #e8a49b; }
 /* The per-question Swap action reads as a clear button (accent pill), not a
    faint hover-only link. a.doc-tag:hover already inverts to the accent fill. */
 .doc-swap-btn { background:#e8f4fb; color:#006f9a; font-weight:bold; white-space:nowrap; }
@@ -1213,7 +1247,8 @@ $(function() {
     // ---- Mode toggle: Comment (select text) vs Reorder (drag) ----
     var HINTS = {
         comment: 'Comment mode: select text and right-click to comment (or use the per-question Comment tag). Right-click toggles mode.',
-        reorder: 'Reorder mode: drag a question onto another to swap their positions (the two trade numbers; the rest of the packet stays put). Right-click toggles mode.'
+        reorder: 'Reorder mode: drag a question onto another to swap their positions (the two trade numbers; the rest of the packet stays put). Right-click toggles mode.',
+        edit: 'Edit mode: click a question to edit it here. Changes are yours alone until you press <strong>Commit</strong> on that question; <strong>Discard</strong> puts it back. If someone else saves the question while you are working on it, you are warned before anything of theirs is overwritten.'
     };
     var MODE_KEY = 'qemsDocMode';
     function setMode(mode) {
@@ -1226,6 +1261,7 @@ $(function() {
         $('#doc-mode-hint').html(HINTS[mode]);
         $('.doc-list').sortable(mode === 'reorder' ? 'enable' : 'disable');
         $('.doc-page').toggleClass('doc-reorder-mode', mode === 'reorder');
+        if (window.QemsDocEdit) { window.QemsDocEdit.setEnabled(mode === 'edit'); }
     }
     $('.doc-mode-btn').on('click', function(e) {
         e.preventDefault();
@@ -1233,7 +1269,10 @@ $(function() {
     });
     // Restore the last-used mode so it survives a reload (e.g. after a swap).
     var savedMode = 'comment';
-    try { if (localStorage.getItem(MODE_KEY) === 'reorder') savedMode = 'reorder'; } catch (e) { /* ignore */ }
+    try {
+        var stored = localStorage.getItem(MODE_KEY);
+        if (stored === 'reorder' || stored === 'edit') savedMode = stored;
+    } catch (e) { /* ignore */ }
     setMode(savedMode);
 });
 </script>
