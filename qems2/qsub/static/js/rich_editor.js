@@ -457,6 +457,11 @@ $(function () {
                 qems = cd.getData('text/plain') || '';
             }
             qems = qems.replace(/\u00a0/g, ' ');
+            // Styling-not-emphasis bold from the source (a bolded power
+            // section, a wrapper that bolds everything) is dropped — see
+            // cleanPastedQems. Only for pastes; the editor's own content
+            // never passes through here.
+            qems = window.QemsMarkup.cleanPastedQems(qems);
             var insert;
             if (multiline) {
                 qems = tidyMultiline(qems).replace(/\s+$/, '');

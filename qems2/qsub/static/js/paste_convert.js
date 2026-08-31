@@ -29,6 +29,40 @@ $(function () {
     }
 
     /**
+     * Clean QEMS markup that came from a PASTE (never from the editor's own
+     * round-trip — \B a writer typed stays).
+     *
+     * Two kinds of pasted bold are styling rather than emphasis, and kept
+     * bolding "a lot of text by default":
+     *
+     * 1. A bold run that ends at a power mark — qbreader and QEMS's own
+     *    displays bold the pre-power text, but here power formatting is
+     *    derived from the (*) / (+) mark itself, so the pasted bold would
+     *    only duplicate it (and trip the hand-bolded-power warning).
+     * 2. Bold covering essentially the whole paste — a source whose wrapper
+     *    styles everything bold (sites using <strong> for styling, themes,
+     *    export wrappers). Nobody bolds an entire question on purpose.
+     *    Short pastes are left alone: a single bold word was likely copied
+     *    for its boldness.
+     */
+    function cleanPastedQems(qems) {
+        if (!qems) { return qems; }
+        // 1. Bold ending in a power mark: unwrap, the mark carries the power.
+        qems = qems.replace(/\\B([\s\S]*?\((?:\*|\+)\)\s*)\\B/g, '$1');
+        // 2. Wrapper bold: measure how much of the text sits inside \B pairs.
+        var boldLen = 0;
+        qems.replace(/\\B([\s\S]*?)\\B/g, function (all, inner) {
+            boldLen += inner.replace(/\s+/g, '').length;
+            return all;
+        });
+        var totalLen = qems.replace(/\\B/g, '').replace(/\s+/g, '').length;
+        if (totalLen >= 40 && boldLen >= 0.9 * totalLen) {
+            qems = qems.replace(/\\B([\s\S]*?)\\B/g, '$1');
+        }
+        return qems;
+    }
+
+    /**
      * Collapse <b><u>text</u></b> / <u><b>text</b></u> pairs into a single
      * element carrying both styles, so walkNode sees bold+underline together
      * and emits _text_ rather than underline-only __text__. (Google Docs puts
@@ -295,6 +329,7 @@ $(function () {
     window.QemsMarkup = {
         htmlToQems: htmlToQemsMarkup,
         isRichHtml: function (html) { return isRichHtml(html); },
+        cleanPastedQems: cleanPastedQems,
         autoMarkPgTargets: autoMarkPgTargets,
         parenIsGuide: parenIsGuide,
         guidesRequireQuotes: guidesRequireQuotes
@@ -329,7 +364,7 @@ $(function () {
 
             // Prevent default paste and insert converted text
             e.preventDefault();
-            var converted = htmlToQemsMarkup(html)
+            var converted = cleanPastedQems(htmlToQemsMarkup(html))
                 .replace(/\u00a0/g, ' ')        // non-breaking spaces → normal spaces
                 .replace(/\n{3,}/g, '\n\n')     // 3+ newlines → max 2
                 .trim();
