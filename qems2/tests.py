@@ -631,6 +631,24 @@ class PacketParserTests(TestCase):
 #        expectedVhslOutput += "ANSWER: <u><b><i>Answer 1</i></b></u> [or foo <strong>(bar)</strong>]</p><p><strong>Category:</strong> History - American</p>"
 #        self.assertEqual(vhsl_bonus_no_category.to_html(include_category=True), expectedVhslOutput)
 
+    def test_character_count_drops_the_space_a_parenthetical_adds(self):
+        # A guide or power mark forces a space the writer wouldn't otherwise
+        # type; that space is not part of the question's length, in either
+        # counting mode.
+        plain = "This poet wrote about a thing."
+        for text in ("This poet (*) wrote about a thing.",
+                     "This poet (POH-et) wrote about a thing.",
+                     "This poet (+) wrote (*) about a thing."):
+            self.assertEqual(get_character_count(text, True), len(plain), msg=text)
+            marks = sum(len(m) for m in re.findall(r'\([^()]*\)', text))
+            self.assertEqual(get_character_count(text, False), len(plain) + marks, msg=text)
+        # At the end of a sentence the space is before the guide instead.
+        self.assertEqual(get_character_count("Name Goethe (GUR-tuh).", True), len("Name Goethe."))
+        # A literal, escaped parenthesis is ordinary text and keeps its spaces.
+        self.assertEqual(get_character_count("a \\(b\\) c", True), len("a (b) c"))
+        # Never below zero.
+        self.assertEqual(get_character_count("(*) ", True), 0)
+
     def test_character_count_ignores_moderator_instructions(self):
         base = "This is a question about a thing that does stuff."
         base_count = get_character_count(base, True)
@@ -4241,7 +4259,7 @@ class GuidesRequireQuotesTests(TestCase):
         # Guides are excluded from the count; an aside isn't a guide any more, so
         # its words count — but its escape backslashes never do.
         self.assertEqual(get_character_count(text, True, True),
-                         get_character_count('Fine art (a portrait) here.', False))
+                         len('Fine art (a portrait) here.'))
         self.assertLess(get_character_count(text, True), get_character_count(text, True, True))
 
     def test_exclusions_stop_claiming_a_guide_was_dropped(self):
@@ -6312,6 +6330,77 @@ class PronunciationPossessiveTests(TestCase):
             'Question', 'Denis \\PDiderot\\P ("DID-er-OW") wrote.', 'tossup_text'), [])
 
 
+class DraftStyleIssuesTests(TestCase):
+    """The "Style check" button posts the text in the editor — saved or not —
+    and gets the same issues the saved-question check would give."""
+
+    def setUp(self):
+        self.ou = User.objects.create_user('dsi_owner', password='pw', email='dsi@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='dsi dist')
+        self.qset = QuestionSet.objects.create(
+            name='DSI Set', date=timezone.now(), host='', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.client.login(username='dsi_owner', password='pw')
+
+    def _draft(self, **fields):
+        data = {'question_type': 'tossup', 'qset_id': self.qset.id}
+        data.update(fields)
+        return self.client.post('/draft_style_issues/', data)
+
+    def test_checks_unsaved_tossup_text(self):
+        resp = self._draft(tossup_text='This country did  things. For ten points, name this country.',
+                           tossup_answer='France')
+        data = json.loads(resp.content)
+        self.assertTrue(data['ok'])
+        codes = {i['code'] for i in data['issues']}
+        self.assertIn('double_space', codes)
+        self.assertIn('numerals', codes)
+        self.assertIn('underline', codes)
+        # A fix exists for the double space (the panel says "save to fix"),
+        # but none for the missing underline; nothing was saved either way.
+        by_code = {i['code']: i for i in data['issues']}
+        self.assertTrue(by_code['double_space']['fixable'])
+        self.assertFalse(by_code['underline']['fixable'])
+        self.assertEqual(Tossup.objects.count(), 0)
+
+    def test_checks_unsaved_bonus_parts(self):
+        resp = self.client.post('/draft_style_issues/', {
+            'question_type': 'bonus', 'qset_id': self.qset.id,
+            'leadin': 'For 10 points each:', 'part1_text': 'Name this  thing.',
+            'part1_answer': '_thing_', 'part2_text': '', 'part2_answer': '',
+            'part3_text': '', 'part3_answer': ''})
+        data = json.loads(resp.content)
+        self.assertTrue(data['ok'])
+        self.assertIn('double_space', {i['code'] for i in data['issues']})
+
+    def test_honors_disabled_rules_and_set_dismissals(self):
+        self.qset.disabled_style_rules = 'numerals'
+        self.qset.save()
+        StyleRuleDismissal.objects.create(question_set=self.qset, code='underline', token='')
+        resp = self._draft(tossup_text='For ten points, name this country.', tossup_answer='France')
+        codes = {i['code'] for i in json.loads(resp.content)['issues']}
+        self.assertNotIn('numerals', codes)
+        self.assertNotIn('underline', codes)
+
+    def test_non_member_forbidden_and_get_rejected(self):
+        self.assertEqual(self.client.get('/draft_style_issues/').status_code, 405)
+        User.objects.create_user('dsi_other', password='pw', email='o3@t.com')
+        self.client.logout(); self.client.login(username='dsi_other', password='pw')
+        self.assertEqual(self._draft(tossup_text='x', tossup_answer='y').status_code, 403)
+
+    def test_add_pages_carry_the_panel(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        self.qset.editor.add(self.owner)
+        body = self.client.get('/add_tossups/{0}/'.format(self.qset.id)).content.decode()
+        self.assertIn('id="style-panel-draft"', body)
+        self.assertIn('data-qset="{0}"'.format(self.qset.id), body)
+        self.assertNotIn('id="style-panel-refresh"', body)  # nothing saved to recheck
+        body = self.client.get('/add_bonuses/{0}/{1}/'.format(self.qset.id, ACF_STYLE_BONUS)).content.decode()
+        self.assertIn('id="style-panel-draft"', body)
+
+
 class StyleIssueContextTests(TestCase):
     """Mechanical/prose issues carry a preview of the text they found, the same
     way the pronunciation suggestions do."""
@@ -6941,6 +7030,38 @@ class TagsWhileAddingQuestionsTests(TestCase):
         self.assertIn('African Literature', html)
         self.assertNotIn('Genetics', html)
         self.assertIn('name="category_tags"', html)
+
+    def test_the_preview_says_what_each_tag_still_wants(self):
+        # Nothing written yet: the tag wants two tossups and has none.
+        html = json.loads(self.client.get('/tags_for_category/{0}/'.format(self.qset.id),
+                                          {'category': self.lit.id}).content.decode())['html']
+        self.assertIn('needs 2 more tossups', html)
+        # One tossup in: one more to go. A ceiling that has been passed and a
+        # bonus minimum show alongside.
+        tu = Tossup.objects.create(
+            author=self.owner, question_set=self.qset, tossup_text='t', tossup_answer='a',
+            category=self.lit, question_type=self.acf_tu,
+            created_date=datetime.now(), last_changed_date=datetime.now(), question_number=1)
+        self.tag.tossups.add(tu)
+        self.tag.num_bonuses = 1
+        self.tag.max_questions = 0
+        self.tag.save()
+        html = json.loads(self.client.get('/tags_for_category/{0}/'.format(self.qset.id),
+                                          {'category': self.lit.id}).content.decode())['html']
+        self.assertIn('needs 1 more tossup, 1 more bonus; 1 of any type over', html)
+        # Met, and a tag with no quota at all says nothing.
+        self.tag.num_tossups = 1; self.tag.num_bonuses = 0; self.tag.max_questions = None
+        self.tag.save()
+        html = json.loads(self.client.get('/tags_for_category/{0}/'.format(self.qset.id),
+                                          {'category': self.lit.id}).content.decode())['html']
+        self.assertIn('&mdash; met', html)
+        html = json.loads(self.client.get('/tags_for_category/{0}/'.format(self.qset.id),
+                                          {'category': self.sci.id}).content.decode())['html']
+        self.assertNotIn('<small class="qtags-remaining">', html)
+        # The edit page keeps its progress figures without the extra line.
+        body = self.client.get('/edit_tossup/{0}/'.format(tu.id)).content.decode()
+        self.assertIn('qtags-progress', body)
+        self.assertNotIn('<small class="qtags-remaining">', body)
 
     def test_a_category_with_no_tags_returns_nothing(self):
         DistributionEntry.objects.filter(id=self.other_tag.id).delete()

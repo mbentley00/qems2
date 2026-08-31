@@ -163,5 +163,6 @@ $(function () {
 
     {% endif %}
 </form>
+{% if not read_only %}{% include "_style_check_panel.html" with question_type="bonus" qset_id=qset.id %}{% endif %}
 
 {% endblock %}

@@ -9960,6 +9960,66 @@ def question_style_issues(request):
                                     'qset_id': qset.id}))
 
 
+_DRAFT_FIELDS = {
+    'tossup': ('tossup_text', 'tossup_answer'),
+    'bonus': ('leadin', 'part1_text', 'part1_answer', 'part2_text', 'part2_answer',
+              'part3_text', 'part3_answer'),
+}
+
+
+@login_required
+def draft_style_issues(request):
+    """JSON style-check issues for text that hasn't been saved: the "Style
+    check" button on the add/edit pages posts whatever is in the editor.
+    Same rules as /question_style_issues/, run on a stand-in object built from
+    the posted fields, so a writer can tidy a question before submitting it.
+    Nothing is stored, so no fix can be applied from here — `fixable` only
+    says one would exist once the question is saved; dismissals are still
+    honored (they key on the issue, not the saved text)."""
+    from types import SimpleNamespace
+    from . import style_checker
+    if request.method != 'POST':
+        return HttpResponse(json.dumps({'ok': False, 'error': 'POST required'}), status=405)
+    user = request.user.writer
+    qtype = request.POST.get('question_type', '')
+    if qtype not in _DRAFT_FIELDS:
+        return HttpResponse(json.dumps({'ok': False, 'error': 'No such question type'}), status=400)
+    qset_id = request.POST.get('qset_id', '')
+    qset = QuestionSet.objects.filter(id=qset_id).first() if qset_id.isdigit() else None
+    if qset is None:
+        return HttpResponse(json.dumps({'ok': False, 'error': 'No such question set'}), status=404)
+    if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+        return HttpResponse(json.dumps({'ok': False, 'error': 'Not authorized'}), status=403)
+
+    draft = SimpleNamespace(**{f: request.POST.get(f, '') for f in _DRAFT_FIELDS[qtype]})
+    draft.guides_require_quotes = lambda: bool(qset.guides_require_quotes)
+
+    guide = request.POST.get('guide', style_checker.DEFAULT_GUIDE)
+    if guide not in style_checker.guide_keys():
+        guide = style_checker.DEFAULT_GUIDE
+    disabled = qset.disabled_style_rule_set()
+    found = (style_checker.check_tossup(draft, guide, disabled) if qtype == 'tossup'
+             else style_checker.check_bonus(draft, guide, disabled))
+
+    # On an edit page the draft belongs to a saved question, whose own
+    # dismissals apply; on an add page there is no question yet.
+    qid = request.POST.get('question_id', '')
+    dismissed = set()
+    if qid.isdigit():
+        dismissed = set(StyleIssueDismissal.objects.filter(
+            question_type=qtype, question_id=int(qid)).values_list('code', 'token'))
+    dismissed |= set(StyleRuleDismissal.objects.filter(
+        question_set=qset).values_list('code', 'token'))
+
+    issues = [{'severity': i['severity'], 'message': i['message'],
+               'message_html': i.get('message_html', ''),
+               'code': i['code'], 'token': i.get('token', ''),
+               'fixable': 'fix' in i, 'dismissed': False, 'dismissed_scope': ''}
+              for i in found if (i['code'], i.get('token', '')) not in dismissed]
+    return HttpResponse(json.dumps({'ok': True, 'issues': issues, 'guide': guide,
+                                    'qset_id': qset.id}))
+
+
 @login_required
 def grammar_texts(request, qset_id):
     """JSON dump of a set's question prose for the client-side Harper grammar
@@ -10124,8 +10184,11 @@ def tags_for_category(request, qset_id):
     if entry is None:
         return HttpResponse(json.dumps({'html': ''}), content_type='application/json')
 
+    # The question isn't written yet, so say what each tag still wants --
+    # that is what decides what gets written.
     html = render_to_string('question_tags.html',
-                            {'available_tags': build_tag_checkboxes(qset, None, entry)},
+                            {'available_tags': build_tag_checkboxes(qset, None, entry),
+                             'show_remaining': True},
                             request=request)
     return HttpResponse(json.dumps({'html': html}), content_type='application/json')
 
@@ -10358,12 +10421,35 @@ def build_tag_checkboxes(qset, question, dist_entry):
                 bits.append('{0} of at most {1} {2}'.format(done, hi, noun))
         return ', '.join(bits)
 
+    def _remaining_label(tag, p):
+        """What the tag still wants, for someone deciding what to write:
+        "needs 1 more tossup, 2 more bonuses", "met", or "1 tossup over" --
+        the progress figures say where it stands, this says what to do."""
+        needs, over = [], []
+        for (lo, hi), done, (one, many) in zip(
+                tag.quota_pairs(), (p['tu_done'], p['bs_done'], p['q_done']),
+                (('tossup', 'tossups'), ('bonus', 'bonuses'), ('of any type', 'of any type'))):
+            if lo and done < lo:
+                n = lo - done
+                needs.append('{0} more {1}'.format(n, one if n == 1 else many))
+            elif hi is not None and done > hi:
+                n = done - hi
+                over.append('{0} {1} over'.format(n, one if n == 1 else many))
+        bits = []
+        if needs:
+            bits.append('needs ' + ', '.join(needs))
+        bits.extend(over)
+        if bits:
+            return '; '.join(bits)
+        return 'met' if tag.has_quota else ''
+
     sections, by_path = [], {}
     for tag in tags:
         p = tag.progress()
         item = {'tag': tag, 'checked': tag.id in checked_ids,
                 'progress': p, 'complete': p['complete'] if tag.has_quota else None,
-                'over': p['over'], 'label': _progress_label(tag, p)}
+                'over': p['over'], 'label': _progress_label(tag, p),
+                'remaining': _remaining_label(tag, p)}
         by_path.setdefault(tag.category_path, []).append(item)
     for path in sorted(by_path):
         by_group, order = {}, []

@@ -1,12 +1,15 @@
-{# Style-check panel for the edit tossup/bonus pages. Include with:          #}
-{# {% include "_style_check_panel.html" with question_type="tossup" q_id=tossup.id %} #}
+{# Style-check panel for the add/edit tossup/bonus pages. Include with:      #}
+{# {% include "_style_check_panel.html" with question_type="tossup" q_id=tossup.id qset_id=qset.id %} #}
+{# Leave q_id out on the add pages: there is no saved question yet, so the     #}
+{# panel only checks the draft in the editor.                                   #}
 <div class="panel header radius text-center" style="margin-top:1rem;"><strong>Style Check</strong></div>
-<div id="style-panel" data-qtype="{{ question_type }}" data-qid="{{ q_id }}">
+<div id="style-panel" data-qtype="{{ question_type }}" data-qid="{{ q_id|default:'' }}" data-qset="{{ qset_id|default:'' }}">
     <div class="style-panel-top">
-        <span id="style-panel-status" class="style-panel-note">Checking&hellip;</span>
+        <span id="style-panel-status" class="style-panel-note">{% if q_id %}Checking&hellip;{% else %}Check the question you're writing before you submit it.{% endif %}</span>
         <span class="style-panel-links">
-            <a href="#" id="style-panel-refresh" title="Rerun the style check on the saved question">recheck</a>
-            <a href="#" id="style-panel-full-link" target="_blank" rel="noopener" title="Style check for the whole set">whole set &#8599;</a>
+            <a href="#" id="style-panel-draft" class="style-panel-button" title="Run the style check on the text in the editor, saved or not">Style check</a>
+            {% if q_id %}<a href="#" id="style-panel-refresh" title="Rerun the style check on the saved question">saved version</a>{% endif %}
+            <a href="{% if qset_id %}/style_check/{{ qset_id }}/{% else %}#{% endif %}" id="style-panel-full-link" target="_blank" rel="noopener" title="Style check for the whole set">whole set &#8599;</a>
         </span>
     </div>
     <ul id="style-panel-list" class="style-panel-issues"></ul>
@@ -27,6 +30,10 @@
 .style-panel-links { margin-left: auto; font-size: 0.8rem; white-space: nowrap; }
 .style-panel-links a { color: #8a8f94; margin-left: 0.8em; }
 .style-panel-links a:hover { color: #008CBA; }
+.style-panel-links a.style-panel-button { display: inline-block; padding: 0.1rem 0.6rem; border-radius: 3px;
+    background: #e6f2f8; color: #008CBA; font-weight: bold; }
+.style-panel-links a.style-panel-button:hover { background: #d3e9f3; }
+.style-panel-issues .sc-nofix { color: #bdc1c5; font-size: 0.78rem; }
 .style-panel-issues { list-style: none; margin: 0 0 0.75rem; }
 .style-panel-issues .style-issue { display: flex; align-items: baseline; gap: 0.45em;
     padding: 0.15rem 0 0.15rem 0.55em; margin: 0; border-left: 3px solid transparent; font-size: 0.9rem; }
@@ -59,7 +66,7 @@
 $(function () {
     var $panel = $('#style-panel');
     if (!$panel.length) { return; }
-    var qtype = $panel.data('qtype'), qid = $panel.data('qid'), guide = '';
+    var qtype = $panel.data('qtype'), qid = $panel.data('qid'), qsetId = $panel.data('qset'), guide = '';
     function esc(s) { return $('<div>').text(s == null ? '' : s).html(); }
 
     function setStatus(text) { $('#style-panel-status').text(text).show(); }
@@ -109,23 +116,27 @@ $(function () {
         load();  // the fixed issue is gone; recheck against the saved question
     }
 
-    function load() {
-        setStatus('Checking…');
-        $.get('/question_style_issues/', { question_type: qtype, question_id: qid }, function (resp) {
-            if (typeof resp === 'string') { try { resp = JSON.parse(resp); } catch (e) {} }
-            var $list = $('#style-panel-list').empty();
-            if (!resp || !resp.ok) { setStatus((resp && resp.error) || 'The style check failed.'); return; }
-            guide = resp.guide;
-            $('#style-panel-full-link').attr('href', '/style_check/' + resp.qset_id + '/');
-            if (!resp.issues.length) { setStatus('No style issues found.'); return; }
-            setStatus(resp.issues.length + ' style suggestion' + (resp.issues.length === 1 ? '' : 's') + ':');
-            $.each(resp.issues, function (_, i) {
+    // Render one response. `draft` marks a check of the editor text rather than
+    // the saved question: nothing is stored, so there is nothing to Fix.
+    function render(resp, draft) {
+        if (typeof resp === 'string') { try { resp = JSON.parse(resp); } catch (e) {} }
+        var $list = $('#style-panel-list').empty();
+        if (!resp || !resp.ok) { setStatus((resp && resp.error) || 'The style check failed.'); return; }
+        guide = resp.guide;
+        $('#style-panel-full-link').attr('href', '/style_check/' + resp.qset_id + '/');
+        var what = draft ? ' for the text in the editor' : '';
+        if (!resp.issues.length) { setStatus('No style issues found' + what + '.'); return; }
+        setStatus(resp.issues.length + ' style suggestion' + (resp.issues.length === 1 ? '' : 's') + what + ':');
+        $.each(resp.issues, function (_, i) {
                 var $li = $('<li>').addClass('style-issue sev-' + i.severity);
                 // message_html (when present) is escaped server-side and carries
                 // answer-line formatting (underline/bold/italics).
                 $li.append($('<span class="style-issue-msg">').html(i.message_html || esc(i.message)));
                 var $actions = $('<span class="style-issue-actions">');
-                if (i.fixable) {
+                if (draft && i.fixable) {
+                    $actions.append($('<span class="sc-nofix" title="Fix buttons work on the saved question — save first">save to fix</span>'));
+                }
+                if (i.fixable && !draft) {
                     $('<a class="style-action sc-fix" title="Apply this fix to the saved question">Fix</a>')
                         .on('click', function () {
                             $.post('/apply_style_fix/', { question_type: qtype, question_id: qid,
@@ -140,21 +151,53 @@ $(function () {
                             });
                         }).appendTo($actions);
                 }
-                $('<a class="style-action sc-dismiss" title="Hide this suggestion for this question">dismiss</a>')
-                    .on('click', function () {
-                        $.post('/dismiss_style_issue/', { question_type: qtype, question_id: qid,
-                            code: i.code, token: i.token, action: '', scope: '' }, function () {
-                            $li.remove();
-                            if (!$('#style-panel-list li').length) { setStatus('No style issues found.'); }
-                        });
-                    }).appendTo($actions);
+                if (qid) {  // a dismissal hangs off the saved question
+                    $('<a class="style-action sc-dismiss" title="Hide this suggestion for this question">dismiss</a>')
+                        .on('click', function () {
+                            $.post('/dismiss_style_issue/', { question_type: qtype, question_id: qid,
+                                code: i.code, token: i.token, action: '', scope: '' }, function () {
+                                $li.remove();
+                                if (!$('#style-panel-list li').length) { setStatus('No style issues found.'); }
+                            });
+                        }).appendTo($actions);
+                }
                 $li.append($actions);
                 $list.append($li);
-            });
         });
     }
 
+    function load() {
+        if (!qid) { return; }
+        setStatus('Checking…');
+        $.get('/question_style_issues/', { question_type: qtype, question_id: qid },
+              function (resp) { render(resp, false); });
+    }
+
+    // What the writer has typed — the form fields, which the rich editor keeps
+    // in sync. On the bonus page the unified editor is what's on screen and the
+    // per-part fields only catch up on submit, so pull its text down first.
+    function draftFields() {
+        if (window.qemsSyncBonusUnified) { window.qemsSyncBonusUnified(); }
+        var names = qtype === 'tossup'
+            ? ['tossup_text', 'tossup_answer']
+            : ['leadin', 'part1_text', 'part1_answer', 'part2_text', 'part2_answer', 'part3_text', 'part3_answer'];
+        var data = { question_type: qtype, qset_id: qsetId, question_id: qid || '' };
+        $.each(names, function (_, n) { data[n] = $('#id_' + n).val() || ''; });
+        return data;
+    }
+
+    function checkDraft() {
+        setStatus('Checking the text in the editor…');
+        $.post('/draft_style_issues/', draftFields(), function (resp) { render(resp, true); })
+            .fail(function (xhr) {
+                var msg = '';
+                try { msg = JSON.parse(xhr.responseText).error; } catch (e) {}
+                setStatus(msg || 'The style check failed.');
+            });
+    }
+
     $('#style-panel-refresh').on('click', function (e) { e.preventDefault(); load(); });
+    $('#style-panel-draft').on('click', function (e) { e.preventDefault(); checkDraft(); });
     load();
 
     // ---- Grammar (Harper, client-side WASM) — lints the LIVE editor text ----

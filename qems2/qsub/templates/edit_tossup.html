@@ -150,7 +150,7 @@
 </form>
 {% if tossup and pending_suggestions %}{% include "_suggested_changes.html" with question_type="tossup" q_id=tossup.id %}{% endif %}
 
-{% if tossup %}{% include "_style_check_panel.html" with question_type="tossup" q_id=tossup.id %}{% endif %}
+{% if tossup %}{% include "_style_check_panel.html" with question_type="tossup" q_id=tossup.id qset_id=qset.id %}{% endif %}
 {% include "_discord_threads.html" %}
 {% include "_playtest_results.html" %}
 </div>{# .edit-main #}

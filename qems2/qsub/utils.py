@@ -548,8 +548,10 @@ def get_char_count_exclusions(line, ignore_pronunciation, guides_require_quotes=
         s = m.group(0).strip()
         if s:
             found.append(s)
-    if ignore_pronunciation and re.search(r'(?<!\\)\([^()]*\)', line):
+    if ignore_pronunciation and PARENTHETICAL_RE.search(line):
         found.append('pronunciation guides')
+    if count_parenthetical_spaces(strip_moderator_instructions(line)):
+        found.append('the space each guide or power mark adds')
     # De-dupe, preserving order.
     seen = set()
     out = []
@@ -560,6 +562,23 @@ def get_char_count_exclusions(line, ignore_pronunciation, guides_require_quotes=
             out.append(s)
     return out
 
+# An unescaped parenthetical: a pronunciation guide or a power mark.
+PARENTHETICAL_RE = re.compile(r'(?<!\\)\([^()]*\)')
+
+
+def count_parenthetical_spaces(line):
+    """How many spaces exist only to hold a parenthetical: "Goethe (GUR-tuh)
+    wrote" and "clue (*) more" each carry one space the writer wouldn't have
+    typed without the guide or power mark, so it isn't part of the question's
+    length. One per parenthetical, whichever side the space is on."""
+    n = 0
+    for m in PARENTHETICAL_RE.finditer(line):
+        if (m.start() > 0 and line[m.start() - 1] == ' ') or \
+                (m.end() < len(line) and line[m.end()] == ' '):
+            n += 1
+    return n
+
+
 def get_character_count(line, ignore_pronunciation, guides_require_quotes=False):
     line = strip_moderator_instructions(line)
     # An unquoted parenthetical is ordinary text under this set option, so it is
@@ -569,8 +588,11 @@ def get_character_count(line, ignore_pronunciation, guides_require_quotes=False)
     # \P markers only annotate which words a pronunciation guide covers; they
     # are never read, so they never count.
     line = line.replace('\\P', '')
+    # Whether or not guides count, the space one forces the writer to add never
+    # does: "Goethe (GUR-tuh) wrote" is as long as "Goethe wrote" plus the guide.
+    spaces = count_parenthetical_spaces(line)
     if not ignore_pronunciation:
-        return len(line)
+        return max(len(line) - spaces, 0)
 
     count = 0
     parensFlag = False # Parentheses indicate pronunciation guide
@@ -586,7 +608,7 @@ def get_character_count(line, ignore_pronunciation, guides_require_quotes=False)
                 count = count + 1 # Only count non-special chars not in pronunciation guide
         previousChar = c
 
-    return count
+    return max(count - spaces, 0)
 
 def special_character_imbalance_reason(line):
     """Return a human-readable reason the formatting characters are unbalanced,
