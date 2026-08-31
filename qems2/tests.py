@@ -6330,6 +6330,80 @@ class PronunciationPossessiveTests(TestCase):
             'Question', 'Denis \\PDiderot\\P ("DID-er-OW") wrote.', 'tossup_text'), [])
 
 
+class QbreaderFreqTests(TestCase):
+    """Highlighting part of a question looks the phrase up in the qbreader
+    database through /qbreader_freq/ — a proxy so the browser never talks to
+    qbreader itself."""
+
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+        User.objects.create_user('qbf_user', password='pw', email='qbf@t.com')
+        self.client.login(username='qbf_user', password='pw')
+
+    def _fake_urlopen(self, payload):
+        import io, contextlib
+        from unittest import mock
+        from qems2.qsub import views as views_mod
+
+        class _Resp(io.BytesIO):
+            def __exit__(self, *a): self.close()
+            def __enter__(self): return self
+
+        calls = []
+
+        def fake(url, timeout=None):
+            calls.append(url)
+            return _Resp(json.dumps(payload).encode())
+
+        patcher = mock.patch('urllib.request.urlopen', side_effect=fake)
+        return patcher, calls
+
+    def test_returns_counts_and_a_full_results_link(self):
+        patcher, calls = self._fake_urlopen(
+            {'tossups': {'count': 233}, 'bonuses': {'count': 182}})
+        with patcher:
+            resp = self.client.get('/qbreader_freq/', {'q': 'mitochondria'})
+        data = json.loads(resp.content)
+        self.assertEqual((data['ok'], data['tossups'], data['bonuses']), (True, 233, 182))
+        self.assertIn('www.qbreader.org/db/?', data['url'])
+        self.assertIn('q=mitochondria', data['url'])
+        self.assertIn('exactPhrase=true', data['url'])
+        self.assertIn('queryString=mitochondria', calls[0])
+        self.assertIn('exactPhrase=true', calls[0])
+
+    def test_repeated_lookups_are_served_from_cache(self):
+        patcher, calls = self._fake_urlopen(
+            {'tossups': {'count': 1}, 'bonuses': {'count': 2}})
+        with patcher:
+            self.client.get('/qbreader_freq/', {'q': 'mitochondria'})
+            data = json.loads(self.client.get('/qbreader_freq/',
+                                              {'q': 'Mitochondria'}).content)
+        self.assertEqual(len(calls), 1)  # the second came from the cache
+        self.assertEqual(data['tossups'], 1)
+        self.assertIn('q=Mitochondria', data['url'])  # link keeps the user's term
+
+    def test_bad_terms_and_upstream_failure(self):
+        self.assertEqual(self.client.get('/qbreader_freq/', {'q': 'ab'}).status_code, 400)
+        self.assertEqual(self.client.get('/qbreader_freq/', {'q': 'x' * 121}).status_code, 400)
+        from unittest import mock
+        with mock.patch('urllib.request.urlopen', side_effect=OSError('down')):
+            resp = self.client.get('/qbreader_freq/', {'q': 'mitochondria'})
+        self.assertEqual(resp.status_code, 502)
+        data = json.loads(resp.content)
+        self.assertFalse(data['ok'])
+        self.assertIn('www.qbreader.org/db/?', data['url'])  # the link still works
+
+    def test_login_required(self):
+        self.client.logout()
+        resp = self.client.get('/qbreader_freq/', {'q': 'mitochondria'})
+        self.assertEqual(resp.status_code, 302)
+
+    def test_every_page_loads_the_lookup_script(self):
+        resp = self.client.get('/main/')
+        self.assertIn('qbreader_lookup.js', resp.content.decode())
+
+
 class DraftStyleIssuesTests(TestCase):
     """The "Style check" button posts the text in the editor — saved or not —
     and gets the same issues the saved-question check would give."""

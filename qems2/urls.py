@@ -87,6 +87,7 @@ urlpatterns = [
     re_path(r'^restore_style_dismissal/$', restore_style_dismissal),
     re_path(r'^question_style_issues/$', question_style_issues),
     re_path(r'^draft_style_issues/$', draft_style_issues),
+    re_path(r'^qbreader_freq/$', qbreader_freq),
     re_path(r'^grammar_texts/(?P<qset_id>[0-9]+)/$', grammar_texts),
     re_path(r'^swap_candidates/$', swap_candidates),
     re_path(r'^category_tags/(?P<qset_id>[0-9]+)/$', category_tags),

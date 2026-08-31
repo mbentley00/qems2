@@ -9960,6 +9960,49 @@ def question_style_issues(request):
                                     'qset_id': qset.id}))
 
 
+QBREADER_QUERY_URL = 'https://www.qbreader.org/api/query'
+QBREADER_DB_URL = 'https://www.qbreader.org/db/'
+
+
+@login_required
+def qbreader_freq(request):
+    """How often a phrase appears in the qbreader question database.
+
+    The edit pages' highlight-to-search popup asks here rather than qbreader
+    directly (no CORS, no browser-side coupling to their API), with the same
+    exact-phrase reading as the db page's checkbox. Responses are cached for a
+    day: what a writer highlights is usually highlighted again moments later
+    on another question, and frequencies move slowly.
+    """
+    import urllib.request
+    from django.core.cache import cache as django_cache
+    term = (request.GET.get('q') or '').strip()
+    if not (3 <= len(term) <= 120):
+        return HttpResponse(json.dumps({'ok': False, 'error': 'Highlight 3-120 characters'}),
+                            status=400)
+    db_url = '{0}?{1}'.format(QBREADER_DB_URL, urllib.parse.urlencode(
+        {'q': term, 'exactPhrase': 'true'}))
+    key = 'qbfreq:' + term.lower()
+    hit = django_cache.get(key)
+    if hit is not None:
+        hit = dict(hit, url=db_url)
+        return HttpResponse(json.dumps(hit))
+    api = '{0}?{1}'.format(QBREADER_QUERY_URL, urllib.parse.urlencode(
+        {'queryString': term, 'exactPhrase': 'true', 'maxReturnLength': 1}))
+    try:
+        with urllib.request.urlopen(api, timeout=8) as r:
+            data = json.load(r)
+        result = {'ok': True,
+                  'tossups': int(data['tossups']['count']),
+                  'bonuses': int(data['bonuses']['count'])}
+    except Exception:
+        print('qbreader lookup failed:', sys.exc_info()[0], sys.exc_info()[1])
+        return HttpResponse(json.dumps({'ok': False, 'error': 'qbreader did not answer',
+                                        'url': db_url}), status=502)
+    django_cache.set(key, result, 24 * 60 * 60)
+    return HttpResponse(json.dumps(dict(result, url=db_url)))
+
+
 _DRAFT_FIELDS = {
     'tossup': ('tossup_text', 'tossup_answer'),
     'bonus': ('leadin', 'part1_text', 'part1_answer', 'part2_text', 'part2_answer',
