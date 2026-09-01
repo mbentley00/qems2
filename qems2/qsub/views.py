@@ -5793,6 +5793,16 @@ def export_question_set(request, qset_id, output_format):
             return ""
         return str(packet_obj)
 
+    def build_tag_string(question):
+        """A question's tags for the export sheet: "Group: Name" pieces joined
+        by "||", matching how the Comments column is written. A tag with no
+        group is just its name."""
+        pieces = []
+        for tag in question.category_tags.all():
+            group = (tag.group_name or '').strip()
+            pieces.append('{0}: {1}'.format(group, tag.name) if group else tag.name)
+        return '||'.join(pieces)
+
     def build_comment_string(content_type_id, object_id):
         """Build a comment string including threaded replies."""
         comment_list = Comment.objects.filter(
@@ -5841,7 +5851,7 @@ def export_question_set(request, qset_id, output_format):
                     response['Content-Disposition'] = 'attachment; filename="packet2.csv"'
                     csv_writer = unicodecsv.writer(response, encoding='utf-8', quoting=csv.QUOTE_ALL)
 
-                csv_writer.writerow(["Tossup Question", "Answer", "Category", "Author", "Edited", "Packet", "Question Number", "Comments","Id", "Editor", "Proofreader", "Read Carefully"])
+                csv_writer.writerow(["Tossup Question", "Answer", "Category", "Author", "Edited", "Packet", "Question Number", "Comments","Id", "Editor", "Proofreader", "Read Carefully", "Tags"])
                 for tossup in tossups:
                     comment_string = build_comment_string(tossup_content_type_id, tossup.id)
 
@@ -5853,11 +5863,11 @@ def export_question_set(request, qset_id, output_format):
                     if tossup.proofread and tossup.proofreader is not None:
                         proofreader_name = safe_name(tossup.proofreader)
 
-                    csv_writer.writerow([safe_text(tossup.tossup_text), safe_text(tossup.tossup_answer), safe_category(tossup.category), safe_name(tossup.author), tossup.edited, safe_packet(tossup.packet), tossup.question_number, safe_text(comment_string), tossup.id, editor_name, proofreader_name, tossup.read_carefully])
+                    csv_writer.writerow([safe_text(tossup.tossup_text), safe_text(tossup.tossup_answer), safe_category(tossup.category), safe_name(tossup.author), tossup.edited, safe_packet(tossup.packet), tossup.question_number, safe_text(comment_string), tossup.id, editor_name, proofreader_name, tossup.read_carefully, safe_text(build_tag_string(tossup))])
 
                 csv_writer.writerow([])
 
-                csv_writer.writerow(["Bonus Leadin", "Bonus Part 1", "Bonus Answer 1", "Part 1 Difficulty", "Bonus Part 2", "Bonus Answer 2", "Part 2 Difficulty", "Bonus Part 3", "Bonus Answer 3", "Part 3 Difficulty", "Category", "Author", "Edited", "Packet", "Question Number", "Comments", "Id", "Editor", "Proofreader", "Read Carefully"])
+                csv_writer.writerow(["Bonus Leadin", "Bonus Part 1", "Bonus Answer 1", "Part 1 Difficulty", "Bonus Part 2", "Bonus Answer 2", "Part 2 Difficulty", "Bonus Part 3", "Bonus Answer 3", "Part 3 Difficulty", "Category", "Author", "Edited", "Packet", "Question Number", "Comments", "Id", "Editor", "Proofreader", "Read Carefully", "Tags"])
                 for bonus in bonuses:
                     comment_string = build_comment_string(bonus_content_type_id, bonus.id)
 
@@ -5869,7 +5879,7 @@ def export_question_set(request, qset_id, output_format):
                     if bonus.proofread and bonus.proofreader is not None:
                         proofreader_name = safe_name(bonus.proofreader)
 
-                    csv_writer.writerow([safe_text(bonus.leadin), safe_text(bonus.part1_text), safe_text(bonus.part1_answer), bonus.part1_difficulty, safe_text(bonus.part2_text), safe_text(bonus.part2_answer), bonus.part2_difficulty, safe_text(bonus.part3_text), safe_text(bonus.part3_answer), bonus.part3_difficulty, safe_category(bonus.category), safe_name(bonus.author), bonus.edited, safe_packet(bonus.packet), bonus.question_number, safe_text(comment_string), bonus.id, editor_name, proofreader_name, bonus.read_carefully])
+                    csv_writer.writerow([safe_text(bonus.leadin), safe_text(bonus.part1_text), safe_text(bonus.part1_answer), bonus.part1_difficulty, safe_text(bonus.part2_text), safe_text(bonus.part2_answer), bonus.part2_difficulty, safe_text(bonus.part3_text), safe_text(bonus.part3_answer), bonus.part3_difficulty, safe_category(bonus.category), safe_name(bonus.author), bonus.edited, safe_packet(bonus.packet), bonus.question_number, safe_text(comment_string), bonus.id, editor_name, proofreader_name, bonus.read_carefully, safe_text(build_tag_string(bonus))])
 
                 csv_writer.writerow([])
                 entries = qset.setwidedistributionentry_set.all()
@@ -10327,19 +10337,49 @@ def live_char_count(request):
 # Category tags: editor-defined sub-distribution requirements
 #########################################################################
 
+# In a form or a URL a category has to be named, and "" already means "none
+# chosen", so a set-wide tag travels under this token and is stored as "".
+SET_WIDE_TOKEN = '__SET__'
+SET_WIDE_LABEL = 'Whole set (every category)'
+
+
+def scope_from_token(value):
+    """Form/query value -> stored category_path ('' for a set-wide tag)."""
+    value = (value or '').strip()
+    return '' if value == SET_WIDE_TOKEN else value
+
+
+def scope_token(path):
+    """Stored category_path -> the token a link or form field should carry."""
+    return SET_WIDE_TOKEN if not (path or '').strip() else path
+
+
+def scope_label(path):
+    return SET_WIDE_LABEL if not (path or '').strip() else path
+
+
 def _tag_matches_path(tag_path, question_path):
     """A tag applies to a question when one path is a segment-wise prefix of
     the other: a 'Literature - World' tag covers questions in
     'Literature - World - Drama', and a tag on a deeper path than the
-    question's leaf still applies to that leaf."""
+    question's leaf still applies to that leaf.
+
+    A tag with no path at all is set-wide and applies to everything."""
+    if not (tag_path or '').strip():
+        return True
     return (question_path == tag_path or
             question_path.startswith(tag_path + ' - ') or
             tag_path.startswith(question_path + ' - '))
 
 def get_applicable_tags(qset, dist_entry):
-    """Tags of the set that apply to a question in the given category."""
+    """Tags of the set that apply to a question in the given category.
+
+    With no category yet (a question being written before one is picked), the
+    set-wide tags still apply -- they are exactly the ones that do not depend
+    on the category."""
     if dist_entry is None:
-        return []
+        return [tag for tag in CategoryTag.objects.filter(question_set=qset,
+                                                          category_path='')]
     path = str(dist_entry)
     return [tag for tag in CategoryTag.objects.filter(question_set=qset)
             if _tag_matches_path(tag.category_path, path)]
@@ -10496,6 +10536,7 @@ def _category_question_rows(qset, path, tag_rows):
     """
     page_tags = [r['tag'] for r in tag_rows]
     page_tag_ids = {t.id for t in page_tags}
+    set_wide = not (path or '').strip()
     rows = []
     for model, qtype, edit_url in ((Tossup, 'tossup', '/edit_tossup/'),
                                    (Bonus, 'bonus', '/edit_bonus/')):
@@ -10504,7 +10545,9 @@ def _category_question_rows(qset, path, tag_rows):
               .prefetch_related('category_tags'))
         for q in qs:
             qpath = str(q.category) if q.category_id else ''
-            if not (qpath == path or qpath.startswith(path + ' - ')):
+            # A set-wide scope is about every question in the set, including
+            # the ones with no category yet.
+            if not set_wide and not (qpath == path or qpath.startswith(path + ' - ')):
                 continue
             tags = sorted((t for t in q.category_tags.all() if t.question_set_id == qset.id),
                           key=lambda t: (t.group_name, t.sort_order, t.name))
@@ -10639,7 +10682,7 @@ def build_tag_checkboxes(qset, question, dist_entry):
                 'over': p['over'], 'label': _progress_label(tag, p),
                 'remaining': _remaining_label(tag, p)}
         by_path.setdefault(tag.category_path, []).append(item)
-    for path in sorted(by_path):
+    for path in sorted(by_path, key=lambda p: (bool(p), p)):
         by_group, order = {}, []
         for item in by_path[path]:
             key = (item['tag'].group_name or '').strip()
@@ -10650,7 +10693,10 @@ def build_tag_checkboxes(qset, question, dist_entry):
         order.sort(key=lambda k: (k == '', k.lower()))
         sections.append({
             'path': path,
-            'status_url': '/category_tags/{0}/?category={1}'.format(qset.id, urllib.parse.quote(path)),
+            'label': scope_label(path),
+            'set_wide': not path,
+            'status_url': '/category_tags/{0}/?category={1}'.format(
+                qset.id, urllib.parse.quote(scope_token(path))),
             'groups': [{'name': k, 'label': k or 'Other', 'items': by_group[k]} for k in order],
         })
     return sections
@@ -11099,7 +11145,8 @@ def category_tags(request, qset_id):
             action = request.POST.get('action', '')
             try:
                 if action == 'add':
-                    path = request.POST.get('category_path', '').strip()
+                    raw_path = request.POST.get('category_path', '').strip()
+                    path = scope_from_token(raw_path)
                     name = request.POST.get('name', '').strip()
                     group_name = request.POST.get('group_name', '').strip()[:100]
                     num_tossups = int(request.POST.get('num_tossups') or 0)
@@ -11109,7 +11156,7 @@ def category_tags(request, qset_id):
                         raise ValueError('Counts cannot be negative')
                     maxima = _tag_maxima(request.POST,
                                          (num_tossups, num_bonuses, num_questions))
-                    if not path or not name:
+                    if not raw_path or not name:
                         raise ValueError('A category and a tag name are required')
                     tag, created = CategoryTag.objects.get_or_create(
                         question_set=qset, category_path=path, name=name,
@@ -11136,7 +11183,7 @@ def category_tags(request, qset_id):
                                                         name=name).exclude(id=tag.id).exists())
                     if clash:
                         raise ValueError('There is already a tag called "{0}" in {1}'.format(
-                            name, tag.category_path))
+                            name, scope_label(tag.category_path)))
                     counts = [int(request.POST.get(f) or 0)
                               for f in ('num_tossups', 'num_bonuses', 'num_questions')]
                     if min(counts) < 0:
@@ -11212,17 +11259,22 @@ def category_tags(request, qset_id):
     # One category at a time, when the tree asks for it: a set with a few
     # hundred tags is unreadable as one page, and most of the time you are
     # working inside one category anyway.
-    focus_path = (request.GET.get('category') or '').strip()
+    raw_focus = (request.GET.get('category') or '').strip()
+    focus_set_wide = raw_focus == SET_WIDE_TOKEN
+    focus_path = scope_from_token(raw_focus)
+    # "focused" and "focused on the set-wide tags" are different things, and
+    # both differ from the unfocused index -- hence the token rather than ''.
+    focused = bool(raw_focus)
 
     # Group tags by category path with completion status
     groups = []
     tags_by_path = {}
     tag_qs = CategoryTag.objects.filter(question_set=qset)
-    if focus_path:
+    if focused:
         tag_qs = tag_qs.filter(category_path=focus_path)
     for tag in tag_qs:
         tags_by_path.setdefault(tag.category_path, []).append(tag)
-    for path in sorted(tags_by_path):
+    for path in sorted(tags_by_path, key=lambda p: (bool(p), p)):
         rows = []
         for tag in tags_by_path[path]:
             tossups = [{'id': t.id,
@@ -11253,6 +11305,9 @@ def category_tags(request, qset_id):
                       for k in order]
         groups.append({
             'path': path,
+            'token': scope_token(path),
+            'label': scope_label(path),
+            'set_wide': not path,
             'rows': rows,
             'tag_groups': tag_groups,
             'tag_count': len(rows),
@@ -11276,18 +11331,29 @@ def category_tags(request, qset_id):
     tag_counts = dict(CategoryTag.objects.filter(question_set=qset)
                       .values_list('category_path')
                       .annotate(n=Count('id')).values_list('category_path', 'n'))
-    category_index = [{'path': path, 'tag_count': tag_counts.get(path, 0)}
+    category_index = [{'path': path, 'token': scope_token(path), 'label': path,
+                       'set_wide': False, 'tag_count': tag_counts.get(path, 0)}
                       for path in path_choices]
+    # The set-wide tags are a scope of their own, and belong at the top of the
+    # index rather than being reachable only from the add form.
+    category_index.insert(0, {'path': '', 'token': SET_WIDE_TOKEN,
+                              'label': SET_WIDE_LABEL, 'set_wide': True,
+                              'tag_count': tag_counts.get('', 0)})
 
     # With one category open, the page is also where that category's
     # questions get their tags: every question in it, what it carries, and a
     # way to add or drop a tag without opening each question.
     focus_questions = _category_question_rows(qset, focus_path, groups[0]['rows'] if groups else []) \
-        if focus_path else None
+        if focused else None
 
     context = {'qset': qset,
                'user': user,
                'groups': groups,
+               'focused': focused,
+               'focus_set_wide': focus_set_wide,
+               'focus_label': scope_label(focus_path) if focused else '',
+               'set_wide_token': SET_WIDE_TOKEN,
+               'set_wide_label': SET_WIDE_LABEL,
                'focus_questions': focus_questions,
                'path_choices': path_choices,
                'category_index': category_index,

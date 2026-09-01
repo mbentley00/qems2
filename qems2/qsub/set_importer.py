@@ -1,8 +1,8 @@
 """Create a new QuestionSet from an uploaded TSV/CSV in the same format that
 export_question_set produces: a tossup section, a bonus section, and a
 distribution section, each introduced by its header row and separated by a
-blank row. Comments (including threaded replies) are recreated, and the new
-set's questions are pushed into the search index.
+blank row. Comments (including threaded replies) and category tags are
+recreated, and the new set's questions are pushed into the search index.
 
 Admin-only; wired up in views.import_set.
 """
@@ -20,7 +20,7 @@ from django_comments.models import Comment
 
 from qems2.qsub.models import (QuestionSet, Distribution, DistributionEntry,
                                SetWideDistributionEntry, Tossup, Bonus,
-                               QuestionType, CommentReply, Writer)
+                               QuestionType, CommentReply, Writer, CategoryTag)
 from qems2.qsub.utils import (ACF_STYLE_TOSSUP, ACF_STYLE_BONUS, VHSL_BONUS,
                               QUESTION_CREATE)
 from qems2.qsub import signals as qems_signals
@@ -135,6 +135,77 @@ def _parse_comment_cell(cell):
             username, text = '', body
         parsed.append((username.strip(), text, is_reply))
     return parsed
+
+
+def parse_tag_cell(cell):
+    """An exported Tags cell -> [(group_name, tag_name), ...].
+
+    Pieces are joined by "||" and spelled "Group: Name", or just "Name" when
+    the tag has no group -- the same shape as the Comments column.
+    """
+    out = []
+    for piece in (cell or '').split('||'):
+        piece = piece.strip()
+        if not piece:
+            continue
+        if ': ' in piece:
+            group, name = piece.split(': ', 1)
+            out.append((group.strip(), name.strip()))
+        else:
+            out.append(('', piece))
+    return out
+
+
+def resolve_tag(qset, group, name, question_path, cache):
+    """The CategoryTag this piece means, creating it if the set has no such tag.
+
+    A set can hold the same tag name under more than one category, so the one
+    whose path matches the question wins, then a set-wide one, then whatever
+    is left. A tag that has to be created is created set-wide: a tag arriving
+    with a question rather than with the distribution is the kind that applies
+    across categories, and it can always be given a category afterwards.
+    """
+    key = (group, name)
+    if key in cache:
+        candidates = cache[key]
+    else:
+        candidates = list(CategoryTag.objects.filter(question_set=qset, name=name))
+        # A name written with a colon in it ("Note: read carefully") splits
+        # wrongly, so fall back to matching the whole piece as the name.
+        if not candidates and group:
+            whole = '{0}: {1}'.format(group, name)
+            candidates = list(CategoryTag.objects.filter(question_set=qset, name=whole))
+            if candidates:
+                cache[(group, name)] = candidates
+                return candidates[0]
+        if group:
+            grouped = [t for t in candidates if (t.group_name or '') == group]
+            if grouped:
+                candidates = grouped
+        cache[key] = candidates
+    if not candidates:
+        tag = CategoryTag.objects.create(
+            question_set=qset, category_path='', group_name=group[:100], name=name[:200])
+        cache[key] = [tag]
+        return tag
+    for tag in candidates:
+        if question_path and tag.category_path == question_path:
+            return tag
+    for tag in candidates:
+        if not tag.category_path:
+            return tag
+    return candidates[0]
+
+
+def apply_tags(qset, question, is_tossup, cell, cache):
+    """Attach the tags named in an exported Tags cell. Returns how many."""
+    n = 0
+    for group, name in parse_tag_cell(cell):
+        tag = resolve_tag(qset, group, name,
+                          str(question.category) if question.category_id else '', cache)
+        (tag.tossups if is_tossup else tag.bonuses).add(question)
+        n += 1
+    return n
 
 
 LEGACY_SUFFIX = '-legacy'
@@ -319,7 +390,10 @@ def import_set_from_file(uploaded_file, set_name, owner):
     user_cache, resolve = _user_resolver(owner.user)
     legacy_author_ids, resolve_author = _author_resolver(owner)
 
-    summary = {'tossups': 0, 'bonuses': 0, 'comments': 0, 'errors': []}
+    summary = {'tossups': 0, 'bonuses': 0, 'comments': 0, 'tags': 0, 'errors': []}
+    # (group, name) -> the set's matching tags, so a sheet of thousands of rows
+    # resolves each distinct tag once rather than once per question.
+    tag_cache = {}
     created_tossups = []
     created_bonuses = []
 
@@ -379,6 +453,8 @@ def import_set_from_file(uploaded_file, set_name, owner):
                         )
                         tossup.save_question(edit_type=QUESTION_CREATE, changer=owner)
                         summary['comments'] += _create_comments(tossup, tossup_ct, site, _cell(row, tmap, 'Comments'), resolve)
+                        summary['tags'] += apply_tags(qset, tossup, True,
+                                                      _cell(row, tmap, 'Tags'), tag_cache)
                     created_tossups.append(tossup)
                     summary['tossups'] += 1
                 except Exception as ex:
@@ -414,6 +490,8 @@ def import_set_from_file(uploaded_file, set_name, owner):
                         )
                         bonus.save_question(edit_type=QUESTION_CREATE, changer=owner)
                         summary['comments'] += _create_comments(bonus, bonus_ct, site, _cell(row, bmap, 'Comments'), resolve)
+                        summary['tags'] += apply_tags(qset, bonus, False,
+                                                      _cell(row, bmap, 'Tags'), tag_cache)
                     created_bonuses.append(bonus)
                     summary['bonuses'] += 1
                 except Exception as ex:

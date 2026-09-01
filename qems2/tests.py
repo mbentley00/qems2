@@ -6330,6 +6330,287 @@ class PronunciationPossessiveTests(TestCase):
             'Question', 'Denis \\PDiderot\\P ("DID-er-OW") wrote.', 'tossup_text'), [])
 
 
+class TagRoundTripTests(TestCase):
+    """Category tags survive export -> import. Before the Tags column the sheet
+    recorded a question's category, author, packet and comments but not its
+    tags, so re-importing an exported set lost every assignment."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        self.acf_tu = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.acf_bn = QuestionType.objects.get(question_type=ACF_STYLE_BONUS)
+        self.au = User.objects.create_user('trt_admin', password='pw', email='trt@t.com',
+                                           is_superuser=True, is_staff=True)
+        self.owner = Writer.objects.get(user=self.au)
+        self.dist = Distribution.objects.create(name='trt dist')
+        self.lit = DistributionEntry.objects.create(
+            distribution=self.dist, category='Literature', subcategory='World',
+            min_tossups=1, min_bonuses=1, max_tossups=2, max_bonuses=2)
+        self.qset = QuestionSet.objects.create(
+            name='TRT Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.qset.editor.add(self.owner)
+        SetWideDistributionEntry.objects.create(
+            question_set=self.qset, dist_entry=self.lit, num_tossups=2, num_bonuses=2)
+        self.packet = Packet.objects.create(question_set=self.qset, packet_name='Packet 01',
+                                            created_by=self.owner)
+        self.tu = Tossup.objects.create(
+            author=self.owner, question_set=self.qset, packet=self.packet,
+            question_type=self.acf_tu, tossup_text='A clue. For 10 points, name this.',
+            tossup_answer='_Antigone_', category=self.lit, question_number=1,
+            created_date=datetime.now(), last_changed_date=datetime.now())
+        self.bn = Bonus.objects.create(
+            author=self.owner, question_set=self.qset, packet=self.packet,
+            question_type=self.acf_bn, leadin='Lead. For 10 points each:',
+            part1_text='P1', part1_answer='_A1_', part2_text='P2', part2_answer='_A2_',
+            part3_text='P3', part3_answer='_A3_', category=self.lit, question_number=1,
+            created_date=datetime.now(), last_changed_date=datetime.now())
+        # One set-wide tag with a group, one plain category tag.
+        self.period = CategoryTag.objects.create(
+            question_set=self.qset, category_path='', group_name='Period',
+            name='20th Century')
+        self.drama = CategoryTag.objects.create(
+            question_set=self.qset, category_path='Literature - World', name='Drama')
+        self.period.tossups.add(self.tu)
+        self.drama.tossups.add(self.tu)
+        self.period.bonuses.add(self.bn)
+        self.client.login(username='trt_admin', password='pw')
+
+    def _export(self):
+        resp = self.client.get('/export_question_set/{0}/csv/'.format(self.qset.id))
+        self.assertEqual(resp.status_code, 200)
+        return resp.content.decode('utf-8')
+
+    # --- the cell format ---------------------------------------------------
+
+    def test_parse_tag_cell(self):
+        from qems2.qsub.set_importer import parse_tag_cell
+        self.assertEqual(parse_tag_cell('Period: 20th Century||Drama'),
+                         [('Period', '20th Century'), ('', 'Drama')])
+        self.assertEqual(parse_tag_cell(''), [])
+        self.assertEqual(parse_tag_cell('  '), [])
+
+    # --- export ------------------------------------------------------------
+
+    def test_export_carries_a_tags_column(self):
+        text = self._export()
+        self.assertIn('"Tags"', text)
+        self.assertIn('Period: 20th Century', text)
+        self.assertIn('Drama', text)
+
+    # --- round trip --------------------------------------------------------
+
+    def _reimport(self, text, name='TRT Copy'):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from qems2.qsub import set_importer
+        upload = SimpleUploadedFile('export.csv', text.encode('utf-8'), content_type='text/csv')
+        return set_importer.import_set_from_file(upload, name, self.owner)
+
+    def test_tags_survive_a_round_trip(self):
+        summary = self._reimport(self._export())
+        copy = summary['question_set']
+        self.assertEqual(summary['errors'], [])
+        self.assertTrue(summary['tags'] >= 3)
+
+        tu = Tossup.objects.get(question_set=copy)
+        names = {t.name for t in tu.category_tags.all()}
+        self.assertEqual(names, {'20th Century', 'Drama'})
+        bn = Bonus.objects.get(question_set=copy)
+        self.assertEqual({t.name for t in bn.category_tags.all()}, {'20th Century'})
+
+        # The group survives, and a tag created on import is set-wide.
+        period = CategoryTag.objects.get(question_set=copy, name='20th Century')
+        self.assertEqual(period.group_name, 'Period')
+        self.assertTrue(period.is_set_wide)
+        # Tags belong to the new set, never borrowed from the old one.
+        self.assertNotEqual(period.id, self.period.id)
+
+    def test_an_existing_tag_is_reused_not_duplicated(self):
+        # Import into a set that already defines the tag: the assignment should
+        # attach to that tag rather than making a second one of the same name.
+        text = self._export()
+        summary = self._reimport(text)
+        copy = summary['question_set']
+        before = CategoryTag.objects.filter(question_set=copy, name='20th Century').count()
+        self.assertEqual(before, 1)
+
+    def test_a_question_with_no_tags_is_fine(self):
+        self.period.tossups.clear()
+        self.drama.tossups.clear()
+        self.period.bonuses.clear()
+        summary = self._reimport(self._export(), name='TRT Bare')
+        self.assertEqual(summary['errors'], [])
+        self.assertEqual(summary['tags'], 0)
+        tu = Tossup.objects.get(question_set=summary['question_set'])
+        self.assertEqual(tu.category_tags.count(), 0)
+
+    def test_comments_still_come_across(self):
+        from django_comments.models import Comment
+        from django.contrib.contenttypes.models import ContentType
+        from django.contrib.sites.models import Site
+        Comment.objects.create(
+            content_type=ContentType.objects.get_for_model(Tossup),
+            object_pk=str(self.tu.id), site=Site.objects.get_current(),
+            user=self.au, comment='On occult Nazi practices', submit_date=timezone.now())
+        summary = self._reimport(self._export(), name='TRT Comments')
+        self.assertGreaterEqual(summary['comments'], 1)
+        tu = Tossup.objects.get(question_set=summary['question_set'])
+        texts = [c.comment for c in Comment.objects.filter(
+            content_type=ContentType.objects.get_for_model(Tossup),
+            object_pk=str(tu.id))]
+        self.assertIn('On occult Nazi practices', texts)
+
+
+class SetWideCategoryTagTests(TestCase):
+    """A tag with no category path applies to the whole set: it is offered on
+    every question whatever its category, and its quota counts every question
+    carrying it."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('sw_owner', password='pw', email='sw@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='sw dist')
+        self.lit = DistributionEntry.objects.create(
+            distribution=self.dist, category='Literature', subcategory='World',
+            min_tossups=1, min_bonuses=1, max_tossups=2, max_bonuses=2)
+        self.hist = DistributionEntry.objects.create(
+            distribution=self.dist, category='History', subcategory='European',
+            min_tossups=1, min_bonuses=1, max_tossups=2, max_bonuses=2)
+        self.qset = QuestionSet.objects.create(
+            name='SW Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.qset.editor.add(self.owner)
+        for de in (self.lit, self.hist):
+            SetWideDistributionEntry.objects.create(
+                question_set=self.qset, dist_entry=de, num_tossups=2, num_bonuses=2)
+        # One tag for the whole set, one scoped to a single category.
+        self.everywhere = CategoryTag.objects.create(
+            question_set=self.qset, category_path='', name='20th Century',
+            group_name='Period', num_tossups=2)
+        self.lit_only = CategoryTag.objects.create(
+            question_set=self.qset, category_path='Literature - World', name='Drama')
+        self.client.login(username='sw_owner', password='pw')
+
+    def _tossup(self, entry, text='Clue. For 10 points, name this thing.', answer='_thing_'):
+        return Tossup.objects.create(
+            author=self.owner, question_set=self.qset, question_type=self.acf,
+            tossup_text=text, tossup_answer=answer, category=entry,
+            created_date=datetime.now(), last_changed_date=datetime.now(),
+            question_number=1)
+
+    # --- the model ---------------------------------------------------------
+
+    def test_is_set_wide_and_scope_label(self):
+        self.assertTrue(self.everywhere.is_set_wide)
+        self.assertEqual(self.everywhere.scope_label, 'Whole set')
+        self.assertFalse(self.lit_only.is_set_wide)
+        self.assertEqual(self.lit_only.scope_label, 'Literature - World')
+
+    # --- which questions it is offered on ----------------------------------
+
+    def test_offered_in_every_category(self):
+        from qems2.qsub.views import get_applicable_tags
+        for entry in (self.lit, self.hist):
+            names = {t.name for t in get_applicable_tags(self.qset, entry)}
+            self.assertIn('20th Century', names, entry)
+        # The category-scoped one is still only in its own category.
+        self.assertIn('Drama', {t.name for t in get_applicable_tags(self.qset, self.lit)})
+        self.assertNotIn('Drama', {t.name for t in get_applicable_tags(self.qset, self.hist)})
+
+    def test_offered_before_a_category_is_chosen(self):
+        # An add page with no category picked yet still shows the set-wide
+        # tags: they are exactly the ones that do not depend on the category.
+        from qems2.qsub.views import get_applicable_tags
+        names = {t.name for t in get_applicable_tags(self.qset, None)}
+        self.assertEqual(names, {'20th Century'})
+
+    def test_the_endpoint_offers_it_for_any_category(self):
+        for entry in (self.lit, self.hist):
+            resp = self.client.get('/tags_for_category/{0}/'.format(self.qset.id),
+                                   {'category': entry.id})
+            html = json.loads(resp.content.decode())['html']
+            self.assertIn('20th Century', html)
+            self.assertIn('Whole set', html)
+
+    # --- counting ----------------------------------------------------------
+
+    def test_quota_counts_questions_from_every_category(self):
+        tu1, tu2 = self._tossup(self.lit), self._tossup(self.hist)
+        self.everywhere.tossups.add(tu1, tu2)
+        p = self.everywhere.progress()
+        self.assertEqual(p['tu_done'], 2)      # one from each category
+        self.assertTrue(p['complete'])
+
+    # --- the management page -----------------------------------------------
+
+    def test_creating_a_set_wide_tag_through_the_page(self):
+        resp = self.client.post('/category_tags/{0}/'.format(self.qset.id), {
+            'action': 'add', 'category_path': '__SET__', 'name': 'Needs PG',
+            'group_name': 'Production', 'num_tossups': '0', 'num_bonuses': '0',
+            'num_questions': '0'})
+        self.assertEqual(resp.status_code, 200)
+        tag = CategoryTag.objects.get(question_set=self.qset, name='Needs PG')
+        self.assertEqual(tag.category_path, '')
+        self.assertTrue(tag.is_set_wide)
+
+    def test_a_tag_still_needs_a_scope(self):
+        self.client.post('/category_tags/{0}/'.format(self.qset.id), {
+            'action': 'add', 'category_path': '', 'name': 'Nameless scope',
+            'num_tossups': '0', 'num_bonuses': '0', 'num_questions': '0'})
+        self.assertFalse(CategoryTag.objects.filter(
+            question_set=self.qset, name='Nameless scope').exists())
+
+    def test_the_index_lists_the_set_wide_scope(self):
+        body = self.client.get('/category_tags/{0}/'.format(self.qset.id)).content.decode()
+        self.assertIn('Whole set (every category)', body)
+        self.assertIn('category=__SET__', body)
+
+    def test_focusing_on_the_set_wide_scope(self):
+        body = self.client.get('/category_tags/{0}/'.format(self.qset.id),
+                               {'category': '__SET__'}).content.decode()
+        self.assertIn('20th Century', body)
+        self.assertNotIn('Drama', body)          # a category tag, not shown here
+        self.assertIn('Set-wide tags.', body)    # the explanatory note
+
+    def test_focused_set_wide_lists_questions_from_every_category(self):
+        # The question list shows answer lines, so give them distinct ones.
+        self._tossup(self.lit, answer='_Antigone_')
+        self._tossup(self.hist, answer='_Waterloo_')
+        body = self.client.get('/category_tags/{0}/'.format(self.qset.id),
+                               {'category': '__SET__'}).content.decode()
+        self.assertIn('Questions in Whole set', body)
+        self.assertIn('Antigone', body)     # from Literature
+        self.assertIn('Waterloo', body)     # from History
+
+    def test_a_category_focus_still_works(self):
+        body = self.client.get('/category_tags/{0}/'.format(self.qset.id),
+                               {'category': 'Literature - World'}).content.decode()
+        self.assertIn('Drama', body)
+        self.assertNotIn('Set-wide tags.', body)
+
+    # --- export / import ---------------------------------------------------
+
+    def test_set_wide_tags_round_trip_through_the_sheet(self):
+        from qems2.qsub import tag_importer
+        csv_text = tag_importer.export_csv(self.qset)
+        self.assertIn('20th Century', csv_text)
+        entries = tag_importer.parse_tag_sheet('tags.csv', csv_text.encode())
+        blank = [e for e in entries if e['name'] == '20th Century'][0]
+        self.assertEqual(blank['category_path'], '')
+        # Importing into a fresh set keeps it set-wide rather than skipping it.
+        other = QuestionSet.objects.create(
+            name='SW Other', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        created, updated, skipped = tag_importer.import_tags(
+            other, entries, ['Literature - World', 'History - European'])
+        self.assertEqual(skipped, [])
+        self.assertTrue(CategoryTag.objects.filter(
+            question_set=other, name='20th Century', category_path='').exists())
+
+
 class InlineDocumentEditTests(TestCase):
     """Editing questions in place in the document view: /inline_save_question/
     commits one question's prose, and refuses a write whose baseline is stale

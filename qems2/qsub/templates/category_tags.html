@@ -14,8 +14,8 @@
 <h3 class="page-header">Category Tags: {{ qset.name }}</h3>
 <ul class="breadcrumbs">
     <li><a href="/edit_question_set/{{ qset.id }}/">{{ qset.name }}</a></li>
-    <li{% if not focus_path %} class="current"{% endif %}><a href="/category_tags/{{ qset.id }}/">Category Tags</a></li>
-    {% if focus_path %}<li class="current">{{ focus_path }}</li>{% endif %}
+    <li{% if not focused %} class="current"{% endif %}><a href="/category_tags/{{ qset.id }}/">Category Tags</a></li>
+    {% if focused %}<li class="current">{{ focus_label }}</li>{% endif %}
 </ul>
 
 {% if message %}
@@ -24,9 +24,13 @@
 {% if messages %}{% for m in messages %}<div class="alert-box {% if m.tags == 'error' %}warning{% elif m.tags == 'warning' %}warning{% else %}success{% endif %}">{{ m }}</div>{% endfor %}{% endif %}
 
 <div class="panel radius">
-    Tags are editor-defined requirements within a category &mdash; for instance &ldquo;Asian Literature&rdquo;
+    Tags are editor-defined requirements &mdash; for instance &ldquo;Asian Literature&rdquo;
     under Literature - World with 6 tossups and 6 bonuses needed. Writers fulfill a tag by checking it
     on the question's edit page. Tags with a required count of 0 are informational labels.
+    A tag can belong to <strong>one category</strong> or to the <strong>whole set</strong>. Use a
+    set-wide tag for anything that cuts across the distribution &mdash; a time period, a region, where
+    a question came from &mdash; instead of creating the same tag once per category: it is offered on
+    every question whatever its category, and its quota counts every question carrying it.
     A tag can set a ceiling instead of (or as well as) a minimum: &ldquo;This Empire Indicator&rdquo;
     with a maximum of 7 tossups and 0 bonuses asks for none, but goes red once an eighth turns up.
     Tag names are printed in exported packets unless the tag says otherwise; the document view always
@@ -40,8 +44,12 @@
     <input type="hidden" name="action" value="add">
     <div class="row">
         <div class="small-4 columns">
-            <label>Category
+            <label>Applies to
                 <select name="category_path">
+                    {# A tag can belong to the whole set: use it for the things
+                       that cut across the distribution -- a period, a region,
+                       a source -- instead of repeating one per category. #}
+                    <option value="{{ set_wide_token }}"{% if focus_set_wide or selected_path == set_wide_token %} selected{% endif %}>{{ set_wide_label }}</option>
                     {% for path in path_choices %}
                     <option value="{{ path }}"{% if path == selected_path or path == focus_path %} selected{% endif %}>{{ path }}</option>
                     {% endfor %}
@@ -94,17 +102,17 @@
 </form>
 {% endif %}
 
-{% if focus_path %}
+{% if focused %}
 <p><a href="/category_tags/{{ qset.id }}/" class="button small secondary">&laquo; All categories</a></p>
 {% else %}
 <div class="panel radius cat-index">
-    <div class="cat-index-head">Every category in this set &mdash; open one to work on its tags</div>
+    <div class="cat-index-head">Every scope in this set &mdash; open one to work on its tags</div>
     <div class="cat-index-list">
         {% for c in category_index %}
-        <a class="cat-index-item{% if not c.tag_count %} cat-index-empty{% endif %}"
-           href="/category_tags/{{ qset.id }}/?category={{ c.path|urlencode }}"
-           title="{% if c.tag_count %}{{ c.tag_count }} tag{{ c.tag_count|pluralize }}{% else %}No tags yet{% endif %}">
-            {{ c.path }}<span class="cat-index-count">{% if c.tag_count %}{{ c.tag_count }}{% else %}&mdash;{% endif %}</span>
+        <a class="cat-index-item{% if not c.tag_count %} cat-index-empty{% endif %}{% if c.set_wide %} cat-index-setwide{% endif %}"
+           href="/category_tags/{{ qset.id }}/?category={{ c.token|urlencode }}"
+           title="{% if c.set_wide %}Tags that apply to every question in the set{% elif c.tag_count %}{{ c.tag_count }} tag{{ c.tag_count|pluralize }}{% else %}No tags yet{% endif %}">
+            {{ c.label }}<span class="cat-index-count">{% if c.tag_count %}{{ c.tag_count }}{% else %}&mdash;{% endif %}</span>
         </a>
         {% empty %}
         <span class="home-note">This set's distribution has no categories yet.</span>
@@ -116,9 +124,17 @@
 {% if focus_path %}
 {% include "_category_comments.html" %}
 {% endif %}
+{% if focus_set_wide %}
+<div class="panel callout setwide-note">
+    <strong>Set-wide tags.</strong> These apply to every question in the set, whatever its
+    category &mdash; for the things that cut across the distribution, like a time period, a
+    region, or where a question came from. Their quotas count every question carrying the
+    tag, not just those in one category.
+</div>
+{% endif %}
 
 {% if not groups %}
-<div class="panel callout"><p>{% if focus_path %}No tags in {{ focus_path }} yet.{% else %}No tags defined yet.{% endif %}</p></div>
+<div class="panel callout"><p>{% if focused %}No tags in {{ focus_label }} yet.{% else %}No tags defined yet.{% endif %}</p></div>
 {% endif %}
 
 {% comment %}
@@ -127,9 +143,9 @@ categories rather than as everything at once. A focused view (?category=…) ope
 its one category, since that is the whole page then.
 {% endcomment %}
 {% for group in groups %}
-<details class="tag-cat" {% if focus_path or groups|length == 1 %}open{% endif %}>
+<details class="tag-cat{% if group.set_wide %} tag-cat-setwide{% endif %}" {% if focused or groups|length == 1 %}open{% endif %}>
     <summary class="tag-cat-summary">
-        <span class="tag-cat-name">{{ group.path }}</span>
+        <span class="tag-cat-name">{{ group.label }}</span>
         <span class="tag-cat-counts">
             {{ group.tag_count }} tag{{ group.tag_count|pluralize }}
             {% if group.tu_required %}&middot; {{ group.tu_done }}/{{ group.tu_required }} tossups{% endif %}
@@ -137,7 +153,7 @@ its one category, since that is the whole page then.
             {% if group.q_required %}&middot; {{ group.q_done }}/{{ group.q_required }} of any type{% endif %}
             {% if group.incomplete %}<span class="tag-cat-open">{{ group.incomplete }} outstanding</span>{% endif %}
         </span>
-        <a class="tag-cat-only" href="/category_tags/{{ qset.id }}/?category={{ group.path|urlencode }}">Just this category &rarr;</a>
+        <a class="tag-cat-only" href="/category_tags/{{ qset.id }}/?category={{ group.token|urlencode }}">{% if group.set_wide %}Just these &rarr;{% else %}Just this category &rarr;{% endif %}</a>
     </summary>
 
     {% for tg in group.tag_groups %}
@@ -248,7 +264,7 @@ time, and where the questions nobody has tagged stand out.
 {% endcomment %}
 <div class="tag-questions">
     <div class="tag-questions-head">
-        <strong>Questions in {{ focus_path }}</strong>
+        <strong>Questions in {{ focus_label }}</strong>
         <span class="tag-cat-counts">{{ focus_questions.tossups }} tossup{{ focus_questions.tossups|pluralize }},
             {{ focus_questions.bonuses }} bonus{{ focus_questions.bonuses|pluralize:"es" }}
             {% if focus_questions.untagged %}&middot; <span class="tag-cat-open">{{ focus_questions.untagged }} without a tag</span>{% endif %}</span>
@@ -385,6 +401,9 @@ $(function () {
 </script>
 
 <style>
+.cat-index-setwide { font-weight: bold; }
+.tag-cat-setwide > summary .tag-cat-name::before { content: "\002731 "; color: #6b5bbd; }
+.setwide-note { border-left: 4px solid #6b5bbd; }
 .tag-cat { border: 1px solid var(--qx-border, #e9e9ef); border-radius: 6px;
     margin: 10px 0; background: var(--qx-card, #fff); }
 .tag-cat-summary { cursor: pointer; padding: 10px 14px; display: flex; flex-wrap: wrap;

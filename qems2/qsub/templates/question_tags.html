@@ -7,8 +7,11 @@
                 {% if available_tags|length == 1 %}<a href="{{ available_tags.0.status_url }}">tag status</a>{% else %}tag status per category below{% endif %})</small>
             {% for section in available_tags %}
             <div class="qtags-section">
-                {% if available_tags|length > 1 %}
-                <div class="qtags-path">{{ section.path }} &middot; <a href="{{ section.status_url }}">tag status</a></div>
+                {# A set-wide section always names itself: without it a writer
+                   cannot tell that ticking the tag speaks for the whole set
+                   rather than this category. #}
+                {% if available_tags|length > 1 or section.set_wide %}
+                <div class="qtags-path{% if section.set_wide %} qtags-path-setwide{% endif %}">{{ section.label }} &middot; <a href="{{ section.status_url }}">tag status</a></div>
                 {% endif %}
                 {% for g in section.groups %}
                 <div class="qtags-axis">
@@ -39,6 +42,7 @@
 .qtags-panel { padding: 8px 12px 4px; margin-bottom: 12px; }
 .qtags-section { margin-top: 6px; }
 .qtags-path { font-weight: bold; margin: 6px 0 2px; }
+.qtags-path-setwide::before { content: "731 "; color: #6b5bbd; }
 /* One block per axis: its name on a line of its own, a rule down the left so
    the block's extent is visible, and alternating tints so neighbouring axes
    read as separate things rather than one wrapped run. */

@@ -128,11 +128,12 @@ def parse_tag_sheet(name, data):
     for n, row in enumerate(rows[1:], start=2):
         path = cell(row, 'category')
         tag = cell(row, 'tag')
-        if not path or not tag:
-            raise TagImportError('Line {0}: the category and tag name are both required'.format(n))
+        if not tag:
+            raise TagImportError('Line {0}: a tag name is required'.format(n))
         key = (path.lower(), tag.lower())
         if key in seen:
-            raise TagImportError('Line {0}: "{1}" in {2} appears more than once'.format(n, tag, path))
+            raise TagImportError('Line {0}: "{1}" in {2} appears more than once'.format(
+                n, tag, path or 'the whole set'))
         seen.add(key)
         entries.append({
             'category_path': path,
@@ -167,14 +168,17 @@ def import_tags(qset, entries, known_paths):
     assignments and takes the sheet's group, counts and order. Entries whose
     category path is not one of ``known_paths`` (the set's own tree) are
     skipped and returned, since a tag on a category the set does not have
-    would never be offered to a writer.
+    would never be offered to a writer. A blank category path is a set-wide
+    tag and is always accepted.
 
     Returns (created, updated, skipped_paths)."""
     known = set(known_paths)
     created = updated = 0
     skipped = []
     for e in entries:
-        if e['category_path'] not in known:
+        # A blank category column means the tag applies to the whole set, so
+        # it is not measured against the set's category list.
+        if e['category_path'] and e['category_path'] not in known:
             if e['category_path'] not in skipped:
                 skipped.append(e['category_path'])
             continue

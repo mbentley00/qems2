@@ -955,7 +955,13 @@ class PacketizationEntry(models.Model):
 class CategoryTag(models.Model):
 
     question_set = models.ForeignKey(QuestionSet, on_delete=models.CASCADE)
-    category_path = models.CharField(max_length=500)
+    # The category this tag belongs to, as a distribution path
+    # ("Literature - World"). BLANK MEANS THE WHOLE SET: a tag that applies to
+    # every question whatever its category, for the things that cut across the
+    # distribution -- a time period, a region, the notebook a question came
+    # from. Such a tag is offered on every question and counts every question
+    # carrying it, rather than being created once per category.
+    category_path = models.CharField(max_length=500, blank=True, default='')
     name = models.CharField(max_length=200)
     # What kind of tag this is — "Time", "Location", "Subject". A category's
     # tags usually run along more than one axis at once (19th Century and
@@ -1000,6 +1006,15 @@ class CategoryTag(models.Model):
 
     def __str__(self):
         return '{0!s}: {1!s} ({2!s})'.format(self.question_set, self.name, self.category_path)
+
+    @property
+    def is_set_wide(self):
+        """Whether this tag applies to the whole set rather than one category."""
+        return not (self.category_path or '').strip()
+
+    @property
+    def scope_label(self):
+        return self.category_path if not self.is_set_wide else 'Whole set'
 
     @property
     def has_quota(self):
