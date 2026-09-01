@@ -15,3 +15,20 @@ default_*.sqlite3
 cookies.txt
 cookies_test.txt
 .claude/settings.local.json
+
+# The OneNote question notebook and everything derived from it. This is the
+# writer's private, unpublished question archive: it must never enter the
+# repository, and the generated review/import files are large besides. They
+# are produced outside the repo (../quizbowl_import/) on purpose -- these
+# patterns are the second line of defence if a copy is ever made in here.
+*.onepkg
+*.one
+*.onetoc2
+quizbowl_import/
+quizbowl_import.json
+quizbowl_review.html
+quizbowl_data.js
+# intermediates from the import pipeline
+extracted.json
+classified.json
+pages/_toc_*.xml
