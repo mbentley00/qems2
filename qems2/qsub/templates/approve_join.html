@@ -19,12 +19,32 @@
         They've been emailed to let them know.
     </div>
     <p><a href="/edit_question_set/{{ qset.id }}/" class="button small secondary">Go to set</a></p>
+{% elif declined %}
+    {# Declining is quiet on purpose: the requester isn't told, so say so here
+       rather than leaving the owner wondering what the person now knows. #}
+    <div class="alert-box success">
+        {{ requester|verbose_username }}'s request to join <strong>{{ qset.name }}</strong>
+        has been declined. They haven't been emailed about it, and nothing stops
+        them asking again.
+    </div>
+    <p><a href="/edit_question_set/{{ qset.id }}/" class="button small secondary">Go to set</a></p>
 {% elif already %}
     <div class="alert-box info">
         {{ requester|verbose_username }} is already part of <strong>{{ qset.name }}</strong>.
         No action needed.
     </div>
     <p><a href="/edit_question_set/{{ qset.id }}/" class="button small secondary">Go to set</a></p>
+{% elif declining %}
+    <div class="panel">
+        <p>Decline <strong>{{ requester|verbose_username }}</strong>'s request to join
+        <strong>{{ qset.name }}</strong>?</p>
+        <form action="" method="post">
+            {% csrf_token %}
+            <button type="submit" class="button alert">Decline request</button>
+        </form>
+        <p><small style="color:#888;">The request is dropped and they aren't emailed about it.
+        <a href="/approve_join/{{ qset.id }}/{{ requester.id }}/">Add them instead</a>.</small></p>
+    </div>
 {% else %}
     <div class="panel">
         <p><strong>{{ requester|verbose_username }}</strong> has requested to join
@@ -35,7 +55,8 @@
             <button type="submit" name="role" value="editor" class="button secondary">Add as Editor</button>
         </form>
         <p><small style="color:#888;">Writers can edit their own unlocked questions; editors can
-        edit and lock any question in the set.</small></p>
+        edit and lock any question in the set.
+        &mdash; or <a href="/decline_join/{{ qset.id }}/{{ requester.id }}/">decline this request</a>.</small></p>
     </div>
 {% endif %}
 

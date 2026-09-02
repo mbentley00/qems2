@@ -20,6 +20,7 @@ urlpatterns = [
     re_path(r'^$', main),
     re_path(r'^request_to_join/$', request_to_join),
     re_path(r'^approve_join/(?P<qset_id>[0-9]+)/(?P<writer_id>[0-9]+)/$', approve_join),
+    re_path(r'^decline_join/(?P<qset_id>[0-9]+)/(?P<writer_id>[0-9]+)/$', decline_join),
     re_path(r'^join/(?P<token>[A-Za-z0-9_-]{8,64})/$', join_set),
     re_path(r'^set_join_link/(?P<qset_id>[0-9]+)/$', manage_join_link),
     re_path(r'^set_join_request/(?P<qset_id>[0-9]+)/$', resolve_join_request),

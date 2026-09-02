@@ -210,19 +210,26 @@ def _notify_set_join_request(qset, requester, note, via_link):
     if not recipients:
         return False
 
-    approve_url = '{0}/approve_join/{1}/{2}/'.format(
-        dj_settings.BASE_URL.rstrip('/'), qset.id, requester.id)
+    base = dj_settings.BASE_URL.rstrip('/')
+    approve_url = '{0}/approve_join/{1}/{2}/'.format(base, qset.id, requester.id)
+    # A publicly listed set draws requests from people the owner has never heard
+    # of, and saying no was the one answer the mail had no link for -- it meant
+    # finding the set and its Writers and Editors tab. Both decisions get a
+    # link; neither acts on being followed, since mail clients and link
+    # scanners fetch what they are sent.
+    decline_url = '{0}/decline_join/{1}/{2}/'.format(base, qset.id, requester.id)
     subject = 'QEMS3: {0} requests to join "{1}"'.format(requester_name, qset.name)
     body = ('{0} (@{1}{2}) has requested to join your question set "{3}" on QEMS3{4}.\n\n'
             '{5}\n\n'
             'Approve this request (add them as a writer or editor):\n{6}\n\n'
+            'Decline it:\n{7}\n\n'
             'You can also open the set on QEMS3 and review pending requests on the '
-            '"Writers and Editors" tab:\n{7}/edit_question_set/{8}/').format(
+            '"Writers and Editors" tab:\n{8}/edit_question_set/{9}/').format(
         requester_name, requester.user.username,
         ', ' + requester_email if requester_email else '', qset.name,
         ' using your join link' if via_link else '',
         ('Their message: ' + note) if note else '(No message included.)',
-        approve_url, dj_settings.BASE_URL.rstrip('/'), qset.id)
+        approve_url, decline_url, base, qset.id)
     try:
         EmailMessage(subject, body, dj_settings.DEFAULT_FROM_EMAIL, recipients,
                      reply_to=[requester_email] if requester_email else None).send(fail_silently=False)
@@ -377,24 +384,31 @@ def resolve_join_request(request, qset_id):
     return HttpResponseRedirect(back)
 
 
+def _join_request_parties(user, qset_id, writer_id):
+    """(qset, requester, error) for the approve and decline links in a join
+    request email. Both are owner-only, and either can be followed long after
+    the request itself is gone, so the checks are the same for both."""
+    try:
+        qset = QuestionSet.objects.get(id=int(qset_id))
+        requester = Writer.objects.get(id=int(writer_id))
+    except (ValueError, QuestionSet.DoesNotExist, Writer.DoesNotExist):
+        return None, None, {'message': 'That set or user no longer exists.',
+                            'message_class': 'alert-box alert'}
+    if not qset.is_owner(user):
+        return None, None, {'message': 'Only an owner of this set can act on join requests.',
+                            'message_class': 'alert-box alert'}
+    return qset, requester, None
+
+
 @login_required
 def approve_join(request, qset_id, writer_id):
     """Owner-facing approval of a join request, linked directly from the request
     email. Shows a small confirmation page; on POST adds the requester to the
     set as a writer (default) or editor and emails them that they were added."""
     user = request.user.writer
-    try:
-        qset = QuestionSet.objects.get(id=int(qset_id))
-        requester = Writer.objects.get(id=int(writer_id))
-    except (ValueError, QuestionSet.DoesNotExist, Writer.DoesNotExist):
-        return render(request, 'failure.html',
-                      {'message': 'That set or user no longer exists.',
-                       'message_class': 'alert-box alert'})
-
-    if not qset.is_owner(user):
-        return render(request, 'failure.html',
-                      {'message': 'Only an owner of this set can approve join requests.',
-                       'message_class': 'alert-box alert'})
+    qset, requester, error = _join_request_parties(user, qset_id, writer_id)
+    if error is not None:
+        return render(request, 'failure.html', error)
 
     already = _is_set_member(requester, qset)
 
@@ -411,6 +425,37 @@ def approve_join(request, qset_id, writer_id):
     return render(request, 'approve_join.html',
                   {'qset': qset, 'requester': requester, 'already': already, 'user': user,
                    'default_role': link.default_role if link else 'writer'})
+
+
+@login_required
+def decline_join(request, qset_id, writer_id):
+    """Owner-facing decline of a join request, the other link in the request
+    email. GET asks; POST drops the pending request.
+
+    The requester isn't emailed about it -- the same as declining from the set
+    page -- so a no stays between the owner and the set, and nothing stops the
+    requester asking again later.
+    """
+    user = request.user.writer
+    qset, requester, error = _join_request_parties(user, qset_id, writer_id)
+    if error is not None:
+        return render(request, 'failure.html', error)
+
+    already = _is_set_member(requester, qset)
+    pending = SetJoinRequest.objects.filter(question_set=qset, requester=requester)
+
+    if request.method == 'POST' and not already:
+        pending.delete()
+        return render(request, 'approve_join.html',
+                      {'qset': qset, 'requester': requester, 'declined': True, 'user': user})
+
+    # Someone already on the set has no request left to answer either way.
+    if already:
+        pending.delete()
+
+    return render(request, 'approve_join.html',
+                  {'qset': qset, 'requester': requester, 'already': already,
+                   'declining': True, 'user': user})
 
 
 def _grant_set_role(qset, requester, role, by_writer):
