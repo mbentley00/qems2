@@ -396,7 +396,10 @@ html[data-theme="dark"] .packet-nav-end { background: none; border-color: transp
 
 /* Home action buttons: a responsive grid that wraps to fit the screen, instead
    of Foundation's non-wrapping button-group row (which overflowed on mobile). */
-ul.button-group.home-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 8px; margin: 0 0 1.2rem; padding: 0; }
+ul.button-group.home-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
+    /* Every row is as tall as the tallest button on the whole grid, so a
+       two-line label in row 1 doesn't leave row 2 visibly shorter. */
+    grid-auto-rows: 1fr; gap: 8px; margin: 0 0 1.2rem; padding: 0; }
 /* Foundation's .button-group clearfix ::before/::after become anonymous grid
    items — the ::before occupied the whole first cell, shoving the buttons
    right and leaving a phantom gap. */
@@ -409,7 +412,10 @@ ul.button-group.home-actions > li { display: block; margin: 0; float: none; }
    " Label" text node, so the space typed in the markup never survives. */
 ul.button-group.home-actions > li > .button { display: flex; align-items: center; justify-content: center;
     gap: 0.5em; text-align: center; width: 100%; height: 100%; margin: 0; border-left: 0; border-radius: 8px;
-    padding: 0.9rem 1rem; }
+    /* Tight enough that a two-line label still reads as a button rather than a
+       tile -- every row is sized to the tallest label, so the padding here is
+       paid by all nine of them. */
+    padding: 0.5rem 0.75rem; line-height: 1.2; }
 /* The icon keeps its own width whatever the label does — a wrapping label
    must not squeeze it out of shape. */
 ul.button-group.home-actions > li > .button > .fa { flex: 0 0 auto; }

@@ -16,7 +16,7 @@
     <li><a href="/role_groups/" class="button"><i class="fa fa-users"></i> Role Groups</a></li>
     {% if request.user.is_superuser %}
     <li><a href="/import_set/" class="button"><i class="fa fa-file-import"></i> Import Set from TSV</a></li>
-    <li><a href="/import_packets/" class="button"><i class="fa fa-box-open"></i> Import Packets (JSON/docx/PDF)</a></li>
+    <li><a href="/import_packets/" class="button"><i class="fa fa-box-open"></i> Import Packets</a></li>
     <li><a href="/reference_data/" class="button"><i class="fa fa-book"></i> Reference Data</a></li>
     <li><a href="/pending_sets/" class="button{% if pending_set_count %} alert{% endif %}"><i class="fa fa-hourglass-half"></i> Sets Awaiting Approval{% if pending_set_count %} ({{ pending_set_count }}){% endif %}</a></li>
     <li><a href="/suggestion_quality/" class="button"><i class="fa fa-clipboard-check"></i> Suggestion Quality</a></li>
