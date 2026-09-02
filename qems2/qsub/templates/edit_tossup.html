@@ -74,7 +74,7 @@
         edit the text below and <strong>Save as Suggested Changes</strong> for the author or an editor to review.</div>
         {% endif %}
         <label>
-            Tossup Text{% if tossup %}<span class="char-count-inline" title="Live character count (updates as you type)"><strong id="live-char-count" data-qset-id="{{ qset.id }}" data-max="{{ qset.max_acf_tossup_length }}">{{ tossup.character_count }}</strong> / {{ qset.max_acf_tossup_length }}</span>{% endif %}
+            Tossup Text{% if tossup %}<span class="char-count-inline" title="Live character count (updates as you type)"><strong id="live-char-count" data-qset-id="{{ qset.id }}" data-max="{{ qset.max_acf_tossup_length }}" data-fields="id_tossup_text">{{ tossup.character_count }}</strong> / {{ qset.max_acf_tossup_length }}</span>{% endif %}
             {{ form.tossup_text }}
         </label>
         {% if form.tossup_text.errors %}{{ form.tossup_text.errors }}{% endif %}
@@ -220,64 +220,8 @@
 
 <script src="{% static 'js/anchored_comments.js' %}?v=3"></script>
 {% if structured_answers_on %}<script src="{% static 'js/structured_answer.js' %}?v=3"></script>{% endif %}
+<script src="{% static 'js/live_char_count.js' %}?v=1"></script>
 <script>
-// Live character count for the tossup stem as it's edited.
-$(function () {
-    var $out = $('#live-char-count');
-    if (!$out.length) { return; }
-    var max = parseInt($out.data('max'), 10) || 0;
-    var qsetId = $out.data('qset-id');
-    var timer = null;
-    function paint(count) {
-        $out.css('color', (max && count > max) ? '#c60f13' : '');
-    }
-    // The count is rendered server-side, so colour it on load: an over-length
-    // question has to read as over-length before you touch anything.
-    paint(parseInt($out.text(), 10) || 0);
-    function update() {
-        var text = $('#id_tossup_text').val() || '';
-        $.post('/live_char_count/', { qset_id: qsetId, text: text }, function (resp) {
-            if (typeof resp === 'string') { try { resp = JSON.parse(resp); } catch (e) { return; } }
-            $out.text(resp.count);
-            paint(resp.count);
-        });
-    }
-    $(document).on('input', '.rich-editor, #id_tossup_text', function () {
-        clearTimeout(timer); timer = setTimeout(update, 350);
-    });
-
-    // Selected-text count: highlight part of the question (editor or saved
-    // preview) to see how many characters it counts for, using the same rules.
-    var $sel = $('<span id="sel-char-count" style="color:#888; font-weight:normal;"></span>')
-        .appendTo('.char-count-inline');
-    var selTimer = null, selSeq = 0;
-    function selectedText() {
-        var el = document.activeElement;
-        if (el && el.tagName === 'TEXTAREA' && el.selectionStart !== el.selectionEnd) {
-            return el.value.substring(el.selectionStart, el.selectionEnd);
-        }
-        var s = window.getSelection();
-        if (!s || s.isCollapsed || !s.rangeCount) { return ''; }
-        var node = s.getRangeAt(0).commonAncestorContainer;
-        if (node.nodeType === 3) { node = node.parentNode; }
-        if (!$(node).closest('.rich-editor, .anchor-region').length) { return ''; }
-        return s.toString();
-    }
-    function updateSelection() {
-        var text = selectedText();
-        var seq = ++selSeq;
-        if (!text) { $sel.text(''); return; }
-        $.post('/live_char_count/', { qset_id: qsetId, text: text }, function (resp) {
-            if (seq !== selSeq) { return; }
-            if (typeof resp === 'string') { try { resp = JSON.parse(resp); } catch (e) { return; } }
-            $sel.text(' · ' + resp.count + ' selected');
-        });
-    }
-    $(document).on('selectionchange', function () {
-        clearTimeout(selTimer); selTimer = setTimeout(updateSelection, 250);
-    });
-});
-
 // Writers sometimes bold the power section by hand. Power is applied
 // automatically from the (*) and (+) marks, so a long bold run at the start of
 // the stem is almost always a mistake. Warn once per save attempt.

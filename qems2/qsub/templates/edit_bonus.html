@@ -164,7 +164,7 @@
         {% endif %}
         {% if bonus %}
         <p class="char-count-note">
-            Live character count: <strong id="live-char-count" data-qset-id="{{ qset.id }}" data-max="{{ qset.max_acf_bonus_length }}">{{ bonus.character_count }}</strong> / {{ qset.max_acf_bonus_length }}
+            Live character count: <strong id="live-char-count" data-qset-id="{{ qset.id }}" data-max="{{ qset.max_acf_bonus_length }}" data-fields="id_leadin,id_part1_text,id_part2_text,id_part3_text">{{ bonus.character_count }}</strong> / {{ qset.max_acf_bonus_length }}
             <small style="color:#888;">(updates as you type; saved count shown with the question above)</small>
         </p>
         {% endif %}
@@ -342,71 +342,6 @@ $(function () {
 
 <script src="{% static 'js/anchored_comments.js' %}?v=3"></script>
 {% if structured_answers_on %}<script src="{% static 'js/structured_answer.js' %}?v=3"></script>{% endif %}
-<script>
-// Live character count for the bonus (leadin + parts) as it's edited.
-$(function () {
-    var $out = $('#live-char-count');
-    if (!$out.length) { return; }
-    var max = parseInt($out.data('max'), 10) || 0;
-    var qsetId = $out.data('qset-id');
-    var ids = ['#id_leadin', '#id_part1_text', '#id_part2_text', '#id_part3_text'];
-    var timer = null;
-    function paint(count) {
-        $out.css('color', (max && count > max) ? '#c60f13' : '');
-    }
-    // The count is rendered server-side, so colour it on load: an over-length
-    // question has to read as over-length before you touch anything.
-    paint(parseInt($out.text(), 10) || 0);
-    function update() {
-        // In the unified editor the per-part fields only catch up on submit;
-        // pull the unified text down first or the count never moves.
-        if (window.qemsSyncBonusUnified) { window.qemsSyncBonusUnified(); }
-        var data = { qset_id: qsetId, 'text[]': [] };
-        ids.forEach(function (id) {
-            var $f = $(id);
-            if ($f.length) { data['text[]'].push($f.val() || ''); }
-        });
-        $.post('/live_char_count/', data, function (resp) {
-            if (typeof resp === 'string') { try { resp = JSON.parse(resp); } catch (e) { return; } }
-            $out.text(resp.count);
-            paint(resp.count);
-        });
-    }
-    $(document).on('input', '.rich-editor, #id_leadin, #id_part1_text, #id_part2_text, #id_part3_text', function () {
-        clearTimeout(timer); timer = setTimeout(update, 350);
-    });
-
-    // Selected-text count: highlight part of the question (editors or saved
-    // preview) to see how many characters it counts for, using the same rules.
-    var $sel = $('<span id="sel-char-count" style="color:#888; font-weight:normal;"></span>')
-        .appendTo('.char-count-note');
-    var selTimer = null, selSeq = 0;
-    function selectedText() {
-        var el = document.activeElement;
-        if (el && el.tagName === 'TEXTAREA' && el.selectionStart !== el.selectionEnd) {
-            return el.value.substring(el.selectionStart, el.selectionEnd);
-        }
-        var s = window.getSelection();
-        if (!s || s.isCollapsed || !s.rangeCount) { return ''; }
-        var node = s.getRangeAt(0).commonAncestorContainer;
-        if (node.nodeType === 3) { node = node.parentNode; }
-        if (!$(node).closest('.rich-editor, .anchor-region').length) { return ''; }
-        return s.toString();
-    }
-    function updateSelection() {
-        var text = selectedText();
-        var seq = ++selSeq;
-        if (!text) { $sel.text(''); return; }
-        $.post('/live_char_count/', { qset_id: qsetId, text: text }, function (resp) {
-            if (seq !== selSeq) { return; }
-            if (typeof resp === 'string') { try { resp = JSON.parse(resp); } catch (e) { return; } }
-            $sel.text(' · ' + resp.count + ' selected');
-        });
-    }
-    $(document).on('selectionchange', function () {
-        clearTimeout(selTimer); selTimer = setTimeout(updateSelection, 250);
-    });
-});
-</script>
+<script src="{% static 'js/live_char_count.js' %}?v=1"></script>
 
 {% endblock %}

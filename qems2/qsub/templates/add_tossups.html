@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}Add Tossup - QEMS3{% endblock %}
 
@@ -29,7 +30,7 @@
         <a href="#" id="copy-for-discord-tossup" class="button small secondary">Copy for Discord</a>
         <a href="#" id="copy-for-discord-plain-tossup" class="button small secondary">Copy for Discord (no spoilers)</a>
         <label>
-            Tossup Text
+            Tossup Text<span class="char-count-inline" title="Live character count (updates as you type)"><strong id="live-char-count" data-qset-id="{{ qset.id }}" data-max="{{ qset.max_acf_tossup_length }}" data-fields="id_tossup_text">0</strong> / {{ qset.max_acf_tossup_length }}</span>
             {{ form.tossup_text }}
         </label>
         {% if form.tossup_text.errors %}
@@ -108,6 +109,7 @@ $(function () {
     {% endif %}
 
 </form>
-{% if not read_only %}{% include "_style_check_panel.html" with question_type="tossup" qset_id=qset.id %}{% endif %}
+{% if not read_only %}{% include "_style_check_panel.html" with question_type="tossup" qset_id=qset.id %}
+<script src="{% static 'js/live_char_count.js' %}?v=1"></script>{% endif %}
 
 {% endblock %}

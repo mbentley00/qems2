@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block header %}
 {% include "header.html" %}
@@ -33,6 +34,10 @@
                 <textarea id="unified-bonus-text" rows="16" class="unified-editor-textarea expanding" style="width:100%;"></textarea>
             </div>
         {% endif %}
+        <p class="char-count-note">
+            Live character count: <strong id="live-char-count" data-qset-id="{{ qset.id }}" data-max="{{ qset.max_acf_bonus_length }}" data-fields="id_leadin,id_part1_text,id_part2_text,id_part3_text">0</strong> / {{ qset.max_acf_bonus_length }}
+            <small style="color:#888;">(leadin and parts together, updating as you type)</small>
+        </p>
         <div id="individual-fields-container">
         {% if question_type == "ACF-style bonus" %}
             <label>
@@ -163,6 +168,7 @@ $(function () {
 
     {% endif %}
 </form>
-{% if not read_only %}{% include "_style_check_panel.html" with question_type="bonus" qset_id=qset.id %}{% endif %}
+{% if not read_only %}{% include "_style_check_panel.html" with question_type="bonus" qset_id=qset.id %}
+<script src="{% static 'js/live_char_count.js' %}?v=1"></script>{% endif %}
 
 {% endblock %}
