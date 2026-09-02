@@ -4735,8 +4735,9 @@ def type_questions(request, qset_id=None):
                 # ...and which category tags each question could be given, so
                 # they can be ticked now instead of on a second pass through
                 # every question's edit page.
-                attach_tag_choices(qset, tossups)
-                attach_tag_choices(qset, bonuses)
+                preselected = _preselected_category_tags(request)
+                attach_tag_choices(qset, tossups, preselected)
+                attach_tag_choices(qset, bonuses, preselected)
 
                 # Style and repeat checks run here, on the confirmation screen,
                 # where "Back to Editing" can still act on what they say.
@@ -10819,7 +10820,7 @@ def carry_tags_to_set(question, dest_qset):
     question.category_tags.set(keep)
 
 
-def attach_tag_choices(qset, questions):
+def attach_tag_choices(qset, questions, preselected=None):
     """Give each parsed-but-unsaved question the tag checkboxes for its own
     category, so the Type Questions preview can offer them.
 
@@ -10827,7 +10828,13 @@ def attach_tag_choices(qset, questions):
     place in that flow where each question's category is already known -- which
     is what the checkboxes hang off. Anything ticked here is applied as the
     question is created, so a typed batch arrives tagged.
+
+    `preselected` is {distribution entry id: {tag id}} from the entry page,
+    where a tick means "every question I write in this category" -- there is no
+    single question there to attach it to. It only sets what the boxes start
+    as; the preview is still per question and still editable.
     """
+    preselected = preselected or {}
     by_path = {}
     for q in questions:
         entry = getattr(q, 'category', None)
@@ -10836,11 +10843,43 @@ def attach_tag_choices(qset, questions):
             continue
         key = str(entry)
         if key not in by_path:
-            by_path[key] = build_tag_checkboxes(qset, None, entry)
+            by_path[key] = build_tag_checkboxes(
+                qset, None, entry, checked_ids=preselected.get(entry.id, ()))
         q.tag_choices = by_path[key]
 
 
-def build_tag_checkboxes(qset, question, dist_entry):
+def _preselected_category_tags(request):
+    """{distribution entry id: {tag id}} from the Type Questions tag panel.
+
+    Only decides which boxes the preview opens with. Nothing is applied from
+    it: the tags that reach a question are the ones ticked on the preview, and
+    `_apply_typed_tags` checks those against the category the question was
+    actually filed under.
+    """
+    raw = request.POST.get('preselected_tags', '')
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    out = {}
+    for entry_id, tag_ids in data.items():
+        if not isinstance(tag_ids, list):
+            continue
+        try:
+            entry = int(entry_id)
+            tags = set(int(t) for t in tag_ids)
+        except (TypeError, ValueError):
+            continue
+        if tags:
+            out[entry] = tags
+    return out
+
+
+def build_tag_checkboxes(qset, question, dist_entry, checked_ids=None):
     """The tag checkboxes on the question edit pages, as sections.
 
     One section per category path the tags sit on (nearly always one), each
@@ -10848,11 +10887,17 @@ def build_tag_checkboxes(qset, question, dist_entry):
     and each tag saying where it stands -- "1/6 tossups, 0/6 bonuses" -- so
     "6/6 needed" stops reading as if it were already done. The counts include
     this question when it is checked, which the template points out.
+
+    `checked_ids` is for a question that doesn't exist yet, whose ticks come
+    from somewhere other than the database (see `attach_tag_choices`); by
+    default they are read off `question`.
     """
     tags = get_applicable_tags(qset, dist_entry)
     if not tags:
         return []
-    if question is None or question.id is None:
+    if checked_ids is not None:
+        checked_ids = set(checked_ids)
+    elif question is None or question.id is None:
         checked_ids = set()
     else:
         checked_ids = set(question.category_tags.filter(question_set=qset)

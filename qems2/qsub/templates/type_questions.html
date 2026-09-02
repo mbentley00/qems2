@@ -69,6 +69,10 @@
             {% endif %}
             <input type="submit" class="button primary right" value="Submit">
             <input type="hidden" name="qset_id" value="{{ qset.id }}">
+            {# What was ticked in the tag panel, per category, as
+               {"<distribution entry id>": [tag id, ...]}. It opens the preview's
+               boxes; the preview is what actually applies them. #}
+            <input type="hidden" name="preselected_tags" id="tq-preselected-tags" value="">
         </form>
     </div>
     <div id="categories" class="content">
@@ -155,22 +159,61 @@ $(function () {
         textarea.focus();
     });
 
-    // What tags the category just inserted has. They are ticked on the preview
-    // page, where each question's category is settled -- here they are shown so
-    // you know, while writing, what this category is asking for.
+    // The tags of the category you just inserted, tickable.
+    //
+    // There is no one question to attach a tick to -- the box holds a run of
+    // them and none exist yet -- so a tick here means "every question I write
+    // in this category", and is carried to the preview as the state its own
+    // per-question boxes open in. The preview is still where they are applied,
+    // and still editable there.
+    //
+    // Picks are kept per category id, because the panel is re-fetched whenever
+    // a different category is clicked; switching away and back must not lose
+    // them.
     var tagReq = null;
+    var tagPicks = {};      // entry id -> [tag id, ...]
+    var shownEntryId = null;
+
+    function saveTagPicks() {
+        var out = {};
+        $.each(tagPicks, function (entryId, ids) {
+            if (ids && ids.length) { out[entryId] = ids; }
+        });
+        $('#tq-preselected-tags').val($.isEmptyObject(out) ? '' : JSON.stringify(out));
+    }
+
+    // A ticked box on this page must not post as category_tags -- the panel
+    // sits inside the entry form, and that name means something on the pages
+    // this partial is shared with.
+    $(document).on('change', '#tq-category-tags input[type=checkbox]', function () {
+        var $box = $(this);
+        $box.closest('label').toggleClass('qtags-checked', $box.is(':checked'));
+        if (!shownEntryId) { return; }
+        tagPicks[shownEntryId] = $('#tq-category-tags input[type=checkbox]:checked')
+            .map(function () { return parseInt(this.value, 10); }).get();
+        saveTagPicks();
+    });
+
     function showTagsFor(entryId, path) {
         var $slot = $('#tq-category-tags');
         if (!$slot.length || !entryId) { return; }
         if (tagReq) { tagReq.abort(); }
+        shownEntryId = String(entryId);
         tagReq = $.getJSON('/tags_for_category/{{ qset.id }}/', {category: entryId}, function (data) {
             var html = (data && data.html) || '';
             if (!$.trim(html)) { $slot.hide().empty(); return; }
-            $slot.html('<div class="tq-cat-tags-head">Tags available in ' + $('<i>').text(path).html() +
-                       ' &mdash; tick them on the preview after Submit</div>' + html).show();
-            // Reference only at this stage: the questions do not exist yet, so
-            // a box here would have nothing to attach to.
-            $slot.find('input[type=checkbox]').prop('disabled', true);
+            $slot.html('<div class="tq-cat-tags-head">Tags in ' + $('<i>').text(path).html() +
+                       ' &mdash; ticking one applies it to every question you write in this ' +
+                       'category, and you can change it per question on the preview</div>' + html).show();
+            var picked = tagPicks[shownEntryId] || [];
+            $slot.find('input[type=checkbox]').each(function () {
+                // Named for the edit pages, where this partial posts; here the
+                // hidden field carries the picks instead.
+                $(this).removeAttr('name');
+                var on = picked.indexOf(parseInt(this.value, 10)) >= 0;
+                this.checked = on;
+                $(this).closest('label').toggleClass('qtags-checked', on);
+            });
         });
     }
 });

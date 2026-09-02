@@ -78,9 +78,9 @@
                 <div class="tq-tags">
                     <span class="tq-tags-head">Tags</span>
                     {% for section in tossup.tag_choices %}{% for g in section.groups %}{% for item in g.items %}
-                    <label class="tq-tag{% if item.over %} tq-tag-over{% elif item.complete %} tq-tag-done{% endif %}"
+                    <label class="tq-tag{% if item.checked %} tq-tag-checked{% endif %}{% if item.over %} tq-tag-over{% elif item.complete %} tq-tag-done{% endif %}"
                            title="{% if g.name %}{{ g.label|escape }} &middot; {% endif %}{{ item.label|default:'No quota'|escape }}">
-                        <input type="checkbox" name="tossup-tags-{{ qidx }}" value="{{ item.tag.id }}">
+                        <input type="checkbox" name="tossup-tags-{{ qidx }}" value="{{ item.tag.id }}"{% if item.checked %} checked{% endif %}>
                         {{ item.tag.name|escape }}
                     </label>
                     {% endfor %}{% endfor %}{% endfor %}
@@ -106,9 +106,9 @@
                 <div class="tq-tags">
                     <span class="tq-tags-head">Tags</span>
                     {% for section in bonus.tag_choices %}{% for g in section.groups %}{% for item in g.items %}
-                    <label class="tq-tag{% if item.over %} tq-tag-over{% elif item.complete %} tq-tag-done{% endif %}"
+                    <label class="tq-tag{% if item.checked %} tq-tag-checked{% endif %}{% if item.over %} tq-tag-over{% elif item.complete %} tq-tag-done{% endif %}"
                            title="{% if g.name %}{{ g.label|escape }} &middot; {% endif %}{{ item.label|default:'No quota'|escape }}">
-                        <input type="checkbox" name="bonus-tags-{{ qidx }}" value="{{ item.tag.id }}">
+                        <input type="checkbox" name="bonus-tags-{{ qidx }}" value="{{ item.tag.id }}"{% if item.checked %} checked{% endif %}>
                         {{ item.tag.name|escape }}
                     </label>
                     {% endfor %}{% endfor %}{% endfor %}
@@ -156,6 +156,9 @@
 .tq-tag { display: inline-flex; align-items: baseline; gap: 4px; margin: 0; font-weight: normal;
     font-size: 0.9em; white-space: nowrap; }
 .tq-tag input { margin: 0 2px 0 0; position: relative; top: 1px; }
+/* Carried over from the entry page, so it is visible which ticks arrived
+   already made rather than looking like the writer put them there. */
+.tq-tag-checked { font-weight: bold; }
 .tq-tag-done { color: #1b5e20; }
 .tq-tag-over { color: #a94442; }
 html[data-theme="dark"] .tq-tag-done { color: #86d29d; }
