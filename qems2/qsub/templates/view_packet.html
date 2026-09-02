@@ -19,21 +19,52 @@
     <a href="#" id="packet-changed-reload" class="button tiny" style="margin:0 0 0 0.5rem;">Reload</a>
     <a href="#" id="packet-changed-dismiss" class="right" style="margin:0;">Dismiss</a>
 </div>
+{{ packet_question_revisions|json_script:"doc-question-revisions" }}
 <script>
 (function () {
     var packetId = {{ packet.id }};
     var current = "{{ packet_revision }}";
     var banner = document.getElementById('packet-changed-banner');
     var dismissed = false;
+    var baseline = {};
+    try { baseline = JSON.parse(document.getElementById('doc-question-revisions').textContent); }
+    catch (e) { baseline = null; }
+
+    // Committing an inline edit changes the packet, so the poll that follows
+    // reports a packet this page has never seen -- and used to tell an editor
+    // their own work was "changed by someone". Compare question by question
+    // instead: a revision the inline editor already knows about is one this
+    // page committed (or was shown and accepted), so it is not news. Anything
+    // else -- another writer's save, a question added, removed or reordered,
+    // even your own edit from a second tab -- still raises the banner, because
+    // the words on this page really are out of date.
+    function isForeign(questions) {
+        if (!baseline || !questions) { return true; }
+        var known = (window.QemsDocEdit && window.QemsDocEdit.knownRevision) || null;
+        var seen = {}, foreign = false;
+        Object.keys(questions).forEach(function (key) {
+            seen[key] = true;
+            var was = baseline[key], now = questions[key];
+            if (!was || was.num !== now.num) { foreign = true; return; }
+            if (was.rev === now.rev) { return; }
+            if (known && known(key) === now.rev) { baseline[key] = now; return; }
+            foreign = true;
+        });
+        Object.keys(baseline).forEach(function (key) {
+            if (!seen[key]) { foreign = true; }
+        });
+        return foreign;
+    }
+
     function check() {
         fetch('/packet_revision/' + packetId + '/', { credentials: 'same-origin' })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (j) {
                 if (!j) { return; }
                 if (window.QemsDocEdit) { window.QemsDocEdit.checkRevisions(j.questions); }
-                if (j.revision && j.revision !== current && !dismissed) {
-                    banner.style.display = 'block';
-                }
+                if (!j.revision || j.revision === current || dismissed) { return; }
+                if (!isForeign(j.questions)) { current = j.revision; return; }
+                banner.style.display = 'block';
             })
             .catch(function () { /* ignore transient errors */ });
     }
@@ -189,6 +220,7 @@ document.addEventListener('DOMContentLoaded', function () {
 {% if not read_only %}
 {{ edit_payload|json_script:"doc-edit-payload" }}
 <script src="{% static 'js/doc_inline_edit.js' %}?v=1"></script>
+<script src="{% static 'js/doc_anchor_hover.js' %}?v=1"></script>
 {% endif %}
 
 <div class="doc-gutter" id="doc-gutter">
@@ -538,6 +570,16 @@ a.doc-add-comment:hover { background: #008CBA; color: #fff; }
     padding: 4px 10px; font-size: 12px; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,0.3);
 }
 #doc-anchor-btn:hover { background: #0079a8; }
+/* Hovering an anchored comment paints its target. An overlay rather than a
+   <mark>: in Edit mode the target lives inside the rich editor's
+   contenteditable, whose DOM is not ours to rewrite under a live cursor. */
+.doc-anchor-overlay { position: absolute; top: 0; left: 0; pointer-events: none; z-index: 40; }
+.doc-anchor-hit { position: absolute; background: rgba(244, 180, 0, 0.32);
+    box-shadow: 0 0 0 1px rgba(201, 162, 39, 0.65); border-radius: 2px; }
+/* The words are gone, so there is nothing to point at -- say so on the quote
+   rather than leaving the hover looking broken. */
+.doc-comment.doc-anchor-lost > .doc-comment-selection {
+    opacity: 0.6; border-left-style: dashed; text-decoration: line-through; }
 </style>
 
 {{ discord_payload|json_script:"discord-payload" }}
@@ -742,7 +784,10 @@ $(function() {
         if ($(e.target).closest('.doc-comment-actions, .doc-comment-box, .doc-comment-text, a').length) { return; }
         var sel = window.getSelection();
         if (sel && !sel.isCollapsed) { return; }
-        window.location = $('#' + $(this).data('for')).data('edit-url');
+        // A new tab: the document is what you were reading, and uncommitted
+        // inline edits and an open reply box both live on this page.
+        var url = $('#' + $(this).data('for')).data('edit-url');
+        if (url) { window.open(url, '_blank', 'noopener'); }
     });
 
     $('.doc-question').on('mouseenter', function() {
@@ -953,6 +998,34 @@ $(function() {
                 $box.remove();
                 layoutComments();
             }).fail(function() { alert('Could not save the comment.'); $btn.prop('disabled', false); });
+    });
+
+    // Delete a comment or reply. Only hides it (the question's History page
+    // still has it), but a stray click in a dense margin is easy, so it asks.
+    // The gutter is re-fetched rather than patched: deleting a comment that had
+    // replies promotes them, and only the server knows the shape that leaves.
+    $(document).on('click', '.doc-c-delete', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var $link = $(this), $c = $link.closest('.doc-comment');
+        var isReply = $c.hasClass('doc-comment-reply');
+        if (!window.confirm(isReply ? 'Delete this reply?' : 'Delete this comment?')) { return; }
+        $link.addClass('doc-c-busy');
+        $.post('/delete_comment/', { comment_id: $c.data('comment-id'), qset_id: window.QEMS_QSET_ID },
+            function(response) {
+                var json;
+                try { json = (typeof response === 'string') ? JSON.parse(response) : response; }
+                catch (err) { json = null; }
+                if (json && (json.message_class || '').indexOf('success') < 0) {
+                    $link.removeClass('doc-c-busy');
+                    alert(json.message || 'Could not delete the comment.');
+                    return;
+                }
+                refreshDocComments();
+            }).fail(function() {
+                $link.removeClass('doc-c-busy');
+                alert('Could not delete the comment.');
+            });
     });
 
     // Cancel inside a card: drop the box and put the original text back.

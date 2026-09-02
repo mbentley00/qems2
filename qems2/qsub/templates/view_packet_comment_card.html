@@ -4,7 +4,10 @@
     <div class="doc-comment-target">{% if q.qtype == 'tossup' %}Tossup{% else %}Bonus{% endif %} {{ q.number }}</div>
     {% for c in q.comments %}
     <div class="doc-comment doc-comment-top{% if c.anchored %} doc-comment-anchored{% endif %}{% if c.resolved %} doc-comment-resolved{% endif %}"
-         data-comment-id="{{ c.id }}">
+         data-comment-id="{{ c.id }}"{% if c.anchored %}
+         data-anchor-text="{{ c.selection }}"
+         data-anchor-prefix="{{ c.anchor_prefix }}"
+         data-anchor-suffix="{{ c.anchor_suffix }}"{% endif %}>
         {% if c.anchored %}
         <div class="doc-comment-selection" title="This comment is anchored to a selection in the question">
             <i class="fa fa-quote-left"></i> {{ c.selection|truncatechars:120 }}
@@ -21,6 +24,7 @@
             <a href="#" class="doc-c-reply" title="Reply to this comment">Reply</a>
             <a href="#" class="doc-c-resolve" title="Mark this comment handled">{% if c.resolved %}Unresolve{% else %}Resolve{% endif %}</a>
             {% if c.can_edit %}<a href="#" class="doc-c-edit" title="Edit your comment">Edit</a>{% endif %}
+            <a href="#" class="doc-c-delete" title="Delete this comment">Delete</a>
         </div>
         {% endif %}
         <div class="doc-comment-replies">
@@ -28,8 +32,11 @@
         <div class="doc-comment doc-comment-reply" data-comment-id="{{ r.id }}">
             <div class="doc-comment-author"><i class="fa fa-reply"></i> {{ r.user }} <span class="doc-comment-date">{{ r.date|date:"m/d/y H:i" }}</span></div>
             {% autoescape off %}<div class="doc-comment-text" data-raw="{{ r.text|escape }}"><span class="comment-strikeable" data-comment-id="{{ r.id }}">{{ r.text|safe|comment_html|linebreaks }}</span></div>{% endautoescape %}
-            {% if r.can_edit and not read_only %}
-            <div class="doc-comment-actions"><a href="#" class="doc-c-edit" title="Edit your reply">Edit</a></div>
+            {% if not read_only %}
+            <div class="doc-comment-actions">
+                {% if r.can_edit %}<a href="#" class="doc-c-edit" title="Edit your reply">Edit</a>{% endif %}
+                <a href="#" class="doc-c-delete" title="Delete this reply">Delete</a>
+            </div>
             {% endif %}
         </div>
         {% endfor %}

@@ -8341,13 +8341,19 @@ def _question_revision(question):
 
 
 def _packet_question_revisions(packet):
-    """{'tossup-12': rev} for every question in the packet, so an open inline
-    editor can be told its question moved without reloading the document."""
+    """{'tossup-12': {'rev': ..., 'num': ...}} for every question in the packet.
+
+    An open inline editor uses `rev` to be told its question moved without
+    reloading the document; the "this packet changed" banner compares the whole
+    map against the one the page loaded with, so a change the page made itself
+    can be told apart from somebody else's.
+    """
     out = {}
-    for qtype, qs in (('tossup', packet.tossup_set.values_list('id', 'last_changed_date')),
-                      ('bonus', packet.bonus_set.values_list('id', 'last_changed_date'))):
-        for qid, changed in qs:
-            out['{0}-{1}'.format(qtype, qid)] = changed.isoformat() if changed else ''
+    for qtype, qs in (('tossup', packet.tossup_set.values_list('id', 'question_number', 'last_changed_date')),
+                      ('bonus', packet.bonus_set.values_list('id', 'question_number', 'last_changed_date'))):
+        for qid, num, changed in qs:
+            out['{0}-{1}'.format(qtype, qid)] = {
+                'rev': changed.isoformat() if changed else '', 'num': num}
     return out
 
 
@@ -8628,8 +8634,8 @@ def view_packet(request, packet_id):
             is_removed=False).order_by('submit_date').select_related('user'))
         comment_ids = [c.id for c in comments]
         # Which comments are anchored to a text selection, and which are replies.
-        anchored = {a.comment_id: a.selected_text
-                    for a in CommentAnchor.objects.filter(comment_id__in=comment_ids)}
+        anchors = {a.comment_id: a for a in CommentAnchor.objects.filter(comment_id__in=comment_ids)}
+        anchored = {cid: a.selected_text for cid, a in anchors.items()}
         parent_of = {r.comment_id: r.parent_id
                      for r in CommentReply.objects.filter(comment_id__in=comment_ids)}
         resolved = set(CommentResolution.objects.filter(
@@ -8641,8 +8647,14 @@ def view_packet(request, packet_id):
                 label = '{0} {1}'.format(c.user.first_name, c.user.last_name).strip()
             if not label:
                 label = c.user_name or (c.user.username if c.user else 'unknown')
+            anchor = anchors.get(c.id)
             return {'id': c.id, 'user': label, 'text': c.comment, 'date': c.submit_date,
                     'anchored': c.id in anchored, 'selection': anchored.get(c.id, ''),
+                    # The surrounding context the anchor was taken with, so
+                    # hovering the comment can re-locate the span it is on --
+                    # in the rendered question or in an open inline editor.
+                    'anchor_prefix': anchor.prefix if anchor else '',
+                    'anchor_suffix': anchor.suffix if anchor else '',
                     'resolved': c.id in resolved,
                     'can_edit': c.user_id == request.user.id,
                     'replies': []}
@@ -8690,6 +8702,7 @@ def view_packet(request, packet_id):
                               'edit_payload': edit_payload,
                               'mp3_voices': VOICE_CHOICES,
                               'packet_revision': _packet_revision(packet),
+                              'packet_question_revisions': _packet_question_revisions(packet),
                               'careful_notes': careful_notes,
                               'extras': extras,
                               'role': get_role_no_owner(user, qset),

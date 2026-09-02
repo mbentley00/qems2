@@ -290,11 +290,18 @@
     function checkRevisions(revs) {
         if (!revs) { return; }
         $.each(open, function (key, st) {
-            var latest = revs[key];
+            var latest = revs[key] && revs[key].rev;
             if (latest && latest !== st.revision && !st.conflict && isDirty(key)) {
                 showConflict(key, {changed_by: '', changed_date: ''});
             }
         });
+    }
+
+    // The revision of a question as this page last left it: what it loaded
+    // with, or what it committed or accepted since. The "this packet changed"
+    // banner asks, so that a change made here isn't reported back as news.
+    function knownRevision(key) {
+        return payload && payload[key] ? payload[key].revision : null;
     }
 
     // ---- wiring ------------------------------------------------------------
@@ -366,6 +373,7 @@
         window.QemsDocEdit = {
             setEnabled: setEnabled,
             checkRevisions: checkRevisions,
+            knownRevision: knownRevision,
             anyDirty: anyDirty
         };
     });
