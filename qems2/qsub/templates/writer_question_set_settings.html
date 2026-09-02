@@ -40,11 +40,16 @@
             {{ form.name.errors }}
         {% endif %}
     </div>
+    <p class="wqs-note">The first two columns email you. The last one is quieter:
+    it adds anyone's new or changed questions in that category to your
+    <a href="/activity/{{ qset.id }}/">My Activity</a> page for this set, with no
+    mail at all. Nothing is followed unless you tick it.</p>
     <table class="table-striped table-hover" id="distribution-table">
         <thead>
         <th>Category</th>
         <th>Email on New Comments</th>
         <th>Email on New Questions</th>
+        <th>Show new/updated questions in My Activity</th>
         </thead>
         <tbody>
         {% for form in formset %}
@@ -53,6 +58,7 @@
             <td>{{ form.distribution_entry_string }}</td>
             <td>{{ form.email_on_new_comments }}</td>
             <td>{{ form.email_on_new_questions }}</td>
+            <td>{{ form.activity_on_question_changes }}</td>
         </tr>
         {% endfor %}
         </tbody>
@@ -63,5 +69,9 @@
 </form>
 
 {% include "dialog.html" %}
+
+<style>
+.wqs-note { font-size: 0.85rem; color: var(--qx-muted, #8a8f9c); margin: 1rem 0 0.4rem; }
+</style>
 
 {% endblock %}

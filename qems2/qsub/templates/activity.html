@@ -16,6 +16,11 @@
     <li class="current">My Activity</li>
 </ul>
 
+<p class="activity-settings-link">
+    <a href="/writer_question_set_settings/{{ qset.id }}/">Notification settings for this set</a>
+    &mdash; choose which categories email you, and which ones show up here.
+</p>
+
 <div class="panel callout radius"><strong>Mentions of you</strong></div>
 {% if not mention_items %}
 <p>No one has @mentioned you in a comment on this set yet. Mention someone in a comment by
@@ -60,5 +65,46 @@ typing <code>@username</code>.</p>
     </tbody>
 </table>
 {% endif %}
+
+<div class="panel callout radius" style="margin-top:1.5rem;">
+    <strong>New and updated questions in categories you follow</strong>
+    {% if watched_categories %}
+    <span class="activity-watched">{{ watched_categories|join:", " }}</span>
+    {% endif %}
+</div>
+{% if not following_categories %}
+<p>You aren't following any categories on this set yet.
+   <a href="/writer_question_set_settings/{{ qset.id }}/">Pick some in your settings</a>
+   and anything anyone writes or changes in them shows up here.</p>
+{% elif not category_items %}
+<p>Nothing new in the categories you follow.</p>
+{% else %}
+<table class="table-striped table-hover" style="width:100%;">
+    <thead><tr><th style="width:14%;">When</th><th style="width:14%;">By</th><th style="width:24%;">Question</th><th style="width:14%;">Category</th><th>What changed</th><th style="width:10%;"></th></tr></thead>
+    <tbody>
+    {% autoescape off %}
+    {% for c in category_items %}
+        <tr>
+            <td>{{ c.date|to_short_datetime }}</td>
+            <td>{{ c.by }}</td>
+            <td>{{ c.preview }}</td>
+            <td>{{ c.category|escape }}</td>
+            <td class="activity-summary">{% if c.is_new %}<span class="activity-new">New</span> {% endif %}{{ c.summary }}</td>
+            <td><a href="{{ c.edit_url }}" class="button tiny secondary" style="margin-bottom:0;">View {{ c.qtype }}</a></td>
+        </tr>
+    {% endfor %}
+    {% endautoescape %}
+    </tbody>
+</table>
+{% endif %}
+
+<style>
+.activity-settings-link { font-size: 0.9rem; color: var(--qx-muted, #8a8f9c); margin: 0 0 1rem; }
+.activity-watched { color: var(--qx-muted, #8a8f9c); font-weight: normal; margin-left: 6px; }
+.activity-new { background: #dff3e6; border: 1px solid #b6e0c4; border-radius: 3px;
+    color: #1c7c3e; font-size: 0.7rem; text-transform: uppercase; letter-spacing: .03em;
+    padding: 0 4px; margin-right: 3px; }
+html[data-theme="dark"] .activity-new { background: var(--qx-elevate); border-color: var(--qx-border); }
+</style>
 
 {% endblock %}

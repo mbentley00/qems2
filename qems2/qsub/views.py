@@ -7541,6 +7541,8 @@ def writer_question_set_settings(request, qset_id):
                 entry = PerCategoryWriterSettings.objects.get(id=entry_id)
                 entry.email_on_new_questions = email_on_new_questions
                 entry.email_on_new_comments = email_on_new_comments
+                entry.activity_on_question_changes = bool(
+                    per_category_form.cleaned_data['activity_on_question_changes'])
                 entry.save()
 
             message = 'Your settings have been updated.'
@@ -7573,7 +7575,8 @@ def writer_question_set_settings(request, qset_id):
                 'entry_id': entry.id,
                 'distribution_entry_string': str(entry.distribution_entry),
                 'email_on_new_questions': entry.email_on_new_questions,
-                'email_on_new_comments': entry.email_on_new_comments})
+                'email_on_new_comments': entry.email_on_new_comments,
+                'activity_on_question_changes': entry.activity_on_question_changes})
                 
         form = WriterQuestionSetSettingsForm(instance=settings)
         PerCategoryWriterSettingsFormset = formset_factory(PerCategoryWriterSettingsForm, can_delete=False, extra=0)
@@ -9349,6 +9352,93 @@ def _describe_change(model, before, rows):
     return summary
 
 
+def _watched_category_activity(user, qset, since=None, limit=100, exclude=None):
+    """New or changed questions in the categories this writer follows.
+
+    The companion to `_activity_changes`, which reports only questions of your
+    own. This one is about the category, so it covers questions you have never
+    touched and counts from each one's creation rather than from the moment it
+    became yours. Nothing appears unless the writer ticked the category on their
+    settings page for this set.
+
+    `exclude` is a set of (model, question id) already reported as yours -- the
+    stronger claim of the two, so those are not listed twice.
+    """
+    row = WriterQuestionSetSettings.objects.filter(
+        question_set=qset, writer=user).first()
+    if row is None:
+        return []
+    watched = set(PerCategoryWriterSettings.objects
+                  .filter(writer_question_set_settings=row,
+                          activity_on_question_changes=True)
+                  .values_list('distribution_entry_id', flat=True))
+    if not watched:
+        return []
+
+    exclude = exclude or set()
+    items = []
+    for model, hist_model, edit_url in ((Tossup, TossupHistory, '/edit_tossup/'),
+                                        (Bonus, BonusHistory, '/edit_bonus/')):
+        mine = (model.objects.filter(question_set=qset, category_id__in=watched)
+                .select_related('category'))
+        hist_to_q = {q.question_history_id: q for q in mine
+                     if q.question_history_id and (model, q.id) not in exclude}
+        if not hist_to_q:
+            continue
+        changes = (hist_model.objects.filter(question_history_id__in=hist_to_q.keys())
+                   .exclude(changer=user).select_related('changer__user')
+                   .order_by('-change_date'))
+        if since is not None:
+            changes = changes.filter(change_date__gt=since)
+        kept = 0
+        for h in changes.iterator():
+            q = hist_to_q.get(h.question_history_id)
+            if q is None:
+                continue
+            items.append((model, hist_model, edit_url, h, q))
+            kept += 1
+            if kept >= limit:
+                break
+    return _group_activity_changes(items)[:limit]
+
+
+def _activity_feeds(user, qset, since=None, limit=100):
+    """Both change feeds for a set, in the order the page shows them."""
+    own = _activity_changes(user, qset, since=since, limit=limit)
+    seen = set((model, q.id) for model, _h, _e, _rows, q in own)
+    watched = _watched_category_activity(user, qset, since=since, limit=limit,
+                                         exclude=seen)
+    return own, watched
+
+
+def _change_item(model, hist_model, edit_url, rows, q, user, with_role=True):
+    """One row of a change feed: what changed, by whom, measured against the
+    last save before the run."""
+    first, last = rows[0], rows[-1]
+    before = (hist_model.objects
+              .filter(question_history_id=first.question_history_id,
+                      change_date__lt=first.change_date)
+              .order_by('-change_date', '-id').first())
+    item = {
+        'date': last.change_date,
+        'by': str(last.changer) if last.changer else 'unknown',
+        'qtype': 'tossup' if model is Tossup else 'bonus',
+        'edit_url': '{0}{1}/'.format(edit_url, q.id),
+        'preview': (_grid_answer_preview(q.tossup_answer) if model is Tossup
+                    else _grid_answer_preview(q.part1_answer, 30)),
+        'summary': _describe_change(model, before, rows),
+        'saves': len(rows),
+        'category': str(q.category) if q.category else '',
+        # A run whose first save is the question's own first is a new question,
+        # not an edit to one -- worth saying when the feed is a category you
+        # follow rather than questions you already know about.
+        'is_new': before is None,
+    }
+    if with_role:
+        item['role'] = 'wrote' if q.author_id == user.id else 'edited'
+    return item
+
+
 def _new_activity_count(user, qset):
     """Count activity (mentions + others' changes to your questions) newer than
     the last time the user viewed their activity feed for this set."""
@@ -9369,7 +9459,8 @@ def _new_activity_count(user, qset):
     count = mentions.count()
     # Same rule as the feed, so the badge never promises items the page won't
     # show (and the cap matches the number the feed lists).
-    count += len(_activity_changes(user, qset, since=last))
+    own, watched = _activity_feeds(user, qset, since=last)
+    count += len(own) + len(watched)
     return count
 
 
@@ -9408,36 +9499,32 @@ def activity(request, qset_id):
         })
 
     # --- changes by others to questions you authored or edited, from the point
-    # each one became yours (see _activity_changes) ---
-    change_items = []
-    # The row before each run is what the run is measured against: the last
-    # save of the question, by anyone, before the run's first.
-    for model, hist_model, edit, rows, q in _activity_changes(user, qset):
-        first, last = rows[0], rows[-1]
-        before = (hist_model.objects
-                  .filter(question_history_id=first.question_history_id,
-                          change_date__lt=first.change_date)
-                  .order_by('-change_date', '-id').first())
-        preview = (_grid_answer_preview(q.tossup_answer) if model is Tossup
-                   else _grid_answer_preview(q.part1_answer, 30))
-        change_items.append({
-            'date': last.change_date,
-            'by': str(last.changer) if last.changer else 'unknown',
-            'qtype': 'tossup' if model is Tossup else 'bonus',
-            'edit_url': '{0}{1}/'.format(edit, q.id),
-            'preview': preview,
-            'role': 'wrote' if q.author_id == user.id else 'edited',
-            'summary': _describe_change(model, before, rows),
-            'saves': len(rows),
-        })
+    # each one became yours, plus anything in a category you follow ---
+    own, watched = _activity_feeds(user, qset)
+    change_items = [_change_item(model, hist_model, edit, rows, q, user)
+                    for model, hist_model, edit, rows, q in own]
+    category_items = [_change_item(model, hist_model, edit, rows, q, user, with_role=False)
+                      for model, hist_model, edit, rows, q in watched]
 
     # Mark this set's activity as seen (clears the notification badge).
     ActivitySeen.objects.update_or_create(
         writer=user, question_set=qset, defaults={'last_seen': timezone.now()})
 
+    # What you follow, named on the page whether or not it has anything in it
+    # today -- an empty section should still say what it is empty of. An empty
+    # list is also what tells the page to offer the settings instead.
+    watched_categories = sorted(
+        str(p.distribution_entry) for p in PerCategoryWriterSettings.objects.filter(
+            writer_question_set_settings__question_set=qset,
+            writer_question_set_settings__writer=user,
+            activity_on_question_changes=True).select_related('distribution_entry'))
+
     return render(request, 'activity.html',
                   {'qset': qset, 'user': user,
-                   'mention_items': mention_items, 'change_items': change_items})
+                   'mention_items': mention_items, 'change_items': change_items,
+                   'category_items': category_items,
+                   'watched_categories': watched_categories,
+                   'following_categories': bool(watched_categories)})
 
 
 @login_required

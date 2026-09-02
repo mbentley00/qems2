@@ -1903,6 +1903,11 @@ class PerCategoryWriterSettings(models.Model):
     distribution_entry = models.ForeignKey(DistributionEntry, on_delete=models.CASCADE)
     email_on_new_questions = models.BooleanField(default=False)
     email_on_new_comments = models.BooleanField(default=False)
+    # Show anyone's new or changed questions in this category on My Activity --
+    # a way to follow a category without having written every question in it.
+    # No email, and off by default: on a large set this is a lot of traffic, so
+    # it is opted into one category at a time.
+    activity_on_question_changes = models.BooleanField(default=False)
 
 def create_user_profile(sender, instance, created, **kwargs):
     if created:

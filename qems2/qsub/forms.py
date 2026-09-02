@@ -28,6 +28,7 @@ class WriterQuestionSetSettingsForm(forms.ModelForm):
 class PerCategoryWriterSettingsForm(forms.Form):
     email_on_new_comments = forms.BooleanField(required=False)
     email_on_new_questions = forms.BooleanField(required=False)
+    activity_on_question_changes = forms.BooleanField(required=False)
     distribution_entry_string = forms.CharField(max_length=200)
     entry_id = forms.IntegerField(widget=forms.TextInput(attrs={'style': 'display: none'}))
 
