@@ -1,0 +1,52 @@
+{% comment %}
+Style- and repeat-check report for one question on the upload confirmation
+screen, before anything is saved. Context: issues (style_checker dicts),
+dups (saved questions sharing an answer) and repeats (other questions in this
+same batch sharing one), any of which may be empty.
+
+Rendered with autoescape forced on: the caller loops inside {% autoescape off %}
+so the raw question markup passes through, and a check message quotes the
+writer's own text back at them.
+{% endcomment %}
+{% autoescape on %}
+{% if issues or dups or repeats %}
+<div class="tq-checks">
+    {% if issues %}
+    <div class="tq-check-block">
+        <span class="tq-checks-head">Style check &mdash; {{ issues|length }} suggestion{{ issues|length|pluralize }}</span>
+        <ul class="tq-check-list">
+            {% for i in issues %}
+            <li class="tq-sev-{{ i.severity }}">{% if i.message_html %}{{ i.message_html|safe }}{% else %}{{ i.message }}{% endif %}</li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+    {% if dups or repeats %}
+    <div class="tq-check-block">
+        <span class="tq-checks-head">Repeat check</span>
+        <ul class="tq-check-list">
+            {% for m in repeats %}
+            <li class="tq-sev-warning">
+                Same answer as <strong>{{ m.label }}</strong> in this batch &mdash;
+                <strong>{{ m.answer_html|safe }}</strong>
+            </li>
+            {% endfor %}
+            {% for m in dups %}
+            <li class="tq-sev-warning">
+                Already answered by
+                {% if m.type == 'tossup' %}
+                    <a href="/edit_tossup/{{ m.id }}/" target="_blank" rel="noopener">a tossup</a>
+                {% else %}
+                    <a href="/edit_bonus/{{ m.id }}/" target="_blank" rel="noopener">a bonus ({{ m.part_label }})</a>
+                {% endif %}
+                in this set &mdash; <strong>{{ m.answer_html|safe }}</strong>
+                <small>({{ m.category_str|default:"uncategorized" }}{% if m.packet %}, {{ m.packet }}{% endif %} &mdash; {{ m.author }})</small>
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+{% endautoescape %}

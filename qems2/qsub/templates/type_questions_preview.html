@@ -21,6 +21,20 @@
     {% csrf_token %}
     <div class="row">
         <div class="small-10 small-centered columns">
+            {% if check_summary %}
+            <div class="tq-check-summary">
+                {% if check_summary.style or check_summary.repeat %}
+                The style and repeat checks ran on these questions:
+                <strong>{{ check_summary.style }} style suggestion{{ check_summary.style|pluralize }}</strong>
+                and <strong>{{ check_summary.repeat }} possible repeat{{ check_summary.repeat|pluralize }}</strong>,
+                listed under each question. "Back to Editing" takes you back to the text to fix them;
+                submitting as is commits them unchanged.
+                {% else %}
+                The style and repeat checks ran on these questions and flagged nothing.
+                {% endif %}
+            </div>
+            {% endif %}
+
             {% if tossup_errors %}
             {% for tu_error in tossup_errors %}
             <div class="alert alert-danger">
@@ -72,6 +86,7 @@
                     {% endfor %}{% endfor %}{% endfor %}
                 </div>
                 {% endwith %}{% endif %}
+                {% include "_preview_checks.html" with issues=tossup.style_issues dups=tossup.dup_matches repeats=tossup.batch_repeats %}
                 <input type="hidden" name="tossup-text-{{ forloop.counter0 }}" value="{{ tossup.tossup_text|force_escape }}">
                 <input type="hidden" name="tossup-answer-{{ forloop.counter0 }}" value="{{ tossup.tossup_answer|force_escape }}">
                 <input type="hidden" name="tossup-category-{{ forloop.counter0 }}" value="{{ tossup.category|force_escape|escape }}">
@@ -99,6 +114,7 @@
                     {% endfor %}{% endfor %}{% endfor %}
                 </div>
                 {% endwith %}{% endif %}
+                {% include "_preview_checks.html" with issues=bonus.style_issues dups=bonus.dup_matches repeats=bonus.batch_repeats %}
                 <input type="hidden" name="bonus-leadin-{{ forloop.counter0 }}" value="{{ bonus.leadin|force_escape }}">
                 <input type="hidden" name="bonus-category-{{ forloop.counter0 }}" value="{{ bonus.category|force_escape|escape }}">
                 <input type="hidden" name="bonus-type-{{ forloop.counter0 }}" value="{{ bonus.question_type|force_escape }}">
@@ -131,8 +147,6 @@
     </div>
 </form>
 
-{% endblock %}
-
 <style>
 /* Tags a typed question can be given before it is created, so a batch does not
    have to be walked again question by question afterwards. */
@@ -146,4 +160,21 @@
 .tq-tag-over { color: #a94442; }
 html[data-theme="dark"] .tq-tag-done { color: #86d29d; }
 html[data-theme="dark"] .tq-tag-over { color: #e8a49b; }
+
+/* The style/repeat report for a question, on the confirmation screen where the
+   text can still be changed. */
+.tq-checks { margin: 0 0 12px; padding: 6px 0 6px 10px; border-left: 3px solid var(--qx-border, #d9dde5); }
+.tq-check-block + .tq-check-block { margin-top: 6px; }
+.tq-checks-head { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--qx-muted, #6b7080); }
+.tq-check-list { list-style: none; margin: 2px 0 0; }
+.tq-check-list li { padding: 2px 0 2px 8px; border-left: 3px solid transparent; font-size: 0.9rem; }
+.tq-check-list .tq-sev-error { border-left-color: #c0392b; }
+.tq-check-list .tq-sev-warning { border-left-color: #d4870c; }
+.tq-check-list .tq-sev-info { border-left-color: #b9c6d4; }
+.tq-check-summary { border: 1px solid #cfe0f5; border-left: 4px solid #008CBA; background: #f5f9ff;
+    border-radius: 6px; padding: 8px 12px; margin-bottom: 1rem; font-size: 0.9rem; }
+html[data-theme="dark"] .tq-check-summary { background: var(--qx-elevate); border-color: var(--qx-border); }
 </style>
+
+{% endblock %}

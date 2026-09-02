@@ -34,7 +34,10 @@ from .utils import *
 from .packet_parser import parse_packet_data
 from . import answer_structure
 from . import category_mapper
-from .duplicate_checker import find_duplicates, find_internal_issues, find_topic_repeats, find_answer_matches, CRITICAL, WARNING, INFO
+from .duplicate_checker import (find_duplicates, find_internal_issues,
+                                find_topic_repeats, find_answer_matches,
+                                build_answer_index, lookup_answer_matches,
+                                normalize_answer, CRITICAL, WARNING, INFO)
 from django.utils.safestring import mark_safe
 from django_comments.models import Comment
 from django.db.models import Q, Max
@@ -2815,6 +2818,76 @@ def _attach_structure_previews(qset, tossups, bonuses):
         ]
 
 
+def _attach_preview_checks(qset, tossups, bonuses):
+    """Run the style check and the repeat check over the parsed questions on the
+    upload preview and hang the results on each one, so a writer can fix what
+    they say while the text is still editable instead of finding out on each
+    question's edit page after the batch is committed.
+
+    Same rules as the edit page's panels. Set-wide rule dismissals apply;
+    per-question dismissals can't, since these questions don't exist yet.
+    Repeats cover both the questions already in the set and the rest of this
+    batch -- two questions typed together share no saved answer to match on, so
+    nothing downstream would catch that pair until both were in.
+
+    Returns a summary count for the header, {'style': n, 'repeat': n}.
+    """
+    from . import style_checker
+    disabled = qset.disabled_style_rule_set()
+    rule_dismissed = set(StyleRuleDismissal.objects.filter(
+        question_set=qset).values_list('code', 'token'))
+    index = build_answer_index(qset)
+
+    questions = ([('tossup', 'Tossup', i, tu) for i, tu in enumerate(tossups or [], start=1)]
+                 + [('bonus', 'Bonus', i, bs) for i, bs in enumerate(bonuses or [], start=1)])
+
+    # Every answer in the batch, keyed the way the set index is keyed, so a
+    # repeat inside the batch is found the same way one against the set is. The
+    # raw answer is kept alongside so a match can be shown as it was typed.
+    batch = []
+    for qtype, noun, number, question in questions:
+        raws = ((question.tossup_answer,) if qtype == 'tossup'
+                else (question.part1_answer, question.part2_answer, question.part3_answer))
+        answers = {}
+        for raw in raws:
+            norm = normalize_answer(raw)
+            if norm:
+                answers.setdefault(norm, raw)
+        batch.append({'label': '{0} {1}'.format(noun, number), 'norms': set(answers),
+                      'answers': answers})
+
+    style_count = 0
+    repeat_count = 0
+    for pos, (qtype, noun, number, question) in enumerate(questions):
+        found = (style_checker.check_tossup(question, style_checker.DEFAULT_GUIDE, disabled)
+                 if qtype == 'tossup'
+                 else style_checker.check_bonus(question, style_checker.DEFAULT_GUIDE, disabled))
+        question.style_issues = [i for i in found
+                                 if (i['code'], i.get('token', '')) not in rule_dismissed]
+        style_count += len(question.style_issues)
+
+        mine = batch[pos]['norms']
+        question.dup_matches = []
+        if mine:
+            for m in lookup_answer_matches(index, mine):
+                m = dict(m, answer_html=_dup_render_answer(m['answer_raw']))
+                question.dup_matches.append(m)
+
+        question.batch_repeats = []
+        for other_pos, other in enumerate(batch):
+            if other_pos == pos:
+                continue
+            shared = mine & other['norms']
+            if shared:
+                norm = sorted(shared)[0]
+                question.batch_repeats.append(
+                    {'label': other['label'],
+                     'answer_html': _dup_render_answer(other['answers'][norm])})
+        repeat_count += len(question.dup_matches) + len(question.batch_repeats)
+
+    return {'style': style_count, 'repeat': repeat_count}
+
+
 def _structured_tossup_ctx(qset, tossup):
     """Template context for a tossup's structured answer editor. Empty when the
     set doesn't record structure, which leaves the plain answer box in place."""
@@ -4620,12 +4693,17 @@ def type_questions(request, qset_id=None):
                 attach_tag_choices(qset, tossups)
                 attach_tag_choices(qset, bonuses)
 
+                # Style and repeat checks run here, on the confirmation screen,
+                # where "Back to Editing" can still act on what they say.
+                check_summary = _attach_preview_checks(qset, tossups, bonuses)
+
                 return render(request, 'type_questions_preview.html',
                                          {'tossups': tossups,
                                           'bonuses': bonuses,
                                           'tossup_errors': tossup_errors,
                                           'bonus_errors': bonus_errors,
                                           'category_errors': category_errors,
+                                          'check_summary': check_summary,
                                           'message': 'Please verify that these questions have been correctly parsed. Hitting "Submit" will '\
                                           'commit these questions to the database. If you see any mistakes, hit "Cancel" and correct your mistakes.',
                                           'qset': qset,

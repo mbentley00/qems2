@@ -213,50 +213,84 @@ def find_duplicates(qset):
     return result
 
 
-def find_answer_matches(qset, question, qtype):
-    """Find other questions in `qset` whose normalized answer matches any answer
-    of `question` (a Tossup or Bonus). Used for the post-submit "you may have
-    created a duplicate" check. Returns a list of lightweight entry dicts."""
+def answer_norms(question, qtype):
+    """The normalized answers a question is matched on: one for a tossup, one
+    per non-empty part for a bonus. Works on an unsaved question too."""
+    if qtype == 'tossup':
+        answers = (question.tossup_answer,)
+    else:
+        answers = (question.part1_answer, question.part2_answer, question.part3_answer)
+    return set(n for n in (normalize_answer(a) for a in answers) if n)
+
+
+def build_answer_index(qset):
+    """Map each normalized answer used in `qset` to the saved questions that use
+    it (a bonus contributes one entry per part).
+
+    Scanning the set once and reusing the index is what makes checking a whole
+    batch of questions affordable -- the upload preview checks every question a
+    writer typed, and re-reading the set for each of them does not scale.
+    Entries carry a `seq` so lookups can report them in set order.
+    """
     from .models import Tossup, Bonus
 
-    my_norms = set()
-    if qtype == 'tossup':
-        n = normalize_answer(question.tossup_answer)
-        if n:
-            my_norms.add(n)
-    else:
-        for a in (question.part1_answer, question.part2_answer, question.part3_answer):
-            n = normalize_answer(a)
-            if n:
-                my_norms.add(n)
-    if not my_norms:
-        return []
+    index = {}
+    seq = 0
 
-    matches = []
+    def add(norm, entry):
+        index.setdefault(norm, []).append(entry)
+
     for tu in Tossup.objects.filter(question_set=qset).select_related('category', 'author', 'packet'):
-        if qtype == 'tossup' and tu.id == question.id:
+        n = normalize_answer(tu.tossup_answer)
+        if not n:
             continue
-        if normalize_answer(tu.tossup_answer) in my_norms:
-            matches.append({
-                'type': 'tossup', 'id': tu.id, 'answer_raw': tu.tossup_answer,
+        add(n, {'type': 'tossup', 'id': tu.id, 'answer_raw': tu.tossup_answer,
                 'category_str': _get_category_str(tu), 'author': str(tu.author),
-                'part_label': None,
+                'part_label': None, 'seq': seq,
                 'packet': tu.packet.packet_name if tu.packet else ''})
+        seq += 1
 
     for bonus in Bonus.objects.filter(question_set=qset).select_related('category', 'author', 'packet'):
-        if qtype == 'bonus' and bonus.id == question.id:
-            continue
         for label, ans in (('Part 1', bonus.part1_answer),
                            ('Part 2', bonus.part2_answer),
                            ('Part 3', bonus.part3_answer)):
             n = normalize_answer(ans)
-            if n and n in my_norms:
-                matches.append({
-                    'type': 'bonus', 'id': bonus.id, 'answer_raw': ans,
+            if not n:
+                continue
+            add(n, {'type': 'bonus', 'id': bonus.id, 'answer_raw': ans,
                     'category_str': _get_category_str(bonus), 'author': str(bonus.author),
-                    'part_label': label,
+                    'part_label': label, 'seq': seq,
                     'packet': bonus.packet.packet_name if bonus.packet else ''})
-    return matches
+            seq += 1
+
+    return index
+
+
+def lookup_answer_matches(index, norms, exclude=None):
+    """Entries from `build_answer_index` matching any of `norms`, in set order.
+
+    `exclude` is an optional (qtype, id) pair, so a saved question being checked
+    against its own set doesn't report itself.
+    """
+    hits = {}
+    for norm in norms:
+        for entry in index.get(norm, ()):
+            if exclude is not None and (entry['type'], entry['id']) == exclude:
+                continue
+            hits[entry['seq']] = entry
+    return [hits[seq] for seq in sorted(hits)]
+
+
+def find_answer_matches(qset, question, qtype):
+    """Find other questions in `qset` whose normalized answer matches any answer
+    of `question` (a Tossup or Bonus). Used for the post-submit "you may have
+    created a duplicate" check. Returns a list of lightweight entry dicts."""
+    norms = answer_norms(question, qtype)
+    if not norms:
+        return []
+    qid = getattr(question, 'id', None)
+    exclude = (qtype, qid) if qid is not None else None
+    return lookup_answer_matches(build_answer_index(qset), norms, exclude)
 
 
 SENTENCE_SPLIT = re.compile(r'[.;!?]+')
