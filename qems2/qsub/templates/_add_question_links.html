@@ -1,0 +1,21 @@
+{% comment %}
+"New Tossup" / "New Bonus" for a particular category, so that noticing a
+category is short and writing for it are one gesture rather than two pages
+apart.
+
+Include with `add_qset_id` and whichever the page knows:
+  add_category_id    the distribution entry's id (exact)
+  add_category_path  the category path, honoured only when it names exactly one
+                     entry of this set's distribution -- see _requested_category
+
+Nothing here decides what the picker ends up on; that is the add page's call,
+and it falls back to the writer's last category when the hint resolves to
+nothing.
+{% endcomment %}
+{% if add_category_id %}
+<a href="/add_tossups/{{ add_qset_id }}/?category={{ add_category_id }}" class="button small"><i class="fa fa-circle-plus"></i> New tossup here</a>
+<a href="/add_bonuses/{{ add_qset_id }}/ACF-style bonus/?category={{ add_category_id }}" class="button small secondary"><i class="fa fa-circle-plus"></i> New bonus here</a>
+{% elif add_category_path %}
+<a href="/add_tossups/{{ add_qset_id }}/?category_path={{ add_category_path|urlencode }}" class="button small"><i class="fa fa-circle-plus"></i> New tossup here</a>
+<a href="/add_bonuses/{{ add_qset_id }}/ACF-style bonus/?category_path={{ add_category_path|urlencode }}" class="button small secondary"><i class="fa fa-circle-plus"></i> New bonus here</a>
+{% endif %}

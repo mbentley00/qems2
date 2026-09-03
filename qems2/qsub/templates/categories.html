@@ -26,6 +26,7 @@
     {% endif %}
     {% if category %}
     <p class="cat-actions">
+        {% include "_add_question_links.html" with add_qset_id=qset.id add_category_id=category.id %}
         <a href="/category_doc/{{ qset.id }}/{{ category.id }}/" class="button small secondary"><i class="fa fa-file-lines"></i> Document view</a>
     </p>
     {% endif %}

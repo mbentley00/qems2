@@ -20,6 +20,7 @@
 </ul>
 
 <p class="cat-actions">
+    {% include "_add_question_links.html" with add_qset_id=qset.id add_category_path=category_name %}
     <a href="/category_doc_top/{{ qset.id }}/{{ category_name }}/" class="button small secondary cat-doc-btn"><i class="fa fa-file-lines"></i> Document view (all {{ category_name }})</a>
 </p>
 

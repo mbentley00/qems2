@@ -2432,11 +2432,41 @@ def _last_category_for(user, qset):
     return latest.category
 
 
-def _add_initial(user, qset, question_type_id):
+def _requested_category(qset, request):
+    """The category an add-a-question link asked to start on, or None.
+
+    The category and category-tag pages link here so that "this needs two more
+    tossups" and writing one are the same gesture. A page that knows the exact
+    distribution entry sends `category` as its id; one that knows only the path
+    its tags sit on sends `category_path`, which names a category only when it
+    matches one exactly -- a tag on "Literature" covers several, and picking one
+    of them on the writer's behalf would be worse than leaving the picker as it
+    was. Either way the id is checked against this set's own distribution.
+    """
+    raw = (request.GET.get('category') or '').strip()
+    if raw.isdigit():
+        return DistributionEntry.objects.filter(
+            id=int(raw), distribution_id=qset.distribution_id).first()
+
+    path = (request.GET.get('category_path') or '').strip()
+    if not path:
+        return None
+    entries = list(DistributionEntry.objects.filter(distribution_id=qset.distribution_id))
+    exact = [e for e in entries if str(e) == path]
+    if len(exact) == 1:
+        return exact[0]
+    # A top-level category with a single entry under it is still unambiguous.
+    under = [e for e in entries if (e.category or '').strip() == path]
+    return under[0] if len(under) == 1 else None
+
+
+def _add_initial(user, qset, question_type_id, requested=None):
+    """Opening values for an add-a-question form: the category asked for by the
+    link that got here, else the last one this writer used."""
     initial = {'question_type': question_type_id}
-    last = _last_category_for(user, qset)
-    if last is not None:
-        initial['category'] = last.id
+    entry = requested if requested is not None else _last_category_for(user, qset)
+    if entry is not None:
+        initial['category'] = entry.id
     return initial
 
 
@@ -2455,10 +2485,12 @@ def add_tossups(request, qset_id, packet_id=None):
 
     if request.method == 'GET':
         if user in qset.editor.all() or user in qset.writer.all() or qset.is_owner(user):
+            initial = _add_initial(user, qset, question_type_id,
+                                   _requested_category(qset, request))
             if user in qset.writer.all() and user not in qset.editor.all() and not qset.is_owner(user):
-                tossup_form = TossupForm(qset_id=qset.id, packet_id=packet_id, role='writer', writer=user.user.username, initial=_add_initial(user, qset, question_type_id))
+                tossup_form = TossupForm(qset_id=qset.id, packet_id=packet_id, role='writer', writer=user.user.username, initial=initial)
             else:
-                tossup_form = TossupForm(qset_id=qset.id, packet_id=packet_id, writer=user.user.username, initial=_add_initial(user, qset, question_type_id))
+                tossup_form = TossupForm(qset_id=qset.id, packet_id=packet_id, writer=user.user.username, initial=initial)
             read_only = False
         else:
             tossup_form = []
@@ -2575,7 +2607,10 @@ def add_bonuses(request, qset_id, bonus_type, packet_id=None):
 
     if request.method == 'GET':
         if user in qset.editor.all() or user in qset.writer.all() or qset.is_owner(user):
-            form = BonusForm(qset_id=qset.id, packet_id=packet_id, role=role, initial=_add_initial(user, qset, question_type_id), writer=user.user.username, question_type=bonus_type)
+            form = BonusForm(qset_id=qset.id, packet_id=packet_id, role=role,
+                             initial=_add_initial(user, qset, question_type_id,
+                                                  _requested_category(qset, request)),
+                             writer=user.user.username, question_type=bonus_type)
             read_only = False
         else:
             form = None

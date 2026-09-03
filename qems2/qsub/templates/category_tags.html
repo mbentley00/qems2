@@ -103,7 +103,10 @@
 {% endif %}
 
 {% if focused %}
-<p><a href="/category_tags/{{ qset.id }}/" class="button small secondary">&laquo; All categories</a></p>
+<p class="cat-actions">
+    {% if focus_path %}{% include "_add_question_links.html" with add_qset_id=qset.id add_category_path=focus_path %}{% endif %}
+    <a href="/category_tags/{{ qset.id }}/" class="button small secondary">&laquo; All categories</a>
+</p>
 {% else %}
 <div class="panel radius cat-index">
     <div class="cat-index-head">Every scope in this set &mdash; open one to work on its tags</div>
