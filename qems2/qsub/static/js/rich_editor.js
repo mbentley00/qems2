@@ -136,7 +136,7 @@ $(function () {
             // How worn a clue is, without leaving the question. The same
             // lookup the highlight popup does, asked for deliberately and
             // answered under the field, where it stays put while you read it.
-            '  <a href="#" class="rich-editor-btn rich-editor-qb" data-cmd="qbfreq" title="How often the selected phrase appears in the qbreader database. Select a phrase first.">QB</a>' +
+            '  <a href="#" class="rich-editor-btn rich-editor-qb" data-cmd="qbfreq" title="How often the selected phrase appears in the qbreader database. Select a phrase first.">DB</a>' +
             '  <a href="#" class="rich-editor-btn rich-editor-plain" data-cmd="plaintext" title="Edit the raw QEMS markup directly (e.g. ~foo~ for italics, _foo_ for answer underlines)">Raw</a>' +
             '</div>');
         var $editor = $('<div class="rich-editor" contenteditable="true" spellcheck="true"></div>');
