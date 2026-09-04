@@ -1,7 +1,8 @@
 // Run the Discord formatters under node in both modes of the set option
-// "Discord copy leaves a bonus's opening readable". The option is bonus-only:
-// an unspoilered tossup sentence is dropped by the playtest bot's clue
-// splitter, so tossups stay fully spoilered either way.
+// "Discord copy leaves a question's opening readable". It covers both types:
+// a tossup's first sentence, and a bonus's leadin and first part. It used to
+// be bonus-only, because the playtest bot's clue splitter dropped an
+// unspoilered tossup sentence outright; the bot handles it now.
 //   node qems2/qsub/static/js/checks/discord_first_clue_check.js qems2/qsub/static/js/paste_convert.js
 const fs = require('fs');
 const src = fs.readFileSync(process.argv[2], 'utf8');
@@ -32,13 +33,17 @@ check('default: bonus leadin and part 1 spoilered, no difficulty in the label', 
 
 global.window.qemsDiscordShowFirst = true;
 t = D.tossup(tu, '_X_', 'me', 'Cat', 1);
-check('on: tossups stay fully spoilered (the bot drops unspoilered clues)',
-      t.startsWith('**||First clue here.|| ||Second clue (*)||** ||with more.||') && t.includes('||Third clue.||'));
+check('on: first sentence readable, rest of the stem spoilered',
+      t.startsWith('**First clue here. ||Second clue (*)||** ||with more.||') && t.includes('||Third clue.||'));
+check('on: the answer is never readable', t.includes('ANSWER: ||'));
 b = D.bonus('Lead in.', parts, 'me', 'Cat', 2);
 check('on: leadin and part 1 readable, answer 1 and later parts spoilered',
       b.startsWith('Lead in.\n[10] Part one.\nANSWER: ||') && b.includes('[10] ||Part two.||'));
 t = D.tossup('No power mark at all. Next one.', '_X_', '', '', 0);
-check('on: an unpowered tossup is spoilered too',
-      t.startsWith('||No power mark at all.|| ||Next one.||'));
+check('on: an unpowered tossup opens readable too',
+      t.startsWith('No power mark at all. ||Next one.||'));
+t = D.tossup('Only one sentence here.', '_X_', '', '', 0);
+check('on: a one-sentence tossup is readable, its answer is not',
+      t.startsWith('Only one sentence here.\nANSWER: ||'));
 console.log(ok ? 'ALL PASS' : 'SOME FAILED');
 process.exit(ok ? 0 : 1);

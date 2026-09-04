@@ -736,13 +736,19 @@ $(function () {
     }
 
     // Whether the set wants a question's opening left readable in a spoilered
-    // copy. Bonuses only, and only the leadin and first part: the playtest bot
-    // builds a tossup's clue list out of the ||spoilered|| runs alone, so an
-    // unspoilered opening sentence is not merely unhidden there -- it is
-    // dropped, which shifts every buzz index and inflates the buzz percentages
-    // computed from the remaining text. A tossup is therefore always fully
-    // spoilered regardless of the setting. The page sets the flag from the
-    // set's settings; absent, everything is spoilered.
+    // copy, so a playtest channel can see what a question is about without
+    // opening it. For a tossup that is its first sentence; for a bonus, the
+    // leadin and the first part (never an answer).
+    //
+    // Tossups used to be exempt: the playtest bot built a tossup's clue list
+    // out of the ||spoilered|| runs alone, so an unspoilered opening sentence
+    // was not merely unhidden, it was dropped -- which shifted every buzz index
+    // and skewed the buzz percentages computed from what was left. The bot
+    // handles an unspoilered opening now, so the setting means what it says for
+    // both question types.
+    //
+    // The page sets the flag from the set's settings; absent, everything is
+    // spoilered.
     // The author select's label is "Real Name (username)"; the Discord footer
     // wants the name alone. A bare username (no real name set) has no
     // parenthetical and passes through.
@@ -755,10 +761,6 @@ $(function () {
     }
     function spoil(text, isFirst) {
         return (isFirst && showFirstClue()) ? text : '||' + text + '||';
-    }
-    // Tossups take this one instead: no opening is ever left readable.
-    function spoilAlways(text) {
-        return '||' + text + '||';
     }
 
     function formatTossupForDiscord(text, answer, author, category, qid) {
@@ -779,21 +781,23 @@ $(function () {
             var beforeSentences = splitIntoSentences(qemsToDiscordMarkup(beforePower));
             var afterSentences = splitIntoSentences(qemsToDiscordMarkup(afterPower));
 
-            // Pre-power: bold + spoiler
-            result = '**' + beforeSentences.map(function (s) {
-                return spoilAlways(s);
+            // Pre-power: bold + spoiler. Only the very first sentence of the
+            // stem can be the readable opening; the bold run is unaffected
+            // either way, since power is about scoring, not hiding.
+            result = '**' + beforeSentences.map(function (s, i) {
+                return spoil(s, i === 0);
             }).join(' ') + '**';
 
-            // Post-power: spoiler only
+            // Post-power: spoiler only, and never the opening.
             if (afterSentences.length > 0) {
                 result += ' ' + afterSentences.map(function (s) {
-                    return spoilAlways(s);
+                    return spoil(s, false);
                 }).join(' ');
             }
         } else {
             var sentences = splitIntoSentences(qemsToDiscordMarkup(text));
-            result = sentences.map(function (s) {
-                return spoilAlways(s);
+            result = sentences.map(function (s, i) {
+                return spoil(s, i === 0);
             }).join(' ');
         }
 
