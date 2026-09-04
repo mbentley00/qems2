@@ -5427,6 +5427,104 @@ def forgot_username(request):
         sent = True
     return render(request, 'account/forgot_username.html', {'sent': sent})
 
+def _move_confirm_context(question, qtype, q_set, dest_qset, post=None):
+    """What moving this question would do to the things it carries.
+
+    A question's category is a row in its set's distribution, its tags are rows
+    owned by its set, and its author is someone who writes for its set. None of
+    the three survives a move by itself. This works out what the destination can
+    offer for each, preferring what the question already has where the
+    destination has the same thing by name.
+
+    `post` is the confirmation form coming back, so a re-render (a changed
+    category brings different tags) keeps what was chosen.
+    """
+    dest_entries = [e.dist_entry for e in dest_qset.setwidedistributionentry_set
+                    .select_related('dist_entry').order_by('dist_entry__category',
+                                                           'dist_entry__subcategory')]
+    current_path = str(question.category) if question.category_id else ''
+    twin = next((e for e in dest_entries if str(e) == current_path), None)
+
+    if post is not None and 'category' in post:
+        raw = (post.get('category') or '').strip()
+        selected = next((e for e in dest_entries if str(e.id) == raw), None)
+    else:
+        selected = twin
+
+    # Tags the destination could give the question, for the category it will
+    # land in. A tag with the same name on the same path is the same tag as far
+    # as a writer is concerned, so it comes across ticked.
+    carried_names = set()
+    dest_tags = []
+    if selected is not None or not current_path:
+        applicable = get_applicable_tags(dest_qset, selected)
+        mine = {(t.category_path, t.name) for t in question.category_tags.all()}
+        if post is not None and 'confirm' in post:
+            chosen = {int(v) for v in post.getlist('tags') if str(v).isdigit()}
+        else:
+            chosen = None
+        for tag in applicable:
+            carried = (tag.category_path, tag.name) in mine
+            if carried:
+                carried_names.add(tag.name)
+            dest_tags.append({'tag': tag, 'carried': carried,
+                              'checked': carried if chosen is None else tag.id in chosen})
+
+    dropped = [t for t in question.category_tags.all()
+               if t.question_set_id != dest_qset.id and t.name not in carried_names]
+
+    dest_writers = list(dict.fromkeys(
+        list(dest_qset.all_owners()) + list(dest_qset.editor.all())
+        + list(dest_qset.writer.all())))
+    author_id = question.author_id
+    if post is not None and 'author' in post:
+        raw = (post.get('author') or '').strip()
+        author_id = int(raw) if raw.isdigit() else None
+
+    return {
+        'user': None, 'q_set': q_set, 'dest_qset': dest_qset,
+        'question': question, 'qtype': qtype,
+        'edit_url': '/edit_{0}/{1}/'.format(qtype, question.id),
+        'dest_categories': dest_entries,
+        'category_match': str(twin) if twin is not None else '',
+        'selected_category_id': selected.id if selected is not None else None,
+        'dest_tags': dest_tags,
+        'dropped_tags': dropped,
+        'dest_writers': dest_writers,
+        'current_author_id': question.author_id,
+        'selected_author_id': author_id,
+        'current_author_outside': (question.author_id is not None
+                                   and question.author not in dest_writers),
+        'message': '', 'message_class': '',
+    }
+
+
+def _apply_move(question, qtype, dest_qset, post):
+    """Move the question and set what the confirmation asked for."""
+    dest_entries = {e.dist_entry_id: e.dist_entry
+                    for e in dest_qset.setwidedistributionentry_set.select_related('dist_entry')}
+    raw_cat = (post.get('category') or '').strip()
+    category = dest_entries.get(int(raw_cat)) if raw_cat.isdigit() else None
+
+    raw_author = (post.get('author') or '').strip()
+    author = Writer.objects.filter(id=int(raw_author)).first() if raw_author.isdigit() else None
+
+    wanted = {int(v) for v in post.getlist('tags') if str(v).isdigit()}
+
+    question.question_set = dest_qset
+    question.packet = None
+    question.category = category
+    question.author = author
+    question.save()
+
+    # Only tags of the destination, and only the ones ticked: a tag of the old
+    # set left attached would count a question it no longer has.
+    keep = [t for t in get_applicable_tags(dest_qset, category) if t.id in wanted]
+    question.category_tags.set(keep)
+    cache.clear()
+    return question
+
+
 @login_required
 def move_tossup(request, q_set_id, tossup_id):
     user = request.user.writer
@@ -5488,12 +5586,16 @@ def move_tossup(request, q_set_id, tossup_id):
                 dest_qset = QuestionSet.objects.get(id=dest_qset_id)
 
                 if (tossup is not None and dest_qset is not None):
-                    tossup.question_set = dest_qset
-                    tossup.packet = None
+                    # Choosing the destination is the first half; the second is
+                    # deciding what the question's category, author and tags
+                    # become there, since none of them travels on its own.
+                    if not request.POST.get('confirm'):
+                        ctx = _move_confirm_context(tossup, 'tossup', q_set, dest_qset,
+                                                    request.POST)
+                        ctx['user'] = user
+                        return render(request, 'move_question_confirm.html', ctx)
 
-                    tossup.save()
-                    carry_tags_to_set(tossup, dest_qset)
-                    cache.clear()
+                    _apply_move(tossup, 'tossup', dest_qset, request.POST)
                     message = "Successfully moved tossup to " + str(dest_qset)
                     message_class = 'alert-box success'
                     return render(request, 'move_tossup_success.html',
@@ -5599,12 +5701,13 @@ def move_bonus(request, q_set_id, bonus_id):
                 dest_qset = QuestionSet.objects.get(id=dest_qset_id)
 
                 if (bonus is not None and dest_qset is not None):
-                    bonus.question_set = dest_qset
-                    bonus.packet = None
+                    if not request.POST.get('confirm'):
+                        ctx = _move_confirm_context(bonus, 'bonus', q_set, dest_qset,
+                                                    request.POST)
+                        ctx['user'] = user
+                        return render(request, 'move_question_confirm.html', ctx)
 
-                    bonus.save()
-                    carry_tags_to_set(bonus, dest_qset)
-                    cache.clear()
+                    _apply_move(bonus, 'bonus', dest_qset, request.POST)
                     return render(request, 'move_bonus_success.html',
                                         {'user': user,
                                          'q_set': q_set,

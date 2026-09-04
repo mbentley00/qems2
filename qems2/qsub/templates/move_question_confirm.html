@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% load filters %}
+
+{% block title %}Move {{ qtype|capfirst }} - QEMS3{% endblock %}
+
+{% block content %}
+
+{% comment %}
+The step between choosing a destination and the question arriving there.
+
+A question carries three things that belong to the set it is in rather than to
+the question: its category (a row in that set's distribution), its tags (rows
+owned by that set), and its author (someone on that set). Moving used to take
+the destination and go, which left the category pointing at a distribution the
+new set does not use and dropped every tag without saying so. This page says
+what will happen to each and lets it be settled before the move rather than
+found afterwards.
+{% endcomment %}
+
+<h3 class="page-header">Move {{ qtype }} to {{ dest_qset.name }}</h3>
+<ul class="breadcrumbs">
+    <li><a href="/edit_question_set/{{ q_set.id }}/">{{ q_set.name }}</a></li>
+    <li><a href="{{ edit_url }}">The {{ qtype }}</a></li>
+    <li class="current">Move</li>
+</ul>
+
+{% if message %}<div class="{{ message_class }}">{{ message }}</div>{% endif %}
+
+<div class="panel radius mv-question">
+    {% autoescape off %}{% if qtype == 'tossup' %}{{ question|tossup_html }}{% else %}{{ question|bonus_html }}{% endif %}{% endautoescape %}
+</div>
+
+<form action="" method="post" class="mv-form">
+    {% csrf_token %}
+    <input type="hidden" name="move_sets" value="{{ dest_qset.id }}">
+    <input type="hidden" name="confirm" value="1">
+
+    <div class="mv-row">
+        <div class="mv-label">Category
+            <small>A category belongs to the set's distribution, so it has to be
+            chosen again in {{ dest_qset.name }}.</small></div>
+        <div class="mv-field">
+            {% if category_match %}
+            <p class="mv-note mv-ok">{{ dest_qset.name }} has the same category,
+                <strong>{{ category_match }}</strong>, and it is selected below.</p>
+            {% elif question.category %}
+            <p class="mv-note mv-warn">{{ dest_qset.name }} has no
+                <strong>{{ question.category }}</strong>. Pick where this belongs, or
+                leave it uncategorized and set it later.</p>
+            {% endif %}
+            <select name="category">
+                <option value="">Uncategorized</option>
+                {% for entry in dest_categories %}
+                <option value="{{ entry.id }}"{% if entry.id == selected_category_id %} selected{% endif %}>{{ entry }}</option>
+                {% endfor %}
+            </select>
+        </div>
+    </div>
+
+    <div class="mv-row">
+        <div class="mv-label">Author
+            <small>Kept as it is unless you change it. An author who does not
+            write for {{ dest_qset.name }} still shows on the question.</small></div>
+        <div class="mv-field">
+            <select name="author">
+                <option value="">No author</option>
+                {% for w in dest_writers %}
+                <option value="{{ w.id }}"{% if w.id == selected_author_id %} selected{% endif %}>{{ w }}{% if w.id == current_author_id %} — current{% endif %}</option>
+                {% endfor %}
+                {% if current_author_outside %}
+                <option value="{{ current_author_id }}" selected>{{ question.author }} — current, not on {{ dest_qset.name }}</option>
+                {% endif %}
+            </select>
+        </div>
+    </div>
+
+    <div class="mv-row">
+        <div class="mv-label">Category tags
+            <small>Tags belong to a set. One with the same name on the same
+            category path in {{ dest_qset.name }} is ticked; the rest are gone
+            unless {{ dest_qset.name }} has something to put in their place.</small></div>
+        <div class="mv-field">
+            {% if dropped_tags %}
+            <p class="mv-note mv-warn">Not in {{ dest_qset.name }}:
+                {% for t in dropped_tags %}<span class="mv-tag mv-tag-gone">{{ t.name }}</span>{% endfor %}
+            </p>
+            {% endif %}
+            {% if dest_tags %}
+            <div class="mv-tags">
+                {% for t in dest_tags %}
+                <label class="mv-tag-pick"><input type="checkbox" name="tags" value="{{ t.tag.id }}"{% if t.checked %} checked{% endif %}>
+                    {% if t.tag.group_name %}<span class="mv-tag-group">{{ t.tag.group_name }}:</span> {% endif %}{{ t.tag.name }}{% if t.carried %} <span class="mv-carried">carried over</span>{% endif %}</label>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="mv-note">{{ dest_qset.name }} has no tags for that category
+                {% if not selected_category_id %}(pick a category first){% endif %}.</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="mv-row">
+        <div class="mv-label">Packet</div>
+        <div class="mv-field">
+            <p class="mv-note">{% if question.packet %}Leaving <strong>{{ question.packet }}</strong>;
+                the question arrives unpacketized and can be packetized in
+                {{ dest_qset.name }}.{% else %}Not in a packet, and arrives that way.{% endif %}</p>
+        </div>
+    </div>
+
+    <div class="mv-actions">
+        <input type="submit" class="button primary" value="Move the {{ qtype }}">
+        <a href="{{ edit_url }}" class="button secondary">Cancel</a>
+    </div>
+</form>
+
+<style>
+.mv-question { background: var(--qx-card, #fff); }
+.mv-form { max-width: 900px; }
+.mv-row { display: flex; flex-wrap: wrap; gap: 8px 20px; padding: 12px 0;
+    border-top: 1px solid var(--qx-border, #ececf1); }
+.mv-label { flex: 0 0 13rem; font-weight: 600; color: #2b2f3a; }
+.mv-label small { display: block; font-weight: 400; color: var(--qx-muted, #8a8f9c); margin-top: 3px; }
+.mv-field { flex: 1 1 22rem; }
+.mv-field select { margin: 0; max-width: 34rem; }
+.mv-note { font-size: 0.86rem; margin: 0 0 6px; }
+.mv-ok { color: #1b5e20; }
+.mv-warn { color: #a94442; }
+.mv-tags { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.mv-tag-pick { font-weight: 400; margin: 0; display: inline-flex; align-items: baseline; gap: 5px; }
+.mv-tag-group { color: var(--qx-muted, #8a8f9c); }
+.mv-carried { color: #1b5e20; font-size: 0.78rem; }
+.mv-tag { display: inline-block; border-radius: 9px; padding: 0 7px; margin: 0 3px 2px 0;
+    font-size: 0.78rem; background: #f6e6e5; color: #a94442; }
+.mv-actions { margin-top: 14px; }
+.mv-actions .button { margin: 0 6px 0 0; }
+html[data-theme="dark"] .mv-tag { background: var(--qx-elevate); }
+</style>
+
+{% endblock %}
