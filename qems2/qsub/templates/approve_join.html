@@ -4,8 +4,10 @@
 {% include "header.html" %}
 {% endblock %}
 
-{# One template answers the request either way, so the tab has to say which
-   question is being asked. #}
+{% comment %}
+One template answers the request either way, so the tab has to say which
+question is being asked.
+{% endcomment %}
 {% block title %}{% if declining or declined %}Decline{% else %}Approve{% endif %} Join Request - QEMS3{% endblock %}
 
 {% block content %}
@@ -22,8 +24,10 @@
     </div>
     <p><a href="/edit_question_set/{{ qset.id }}/" class="button small secondary">Go to set</a></p>
 {% elif declined %}
-    {# Declining is quiet on purpose: the requester isn't told, so say so here
-       rather than leaving the owner wondering what the person now knows. #}
+    {% comment %}
+    Declining is quiet on purpose: the requester isn't told, so say so here
+    rather than leaving the owner wondering what the person now knows.
+    {% endcomment %}
     <div class="alert-box success">
         {{ requester|verbose_username }}'s request to join <strong>{{ qset.name }}</strong>
         has been declined. They haven't been emailed about it, and nothing stops

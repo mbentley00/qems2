@@ -69,9 +69,11 @@
             {% endif %}
             <input type="submit" class="button primary right" value="Submit">
             <input type="hidden" name="qset_id" value="{{ qset.id }}">
-            {# What was ticked in the tag panel, per category, as
-               {"<distribution entry id>": [tag id, ...]}. It opens the preview's
-               boxes; the preview is what actually applies them. #}
+            {% comment %}
+            What was ticked in the tag panel, keyed by distribution entry id,
+            as {"<id>": [tag id, ...]}. It sets what the preview's own boxes
+            open as; the preview is what actually applies them.
+            {% endcomment %}
             <input type="hidden" name="preselected_tags" id="tq-preselected-tags" value="">
         </form>
     </div>

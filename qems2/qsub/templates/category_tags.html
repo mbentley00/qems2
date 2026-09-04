@@ -24,18 +24,16 @@
 {% if messages %}{% for m in messages %}<div class="alert-box {% if m.tags == 'error' %}warning{% elif m.tags == 'warning' %}warning{% else %}success{% endif %}">{{ m }}</div>{% endfor %}{% endif %}
 
 <div class="panel radius">
-    Tags are editor-defined requirements &mdash; for instance &ldquo;Asian Literature&rdquo;
-    under Literature - World with 6 tossups and 6 bonuses needed. Writers fulfill a tag by checking it
-    on the question's edit page. Tags with a required count of 0 are informational labels.
-    A tag can belong to <strong>one category</strong> or to the <strong>whole set</strong>. Use a
-    set-wide tag for anything that cuts across the distribution &mdash; a time period, a region, where
-    a question came from &mdash; instead of creating the same tag once per category: it is offered on
-    every question whatever its category, and its quota counts every question carrying it.
-    A tag can set a ceiling instead of (or as well as) a minimum: &ldquo;This Empire Indicator&rdquo;
-    with a maximum of 7 tossups and 0 bonuses asks for none, but goes red once an eighth turns up.
-    Tag names are printed in exported packets unless the tag says otherwise; the document view always
-    shows them.
-    <p class="home-note">Tags can also have groups such as location, time period, or other divisions.</p>
+    Tags are used to more precisely define requirements for a category or a set. For instance, a category such
+    as European History may have tags defining how many questions are needed for a given time period and for
+    different regions within Europe. They take the place of category spreadsheets frequently used when editing a tournament in Google Docs.
+    <p class="home-note">Questions can have multiple tags. For instance, a tossup on Diocletian might get tagged with
+        "Classical" (for time period), "Italy" (for region) and "Person" (for answer type). The tags and groupings are defined
+        by editors.
+    </p>
+    <p class="home-note">Tags can specify exact requirements such as needing 2 tossups and 2 bonuses across the set.
+        They can also be set without a minimum or maximum defined for cases such as "no more than 4 tossups on this, but 0 is okay".
+    </p>
 </div>
 
 {% if can_edit %}
@@ -46,9 +44,11 @@
         <div class="small-4 columns">
             <label>Applies to
                 <select name="category_path">
-                    {# A tag can belong to the whole set: use it for the things
-                       that cut across the distribution -- a period, a region,
-                       a source -- instead of repeating one per category. #}
+                    {% comment %}
+                    A tag can belong to the whole set: use it for the things
+                    that cut across the distribution -- a period, a region,
+                    a source -- instead of repeating one per category.
+                    {% endcomment %}
                     <option value="{{ set_wide_token }}"{% if focus_set_wide or selected_path == set_wide_token %} selected{% endif %}>{{ set_wide_label }}</option>
                     {% for path in path_choices %}
                     <option value="{{ path }}"{% if path == selected_path or path == focus_path %} selected{% endif %}>{{ path }}</option>

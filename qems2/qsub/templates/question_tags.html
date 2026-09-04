@@ -7,9 +7,11 @@
                 {% if available_tags|length == 1 %}<a href="{{ available_tags.0.status_url }}">tag status</a>{% else %}tag status per category below{% endif %})</small>
             {% for section in available_tags %}
             <div class="qtags-section">
-                {# A set-wide section always names itself: without it a writer
-                   cannot tell that ticking the tag speaks for the whole set
-                   rather than this category. #}
+                {% comment %}
+                A set-wide section always names itself: without it a writer
+                cannot tell that ticking the tag speaks for the whole set
+                rather than this category.
+                {% endcomment %}
                 {% if available_tags|length > 1 or section.set_wide %}
                 <div class="qtags-path{% if section.set_wide %} qtags-path-setwide{% endif %}">{{ section.label }} &middot; <a href="{{ section.status_url }}">tag status</a></div>
                 {% endif %}
