@@ -40,7 +40,7 @@ from .duplicate_checker import (find_duplicates, find_internal_issues,
                                 normalize_answer, CRITICAL, WARNING, INFO)
 from django.utils.safestring import mark_safe
 from django_comments.models import Comment
-from django.db.models import Q, Max
+from django.db.models import Q, Max, Prefetch
 from django.db import connection
 
 
@@ -10854,18 +10854,27 @@ def _category_question_rows(qset, path, tag_rows):
     page_tags = [r['tag'] for r in tag_rows]
     page_tag_ids = {t.id for t in page_tags}
     set_wide = not (path or '').strip()
+
+    # Which categories count as "in" this path: the path itself and anything
+    # under it. Worked out once against the distribution, so the questions can
+    # be asked for by category instead of reading the whole set and throwing
+    # most of it away -- which cost four seconds on an 11,000-question set, and
+    # cost it again after every tag assigned, since the page refetches itself.
+    category_ids = None
+    if not set_wide:
+        category_ids = [e.id for e in DistributionEntry.objects.filter(
+            distribution_id=qset.distribution_id)
+            if str(e) == path or str(e).startswith(path + ' - ')]
+
     rows = []
     for model, qtype, edit_url in ((Tossup, 'tossup', '/edit_tossup/'),
                                    (Bonus, 'bonus', '/edit_bonus/')):
         qs = (model.objects.filter(question_set=qset)
               .select_related('category', 'packet', 'author__user')
               .prefetch_related('category_tags'))
+        if category_ids is not None:
+            qs = qs.filter(category_id__in=category_ids)
         for q in qs:
-            qpath = str(q.category) if q.category_id else ''
-            # A set-wide scope is about every question in the set, including
-            # the ones with no category yet.
-            if not set_wide and not (qpath == path or qpath.startswith(path + ' - ')):
-                continue
             tags = sorted((t for t in q.category_tags.all() if t.question_set_id == qset.id),
                           key=lambda t: (t.group_name, t.sort_order, t.name))
             have = {t.id for t in tags}
@@ -11644,6 +11653,14 @@ def category_tags(request, qset_id):
     tag_qs = CategoryTag.objects.filter(question_set=qset)
     if focused:
         tag_qs = tag_qs.filter(category_path=focus_path)
+    # Each tag's questions in one query per type rather than two per tag: a set
+    # with a hundred tags was two hundred round trips before the page could be
+    # drawn. The filters are the ones the rows used to apply one tag at a time.
+    tag_qs = tag_qs.prefetch_related(
+        Prefetch('tossups', queryset=Tossup.objects.filter(
+            question_set=qset).select_related('packet')),
+        Prefetch('bonuses', queryset=Bonus.objects.filter(
+            question_set=qset).select_related('packet')))
     for tag in tag_qs:
         tags_by_path.setdefault(tag.category_path, []).append(tag)
     for path in sorted(tags_by_path, key=lambda p: (bool(p), p)):
@@ -11652,14 +11669,14 @@ def category_tags(request, qset_id):
             tossups = [{'id': t.id,
                         'answer': _grid_answer_preview(t.tossup_answer),
                         'location': '{0} #{1}'.format(t.packet.packet_name, t.question_number) if t.packet else 'Unassigned'}
-                       for t in tag.tossups.filter(question_set=qset).select_related('packet')]
+                       for t in tag.tossups.all()]
             bonuses = [{'id': b.id,
                         'answer': ' / '.join(filter(None, [
                             _grid_answer_preview(b.part1_answer, 20),
                             _grid_answer_preview(b.part2_answer, 20),
                             _grid_answer_preview(b.part3_answer, 20)])),
                         'location': '{0} #{1}'.format(b.packet.packet_name, b.question_number) if b.packet else 'Unassigned'}
-                       for b in tag.bonuses.filter(question_set=qset).select_related('packet')]
+                       for b in tag.bonuses.all()]
             row = tag.progress(len(tossups), len(bonuses))
             row.update({'tag': tag, 'tossups': tossups, 'bonuses': bonuses})
             rows.append(row)

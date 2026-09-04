@@ -453,17 +453,50 @@ $(function () {
                 $form.find('input[type=submit], button[type=submit]').prop('disabled', false);
                 flash('That did not save \u2014 check your connection and try again.',
                       'alert-box warning');
+                // Whatever was painted on ahead of the save has to come off.
+                refresh();
             });
     }
 
     $(document).on('click', '.tag-ajax-form input[type=submit], .tag-ajax-form button[type=submit]',
         function () { $(this).closest('form').data('clicked-button', $(this)); });
 
+    // Assigning and unassigning are the two you do dozens of in a row, and
+    // they are also the two whose effect on the row in front of you is
+    // obvious. So the chip appears (or goes) the moment you ask, and the
+    // refresh that follows reconciles the counts nobody is watching that
+    // closely -- the quota progress, the untagged tally. If the save fails the
+    // refresh puts the truth back, so an optimistic chip can never outlive the
+    // request that was supposed to create it.
+    function paintAssign($form) {
+        var action = $form.find('input[name=action]').val();
+        var $cell = $form.closest('.tag-q-tags');
+        if (!$cell.length) { return; }
+        if (action === 'assign') {
+            var $sel = $form.find('select'), name = $sel.find('option:selected').text();
+            // The group prefix the option carries ("Period: Ancient") is for
+            // telling options apart, not for the chip.
+            name = name.replace(/^[^:]*:\s*/, '');
+            $cell.find('.tag-q-flag').remove();
+            $('<span class="tag-chip"></span>').text(name).insertBefore($form);
+            $sel.find('option:selected').remove();
+            $sel.val('');
+            $cell.closest('tr').removeClass('tag-q-untagged');
+        } else {
+            var $chip = $form.closest('.tag-chip');
+            $chip.remove();
+            if (!$cell.find('.tag-chip').length) {
+                $cell.prepend($('<span class="tag-q-flag">No tags</span>'));
+            }
+        }
+    }
+
     $(document).on('submit', '.tag-ajax-form', function (e) {
         e.preventDefault();
         var $form = $(this);
         var isAdd = $form.is('#tag-add-form');
         var group = isAdd ? $form.find('input[name=group_name]').val() : null;
+        var optimistic = $form.is('.tag-assign-form, .tag-chip-del');
         post($form, function () {
             if (!isAdd) { return; }
             // Ready for the next one: the name is what changes, the category
@@ -473,6 +506,9 @@ $(function () {
             $f.find('input[name=tag_name]').val('').focus();
             $f.find('input[type=submit], button[type=submit]').prop('disabled', false);
         });
+        // After post(), never before: it paints over the very fields post()
+        // serialises, and clearing the select first posted an empty tag id.
+        if (optimistic) { paintAssign($form); }
     });
 
     // Everything below is re-run after a swap, because the markup it binds to
