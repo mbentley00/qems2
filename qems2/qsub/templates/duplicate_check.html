@@ -16,6 +16,31 @@
     </div>
 </div>
 
+{% if checks_off %}
+{% comment %}
+Switched off for this set rather than empty: an empty report and a report that
+never ran look identical, and the difference is the whole reason someone turned
+it off.
+{% endcomment %}
+<div class="row">
+    <div class="small-12 columns">
+        <div class="panel callout radius">
+            <h5 style="margin-top:0;">Duplicate and repeat checks are off for this set</h5>
+            <p>These reads every question in the set and compares them with each other, so
+            what they cost grows with the set &mdash; and on an archive, an answer appearing
+            twice is usually the point rather than a fault.</p>
+            {% if not read_only %}
+            <p style="margin-bottom:0;">Turn them back on with <strong>Run duplicate and repeat
+            checks</strong> on the
+            <a href="/edit_question_set/{{ qset.id }}/">set's settings</a>.</p>
+            {% else %}
+            <p style="margin-bottom:0;">An editor can turn them back on in the set's settings.</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% else %}
+
 <div class="row">
     <div class="small-12 columns">
         <div class="panel">
@@ -221,6 +246,8 @@
             </div>
         </div>
     {% endfor %}
+{% endif %}
+
 {% endif %}
 
 {% endblock %}

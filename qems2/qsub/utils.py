@@ -91,7 +91,22 @@ def sanitize_html(html, allowed_tags=DEFAULT_ALLOWED_TAGS):
     return soup.renderContents()
 
 def strip_markup(html):
+    """The text of `html` with any HTML tags removed.
+
+    Question prose almost never contains HTML -- QEMS's own markup is _x_,
+    \\Bx\\B and ~x~, none of which is a tag -- so building a parse tree for it
+    is nearly always wasted work, and this is called tens of thousands of times
+    by the duplicate and repeat reports. With no "<" in the string there is
+    nothing for the parser to remove, and escaping "&" then letting get_text
+    unescape it is a round trip, so the text comes back exactly as it went in.
+
+    Two exceptions fall through to the parser rather than being reasoned about:
+    a string containing "<" at all, and one starting with whitespace, which the
+    HTML parser drops.
+    """
     html = convert_smart_quotes(html)
+    if html and '<' not in html and not html[:1].isspace():
+        return html
     html = html.replace("&", "&amp;")
     soup = BeautifulSoup(html)
     return soup.get_text()

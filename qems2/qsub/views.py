@@ -887,8 +887,13 @@ def import_set(request):
                     (form.cleaned_data.get('set_name') or '').strip(), user,
                     target_set=target)
                 qset = summary['question_set']
-                message = ('{0} "{1}": {2} tossups, {3} bonuses, {4} comments.'
-                           .format('Added to' if target is not None else 'Imported',
+                # Name the file, not just the set: importing an archive is a
+                # run of near-identical uploads, and "which one did I just do"
+                # is the only thing the confirmation can answer that the set
+                # page cannot.
+                message = ('{0} — {1} "{2}": {3} tossups, {4} bonuses, {5} comments.'
+                           .format(form.cleaned_data['set_file'].name,
+                                   'added to' if target is not None else 'imported as',
                                    qset.name, summary['tossups'], summary['bonuses'],
                                    summary['comments']))
                 if target is not None:
@@ -1610,6 +1615,11 @@ def duplicate_check(request, qset_id):
         return render(request, 'failure.html',
                       {'message': 'You are not authorized to view this set.',
                        'message_class': 'alert-box alert'})
+
+    if not qset.enable_duplicate_checks:
+        return render(request, 'duplicate_check.html',
+                      {'qset': qset, 'user': user, 'checks_off': True,
+                       'read_only': not (qset.is_owner(user) or user in qset.editor.all())})
 
     # Cache the (expensive) report, keyed by a fingerprint of the question
     # state so it recomputes only when something actually changed.
@@ -9748,6 +9758,8 @@ def _question_issue_map(qset):
     """Map 'tossup-<id>'/'bonus-<id>' -> worst repeat-checker severity for every
     flagged question in the set. Cached by the dup-check fingerprint so it only
     recomputes when questions change."""
+    if not qset.enable_duplicate_checks:
+        return {}
     key = 'dupissues:{0}:{1}'.format(qset.id, _dup_fingerprint(qset))
     cached = cache.get(key)
     if cached is not None:

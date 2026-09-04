@@ -213,6 +213,12 @@ class QuestionSet (models.Model):
     # inflated the buzz percentages, which are computed over the clues it did
     # see. Tossups are fully spoilered until the bot handles it.
     discord_show_first_clue = models.BooleanField(default=False)
+    # The duplicate and repeat reports read every question in the set and
+    # compare them with each other, so what they cost grows with the set. An
+    # archive of thousands of questions can afford them; it may also not want
+    # them, since "this answer appears twice" is the point of an archive rather
+    # than a fault in it. Off means the pages say so instead of running.
+    enable_duplicate_checks = models.BooleanField(default=True)
 
     # When true, answer lines are recorded as structure - a required primary
     # answer plus optional accepts and directed prompts - instead of only as

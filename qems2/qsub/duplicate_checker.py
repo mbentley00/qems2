@@ -116,8 +116,10 @@ def find_duplicates(qset):
 
     entries = []
 
-    # Collect tossups
-    for tu in Tossup.objects.filter(question_set=qset).select_related('category', 'author'):
+    # Collect tossups. author__user, not just author: Writer.__str__ reads
+    # its User, so stopping at the Writer costs a query per question -- 10,722
+    # of them on the archive, which was most of this function's runtime.
+    for tu in Tossup.objects.filter(question_set=qset).select_related('category', 'author__user'):
         norm = normalize_answer(tu.tossup_answer)
         if not norm:
             continue
@@ -133,7 +135,7 @@ def find_duplicates(qset):
         })
 
     # Collect bonus parts
-    for bonus in Bonus.objects.filter(question_set=qset).select_related('category', 'author'):
+    for bonus in Bonus.objects.filter(question_set=qset).select_related('category', 'author__user'):
         parts = [
             ('Part 1', bonus.part1_answer, bonus.part1_text),
             ('Part 2', bonus.part2_answer, bonus.part2_text),
@@ -240,7 +242,7 @@ def build_answer_index(qset):
     def add(norm, entry):
         index.setdefault(norm, []).append(entry)
 
-    for tu in Tossup.objects.filter(question_set=qset).select_related('category', 'author', 'packet'):
+    for tu in Tossup.objects.filter(question_set=qset).select_related('category', 'author__user', 'packet'):
         n = normalize_answer(tu.tossup_answer)
         if not n:
             continue
@@ -250,7 +252,7 @@ def build_answer_index(qset):
                 'packet': tu.packet.packet_name if tu.packet else ''})
         seq += 1
 
-    for bonus in Bonus.objects.filter(question_set=qset).select_related('category', 'author', 'packet'):
+    for bonus in Bonus.objects.filter(question_set=qset).select_related('category', 'author__user', 'packet'):
         for label, ans in (('Part 1', bonus.part1_answer),
                            ('Part 2', bonus.part2_answer),
                            ('Part 3', bonus.part3_answer)):
@@ -321,7 +323,7 @@ def find_internal_issues(qset):
     issues = []
 
     # Check bonuses for repeated part answers
-    for bonus in Bonus.objects.filter(question_set=qset).select_related('category', 'author'):
+    for bonus in Bonus.objects.filter(question_set=qset).select_related('category', 'author__user'):
         parts = []
         for label, answer in [('Part 1', bonus.part1_answer),
                                ('Part 2', bonus.part2_answer),
@@ -355,7 +357,7 @@ def find_internal_issues(qset):
             })
 
     # Check tossups for clue reuse (repeated content across sentences)
-    for tu in Tossup.objects.filter(question_set=qset).select_related('category', 'author'):
+    for tu in Tossup.objects.filter(question_set=qset).select_related('category', 'author__user'):
         sentences = _split_sentences(tu.tossup_text)
         if len(sentences) < 2:
             continue
@@ -425,7 +427,7 @@ def _collect_repeat_entries(qset):
             return 'Unassigned'
         return '{0} #{1}'.format(question.packet.packet_name, question.question_number or '?')
 
-    for tu in Tossup.objects.filter(question_set=qset).select_related('category', 'author', 'packet'):
+    for tu in Tossup.objects.filter(question_set=qset).select_related('category', 'author__user', 'packet'):
         norm = normalize_answer(tu.tossup_answer)
         if not norm:
             continue
@@ -438,7 +440,7 @@ def _collect_repeat_entries(qset):
             'author': str(tu.author), 'location': location(tu),
         })
 
-    for bonus in Bonus.objects.filter(question_set=qset).select_related('category', 'author', 'packet'):
+    for bonus in Bonus.objects.filter(question_set=qset).select_related('category', 'author__user', 'packet'):
         for part_label, answer, text in [('Part 1', bonus.part1_answer, bonus.part1_text),
                                          ('Part 2', bonus.part2_answer, bonus.part2_text),
                                          ('Part 3', bonus.part3_answer, bonus.part3_text)]:
@@ -572,7 +574,7 @@ def find_topic_repeats(qset):
 
     # --- 3. Answer mentioned in another question's text ---
     question_texts = []
-    for tu in Tossup.objects.filter(question_set=qset).select_related('category', 'author', 'packet'):
+    for tu in Tossup.objects.filter(question_set=qset).select_related('category', 'author__user', 'packet'):
         question_texts.append({
             'type': 'tossup', 'id': tu.id, 'part_label': None,
             'plain': ' {0} '.format(_plain_words(tu.tossup_text)),
@@ -581,7 +583,7 @@ def find_topic_repeats(qset):
             'location': '{0} #{1}'.format(tu.packet.packet_name, tu.question_number) if tu.packet else 'Unassigned',
             'text_preview': '', 'text': tu.tossup_text,
         })
-    for bonus in Bonus.objects.filter(question_set=qset).select_related('category', 'author', 'packet'):
+    for bonus in Bonus.objects.filter(question_set=qset).select_related('category', 'author__user', 'packet'):
         text = ' '.join(filter(None, [bonus.leadin, bonus.part1_text, bonus.part2_text, bonus.part3_text]))
         question_texts.append({
             'type': 'bonus', 'id': bonus.id, 'part_label': '',
