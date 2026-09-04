@@ -18,26 +18,27 @@
     {% if focused %}<li class="current">{{ focus_label }}</li>{% endif %}
 </ul>
 
+{# Where both the server's message and a scripted action's reply land. #}
+<div id="tag-flash">
 {% if message %}
     <div class="{{ message_class }}">{{ message }}</div>
 {% endif %}
-{% if messages %}{% for m in messages %}<div class="alert-box {% if m.tags == 'error' %}warning{% elif m.tags == 'warning' %}warning{% else %}success{% endif %}">{{ m }}</div>{% endfor %}{% endif %}
-
-<div class="panel radius">
-    Tags are used to more precisely define requirements for a category or a set. For instance, a category such
-    as European History may have tags defining how many questions are needed for a given time period and for
-    different regions within Europe. They take the place of category spreadsheets frequently used when editing a tournament in Google Docs.
-    <p class="home-note">Questions can have multiple tags. For instance, a tossup on Diocletian might get tagged with
-        "Classical" (for time period), "Italy" (for region) and "Person" (for answer type). The tags and groupings are defined
-        by editors.
-    </p>
-    <p class="home-note">Tags can specify exact requirements such as needing 2 tossups and 2 bonuses across the set.
-        They can also be set without a minimum or maximum defined for cases such as "no more than 4 tossups on this, but 0 is okay".
-    </p>
 </div>
 
+{% comment %}
+Notes on the category come first: they are what the last person working here
+left for the next one, and they bear on what you are about to do. The standing
+explanation of what tags are goes to the foot of the page -- it is the same
+every visit, and you stop needing it after the first.
+{% endcomment %}
+{% if focus_path %}
+{% include "_category_comments.html" %}
+{% endif %}
+{% if messages %}{% for m in messages %}<div class="alert-box {% if m.tags == 'error' %}warning{% elif m.tags == 'warning' %}warning{% else %}success{% endif %}">{{ m }}</div>{% endfor %}{% endif %}
+
+
 {% if can_edit %}
-<form action="" method="post" class="panel radius">
+<form action="" method="post" class="panel radius tag-ajax-form" id="tag-add-form">
     {% csrf_token %}
     <input type="hidden" name="action" value="add">
     <div class="row">
@@ -108,7 +109,7 @@
     <a href="/category_tags/{{ qset.id }}/" class="button small secondary">&laquo; All categories</a>
 </p>
 {% else %}
-<div class="panel radius cat-index">
+<div class="panel radius cat-index" id="tag-index-region">
     <div class="cat-index-head">Every scope in this set &mdash; open one to work on its tags</div>
     <div class="cat-index-list">
         {% for c in category_index %}
@@ -124,9 +125,6 @@
 </div>
 {% endif %}
 
-{% if focus_path %}
-{% include "_category_comments.html" %}
-{% endif %}
 {% if focus_set_wide %}
 <div class="panel callout setwide-note">
     <strong>Set-wide tags.</strong> These apply to every question in the set, whatever its
@@ -136,6 +134,7 @@
 </div>
 {% endif %}
 
+<div id="tag-groups-region">
 {% if not groups %}
 <div class="panel callout"><p>{% if focused %}No tags in {{ focus_label }} yet.{% else %}No tags defined yet.{% endif %}</p></div>
 {% endif %}
@@ -178,10 +177,10 @@ its one category, since that is the whole page then.
             <tbody class="tag-group-body">
                 {% for row in tg.rows %}
                 <tr class="tag-row" data-tag-id="{{ row.tag.id }}">
-                    {% if can_edit %}<td class="tag-drag-col"><span class="tag-drag-handle" title="Drag to reorder">&#8942;&#8942;</span></td>{% endif %}
+                    {% if can_edit %}<td class="tag-drag-col"><span class="tag-drag-handle" title="Drag to reorder" aria-hidden="true">&#10303;</span></td>{% endif %}
                     <td><strong>{{ row.tag.name }}</strong>{% if not row.tag.show_in_output %}<span class="tag-no-out" title="This tag is not printed in exported packets">not in exports</span>{% endif %}</td>
                     <td class="{% if row.tu_over %}tag-over{% elif row.tu_complete %}tag-complete{% else %}tag-incomplete{% endif %}">
-                        {{ row.tu_done }}{% if row.tag.num_tossups %}/{{ row.tag.num_tossups }}{% endif %}{% if row.tag.max_tossups != None %}<span class="tag-max" title="At most {{ row.tag.max_tossups }}">&le;{{ row.tag.max_tossups }}</span>{% endif %}
+                        {{ row.tu_done }}{% if row.tag.num_tossups %}/{{ row.tag.num_tossups }}{% endif %}{% if row.tag.max_tossups != None and row.tag.max_tossups != row.tag.num_tossups %}<span class="tag-max" title="At most {{ row.tag.max_tossups }}">&le;{{ row.tag.max_tossups }}</span>{% endif %}
                     </td>
                     <td>
                         {% for q in row.tossups %}
@@ -189,7 +188,7 @@ its one category, since that is the whole page then.
                         {% endfor %}
                     </td>
                     <td class="{% if row.bs_over %}tag-over{% elif row.bs_complete %}tag-complete{% else %}tag-incomplete{% endif %}">
-                        {{ row.bs_done }}{% if row.tag.num_bonuses %}/{{ row.tag.num_bonuses }}{% endif %}{% if row.tag.max_bonuses != None %}<span class="tag-max" title="At most {{ row.tag.max_bonuses }}">&le;{{ row.tag.max_bonuses }}</span>{% endif %}
+                        {{ row.bs_done }}{% if row.tag.num_bonuses %}/{{ row.tag.num_bonuses }}{% endif %}{% if row.tag.max_bonuses != None and row.tag.max_bonuses != row.tag.num_bonuses %}<span class="tag-max" title="At most {{ row.tag.max_bonuses }}">&le;{{ row.tag.max_bonuses }}</span>{% endif %}
                     </td>
                     <td>
                         {% for q in row.bonuses %}
@@ -197,11 +196,11 @@ its one category, since that is the whole page then.
                         {% endfor %}
                     </td>
                     <td class="{% if row.q_over %}tag-over{% elif row.q_complete %}tag-complete{% else %}tag-incomplete{% endif %}">
-                        {% if row.tag.num_questions %}{{ row.q_done }}/{{ row.tag.num_questions }}{% elif row.tag.max_questions != None %}{{ row.q_done }}{% else %}&mdash;{% endif %}{% if row.tag.max_questions != None %}<span class="tag-max" title="At most {{ row.tag.max_questions }}">&le;{{ row.tag.max_questions }}</span>{% endif %}
+                        {% if row.tag.num_questions %}{{ row.q_done }}/{{ row.tag.num_questions }}{% elif row.tag.max_questions != None %}{{ row.q_done }}{% else %}&mdash;{% endif %}{% if row.tag.max_questions != None and row.tag.max_questions != row.tag.num_questions %}<span class="tag-max" title="At most {{ row.tag.max_questions }}">&le;{{ row.tag.max_questions }}</span>{% endif %}
                     </td>
                     {% if can_edit %}
                     <td class="tag-actions">
-                        <form action="" method="post" class="tag-move-form">
+                        <form action="" method="post" class="tag-move-form tag-ajax-form">
                             {% csrf_token %}
                             <input type="hidden" name="action" value="move">
                             <input type="hidden" name="tag_id" value="{{ row.tag.id }}">
@@ -214,7 +213,7 @@ its one category, since that is the whole page then.
                 {% if can_edit %}
                 <tr class="tag-edit-row" id="tag-edit-{{ row.tag.id }}" hidden>
                     <td colspan="8">
-                        <form action="" method="post" class="tag-edit-form">
+                        <form action="" method="post" class="tag-edit-form tag-ajax-form">
                             {% csrf_token %}
                             <input type="hidden" name="action" value="edit">
                             <input type="hidden" name="tag_id" value="{{ row.tag.id }}">
@@ -223,11 +222,11 @@ its one category, since that is the whole page then.
                             <label class="tag-field"><span class="tag-field-name">Group</span>
                                 <input type="text" name="group_name" value="{{ row.tag.group_name }}" list="tag-group-choices" placeholder="none" autocomplete="off" data-1p-ignore data-lpignore="true"></label>
                             <span class="tag-field"><span class="tag-field-name">Tossups</span>
-                                <input type="number" name="num_tossups" min="0" value="{{ row.tag.num_tossups }}" title="Fewest tossups this tag needs; 0 asks for no minimum">
+                                <input type="number" name="num_tossups" min="0" value="{{ row.tag.num_tossups }}" title="Fewest tossups this tag needs; 0 asks for no minimum. Set the maximum to the same number for an exact quota.">
                                 <span class="tag-quota-to">to</span>
                                 <input type="number" name="max_tossups" min="0" placeholder="any" value="{{ row.tag.max_tossups|default_if_none:'' }}" title="Most tossups this tag allows; empty sets no ceiling"></span>
                             <span class="tag-field"><span class="tag-field-name">Bonuses</span>
-                                <input type="number" name="num_bonuses" min="0" value="{{ row.tag.num_bonuses }}" title="Fewest bonuses this tag needs; 0 asks for no minimum">
+                                <input type="number" name="num_bonuses" min="0" value="{{ row.tag.num_bonuses }}" title="Fewest bonuses this tag needs; 0 asks for no minimum. Set the maximum to the same number for an exact quota.">
                                 <span class="tag-quota-to">to</span>
                                 <input type="number" name="max_bonuses" min="0" placeholder="any" value="{{ row.tag.max_bonuses|default_if_none:'' }}" title="Most bonuses this tag allows; empty sets no ceiling"></span>
                             <span class="tag-field"><span class="tag-field-name tag-nowrap">Any&nbsp;type</span>
@@ -241,7 +240,7 @@ its one category, since that is the whole page then.
                                 <button type="button" class="button tiny secondary tag-edit-toggle" data-target="tag-edit-{{ row.tag.id }}">Cancel</button>
                             </span>
                         </form>
-                        <form action="" method="post" class="tag-delete-form"
+                        <form action="" method="post" class="tag-delete-form tag-ajax-form"
                               onsubmit="return confirm('Delete the tag \'{{ row.tag.name }}\'? Question assignments to it will be removed.');">
                             {% csrf_token %}
                             <input type="hidden" name="action" value="delete">
@@ -254,11 +253,36 @@ its one category, since that is the whole page then.
                 {% endfor %}
             </tbody>
         </table>
+        {% if can_edit %}
+        {% comment %}
+        Adding a tag to the group you are already reading, without going back to
+        the form at the top and retyping the category and the group it is
+        obvious you meant. Tags arrive in runs inside one group, so this is the
+        common case rather than a shortcut.
+        {% endcomment %}
+        <form action="" method="post" class="tag-axis-add tag-ajax-form">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="add">
+            <input type="hidden" name="category_path" value="{{ group.token }}">
+            <input type="hidden" name="group_name" value="{{ tg.name }}">
+            <input type="text" name="tag_name" required
+                   placeholder="Add a tag to {% if tg.name %}{{ tg.label }}{% else %}this group{% endif %}&hellip;"
+                   autocomplete="off" data-1p-ignore data-lpignore="true">
+            <input type="number" name="num_tossups" min="0" value="0" title="Fewest tossups this tag needs">
+            <span class="tag-quota-to">/</span>
+            <input type="number" name="num_bonuses" min="0" value="0" title="Fewest bonuses this tag needs">
+            <input type="hidden" name="num_questions" value="0">
+            <button type="submit" class="button tiny secondary">Add</button>
+        </form>
+        {% endif %}
     </div>
     {% endfor %}
 </details>
 {% endfor %}
 
+</div>{# /tag-groups-region #}
+
+<div id="tag-questions-region">
 {% if focus_questions %}
 {% comment %}
 Every question in the open category, with the tags it carries. This is where
@@ -297,12 +321,12 @@ time, and where the questions nobody has tagged stand out.
                 <td>{{ q.author }}</td>
                 <td class="tag-q-tags">
                     {% for tag in q.tags %}
-                    <span class="tag-chip">{{ tag.name }}{% if can_edit %}<form action="" method="post" class="tag-chip-del">{% csrf_token %}<input type="hidden" name="action" value="unassign"><input type="hidden" name="tag_id" value="{{ tag.id }}"><input type="hidden" name="qtype" value="{{ q.qtype }}"><input type="hidden" name="question_id" value="{{ q.id }}"><button type="submit" title="Remove this tag">&times;</button></form>{% endif %}</span>
+                    <span class="tag-chip">{{ tag.name }}{% if can_edit %}<form action="" method="post" class="tag-chip-del tag-ajax-form">{% csrf_token %}<input type="hidden" name="action" value="unassign"><input type="hidden" name="tag_id" value="{{ tag.id }}"><input type="hidden" name="qtype" value="{{ q.qtype }}"><input type="hidden" name="question_id" value="{{ q.id }}"><button type="submit" title="Remove this tag">&times;</button></form>{% endif %}</span>
                     {% empty %}
                     <span class="tag-q-flag">No tags</span>
                     {% endfor %}
                     {% if can_edit and q.addable %}
-                    <form action="" method="post" class="tag-assign-form">
+                    <form action="" method="post" class="tag-assign-form tag-ajax-form">
                         {% csrf_token %}
                         <input type="hidden" name="action" value="assign">
                         <input type="hidden" name="qtype" value="{{ q.qtype }}">
@@ -324,6 +348,8 @@ time, and where the questions nobody has tagged stand out.
 </div>
 {% endif %}
 
+</div>{# /tag-questions-region #}
+
 <div class="panel radius tag-io-panel">
     <div class="tag-io-head">Tags as a spreadsheet</div>
     <div class="tag-io">
@@ -342,22 +368,128 @@ time, and where the questions nobody has tagged stand out.
 
 <script>
 $(function () {
-    $('.tag-edit-toggle').on('click', function () {
-        var row = document.getElementById($(this).data('target'));
-        row.hidden = !row.hidden;
-        if (!row.hidden) { $(row).find('input[name=name]').focus(); }
+    // ---- acting without reloading -------------------------------------
+    //
+    // Adding tags, correcting them and tagging questions are all things you do
+    // several of in a row, and this page can be hundreds of rows long: a reload
+    // after each one loses your scroll position, your open category and the
+    // filter you had set. Every action posts in the background instead.
+    //
+    // What an action changes is not local to the thing you clicked -- a tag's
+    // quota progress, the untagged count, the "+ tag..." lists on every row,
+    // the per-category counts in the index -- so rather than patching each of
+    // those in the browser and hoping the arithmetic matches the server's, the
+    // page re-fetches itself and swaps in the regions that can change. One
+    // source of truth, and the page keeps its place.
+    var REGIONS = ['#tag-index-region', '#tag-groups-region', '#tag-questions-region'];
+
+    function flash(message, cls) {
+        var $box = $('#tag-flash');
+        if (!message) { $box.empty(); return; }
+        $box.html($('<div>').addClass(cls || 'alert-box success').text(message));
+    }
+
+    // The group you are working in stays put between adds and between visits:
+    // tags arrive in runs that share one ("Period", "Region"), and retyping it
+    // every time is most of the typing.
+    var GROUP_KEY = 'qems-tag-group-{{ qset.id }}';
+    function rememberGroup(value) {
+        try { window.localStorage.setItem(GROUP_KEY, value || ''); } catch (e) { /* private mode */ }
+    }
+    function restoreGroup() {
+        var $g = $('#tag-add-form input[name=group_name]');
+        if (!$g.length || $g.val()) { return; }
+        try {
+            var last = window.localStorage.getItem(GROUP_KEY);
+            if (last) { $g.val(last); }
+        } catch (e) { /* private mode */ }
+    }
+
+    function refresh(done) {
+        $.get(window.location.pathname + window.location.search, function (html) {
+            var $fresh = $('<div>').html(html);
+            REGIONS.forEach(function (sel) {
+                var $src = $fresh.find(sel), $dst = $(sel);
+                if ($src.length && $dst.length) { $dst.html($src.html()); }
+            });
+            wire();
+            if (done) { done(); }
+        }).fail(function () {
+            flash('Saved, but the page could not refresh itself \u2014 reload to see it.',
+                  'alert-box warning');
+        });
+    }
+
+    function post($form, done) {
+        var data = $form.serializeArray();
+        // A submit button's own name/value (the move arrows post a direction)
+        // is not in serializeArray, so carry the one that was clicked.
+        var $btn = $form.data('clicked-button');
+        if ($btn && $btn.attr('name')) {
+            data.push({name: $btn.attr('name'), value: $btn.val()});
+        }
+        $form.find('input[type=submit], button[type=submit]').prop('disabled', true);
+        $.ajax({url: '', type: 'POST', dataType: 'json', data: data,
+                headers: {'X-Requested-With': 'XMLHttpRequest'}})
+            .done(function (resp) {
+                flash(resp && resp.message, resp && resp.message_class);
+                refresh(function () { if (done) { done(resp); } });
+            })
+            .fail(function () {
+                $form.find('input[type=submit], button[type=submit]').prop('disabled', false);
+                flash('That did not save \u2014 check your connection and try again.',
+                      'alert-box warning');
+            });
+    }
+
+    $(document).on('click', '.tag-ajax-form input[type=submit], .tag-ajax-form button[type=submit]',
+        function () { $(this).closest('form').data('clicked-button', $(this)); });
+
+    $(document).on('submit', '.tag-ajax-form', function (e) {
+        e.preventDefault();
+        var $form = $(this);
+        var isAdd = $form.is('#tag-add-form');
+        var group = isAdd ? $form.find('input[name=group_name]').val() : null;
+        post($form, function () {
+            if (!isAdd) { return; }
+            // Ready for the next one: the name is what changes, the category
+            // and the group are what you are working through.
+            rememberGroup(group);
+            var $f = $('#tag-add-form');
+            $f.find('input[name=tag_name]').val('').focus();
+            $f.find('input[type=submit], button[type=submit]').prop('disabled', false);
+        });
     });
-    // Picking a tag from the dropdown is the whole gesture; no second button.
-    $('.tag-assign-form select').on('change', function () {
-        if (this.value) { this.form.submit(); }
-    });
-    $('#tag-untagged-only').on('change', function () {
-        $('.tag-question-table tbody tr').not('.tag-q-untagged').toggle(!this.checked);
+
+    // Everything below is re-run after a swap, because the markup it binds to
+    // has just been replaced.
+    function wire() {
+        $('.tag-edit-toggle').off('click.tags').on('click.tags', function () {
+            var row = document.getElementById($(this).data('target'));
+            row.hidden = !row.hidden;
+            if (!row.hidden) { $(row).find('input[name=tag_name]').focus(); }
+        });
+        // Picking a tag from the dropdown is the whole gesture; no second button.
+        $('.tag-assign-form select').off('change.tags').on('change.tags', function () {
+            if (this.value) { $(this.form).submit(); }
+        });
+        var only = $('#tag-untagged-only');
+        only.off('change.tags').on('change.tags', function () {
+            $('.tag-question-table tbody tr').not('.tag-q-untagged').toggle(!this.checked);
+        });
+        // A filter survives the swap: it is how you were reading the list.
+        if (only.length && only.data('was-on')) { only.prop('checked', true).trigger('change.tags'); }
+        sortable();
+        restoreGroup();
+    }
+    $(document).on('change', '#tag-untagged-only', function () {
+        $(this).data('was-on', this.checked);
     });
     // Drag a tag up or down its group. The edit row travels with its tag (it
     // is the next sibling), so the drag moves the pair and the order posted
     // is read from the tag rows alone.
-    if ($.fn.sortable) {
+    function sortable() {
+      if ($.fn.sortable) {
         $('.tag-group-body').sortable({
             items: '> tr.tag-row',
             handle: '.tag-drag-handle',
@@ -399,7 +531,10 @@ $(function () {
                 $rows.last().find('.tag-move-form button[value=down]').prop('disabled', true);
             }
         });
+      }
     }
+
+    wire();
 });
 </script>
 
@@ -435,10 +570,18 @@ $(function () {
 .tag-io-form input[type=file] { margin: 0; width: auto; font-size: 0.85em; }
 .tag-io-label { margin: 0; font-size: 0.9em; }
 .tag-nowrap { white-space: nowrap; }
-.tag-drag-col { width: 1.6em; padding-right: 0 !important; }
-.tag-drag-handle { cursor: grab; color: var(--qx-muted, #b0b4c0); font-size: 1em; letter-spacing: -0.35em;
-    user-select: none; }
-.tag-drag-handle:hover { color: var(--qx-ink, #2b2f3a); }
+/* The drag grip. It was two vertical ellipses squeezed together with a
+   negative letter-spacing, which rendered as one stray mark hard against the
+   tag name -- it read as a typo in the name rather than as a handle. One
+   braille grip, given its own room, and faint until the row is under the
+   pointer so the name is what you read first. */
+.tag-drag-col { width: 2.2em; text-align: center; padding-left: 4px !important;
+    padding-right: 4px !important; }
+.tag-drag-handle { cursor: grab; color: var(--qx-muted, #b0b4c0); font-size: 1.05em;
+    line-height: 1; opacity: 0.35; transition: opacity 0.12s; user-select: none; }
+.tag-row:hover .tag-drag-handle { opacity: 1; }
+.tag-drag-handle:active { cursor: grabbing; }
+.tag-drag-handle:hover { color: var(--qx-ink, #2b2f3a); opacity: 1; }
 .tag-row-placeholder td { height: 2.4em; background: var(--qx-elevate, #eef2f7) !important;
     border: 1px dashed var(--qx-border, #c8ccd6); }
 .ui-sortable-helper { background: var(--qx-card, #fff); box-shadow: 0 2px 8px rgba(0,0,0,.18); display: table; }
@@ -490,6 +633,22 @@ $(function () {
 .cat-index-empty { color: var(--qx-muted, #8a8f9c); background: transparent;
     border-style: dashed; }
 .tag-io-panel { margin-top: 18px; }
+/* The standing explanation, at the foot of the page: still readable, no longer
+   the first thing between you and the tags. */
+/* The per-group add row: a quiet line under the group's table, not another
+   panel competing with it. */
+.tag-axis-add { display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+    margin: 0 0 10px; padding: 6px 0 0; border-top: 1px dashed var(--qx-border, #e5e7ec); }
+.tag-axis-add input[type=text] { margin: 0; width: auto; min-width: 15em; flex: 1 1 15em;
+    font-size: 0.85em; height: auto; padding: 4px 7px; }
+.tag-axis-add input[type=number] { margin: 0; width: 4.2em; font-size: 0.85em;
+    height: auto; padding: 4px 5px; }
+.tag-axis-add .tag-quota-to { color: var(--qx-muted, #8a8f9c); }
+.tag-axis-add button { margin: 0; }
+.tag-explainer { margin-top: 22px; }
+.tag-explainer-head { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--qx-muted, #8a8f9c); margin-bottom: 6px; }
+.tag-explainer .panel { background: var(--qx-elevate, #f7f8fa); }
 .tag-io-head { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;
     color: var(--qx-muted, #8a8f9c); margin-bottom: 6px; }
 /* The ceiling rides next to the count it caps, greyed so the count still reads first */
@@ -520,6 +679,24 @@ $(function () {
 .tag-over { background-color: #f2dede; color: #a94442; font-weight: bold; }
 .tag-over .tag-max { color: #a94442; }
 </style>
+
+
+<div class="tag-explainer">
+<div class="tag-explainer-head">About category tags</div>
+<div class="panel radius">
+    Tags are used to more precisely define requirements for a category or a set. For instance, a category such
+    as European History may have tags defining how many questions are needed for a given time period and for
+    different regions within Europe. They take the place of category spreadsheets frequently used when editing a tournament in Google Docs.
+    <p class="home-note">Questions can have multiple tags. For instance, a tossup on Diocletian might get tagged with
+        "Classical" (for time period), "Italy" (for region) and "Person" (for answer type). The tags and groupings are defined
+        by editors.
+    </p>
+    <p class="home-note">Tags can specify exact requirements such as needing 2 tossups and 2 bonuses across the set.
+        They can also be set without a minimum or maximum defined for cases such as "no more than 4 tossups on this, but 0 is okay".
+    </p>
+</div>
+</div>
+
 <style>
 html[data-theme="dark"] .tag-cat-open { color: #f08c8c; }
 html[data-theme="dark"] .tag-q-untagged td { background-color: #3a2424 !important; }

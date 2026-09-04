@@ -11575,8 +11575,6 @@ def category_tags(request, qset_id):
                     # A whole group's order at once, from a drag on the page.
                     ids = [int(x) for x in request.POST.getlist('order[]') or request.POST.getlist('order')]
                     _reorder_tags(qset, ids)
-                    if request.headers.get('x-requested-with') == 'XMLHttpRequest':
-                        return HttpResponse(json.dumps({'ok': True}), content_type='application/json')
                     message = ''
                 elif action in ('assign', 'unassign'):
                     tag = CategoryTag.objects.get(question_set=qset, id=int(request.POST['tag_id']))
@@ -11607,6 +11605,16 @@ def category_tags(request, qset_id):
             except (ValueError, KeyError) as ex:
                 message = str(ex) or 'Invalid request'
                 message_class = 'alert-box warning'
+
+        # Answering a scripted request here rather than re-rendering the page:
+        # adding a tag, correcting one, and tagging a question are things you do
+        # several of in a row, and a full reload after each loses your place on
+        # a page that can be hundreds of rows long.
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+            return HttpResponse(
+                json.dumps({'ok': not message_class.endswith('warning'),
+                            'message': message, 'message_class': message_class}),
+                content_type='application/json')
 
         # Tags are edited from the category overview as well as from here.
         nxt = (request.POST.get('next') or '').strip()
