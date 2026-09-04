@@ -1376,6 +1376,7 @@ def categories(request, qset_id, category_id):
 
     return render(request, 'categories.html',
         dict({
+        'table_columns': qset.question_table_headers(),
         'user': user,
         'tossups': tossups,
         'bonuses': bonuses,

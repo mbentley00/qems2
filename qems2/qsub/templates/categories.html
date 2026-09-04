@@ -11,7 +11,7 @@
 
 {% block title %}{% if category %}{{ category }} - QEMS3{% else %}Category View - QEMS3{% endif %}{% endblock %}
 
-{% cache 500 categorycache category qset %}
+{% cache 500 categorycache category qset qset.question_table_columns qset.question_table_random_order %}
 
     {% block content %}
 
@@ -34,43 +34,24 @@
     Tossups Remaining: {{ category_status|tossups_remaining }}, Tossup Completion: {{ category_status.tu_in_cat|percent:category_status.tu_req }}<br />
     Bonuses Remaining: {{ category_status|bonuses_remaining }}, Bonus Completion: {{ category_status.bs_in_cat|percent:category_status.bs_req }}</p>
     {% include "_category_comments.html" %}
+    <p class="home-note qtable-note">
+        {% if qset.question_table_random_order %}Shuffled &mdash; a different order each visit, so
+        the questions at the end of the list get looked at too. {% endif %}
+        <a href="/edit_question_set/{{ qset.id }}/#question-table">Columns and order</a>
+    </p>
     <p><a href="#bonuses">Jump to bonuses</a></p>
     <div id="tossups">
         <div class="panel header radius text-center"><strong>Tossups</strong></div>    
         <table class="tablesorter table-striped table-hover" id="category-tossup-table">
             <thead>
                 <tr>
-                    <th>Author</th>
-                    <th>Preview</th>
-                    <th>Answer</th>
-                    <th>Category</th>
-                    <th>Packet</th>
-                    <th>Created</th>
-                    <th>Modified</th>
-                    <th>Edited</th>
-                    <th>Proofread</th>
-                    <th>Comments</th>
-                    <th>Last Comment</th>
+                    {% for col in table_columns %}<th>{{ col.label }}</th>{% endfor %}
                 </tr>
             </thead>
             <tbody>
             {% autoescape off %}
                 {% for tossup in tossups %}
-                <tr>
-                    <td>{{ tossup.author|escape }}</td>
-                    <td><a href="/edit_tossup/{{ tossup.id }}">{{ tossup.tossup_text|safe|preview|question_html }}</a></td>
-                    <td><a href="/edit_tossup/{{ tossup.id }}">{{ tossup|tossup_answer }}</a></td>
-                    <td>{{ tossup.category|escape }}</td>
-                    <td>{% if tossup.packet %}<a href="/view_packet/{{ tossup.packet.id }}/" title="Open this packet">{{ tossup.packet }}</a>{% else %}Not in packet{% endif %}</td>
-                    <td>{{ tossup.created_date|to_short_datetime }}</td>
-                    <td>{{ tossup.last_changed_date|to_short_datetime }}</td>
-                    <td>{% if tossup.edited_date %} {{ tossup.edited_date|to_short_datetime }} {% endif %}</td>
-                    <td>{% if tossup.proofread_date %} {{ tossup.proofread_date|to_short_datetime }} {% endif %}</td>
-                    <td>
-                    {% include "_comment_cell.html" with comments=tossup.cached_comments kind="tossup" question=tossup %}
-                    </td>
-                    <td>{{ tossup|tossup_last_comment_date|to_short_datetime }}</td>
-                </tr>
+                <tr>{% include "_question_table_cells.html" with q=tossup qtype="tossup" columns=table_columns edit_url="/edit_tossup/"|add:tossup.id|stringformat:"s" %}</tr>
                 {% endfor %}
             {% endautoescape %}
             </tbody>
@@ -83,37 +64,13 @@
         <table class="tablesorter table-striped table-hover" id="category-bonus-table">
             <thead>
                 <tr>
-                    <th>Author</th>
-                    <th>Preview</th>
-                    <th>Answer</th>
-                    <th>Category</th>
-                    <th>Packet</th>
-                    <th>Created</th>
-                    <th>Modified</th>
-                    <th>Edited</th>
-                    <th>Proofread</th>
-                    <th>Comments</th>
-                    <th>Last Comment</th>
+                    {% for col in table_columns %}<th>{{ col.label }}</th>{% endfor %}
                 </tr>
             </thead>
             <tbody>
             {% autoescape off %}
                 {% for bonus in bonuses %}
-                <tr>
-                    <td>{{ bonus.author|escape }}</td>
-                    <td><a href="/edit_bonus/{{ bonus.id }}/">{{ bonus|bonus_leadin }}</a></td>
-                    <td><a href="/edit_bonus/{{ bonus.id }}/">{{ bonus|bonus_answers }}</a></td>
-                    <td>{{ bonus.category|escape }}</td>
-                    <td>{% if bonus.packet %}<a href="/view_packet/{{ bonus.packet.id }}/" title="Open this packet">{{ bonus.packet }}</a>{% else %}Not in packet{% endif %}</td>
-                    <td>{{ bonus.created_date|to_short_datetime }}</td>
-                    <td>{{ bonus.last_changed_date|to_short_datetime }}</td>
-                    <td>{% if bonus.edited_date %} {{ bonus.edited_date|to_short_datetime }} {% endif %}</td>
-                    <td>{% if bonus.proofread_date %} {{ bonus.proofread_date|to_short_datetime }} {% endif %}</td>                    
-                    <td>
-                    {% include "_comment_cell.html" with comments=bonus.cached_comments kind="bonus" question=bonus %}
-                    </td>
-                    <td>{{ bonus|bonus_last_comment_date|to_short_datetime }}</td>
-                </tr>
+                <tr>{% include "_question_table_cells.html" with q=bonus qtype="bonus" columns=table_columns edit_url="/edit_bonus/"|add:bonus.id|stringformat:"s" %}</tr>
                 {% endfor %}
             {% endautoescape %}
             </tbody>
@@ -123,6 +80,15 @@
     <p><a href="#tossups">Jump to tossups</a></p>
     <p><a href="#bonuses">Jump to bonuses</a></p>
 
+
+<style>
+.qtable-note { margin-bottom: 0.4rem; }
+.qtable-tag { display: inline-block; background: #eef2f7; color: #2b2f3a; border-radius: 9px;
+    padding: 0 7px; margin: 0 3px 2px 0; font-size: 0.75rem; white-space: nowrap; }
+.qtable-none { color: #b0b4c0; }
+.qtable-length { text-align: right; font-variant-numeric: tabular-nums; }
+html[data-theme="dark"] .qtable-tag { background: var(--qx-elevate); color: var(--qx-text); }
+</style>
     {% endblock %}
     
 {% endcache %}

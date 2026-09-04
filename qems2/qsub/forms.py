@@ -68,6 +68,16 @@ class QuestionSetForm(forms.ModelForm):
                    'tossups_per_packet', 'bonuses_per_packet',
                    'approval_status', 'approval_date']
 
+    def clean_question_table_columns(self):
+        """Only keys the model knows, in its own order. The value is a list the
+        page writes from checkboxes, so it is normalised here rather than
+        trusted -- and an empty choice means the default set, not no columns."""
+        raw = (self.cleaned_data.get('question_table_columns') or '')
+        wanted = {c.strip() for c in raw.split(',') if c.strip()}
+        known = [k for k, _label, _on in QuestionSet.QUESTION_TABLE_COLUMNS]
+        keep = [k for k in known if k in wanted]
+        return ','.join(keep)
+
     def clean_favicon_color(self):
         """Only a colour the page offers. The value ends up in markup, and a
         list of nine is easier to be sure of than any amount of escaping."""
@@ -91,6 +101,10 @@ class QuestionSetForm(forms.ModelForm):
         if 'favicon_color' in self.fields:
             self.fields['favicon_color'].required = False
             self.fields['favicon_color'].widget = forms.HiddenInput()
+        # Chosen from checkboxes on the page, same as the colour.
+        if 'question_table_columns' in self.fields:
+            self.fields['question_table_columns'].required = False
+            self.fields['question_table_columns'].widget = forms.HiddenInput()
 
         for field in self.fields:
             if read_only:

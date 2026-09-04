@@ -1,0 +1,40 @@
+{% comment %}
+One question's cells, in the order the set asked for. Used by both tables on the
+category page, so tossups and bonuses cannot drift apart.
+
+Context: q (the question), qtype ('tossup'/'bonus'), columns (from
+QuestionSet.question_table_headers), edit_url.
+
+The caller is inside {% autoescape off %} because the previews are rendered
+markup, so anything here that is a writer's own words escapes explicitly.
+{% endcomment %}
+{% load filters %}
+{% for col in columns %}
+    {% if col.key == 'author' %}
+    <td>{{ q.author|escape }}</td>
+    {% elif col.key == 'preview' %}
+    <td><a href="{{ edit_url }}">{% if qtype == 'tossup' %}{{ q.tossup_text|safe|preview|question_html }}{% else %}{{ q|bonus_leadin }}{% endif %}</a></td>
+    {% elif col.key == 'answer' %}
+    <td><a href="{{ edit_url }}">{% if qtype == 'tossup' %}{{ q|tossup_answer }}{% else %}{{ q|bonus_answers }}{% endif %}</a></td>
+    {% elif col.key == 'category' %}
+    <td>{{ q.category|escape }}</td>
+    {% elif col.key == 'tags' %}
+    <td class="qtable-tags">{% for tag in q.category_tags.all %}<span class="qtable-tag" title="{% if tag.group_name %}{{ tag.group_name|escape }}: {% endif %}{{ tag.name|escape }}">{{ tag.name|escape }}</span>{% empty %}<span class="qtable-none">&mdash;</span>{% endfor %}</td>
+    {% elif col.key == 'length' %}
+    <td class="qtable-length">{{ q.character_count }}</td>
+    {% elif col.key == 'packet' %}
+    <td>{% if q.packet %}<a href="/view_packet/{{ q.packet.id }}/" title="Open this packet">{{ q.packet|escape }}</a>{% else %}Not in packet{% endif %}</td>
+    {% elif col.key == 'created' %}
+    <td>{{ q.created_date|to_short_datetime }}</td>
+    {% elif col.key == 'modified' %}
+    <td>{{ q.last_changed_date|to_short_datetime }}</td>
+    {% elif col.key == 'edited' %}
+    <td>{% if q.edited_date %}{{ q.edited_date|to_short_datetime }}{% endif %}</td>
+    {% elif col.key == 'proofread' %}
+    <td>{% if q.proofread_date %}{{ q.proofread_date|to_short_datetime }}{% endif %}</td>
+    {% elif col.key == 'comments' %}
+    <td>{% include "_comment_cell.html" with comments=q.cached_comments kind=qtype question=q %}</td>
+    {% elif col.key == 'last_comment' %}
+    <td>{% if qtype == 'tossup' %}{{ q|tossup_last_comment_date|to_short_datetime }}{% else %}{{ q|bonus_last_comment_date|to_short_datetime }}{% endif %}</td>
+    {% endif %}
+{% endfor %}

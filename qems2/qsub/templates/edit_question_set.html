@@ -174,6 +174,27 @@
                 <label class="set-info-check">{{ form.enable_duplicate_checks }}
                     <span>Run duplicate and repeat checks
                         <small>The Duplicate Checker and the repeat flags on the packet grid read every question in the set and compare them with each other, so they get slower as the set grows. Off for an archive, where the same answer appearing twice is the point rather than a fault: the pages say they are off instead of running.</small></span></label>
+                {% comment %}
+                What the category question tables show. A set writing to a
+                length limit wants the length column; one that never marks a
+                question proofread does not want an empty Proofread column on
+                every row. Stored as a list of keys, so a column added later
+                does not need every set to be edited.
+                {% endcomment %}
+                <div class="set-columns" id="question-table">
+                    <span class="set-columns-label">Question table columns
+                        <small>Which columns the category question lists show
+                        (<a href="/category_overview/{{ qset.id }}/">Category Overview</a> &rarr; a category).</small></span>
+                    {{ form.question_table_columns }}
+                    <div class="set-columns-list">
+                        {% for col in qset.question_table_column_choices %}
+                        <label class="set-column"><input type="checkbox" value="{{ col.key }}"{% if col.shown %} checked{% endif %}> {{ col.label }}</label>
+                        {% endfor %}
+                    </div>
+                </div>
+                <label class="set-info-check">{{ form.question_table_random_order }}
+                    <span>Shuffle the question tables
+                        <small>A different order every visit, so the questions at the end of a long category get looked at as often as the ones at the top. Off: newest first, as the database returns them.</small></span></label>
                 <label class="set-info-check">{{ form.structured_answers }}
                     <span>Structured answer lines
                         <small>Records an answer as a primary answer plus its accepts and directed prompts, editable as fields. The printed line is unchanged, and answers typed or pasted as prose are parsed into structure as best they can be.</small></span></label>
@@ -210,6 +231,11 @@
         .set-favicon-label { font-weight: 600; color: #2b2f3a; flex: 0 0 100%; }
         .set-favicon-label small { display: block; font-weight: 400; color: #8a8f9c; margin-top: 3px; }
         .set-favicon-swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+        .set-columns { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+        .set-columns-label { font-weight: 600; color: #2b2f3a; flex: 0 0 100%; }
+        .set-columns-label small { display: block; font-weight: 400; color: #8a8f9c; margin-top: 3px; }
+        .set-columns-list { display: flex; flex-wrap: wrap; gap: 4px 18px; }
+        .set-column { font-weight: 400; margin: 0; display: inline-flex; align-items: baseline; gap: 5px; }
         .set-swatch { width: 26px; height: 26px; border-radius: 7px; border: 2px solid transparent;
             box-shadow: 0 0 0 1px rgba(20,20,40,.14); cursor: pointer; padding: 0; }
         .set-swatch.on { border-color: #2b2f3a; box-shadow: 0 0 0 1px #fff, 0 0 0 3px #2b2f3a33; }
@@ -886,6 +912,16 @@
 // Clicking a swatch sets the hidden field; Submit Changes saves it with the
 // rest of the settings, so there is nothing to save separately.
 $(function () {
+    // The boxes write the hidden field; Submit Changes saves it with the rest.
+    var $cols = $('#id_question_table_columns');
+    function syncColumns() {
+        $cols.val($('.set-columns-list input:checked').map(function () {
+            return this.value;
+        }).get().join(','));
+    }
+    $('.set-columns-list').on('change', 'input', syncColumns);
+    syncColumns();
+
     $('.set-favicon-swatches').on('click', '.set-swatch', function () {
         var $b = $(this);
         $b.closest('.set-favicon').find('#id_favicon_color').val($b.data('color'));

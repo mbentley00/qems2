@@ -224,6 +224,52 @@ class QuestionSet (models.Model):
     # Blank means the ordinary icon.
     favicon_color = models.CharField(max_length=7, blank=True, default='')
 
+    # Which columns the category question tables show, as a comma-separated
+    # list of the keys below, and whether those tables open in a random order.
+    # A set writing to a length limit wants the length column; one that never
+    # marks questions proofread does not want an empty Proofread column on
+    # every row. Blank means the default set.
+    question_table_columns = models.TextField(blank=True, default='')
+    question_table_random_order = models.BooleanField(default=False)
+
+    # (key, label, on by default). Order here is the order on screen.
+    QUESTION_TABLE_COLUMNS = [
+        ('author', 'Author', True),
+        ('preview', 'Preview', True),
+        ('answer', 'Answer', True),
+        ('category', 'Category', True),
+        ('tags', 'Tags', True),
+        ('length', 'Length', False),
+        ('packet', 'Packet', True),
+        ('created', 'Created', True),
+        ('modified', 'Modified', True),
+        ('edited', 'Edited', True),
+        ('proofread', 'Proofread', True),
+        ('comments', 'Comments', True),
+        ('last_comment', 'Last Comment', True),
+    ]
+
+    def question_table_column_keys(self):
+        """The columns to show, in screen order, ignoring anything unknown."""
+        known = [k for k, _label, _on in self.QUESTION_TABLE_COLUMNS]
+        chosen = (self.question_table_columns or '').strip()
+        if not chosen:
+            return [k for k, _label, on in self.QUESTION_TABLE_COLUMNS if on]
+        wanted = {c.strip() for c in chosen.split(',') if c.strip()}
+        return [k for k in known if k in wanted]
+
+    def question_table_column_choices(self):
+        """(key, label, shown) for the settings page."""
+        shown = set(self.question_table_column_keys())
+        return [{'key': k, 'label': label, 'shown': k in shown}
+                for k, label, _on in self.QUESTION_TABLE_COLUMNS]
+
+    def question_table_headers(self):
+        """The labels to print, in order."""
+        labels = dict((k, label) for k, label, _on in self.QUESTION_TABLE_COLUMNS)
+        return [{'key': k, 'label': labels[k]} for k in self.question_table_column_keys()]
+
+
     # What the settings page offers. Named so the page can label them, and far
     # enough apart to tell apart at sixteen pixels.
     FAVICON_COLORS = [
