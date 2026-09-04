@@ -45,5 +45,18 @@ check('on: an unpowered tossup opens readable too',
 t = D.tossup('Only one sentence here.', '_X_', '', '', 0);
 check('on: a one-sentence tossup is readable, its answer is not',
       t.startsWith('Only one sentence here.\nANSWER: ||'));
+// A note to players is not a clue: it must not use up the readable opening.
+const noted = '\\NNote to players: description acceptable.\\N First clue here. Second clue. For 10 points, name it.';
+t = D.tossup(noted, '_X_', '', '', 0);
+check('on: a leading note does not spend the readable opening',
+      t.startsWith('_Note to players: description acceptable._ First clue here. ||Second clue.||'));
+t = D.tossup('\\NNote.\\N First clue (*) here. Rest of it.', '_X_', '', '', 0);
+check('on: the same in a powered tossup',
+      t.startsWith('**_Note._ First clue (*)** ||here.||'));
+global.window.qemsDiscordShowFirst = false;
+t = D.tossup(noted, '_X_', '', '', 0);
+check('off: a leading note is spoilered like everything else',
+      t.startsWith('||_Note to players: description acceptable._|| ||First clue here.||'));
+global.window.qemsDiscordShowFirst = true;
 console.log(ok ? 'ALL PASS' : 'SOME FAILED');
 process.exit(ok ? 0 : 1);

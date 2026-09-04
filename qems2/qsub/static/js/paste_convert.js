@@ -763,12 +763,24 @@ $(function () {
         return (isFirst && showFirstClue()) ? text : '||' + text + '||';
     }
 
+    // How many sentences at the front of the question are only a note to the
+    // moderator or players. A note is not a clue -- it is what the reader says
+    // before the question starts -- so it must not use up the one sentence the
+    // set chose to leave readable, or the opening clue ends up spoilered and
+    // the readable part says nothing about the answer.
+    function leadingNoteSentences(raw) {
+        var m = /^\s*(?:\\N[\s\S]*?\\N\s*)+/.exec(raw || '');
+        if (!m) { return 0; }
+        return splitIntoSentences(qemsToDiscordMarkup(m[0])).length;
+    }
+
     function formatTossupForDiscord(text, answer, author, category, qid) {
         text = (text || '').trim();
         answer = (answer || '').trim();
         var info = { author: authorDisplayName(author), category: category || '' };
 
         var discordAnswer = qemsToDiscordMarkup(answer);
+        var noteLead = leadingNoteSentences(text);
         // Bold runs to the last power mark: a (+) superpower precedes the (*) power.
         var powerIdx = Math.max(text.indexOf('(*)'), text.indexOf('(+)'));
         var hasPower = powerIdx !== -1;
@@ -781,11 +793,12 @@ $(function () {
             var beforeSentences = splitIntoSentences(qemsToDiscordMarkup(beforePower));
             var afterSentences = splitIntoSentences(qemsToDiscordMarkup(afterPower));
 
-            // Pre-power: bold + spoiler. Only the very first sentence of the
-            // stem can be the readable opening; the bold run is unaffected
-            // either way, since power is about scoring, not hiding.
+            // Pre-power: bold + spoiler. The readable opening is the first
+            // clue -- any note in front of it comes along, since it is not a
+            // clue and hiding it would tell a reader nothing. The bold run is
+            // unaffected either way: power is about scoring, not hiding.
             result = '**' + beforeSentences.map(function (s, i) {
-                return spoil(s, i === 0);
+                return spoil(s, i <= noteLead);
             }).join(' ') + '**';
 
             // Post-power: spoiler only, and never the opening.
@@ -797,7 +810,7 @@ $(function () {
         } else {
             var sentences = splitIntoSentences(qemsToDiscordMarkup(text));
             result = sentences.map(function (s, i) {
-                return spoil(s, i === 0);
+                return spoil(s, i <= noteLead);
             }).join(' ');
         }
 
