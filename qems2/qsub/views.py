@@ -912,7 +912,13 @@ def import_set(request):
                 message = 'Import failed: {0}'.format(ex)
                 message_class = 'alert-box alert'
     else:
-        form = ImportSetForm(writer=user)
+        # ?target=<id> comes from a set's own overview ("Import questions into
+        # this set"), so the page opens on the set you came from rather than
+        # making you find it in the list again. An id you cannot import into is
+        # simply not in the field's queryset and is ignored.
+        target = request.GET.get('target', '')
+        form = ImportSetForm(writer=user,
+                             initial={'target_set': target} if target.isdigit() else None)
 
     return render(request, 'import_set.html',
                   {'form': form, 'user': user, 'summary': summary,

@@ -194,6 +194,38 @@
         .editor-tag-add select, .editor-tag-add input { display: inline-block; width: auto; height: auto;
             margin: 0 4px 0 0; padding: 2px 4px; font-size: 0.8em; }
         .editor-tag-add .editor-tag-free-input { max-width: 110px; }
+        /* The overview's actions. One row per group rather than one full-width
+           panel per link: nine stacked panels made a short list of links look
+           like a long page, and buried the one thing everybody can use. */
+        .set-actions { margin: 1.25rem 0 0; }
+        .set-actions-group { display: flex; flex-wrap: wrap; align-items: baseline;
+            gap: 4px 14px; padding: 9px 14px; background: #fff; border: 1px solid #e9e9ef;
+            border-radius: 10px; margin-bottom: 8px; }
+        .set-actions-label { flex: 0 0 8.5em; font-size: 0.72rem; text-transform: uppercase;
+            letter-spacing: 0.07em; color: #8a8f9c; font-weight: 700; }
+        .set-actions-group a { font-weight: 600; }
+        .set-actions-sep { color: #d4d7de; }
+        /* Owner-only and destructive actions are marked as what they are, so a
+           set's controls are not one undifferentiated list. */
+        .set-actions-owner { border-color: #ddd3f5; background: #faf8ff; }
+        .set-actions-owner .set-actions-label { color: #6b5bbd; }
+        .set-actions-danger { border-color: #f2d6d3; background: #fdf7f6; }
+        .set-actions-danger .set-actions-label { color: #a94442; }
+        .set-actions-danger a { color: #a94442; }
+        .set-actions-note { flex-basis: 100%; margin: 2px 0 0 0; font-size: 0.78rem;
+            color: #8a8f9c; font-weight: 400; }
+        /* The packetized-export options: still a form of its own, but a tighter
+           box than a full panel. */
+        .set-export-form { background: #fff; border: 1px solid #e9e9ef; border-radius: 10px;
+            padding: 9px 14px; margin-bottom: 8px; }
+        .set-export-form label { display: inline-block; margin: 0 12px 0 0; font-weight: 400; }
+        .set-export-head { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.07em;
+            color: #8a8f9c; font-weight: 700; margin-right: 8px; }
+        @media (max-width: 700px) { .set-actions-label { flex-basis: 100%; } }
+        html[data-theme="dark"] .set-actions-group,
+        html[data-theme="dark"] .set-export-form { background: var(--qx-card); border-color: var(--qx-border); }
+        html[data-theme="dark"] .set-actions-owner,
+        html[data-theme="dark"] .set-actions-danger { background: var(--qx-elevate); }
         /* Join link (Writers and Editors tab, owners only) */
         .join-link-row { display: flex; gap: 6px; align-items: center; max-width: 620px; }
         .join-link-row input { margin: 0; font-family: monospace; font-size: 0.85em; background: #f7f8fa; }
@@ -285,21 +317,39 @@
             });
         });
         </script>
-        <div class="panel header radius text-center">
-            <strong><a href="/question_set_distribution/{{ qset.id }}">Set-Specific Distribution</a></strong>
-        </div>
-        {% if qset|is_set_owner:user %}
-            <div class="panel header radius text-center">
-                <strong><a href="/api_access/{{ qset.id }}/"><i class="fa fa-robot"></i> Discord Bot Settings</a></strong>
+        <div class="set-actions">
+
+            {% comment %}
+            Everyone who can see the set gets this row: the distribution to work
+            to, and the settings and feed that are each writer's own.
+            {% endcomment %}
+            <div class="set-actions-group">
+                <span class="set-actions-label">This set</span>
+                <a href="/question_set_distribution/{{ qset.id }}">Set-specific distribution</a>
+                <span class="set-actions-sep">|</span>
+                <a href="/writer_question_set_settings/{{ qset.id }}">Your settings for this set</a>
+                <span class="set-actions-sep">|</span>
+                <a href="/activity/{{ qset.id }}/">My activity</a>
             </div>
-        {% endif %}
+
         {% if role == "editor" %}
-            <div class="panel header radius text-center">
-                <strong><a href="/export_question_set/{{ qset.id }}/csv/">Export Question Set to CSV</a></strong> | <strong><a href="/export_question_set/{{ qset.id }}/tsv/">Export to TSV</a></strong> | <strong><a href="/export_question_set/{{ qset.id }}/docx/">Export to Word</a></strong> | <strong><a href="/export_question_set/{{ qset.id }}/docx-by-category/">Export to Word by Category</a></strong> | <strong><a href="/export_question_set/{{ qset.id }}/yapp-json/">Export Packetized YAPP JSON</a></strong> | <strong><a href="/export_question_set/{{ qset.id }}/yapp2-json/" title="YAPP JSON plus pronunciation-guide anchoring; plain YAPP readers see the same questions.">Export Packetized YAPP2 JSON</a></strong>
+            <div class="set-actions-group">
+                <span class="set-actions-label">Export</span>
+                <a href="/export_question_set/{{ qset.id }}/csv/">CSV</a>
+                <span class="set-actions-sep">|</span>
+                <a href="/export_question_set/{{ qset.id }}/tsv/">TSV</a>
+                <span class="set-actions-sep">|</span>
+                <a href="/export_question_set/{{ qset.id }}/docx/">Word</a>
+                <span class="set-actions-sep">|</span>
+                <a href="/export_question_set/{{ qset.id }}/docx-by-category/">Word by category</a>
+                <span class="set-actions-sep">|</span>
+                <a href="/export_question_set/{{ qset.id }}/yapp-json/">YAPP JSON</a>
+                <span class="set-actions-sep">|</span>
+                <a href="/export_question_set/{{ qset.id }}/yapp2-json/" title="YAPP JSON plus pronunciation-guide anchoring; plain YAPP readers see the same questions.">YAPP2 JSON</a>
             </div>
-            <form method="get" action="/export_question_set/{{ qset.id }}/docx-packetized/" class="panel radius" style="text-align:center;">
+            <form method="get" action="/export_question_set/{{ qset.id }}/docx-packetized/" class="set-export-form">
                 <input type="hidden" name="opts" value="1">
-                <strong>Export Packetized Word</strong> &mdash; include:
+                <span class="set-export-head">Packetized</span> include:
                 <label style="display:inline-block; margin:0 10px;"><input type="checkbox" name="comments" value="1" checked> Open comments</label>
                 <label style="display:inline-block; margin:0 10px;"><input type="checkbox" name="writers" value="1" checked> Writer names</label>
                 <label style="display:inline-block; margin:0 10px;"><input type="checkbox" name="editors" value="1" checked> Editor names</label>
@@ -313,18 +363,36 @@
                 <button type="submit" class="button tiny primary" style="margin:0 0 0 4px;" formaction="/export_question_set/{{ qset.id }}/yapp2-json/" title="YAPP2 JSON; with interlacing ticked it carries a readingOrder so the reader alternates tossups and bonuses.">YAPP2</button>
                 <span class="sc-guide-note" style="display:block; margin-top:4px;">(Comments and smart quotes apply to the Word export only. Of these, YAPP2 uses interlacing and category tags.)</span>
             </form>
-            <div class="panel header radius text-center">
-                <strong><a href="/bulk_change_set/{{ qset.id }}">Make Bulk Changes to this Set</a></strong>
+
+            <div class="set-actions-group">
+                <span class="set-actions-label">Questions</span>
+                <a href="/bulk_change_set/{{ qset.id }}">Make bulk changes</a>
+                {% if user.user.is_superuser %}
+                <span class="set-actions-sep">|</span>
+                {% comment %}
+                Straight into the importer with this set already chosen:
+                importing into a set that exists is the reason to come here
+                rather than to the home page.
+                {% endcomment %}
+                <a href="/import_set/?target={{ qset.id }}">Import questions into this set</a>
+                {% endif %}
             </div>
         {% endif %}
-        {% if role == "editor" %}
-            <div class="panel header radius text-center">
-                <strong><a href="/delete_set/{{ qset.id }}" class="delete_set" value="{{ qset.id }}">Delete this set</a></strong>
-            </div>        
+
+        {% if qset|is_set_owner:user %}
+            <div class="set-actions-group set-actions-owner">
+                <span class="set-actions-label">Owner only</span>
+                <a href="/api_access/{{ qset.id }}/"><i class="fa fa-robot"></i> Discord bot settings</a>
+            </div>
         {% endif %}
-        
-        <div class="panel header radius text-center">
-            <strong><a href="/writer_question_set_settings/{{ qset.id }}">Your settings for this set</a></strong>
+
+        {% if role == "editor" %}
+            <div class="set-actions-group set-actions-danger">
+                <span class="set-actions-label">Careful</span>
+                <a href="/delete_set/{{ qset.id }}" class="delete_set" value="{{ qset.id }}">Delete this set</a>
+                <span class="set-actions-note">Deletes every question, comment and packet in it. There is no undo.</span>
+            </div>
+        {% endif %}
         </div>
     </div>
     <div class="content" id="comments">

@@ -423,9 +423,15 @@ $(function () {
 .tag-delete-form { margin: 0; display: inline; }
 .tag-delete-form input { margin: 0; }
 .tag-actions { white-space: nowrap; }
-.tag-io { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 8px; }
+.tag-io { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin-top: 10px; }
 .tag-io .button { margin: 0; }
-.tag-io-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0; }
+/* The explanation of the columns is reference, not part of the controls: give
+   it room and a rule of its own so the row above reads as the two actions it
+   is rather than as a caption's first line. */
+.tag-io-panel .home-note { margin: 14px 0 0; padding-top: 12px;
+    border-top: 1px solid var(--qx-border, #ececf1); }
+.tag-io-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0;
+    padding-left: 18px; border-left: 1px solid var(--qx-border, #ececf1); }
 .tag-io-form input[type=file] { margin: 0; width: auto; font-size: 0.85em; }
 .tag-io-label { margin: 0; font-size: 0.9em; }
 .tag-nowrap { white-space: nowrap; }
