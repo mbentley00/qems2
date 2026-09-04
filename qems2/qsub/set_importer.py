@@ -20,7 +20,7 @@ from django_comments.models import Comment
 
 from qems2.qsub.models import (QuestionSet, Distribution, DistributionEntry,
                                SetWideDistributionEntry, Tossup, Bonus,
-                               QuestionType, CommentReply, Writer, CategoryTag)
+                               QuestionType, CommentReply, Writer, CategoryTag, QuestionHistory)
 from qems2.qsub.utils import (ACF_STYLE_TOSSUP, ACF_STYLE_BONUS, VHSL_BONUS,
                               QUESTION_CREATE)
 from qems2.qsub import signals as qems_signals
@@ -562,7 +562,8 @@ def import_set_from_file(uploaded_file, set_name, owner, target_set=None):
 def delete_question_set(qset):
     """Delete a set and all its content. Search is Postgres full-text over the
     questions' own fields, so deleting the rows is all that's needed (no index
-    to purge). Also clears orphaned comments and the set's distribution."""
+    to purge). Also clears the questions' revision history, orphaned comments,
+    and the set's distribution."""
     tossup_ct = ContentType.objects.get_for_model(Tossup)
     bonus_ct = ContentType.objects.get_for_model(Bonus)
     tossup_ids = [str(i) for i in Tossup.objects.filter(question_set=qset).values_list('id', flat=True)]
@@ -573,9 +574,29 @@ def delete_question_set(qset):
     Comment.objects.filter(content_type=tossup_ct, object_pk__in=tossup_ids).delete()
     Comment.objects.filter(content_type=bonus_ct, object_pk__in=bonus_ids).delete()
 
+    # A question points *at* its QuestionHistory, so the cascade runs the wrong
+    # way: deleting the questions leaves the history behind, and every revision
+    # row under it holds a full copy of the question's text. Left alone, a set
+    # imported and deleted twice costs more storage than the set ever did.
+    history_ids = set(Tossup.objects.filter(question_set=qset)
+                      .exclude(question_history=None)
+                      .values_list('question_history_id', flat=True))
+    history_ids |= set(Bonus.objects.filter(question_set=qset)
+                       .exclude(question_history=None)
+                       .values_list('question_history_id', flat=True))
+
     distribution = qset.distribution
     with transaction.atomic():
         qset.delete()
+        # Only histories nothing else still points at: a question moved between
+        # sets keeps the history it arrived with, and that set still needs it.
+        if history_ids:
+            still_used = set(Tossup.objects.filter(question_history_id__in=history_ids)
+                             .values_list('question_history_id', flat=True))
+            still_used |= set(Bonus.objects.filter(question_history_id__in=history_ids)
+                              .values_list('question_history_id', flat=True))
+            QuestionHistory.objects.filter(
+                id__in=history_ids - still_used).delete()
         # Drop the set's distribution unless another set shares it.
         if distribution is not None and not QuestionSet.objects.filter(distribution=distribution).exists():
             distribution.delete()
