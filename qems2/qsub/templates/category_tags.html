@@ -115,7 +115,7 @@
         <a class="cat-index-item{% if not c.tag_count %} cat-index-empty{% endif %}{% if c.set_wide %} cat-index-setwide{% endif %}"
            href="/category_tags/{{ qset.id }}/?category={{ c.token|urlencode }}"
            title="{% if c.set_wide %}Tags that apply to every question in the set{% elif c.tag_count %}{{ c.tag_count }} tag{{ c.tag_count|pluralize }}{% else %}No tags yet{% endif %}">
-            {{ c.label }}<span class="cat-index-count">{% if c.tag_count %}{{ c.tag_count }}{% else %}&mdash;{% endif %}</span>
+            {{ c.label }}<span class="cat-index-count{% if not c.tag_count %} cat-index-zero{% endif %}">{{ c.tag_count|default:"0" }}</span>
         </a>
         {% empty %}
         <span class="home-note">This set's distribution has no categories yet.</span>
@@ -484,6 +484,9 @@ $(function () {
     background: var(--qx-card, #fff); }
 .cat-index-item:hover { border-color: var(--qx-link, #2a6ebb); }
 .cat-index-count { color: var(--qx-muted, #8a8f9c); font-size: 0.9em; }
+/* A zero is a count like any other, but a quieter one, so a scope with tags
+   still reads first in a wall of them. */
+.cat-index-zero { opacity: 0.55; }
 .cat-index-empty { color: var(--qx-muted, #8a8f9c); background: transparent;
     border-style: dashed; }
 .tag-io-panel { margin-top: 18px; }

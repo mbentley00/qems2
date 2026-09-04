@@ -5352,6 +5352,7 @@ def quick_search_results(request):
         if writer_id:
             qs = qs.filter(author_id=writer_id)
         return (qs.select_related('packet', 'category', 'author', 'author__user', 'question_set')
+                  .prefetch_related('category_tags')
                   .order_by('question_set__name', 'packet__sort_order', 'packet__packet_name', 'question_number'))
 
     rows = []
@@ -5381,6 +5382,10 @@ def quick_search_results(request):
             'id': q.id,
             'answer': answer_preview(qtype, q),
             'category': str(q.category) if q.category_id else '',
+            # What a question is tagged with is most of what you are looking
+            # for when searching an archive -- "the Asian Literature ones" --
+            # and the answer line alone does not say it.
+            'tags': sorted(t.name for t in q.category_tags.all()),
             'location': loc,
             'author': (q.author.get_real_name().strip() or q.author.user.username) if q.author_id else '',
             'edit_url': '/edit_{0}/{1}/'.format(qtype, q.id),

@@ -138,6 +138,14 @@ $(function () {
             var meta = '<span class="qs-meta">' + esc(r.location)
                 + (r.category ? ' · ' + esc(r.category) : '')
                 + (r.author ? ' · ' + esc(r.author) : '') + '</span>';
+            // Tags as chips rather than more of the grey meta run: they are a
+            // list of several, and they are what a search of an archive is
+            // usually narrowing towards.
+            if (r.tags && r.tags.length) {
+                meta += ' <span class="qs-tags">' + r.tags.map(function (t) {
+                    return '<span class="qs-tag">' + esc(t) + '</span>';
+                }).join('') + '</span>';
+            }
             var $head = $(
                 '<div class="qs-head">'
                 + '<span class="qs-caret">▸</span> ' + badge
@@ -181,6 +189,10 @@ $(function () {
 .qs-answer { font-weight: bold; font-size: 1.05rem; }
 .qs-open { margin-left: 0.4em; color: #008CBA; }
 .qs-meta { color: #888; font-size: 0.8rem; }
+.qs-tags { display: inline; }
+.qs-tag { display: inline-block; background: #eef2f7; color: #2b2f3a; border-radius: 9px;
+    padding: 0 7px; margin: 0 3px 2px 0; font-size: 0.72rem; white-space: nowrap; }
+html[data-theme="dark"] .qs-tag { background: var(--qx-elevate); color: var(--qx-text); }
 .qs-body { margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #eee; }
 #qs-results mark { background: #fff2a8; padding: 0 1px; }
 </style>
