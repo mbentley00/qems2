@@ -163,24 +163,38 @@ def find_duplicates(qset):
     for entry in entries:
         groups_by_answer[entry['answer_normalized']].append(entry)
 
+    # Comparing every pair in a group is k*(k-1)/2 work, which is fine for the
+    # handful of questions that usually share an answer and ruinous for a group
+    # that does not. One set had 3,185 questions answering "INCOMPLETE" (the
+    # placeholder an unwritten bonus part carries), and the five million pairs
+    # that produced were 780 MB of page and most of a three-minute request.
+    #
+    # Past this many entries the group is reported as a group -- these all share
+    # an answer, go and look -- and only the first PAIR_SAMPLE of them are
+    # compared, which is enough to say how bad it is.
+    PAIR_SAMPLE = 40
+
     # Build result groups for answers with 2+ entries
     result = []
     for answer, group_entries in groups_by_answer.items():
         if len(group_entries) < 2:
             continue
 
+        sampled = len(group_entries) > PAIR_SAMPLE
+        compared = group_entries[:PAIR_SAMPLE] if sampled else group_entries
+
         # Precompute clue words for each entry
-        clue_words = [extract_clue_words(e['text']) for e in group_entries]
+        clue_words = [extract_clue_words(e['text']) for e in compared]
 
         # Compute pairwise comparisons
         pairs = []
         group_severity = INFO
-        for i in range(len(group_entries)):
-            for j in range(i + 1, len(group_entries)):
+        for i in range(len(compared)):
+            for j in range(i + 1, len(compared)):
                 sim = clue_similarity(clue_words[i], clue_words[j])
                 same_category = (
-                    group_entries[i]['category_str'] != '' and
-                    group_entries[i]['category_str'] == group_entries[j]['category_str']
+                    compared[i]['category_str'] != '' and
+                    compared[i]['category_str'] == compared[j]['category_str']
                 )
 
                 if sim >= 0.3:
@@ -207,6 +221,8 @@ def find_duplicates(qset):
             'severity': group_severity,
             'entries': group_entries,
             'pairs': pairs,
+            'pairs_sampled': sampled,
+            'compared_count': len(compared),
         })
 
     # Sort by severity (critical first), then by how many questions share the

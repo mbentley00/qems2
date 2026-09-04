@@ -1628,12 +1628,34 @@ def duplicate_check(request, qset_id):
 
     if context is None:
         groups = find_duplicates(qset)
+        # The summary describes the whole set, so it is taken now: the lists
+        # below are capped and their entries truncated in place, and counting
+        # afterwards would report only what the page happens to show.
+        dup_summary = {
+            'critical': sum(1 for g in groups if g['severity'] == CRITICAL),
+            'warning': sum(1 for g in groups if g['severity'] == WARNING),
+            'info': sum(1 for g in groups if g['severity'] == INFO),
+            'entries': sum(len(g['entries']) for g in groups),
+        }
         internal_issues = find_internal_issues(qset)
         topic_groups = find_topic_repeats(qset)
 
-        # Batch-load packets and bonus answers for all referenced questions
+        # Only as many groups as a page can actually be, decided before
+        # anything is loaded or rendered for them. The archive produces 1,894
+        # duplicate groups over 8,818 entries, and rendering the lot made 780 MB
+        # of HTML -- a page no browser opens, from a request no server should
+        # spend three minutes on. Both lists are severity-sorted, so a cap keeps
+        # the ones worth reading; the summary above still counts them all.
+        DUP_RENDER_CAP = 150
+        TOPIC_RENDER_CAP = 150
+        dup_total = len(groups)
+        topic_total = len(topic_groups)
+        groups = groups[:DUP_RENDER_CAP]
+        topic_render = topic_groups[:TOPIC_RENDER_CAP]
+
+        # Batch-load packets and bonus answers for the questions actually shown
         tu_ids, bs_ids = set(), set()
-        for group_list in (groups, topic_groups):
+        for group_list in (groups, topic_render):
             for group in group_list:
                 for entry in group['entries']:
                     (bs_ids if entry['type'] == 'bonus' else tu_ids).add(entry['id'])
@@ -1644,7 +1666,13 @@ def duplicate_check(request, qset_id):
             obj = tu_map.get(entry['id']) if entry['type'] == 'tossup' else bonus_map.get(entry['id'])
             return obj.packet.packet_name if (obj is not None and obj.packet) else ''
 
+        # ...and how much of a group: one answer shared by thousands of
+        # questions is a fact, not a table worth printing in full.
+        ENTRY_RENDER_CAP = 25
         for group in groups:
+            group['entry_total'] = len(group['entries'])
+            group['entries'] = group['entries'][:ENTRY_RENDER_CAP]
+            group['entries_truncated'] = group['entry_total'] > len(group['entries'])
             for entry in group['entries']:
                 entry['packet'] = packet_of(entry)
                 entry['answer_html'] = _dup_answer_html(entry, bonus_map)
@@ -1652,12 +1680,6 @@ def duplicate_check(request, qset_id):
             for pair in group['pairs']:
                 pair['similarity_pct'] = int(pair['similarity'] * 100)
 
-        # Topic repeats are already severity-sorted (critical first). A large
-        # set can have hundreds; rendering them all is the slow part, so only
-        # enrich+render the top N and report how many more exist.
-        TOPIC_RENDER_CAP = 150
-        topic_total = len(topic_groups)
-        topic_render = topic_groups[:TOPIC_RENDER_CAP]
         for group in topic_render:
             term = group.get('label')
             for entry in group['entries']:
@@ -1667,11 +1689,12 @@ def duplicate_check(request, qset_id):
 
         context = {
             'groups': groups,
-            'critical_count': sum(1 for g in groups if g['severity'] == CRITICAL),
-            'warning_count': sum(1 for g in groups if g['severity'] == WARNING),
-            'info_count': sum(1 for g in groups if g['severity'] == INFO),
-            'total_groups': len(groups),
-            'total_questions': sum(len(g['entries']) for g in groups),
+            'critical_count': dup_summary['critical'],
+            'warning_count': dup_summary['warning'],
+            'info_count': dup_summary['info'],
+            'total_groups': dup_total,
+            'dup_shown': len(groups),
+            'total_questions': dup_summary['entries'],
             'internal_issues': internal_issues,
             'bonus_repeat_count': sum(1 for i in internal_issues if i['issue_type'] == 'bonus_repeat_answer'),
             'clue_reuse_count': sum(1 for i in internal_issues if i['issue_type'] == 'tossup_clue_reuse'),

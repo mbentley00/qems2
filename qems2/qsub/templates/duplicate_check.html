@@ -83,6 +83,12 @@ it off.
     </div>
 {% endif %}
 
+{% if dup_shown and dup_shown < total_groups %}
+<div class="row"><div class="small-12 columns">
+    <div class="panel callout"><p>Showing the {{ dup_shown }} highest-severity duplicate groups of
+    {{ total_groups }}. The summary above counts them all.</p></div>
+</div></div>
+{% endif %}
 {% for group in groups %}
     <div class="row">
         <div class="small-12 columns">
@@ -98,7 +104,7 @@ it off.
                                 <span class="label">Info</span>
                             {% endif %}
                             &ldquo;{{ group.answer }}&rdquo;
-                            <small>({{ group.entries|length }} questions)</small>
+                            <small>({{ group.entry_total }} question{{ group.entry_total|pluralize }}{% if group.entries_truncated %}, first {{ group.entries|length }} shown{% endif %}{% if group.pairs_sampled %}; overlap measured on {{ group.compared_count }} of them{% endif %})</small>
                         </h5>
                     </div>
                 </div>
