@@ -1190,19 +1190,21 @@ def edit_question_set(request, qset_id):
             if form.is_valid():
                 qset = QuestionSet.objects.get(id=qset_id)
                 previous_distribution_id = qset.distribution_id
-                qset.name = form.cleaned_data['name']
-                qset.date = form.cleaned_data['date']
-                qset.distribution = form.cleaned_data['distribution']
-                qset.num_packets = form.cleaned_data['num_packets']
-                qset.char_count_ignores_pronunciation_guides = form.cleaned_data['char_count_ignores_pronunciation_guides']
-                qset.guides_require_quotes = form.cleaned_data['guides_require_quotes']
-                qset.tossups_only = form.cleaned_data['tossups_only']
-                qset.enable_superpower = form.cleaned_data['enable_superpower']
-                qset.discord_show_first_clue = form.cleaned_data['discord_show_first_clue']
-                qset.structured_answers = form.cleaned_data['structured_answers']
-                qset.public = form.cleaned_data['public']
-                qset.max_acf_tossup_length = form.cleaned_data['max_acf_tossup_length']
-                qset.max_acf_bonus_length = form.cleaned_data['max_acf_bonus_length']
+                # Every field the form carries, rather than a list repeated
+                # here: the list had fallen behind the form twice over
+                # (export_category_tags and enable_duplicate_checks were on the
+                # page, were submitted, and were dropped on the floor), and a
+                # setting that silently does not save is worse than one that
+                # does not exist. The form is a ModelForm over this model with
+                # an explicit exclude, so its fields are exactly the ones a set
+                # is allowed to change here.
+                # The many-to-many sides (co-owners, editors, writers) belong
+                # to the Writers and Editors tab and its own actions; this form
+                # never means to set them, and assigning one directly raises.
+                _m2m = {f.name for f in QuestionSet._meta.many_to_many}
+                for _field in form.fields:
+                    if _field in form.cleaned_data and _field not in _m2m:
+                        setattr(qset, _field, form.cleaned_data[_field])
                 qset.save()
 
                 # Switching the distribution used to change nothing but the
@@ -1241,6 +1243,7 @@ def edit_question_set(request, qset_id):
                 return render(request, 'edit_question_set.html',
                                           {'form': form,
                                            'qset': qset,
+                                           'favicon_colors': QuestionSet.FAVICON_COLORS,
                                            'user': user,
                                            'editors': [ed for ed in qset_editors if ed != qset.owner],
                                            'writers': qset.writer.all(),
@@ -1309,6 +1312,7 @@ def edit_question_set(request, qset_id):
     return render(request, 'edit_question_set.html',
                               {'form': form,
                                'user': user,
+                               'favicon_colors': QuestionSet.FAVICON_COLORS,
                                'editors': [ed for ed in qset_editors if ed != qset.owner],
                                'writers': [wr for wr in qset_writers if wr != qset.owner],
                                'writer_stats': writer_stats,

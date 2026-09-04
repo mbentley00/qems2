@@ -17,9 +17,16 @@
     <script>try{if(window.innerWidth>900&&localStorage.getItem('qx_sidebar_collapsed')==='1'){document.documentElement.classList.add('app-sidebar-collapsed');}}catch(e){}
     try{if(localStorage.getItem('qx_theme')==='dark'){document.documentElement.setAttribute('data-theme','dark');}}catch(e){}</script>
 
+    {% comment %}
+    The set you are in colours the tab, when it has been given a colour: two
+    sets open at once are otherwise two identical tabs. Dev still wins, since
+    mistaking local for production is the worse confusion.
+    {% endcomment %}
     {% if DEBUG %}
     {# Distinct favicon for local/dev so it's easy to tell apart from production tabs #}
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='12' fill='%2316a34a'/><text x='32' y='47' font-size='42' font-weight='bold' fill='white' text-anchor='middle' font-family='Arial,sans-serif'>Q</text></svg>"/>
+    {% elif nav_active.favicon_svg %}
+    <link rel="icon" type="image/svg+xml" href="{{ nav_active.favicon_svg }}"/>
     {% else %}
     <link rel="icon" type="image/png" href="{% static 'favicon.png' %}"/>
     {% endif %}

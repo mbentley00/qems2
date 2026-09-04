@@ -219,6 +219,37 @@ class QuestionSet (models.Model):
     # them, since "this answer appears twice" is the point of an archive rather
     # than a fault in it. Off means the pages say so instead of running.
     enable_duplicate_checks = models.BooleanField(default=True)
+    # A colour for this set's browser tab. Anyone editing two sets at once has
+    # two identical tabs; a colour tells them apart without reading the title.
+    # Blank means the ordinary icon.
+    favicon_color = models.CharField(max_length=7, blank=True, default='')
+
+    # What the settings page offers. Named so the page can label them, and far
+    # enough apart to tell apart at sixteen pixels.
+    FAVICON_COLORS = [
+        ('#5b34d6', 'Purple'), ('#2563eb', 'Blue'), ('#0891b2', 'Teal'),
+        ('#16a34a', 'Green'), ('#ca8a04', 'Amber'), ('#ea580c', 'Orange'),
+        ('#dc2626', 'Red'), ('#db2777', 'Pink'), ('#4b5563', 'Slate'),
+    ]
+
+    def favicon_svg(self):
+        """This set's tab icon as an SVG data URI, or '' for the ordinary one.
+
+        The colour goes into markup, so it is checked against the offered list
+        rather than trusted: a value that is not one of them is no colour at
+        all. That keeps anything else that could be stored in the field out of
+        the page.
+        """
+        colour = (self.favicon_color or '').strip().lower()
+        if colour not in {c for c, _label in self.FAVICON_COLORS}:
+            return ''
+        return (
+            "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' "
+            "viewBox='0 0 64 64'><rect width='64' height='64' rx='12' fill='%23"
+            + colour[1:] +
+            "'/><text x='32' y='47' font-size='42' font-weight='bold' fill='white' "
+            "text-anchor='middle' font-family='Arial,sans-serif'>Q</text></svg>")
+
 
     # When true, answer lines are recorded as structure - a required primary
     # answer plus optional accepts and directed prompts - instead of only as

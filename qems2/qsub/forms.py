@@ -68,6 +68,13 @@ class QuestionSetForm(forms.ModelForm):
                    'tossups_per_packet', 'bonuses_per_packet',
                    'approval_status', 'approval_date']
 
+    def clean_favicon_color(self):
+        """Only a colour the page offers. The value ends up in markup, and a
+        list of nine is easier to be sure of than any amount of escaping."""
+        value = (self.cleaned_data.get('favicon_color') or '').strip().lower()
+        allowed = {c for c, _label in QuestionSet.FAVICON_COLORS}
+        return value if value in allowed else ''
+
     def __init__(self, read_only=False, writer=None, *args, **kwargs):
         super(QuestionSetForm, self).__init__(*args, **kwargs)
 
@@ -78,6 +85,12 @@ class QuestionSetForm(forms.ModelForm):
             self.fields['distribution'].queryset = Distribution.visible_to(writer)
 
         self.fields['date'].widget.attrs.update({'placeholder': 'mm/dd/yyyy'})
+
+        # The colour is picked from swatches on the page, so the field only has
+        # to carry the value they set.
+        if 'favicon_color' in self.fields:
+            self.fields['favicon_color'].required = False
+            self.fields['favicon_color'].widget = forms.HiddenInput()
 
         for field in self.fields:
             if read_only:
