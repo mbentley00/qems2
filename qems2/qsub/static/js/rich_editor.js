@@ -133,6 +133,10 @@ $(function () {
             // Switch to editing the raw QEMS markup (e.g. ~foo~ for italics) in
             // the underlying textarea, to hand-fix anything the rich view got
             // wrong; the label flips to "Rich" to switch back.
+            // How worn a clue is, without leaving the question. The same
+            // lookup the highlight popup does, asked for deliberately and
+            // answered under the field, where it stays put while you read it.
+            '  <a href="#" class="rich-editor-btn rich-editor-qb" data-cmd="qbfreq" title="How often the selected phrase appears in the qbreader database. Select a phrase first.">QB</a>' +
             '  <a href="#" class="rich-editor-btn rich-editor-plain" data-cmd="plaintext" title="Edit the raw QEMS markup directly (e.g. ~foo~ for italics, _foo_ for answer underlines)">Raw</a>' +
             '</div>');
         var $editor = $('<div class="rich-editor" contenteditable="true" spellcheck="true"></div>');
@@ -486,6 +490,12 @@ $(function () {
             e.preventDefault();
             var cmd = $(this).attr('data-cmd');
             if (cmd === 'plaintext') { setPlainMode(!plainMode); return; }
+            if (cmd === 'qbfreq') {
+                if (window.QemsQbreader && window.QemsQbreader.lookupInto) {
+                    window.QemsQbreader.lookupInto($wrapper);
+                }
+                return;
+            }
             // The formatting buttons act on the rich editor; ignore them while
             // the raw textarea is showing.
             if (plainMode) { return; }

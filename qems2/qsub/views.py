@@ -40,7 +40,7 @@ from .duplicate_checker import (find_duplicates, find_internal_issues,
                                 normalize_answer, CRITICAL, WARNING, INFO)
 from django.utils.safestring import mark_safe
 from django_comments.models import Comment
-from django.db.models import Q, Max, Prefetch
+from django.db.models import Q, Max, Prefetch, Count
 from django.db import connection
 
 
@@ -11054,9 +11054,23 @@ def build_tag_checkboxes(qset, question, dist_entry, checked_ids=None):
             return '; '.join(bits)
         return 'met' if tag.has_quota else ''
 
+    # How many questions each tag already has, for all of them at once.
+    # tag.progress() counts on its own when it is not told, which is two
+    # queries per tag -- 208 of them on a set with a hundred tags, on every
+    # load *and every save* of a question page, since the checkboxes are part
+    # of the form. That is most of what made saving slow against a database
+    # across the network.
+    tag_ids = [t.id for t in tags]
+    tu_counts = dict(CategoryTag.objects.filter(id__in=tag_ids).annotate(
+        n=Count('tossups', filter=Q(tossups__question_set=qset), distinct=True)
+    ).values_list('id', 'n'))
+    bs_counts = dict(CategoryTag.objects.filter(id__in=tag_ids).annotate(
+        n=Count('bonuses', filter=Q(bonuses__question_set=qset), distinct=True)
+    ).values_list('id', 'n'))
+
     sections, by_path = [], {}
     for tag in tags:
-        p = tag.progress()
+        p = tag.progress(tu_counts.get(tag.id, 0), bs_counts.get(tag.id, 0))
         item = {'tag': tag, 'checked': tag.id in checked_ids,
                 'progress': p, 'complete': p['complete'] if tag.has_quota else None,
                 'over': p['over'], 'label': _progress_label(tag, p),

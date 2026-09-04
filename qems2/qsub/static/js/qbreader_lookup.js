@@ -126,6 +126,74 @@
         });
     }
 
+    // ---- the toolbar button ------------------------------------------
+    //
+    // The popup above appears on its own when you happen to select something
+    // and waits for a pause; the button is for when you have decided to check.
+    // Its answer goes under the field and stays there, because the point is to
+    // read it while you rewrite the clue -- a popup tied to the selection
+    // vanishes the moment you start.
+
+    function panelFor($wrapper) {
+        var $panel = $wrapper.find('.qbr-inline');
+        if (!$panel.length) {
+            $panel = $('<div class="qbr-inline" role="status"></div>').appendTo($wrapper);
+        }
+        return $panel;
+    }
+
+    function render($panel, term, resp) {
+        $panel.empty().show();
+        $('<button type="button" class="qbr-inline-close" title="Hide">&times;</button>')
+            .appendTo($panel);
+        $('<span class="qbr-inline-term"></span>')
+            .text('\u201c' + (term.length > 60 ? term.slice(0, 60) + '\u2026' : term) + '\u201d')
+            .appendTo($panel);
+        if (resp.ok) {
+            $('<span class="qbr-inline-counts"></span>').text(
+                resp.tossups + ' tossup' + (resp.tossups === 1 ? '' : 's') + ' \u00b7 ' +
+                resp.bonuses + ' bonus' + (resp.bonuses === 1 ? '' : 'es') + ' on qbreader'
+            ).appendTo($panel);
+        } else {
+            $('<span class="qbr-inline-counts"></span>')
+                .text(resp.error || 'lookup failed').appendTo($panel);
+        }
+        $('<a target="_blank" rel="noopener">full results \u2197</a>')
+            .attr('href', resp.url ||
+                  ('https://www.qbreader.org/db/?q=' + encodeURIComponent(term) + '&exactPhrase=true'))
+            .appendTo($panel);
+    }
+
+    function lookupInto($wrapper) {
+        var $panel = panelFor($wrapper);
+        var raw = selectedQuestionText();
+        var term = cleanTerm(raw);
+        if (!term) {
+            $panel.empty().show()
+                .append($('<button type="button" class="qbr-inline-close" title="Hide">&times;</button>'))
+                .append($('<span class="qbr-inline-counts"></span>').text(
+                    raw ? 'That selection is too short, too long, or spans lines.'
+                        : 'Select a phrase in the question first, then press QB.'));
+            return;
+        }
+        if (cache[term]) { render($panel, term, cache[term]); return; }
+        $panel.empty().show()
+            .append($('<span class="qbr-inline-counts"></span>').text('Looking up \u201c' + term + '\u201d\u2026'));
+        $.get('/qbreader_freq/', { q: term }, function (resp) {
+            if (typeof resp === 'string') { try { resp = JSON.parse(resp); } catch (e) { return; } }
+            cache[term] = resp;
+            render($panel, term, resp);
+        }).fail(function () {
+            render($panel, term, { ok: false, error: 'lookup failed' });
+        });
+    }
+
+    window.QemsQbreader = { lookupInto: lookupInto };
+
+    $(document).on('click', '.qbr-inline-close', function () {
+        $(this).closest('.qbr-inline').hide().empty();
+    });
+
     $(function () {
         // Nothing to do on pages without question fields.
         if (!$(FIELD_SELECTOR).length && !$('.rich-editor, .anchor-region').length) { return; }
