@@ -11508,7 +11508,10 @@ def category_tags(request, qset_id):
                 if action == 'add':
                     raw_path = request.POST.get('category_path', '').strip()
                     path = scope_from_token(raw_path)
-                    name = request.POST.get('name', '').strip()
+                    # tag_name, not name: a field called "name" is one a
+                    # password manager offers to fill with the signed-in
+                    # person's name and then offers to save as a login.
+                    name = request.POST.get('tag_name', '').strip()
                     group_name = request.POST.get('group_name', '').strip()[:100]
                     num_tossups = int(request.POST.get('num_tossups') or 0)
                     num_bonuses = int(request.POST.get('num_bonuses') or 0)
@@ -11537,7 +11540,7 @@ def category_tags(request, qset_id):
                     message_class = 'alert-box success'
                 elif action == 'edit':
                     tag = CategoryTag.objects.get(question_set=qset, id=int(request.POST['tag_id']))
-                    name = request.POST.get('name', '').strip()[:200]
+                    name = request.POST.get('tag_name', '').strip()[:200]
                     if not name:
                         raise ValueError('A tag needs a name')
                     clash = (CategoryTag.objects.filter(question_set=qset, category_path=tag.category_path,
