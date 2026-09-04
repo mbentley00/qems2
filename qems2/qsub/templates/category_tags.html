@@ -227,6 +227,11 @@ its one category, since that is the whole page then.
 
 </div>{# /tag-groups-region #}
 
+{% if focus_questions and can_edit %}
+{# The tags a question on this page can be given, once for the page rather than
+   once per row. The selects read it when they are opened. #}
+{{ assignable_tags|json_script:"tag-assignable" }}
+{% endif %}
 <div id="tag-questions-region">
 {% if focus_questions %}
 {% comment %}
@@ -258,31 +263,32 @@ time, and where the questions nobody has tagged stand out.
             </tr>
         </thead>
         <tbody>
+            {% comment %}
+            A row used to carry a form per chip and a form per question, each
+            with its own CSRF token, and a select holding every assignable tag
+            as its own option. On a category of a thousand questions that came
+            to four and a half megabytes -- 4,670 forms and 15,000 options --
+            and the browser had to parse all of it before the page appeared.
+
+            The row now carries what identifies it and nothing else. One token
+            for the page, and the select is filled from the page's tag list the
+            first time it is opened.
+            {% endcomment %}
             {% for q in focus_questions.rows %}
-            <tr class="{% if q.untagged %}tag-q-untagged{% endif %}">
+            <tr class="{% if q.untagged %}tag-q-untagged{% endif %}"
+                data-qtype="{{ q.qtype }}" data-qid="{{ q.id }}">
                 <td>{{ q.qtype|capfirst }}</td>
                 <td><a href="{{ q.edit_url }}">{{ q.answer }}</a></td>
                 <td>{% if q.location %}{{ q.location }}{% else %}<span class="tag-muted">Unassigned</span>{% endif %}</td>
                 <td>{{ q.author }}</td>
                 <td class="tag-q-tags">
                     {% for tag in q.tags %}
-                    <span class="tag-chip">{{ tag.name }}{% if can_edit %}<form action="" method="post" class="tag-chip-del tag-ajax-form">{% csrf_token %}<input type="hidden" name="action" value="unassign"><input type="hidden" name="tag_id" value="{{ tag.id }}"><input type="hidden" name="qtype" value="{{ q.qtype }}"><input type="hidden" name="question_id" value="{{ q.id }}"><button type="submit" title="Remove this tag">&times;</button></form>{% endif %}</span>
+                    <span class="tag-chip" data-tag-id="{{ tag.id }}">{{ tag.name }}{% if can_edit %}<button type="button" class="tag-unassign" title="Remove this tag">&times;</button>{% endif %}</span>
                     {% empty %}
                     <span class="tag-q-flag">No tags</span>
                     {% endfor %}
-                    {% if can_edit and q.addable %}
-                    <form action="" method="post" class="tag-assign-form tag-ajax-form">
-                        {% csrf_token %}
-                        <input type="hidden" name="action" value="assign">
-                        <input type="hidden" name="qtype" value="{{ q.qtype }}">
-                        <input type="hidden" name="question_id" value="{{ q.id }}">
-                        <select name="tag_id">
-                            <option value="">+ tag&hellip;</option>
-                            {% for tag in q.addable %}
-                            <option value="{{ tag.id }}">{% if tag.group_name %}{{ tag.group_name }}: {% endif %}{{ tag.name }}</option>
-                            {% endfor %}
-                        </select>
-                    </form>
+                    {% if can_edit %}
+                    <select class="tag-assign"><option value="">+ tag&hellip;</option></select>
                     {% endif %}
                 </td>
             </tr>
@@ -434,6 +440,84 @@ $(function () {
         });
     }
 
+    // One CSRF token for the page: every action posts the same one, and a
+    // token per form was 4,671 of them on a big category.
+    function csrf() {
+        return $('input[name=csrfmiddlewaretoken]').first().val();
+    }
+
+    // Filled the first time a row's select is opened, from the page's list.
+    // Rendering every option on every row is what made the page enormous.
+    var ASSIGNABLE = null;
+    function assignable() {
+        if (ASSIGNABLE === null) {
+            var node = document.getElementById('tag-assignable');
+            try { ASSIGNABLE = node ? JSON.parse(node.textContent) : []; }
+            catch (e) { ASSIGNABLE = []; }
+        }
+        return ASSIGNABLE;
+    }
+    $(document).on('mousedown focus', 'select.tag-assign', function () {
+        var $sel = $(this);
+        if ($sel.data('filled')) { return; }
+        var have = {};
+        $sel.closest('.tag-q-tags').find('.tag-chip').each(function () {
+            have[$(this).data('tag-id')] = true;
+        });
+        assignable().forEach(function (t) {
+            if (!have[t.id]) {
+                $('<option>').val(t.id).text(t.label).appendTo($sel);
+            }
+        });
+        $sel.data('filled', true);
+    });
+
+    function postData(data, done) {
+        data.csrfmiddlewaretoken = csrf();
+        $.ajax({url: '', type: 'POST', dataType: 'json', data: data,
+                headers: {'X-Requested-With': 'XMLHttpRequest'}})
+            .done(function (resp) {
+                flash(resp && resp.message, resp && resp.message_class);
+                refresh(function () { if (done) { done(resp); } });
+            })
+            .fail(function () {
+                flash('That did not save \u2014 check your connection and try again.',
+                      'alert-box warning');
+                refresh();
+            });
+    }
+
+    // Assigning: the row says which question, the chips say what it already
+    // has, and the chip appears before the request comes back.
+    $(document).on('change', 'select.tag-assign', function () {
+        var $sel = $(this);
+        var id = $sel.val();
+        if (!id) { return; }
+        var $row = $sel.closest('tr'), $cell = $sel.closest('.tag-q-tags');
+        var name = $sel.find('option:selected').text().replace(/^[^:]*:\s*/, '');
+        postData({action: 'assign', tag_id: id,
+                  qtype: $row.data('qtype'), question_id: $row.data('qid')});
+        $cell.find('.tag-q-flag').remove();
+        $('<span class="tag-chip"></span>').attr('data-tag-id', id).text(name).insertBefore($sel);
+        $sel.find('option:selected').remove();
+        $sel.val('');
+        $row.removeClass('tag-q-untagged');
+    });
+
+    $(document).on('click', '.tag-unassign', function () {
+        var $chip = $(this).closest('.tag-chip');
+        var $row = $chip.closest('tr'), $cell = $chip.closest('.tag-q-tags');
+        postData({action: 'unassign', tag_id: $chip.data('tag-id'),
+                  qtype: $row.data('qtype'), question_id: $row.data('qid')});
+        $chip.remove();
+        if (!$cell.find('.tag-chip').length) {
+            $cell.prepend($('<span class="tag-q-flag">No tags</span>'));
+        }
+        // The select has to offer it again; it is refilled on next open.
+        $cell.find('select.tag-assign').empty()
+             .append($('<option>').val('').text('+ tag\u2026')).data('filled', false);
+    });
+
     function post($form, done) {
         var data = $form.serializeArray();
         // A submit button's own name/value (the move arrows post a direction)
@@ -461,42 +545,11 @@ $(function () {
     $(document).on('click', '.tag-ajax-form input[type=submit], .tag-ajax-form button[type=submit]',
         function () { $(this).closest('form').data('clicked-button', $(this)); });
 
-    // Assigning and unassigning are the two you do dozens of in a row, and
-    // they are also the two whose effect on the row in front of you is
-    // obvious. So the chip appears (or goes) the moment you ask, and the
-    // refresh that follows reconciles the counts nobody is watching that
-    // closely -- the quota progress, the untagged tally. If the save fails the
-    // refresh puts the truth back, so an optimistic chip can never outlive the
-    // request that was supposed to create it.
-    function paintAssign($form) {
-        var action = $form.find('input[name=action]').val();
-        var $cell = $form.closest('.tag-q-tags');
-        if (!$cell.length) { return; }
-        if (action === 'assign') {
-            var $sel = $form.find('select'), name = $sel.find('option:selected').text();
-            // The group prefix the option carries ("Period: Ancient") is for
-            // telling options apart, not for the chip.
-            name = name.replace(/^[^:]*:\s*/, '');
-            $cell.find('.tag-q-flag').remove();
-            $('<span class="tag-chip"></span>').text(name).insertBefore($form);
-            $sel.find('option:selected').remove();
-            $sel.val('');
-            $cell.closest('tr').removeClass('tag-q-untagged');
-        } else {
-            var $chip = $form.closest('.tag-chip');
-            $chip.remove();
-            if (!$cell.find('.tag-chip').length) {
-                $cell.prepend($('<span class="tag-q-flag">No tags</span>'));
-            }
-        }
-    }
-
     $(document).on('submit', '.tag-ajax-form', function (e) {
         e.preventDefault();
         var $form = $(this);
         var isAdd = $form.is('#tag-add-form');
         var group = isAdd ? $form.find('input[name=group_name]').val() : null;
-        var optimistic = $form.is('.tag-assign-form, .tag-chip-del');
         post($form, function () {
             if (!isAdd) { return; }
             // Ready for the next one: the name is what changes, the category
@@ -506,9 +559,6 @@ $(function () {
             $f.find('input[name=tag_name]').val('').focus();
             $f.find('input[type=submit], button[type=submit]').prop('disabled', false);
         });
-        // After post(), never before: it paints over the very fields post()
-        // serialises, and clearing the select first posted an empty tag id.
-        if (optimistic) { paintAssign($form); }
     });
 
     // Everything below is re-run after a swap, because the markup it binds to
@@ -518,10 +568,6 @@ $(function () {
             var row = document.getElementById($(this).data('target'));
             row.hidden = !row.hidden;
             if (!row.hidden) { $(row).find('input[name=tag_name]').focus(); }
-        });
-        // Picking a tag from the dropdown is the whole gesture; no second button.
-        $('.tag-assign-form select').off('change.tags').on('change.tags', function () {
-            if (this.value) { $(this.form).submit(); }
         });
         var only = $('#tag-untagged-only');
         only.off('change.tags').on('change.tags', function () {

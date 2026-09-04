@@ -10894,11 +10894,16 @@ def _category_question_rows(qset, path, tag_rows):
                 'packet_key': (0, q.packet.packet_name, q.question_number or 0) if q.packet_id else (1, '', q.id),
                 'author': str(q.author) if q.author_id else '',
                 'tags': tags,
-                'addable': [t for t in page_tags if t.id not in have],
                 'untagged': not any(t.id in page_tag_ids for t in tags),
             })
     rows.sort(key=lambda r: (r['packet_key'], r['qtype'] != 'tossup'))
     return {'rows': rows,
+            # The tags any row here can be given, listed once for the page
+            # instead of once per row -- see the template.
+            'assignable': [{'id': t.id,
+                            'label': ('{0}: {1}'.format(t.group_name, t.name)
+                                      if t.group_name else t.name)}
+                           for t in page_tags],
             'total': len(rows),
             'untagged': sum(1 for r in rows if r['untagged']),
             'tossups': sum(1 for r in rows if r['qtype'] == 'tossup'),
@@ -11748,6 +11753,7 @@ def category_tags(request, qset_id):
                'set_wide_token': SET_WIDE_TOKEN,
                'set_wide_label': SET_WIDE_LABEL,
                'focus_questions': focus_questions,
+               'assignable_tags': (focus_questions or {}).get('assignable', []),
                'path_choices': path_choices,
                'category_index': category_index,
                'group_choices': group_choices,
