@@ -877,16 +877,28 @@ def import_set(request):
     summary = None
 
     if request.method == 'POST':
-        form = ImportSetForm(request.POST, request.FILES)
+        form = ImportSetForm(request.POST, request.FILES, writer=user)
         if form.is_valid():
             from .set_importer import import_set_from_file, SetImportError
             try:
+                target = form.cleaned_data.get('target_set')
                 summary = import_set_from_file(
-                    form.cleaned_data['set_file'], form.cleaned_data['set_name'], user)
+                    form.cleaned_data['set_file'],
+                    (form.cleaned_data.get('set_name') or '').strip(), user,
+                    target_set=target)
                 qset = summary['question_set']
-                message = ('Imported "{0}": {1} tossups, {2} bonuses, {3} comments.'
-                           .format(qset.name, summary['tossups'], summary['bonuses'],
+                message = ('{0} "{1}": {2} tossups, {3} bonuses, {4} comments.'
+                           .format('Added to' if target is not None else 'Imported',
+                                   qset.name, summary['tossups'], summary['bonuses'],
                                    summary['comments']))
+                if target is not None:
+                    message += (' The set now holds {0} tossups and {1} bonuses.'
+                                .format(Tossup.objects.filter(question_set=qset).count(),
+                                        Bonus.objects.filter(question_set=qset).count()))
+                    if summary.get('categories_created'):
+                        message += (' Added {0} categor{1} the set did not have.'
+                                    .format(summary['categories_created'],
+                                            'y' if summary['categories_created'] == 1 else 'ies'))
                 if summary.get('users_created'):
                     message += ' Created {0} placeholder commenter account(s).'.format(summary['users_created'])
                 if summary.get('legacy_authors'):
@@ -900,7 +912,7 @@ def import_set(request):
                 message = 'Import failed: {0}'.format(ex)
                 message_class = 'alert-box alert'
     else:
-        form = ImportSetForm()
+        form = ImportSetForm(writer=user)
 
     return render(request, 'import_set.html',
                   {'form': form, 'user': user, 'summary': summary,

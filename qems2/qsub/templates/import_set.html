@@ -14,32 +14,45 @@
     <div class="{{ message_class }}">
         {{ message }}
         {% if summary.question_set %}
-            <a href="/edit_question_set/{{ summary.question_set.id }}/">Open the new set.</a>
+            <a href="/edit_question_set/{{ summary.question_set.id }}/">Open the set.</a>
         {% endif %}
     </div>
 {% endif %}
 
 <p>Upload a <strong>.tsv</strong> or <strong>.csv</strong> file in the format produced by
-a set's <em>Export</em> action. A new set is created with all tossups, bonuses, comments
-(including threaded replies), and the category distribution, and the questions are added to
-the search index. Unknown commenters become inactive placeholder accounts so attribution is
+a set's <em>Export</em> action. All tossups, bonuses, comments (including threaded replies),
+category tags and the category distribution come across, and the questions are added to the
+search index. Unknown commenters become inactive placeholder accounts so attribution is
 preserved.</p>
+
+<p>Name a <strong>new set</strong>, or choose an <strong>existing set</strong> to add the
+questions to &mdash; which is how an archive too big for one upload arrives in several,
+without leaving a set behind per file. Adding to a set changes nothing that is already in
+it: categories are matched to the ones it has and only genuinely new ones are created, and
+its quotas, packets and name are left alone.</p>
 
 <form action="" method="post" enctype="multipart/form-data">
     {% csrf_token %}
     <div class="row">
         <div class="small-8 columns">
+            {% if form.non_field_errors %}
+                <div class="alert-box warning">{{ form.non_field_errors }}</div>
+            {% endif %}
             <label>New set name
                 {{ form.set_name }}
             </label>
             {% if form.set_name.errors %}{{ form.set_name.errors }}{% endif %}
+            <label>&hellip;or add these questions to an existing set
+                {{ form.target_set }}
+            </label>
+            {% if form.target_set.errors %}{{ form.target_set.errors }}{% endif %}
             <label>TSV or CSV file
                 {{ form.set_file }}
             </label>
             {% if form.set_file.errors %}{{ form.set_file.errors }}{% endif %}
         </div>
     </div>
-    <input type="submit" value="Import Set" class="button primary right" />
+    <input type="submit" value="Import" class="button primary right" />
 </form>
 
 {% if summary and summary.errors %}

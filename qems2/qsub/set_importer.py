@@ -335,16 +335,29 @@ def _create_comments(question, content_type, site, comment_cell, resolve):
     return created
 
 
-def _build_distribution(dist_rows, qset):
+def _build_distribution(dist_rows, qset, merge=False):
     """Create DistributionEntry + SetWideDistributionEntry rows from the
     distribution section, attached to the set's distribution. Returns a
-    {str(dist_entry): dist_entry} lookup."""
+    {str(dist_entry): dist_entry} lookup.
+
+    With `merge`, the set already has a distribution and it is the authority:
+    a category it already has is reused as it stands, quotas untouched, and
+    only a genuinely new one is added. Importing a second batch must not
+    renumber the quotas an editor has set, nor create a duplicate category
+    that would split a category's questions in two.
+    """
     distribution = qset.distribution
     lookup = {}
+    if merge:
+        for entry in DistributionEntry.objects.filter(distribution=distribution):
+            lookup[str(entry)] = entry
     for row in dist_rows:
         category = (row[0] or '').strip() if len(row) > 0 else ''
         subcategory = (row[1] or '').strip() if len(row) > 1 else ''
         if not category:
+            continue
+        key = '{0} - {1}'.format(category, subcategory)
+        if merge and key in lookup:
             continue
         entry = DistributionEntry.objects.create(
             distribution=distribution, category=category, subcategory=subcategory)
@@ -352,12 +365,25 @@ def _build_distribution(dist_rows, qset):
             question_set=qset, dist_entry=entry,
             num_tossups=_to_int(row[2] if len(row) > 2 else 0),
             num_bonuses=_to_int(row[3] if len(row) > 3 else 0))
-        lookup['{0} - {1}'.format(category, subcategory)] = entry
+        lookup[key] = entry
     return lookup
 
 
-def import_set_from_file(uploaded_file, set_name, owner):
-    """Parse uploaded_file and create a new QuestionSet owned by `owner`.
+def import_set_from_file(uploaded_file, set_name, owner, target_set=None):
+    """Parse uploaded_file into a QuestionSet owned by `owner`.
+
+    With no `target_set` a new set is created and named `set_name`. With one,
+    the questions are added to that existing set instead -- which is what makes
+    an archive importable a few thousand questions at a time, rather than
+    forcing one upload to carry everything or leaving a set per file behind.
+
+    Adding to a set leaves everything already in it alone: its name, its
+    quotas, its packets. Categories are matched to the ones it already has and
+    only genuinely new ones are created, so a second batch files its questions
+    beside the first batch's rather than beside a duplicate category. Tags are
+    matched the same way they always were (`resolve_tag`), so a tag sheet
+    imported beforehand is picked up rather than duplicated.
+
     Returns a summary dict. Raises SetImportError on a fatal parse problem."""
     raw = uploaded_file.read()
     if isinstance(raw, bytes):
@@ -390,7 +416,9 @@ def import_set_from_file(uploaded_file, set_name, owner):
     user_cache, resolve = _user_resolver(owner.user)
     legacy_author_ids, resolve_author = _author_resolver(owner)
 
-    summary = {'tossups': 0, 'bonuses': 0, 'comments': 0, 'tags': 0, 'errors': []}
+    summary = {'tossups': 0, 'bonuses': 0, 'comments': 0, 'tags': 0, 'errors': [],
+               'added_to_existing': target_set is not None,
+               'categories_created': 0}
     # (group, name) -> the set's matching tags, so a sheet of thousands of rows
     # resolves each distinct tag once rather than once per question.
     tag_cache = {}
@@ -411,16 +439,26 @@ def import_set_from_file(uploaded_file, set_name, owner):
     # fields (set in save_question), so there's nothing to index here.
     try:
         with transaction.atomic():
-            distribution = Distribution.objects.create(
-                name='{0} (imported)'.format(set_name)[:100],
-                created_by=owner, created_date=timezone.now())
-            qset = QuestionSet.objects.create(
-                name=set_name, date=timezone.now().date(), host='', address='',
-                owner=owner, num_packets=0, distribution=distribution)
-            # Add the owner as an editor too, matching create_question_set, so
-            # the set is editable/deletable from the normal UI (not just admin).
-            owner.question_set_editor.add(qset)
-            category_lookup = _build_distribution(sections['dist'], qset)
+            if target_set is not None:
+                qset = target_set
+                before = DistributionEntry.objects.filter(
+                    distribution=qset.distribution).count()
+                category_lookup = _build_distribution(sections['dist'], qset, merge=True)
+                summary['categories_created'] = DistributionEntry.objects.filter(
+                    distribution=qset.distribution).count() - before
+            else:
+                distribution = Distribution.objects.create(
+                    name='{0} (imported)'.format(set_name)[:100],
+                    created_by=owner, created_date=timezone.now())
+                qset = QuestionSet.objects.create(
+                    name=set_name, date=timezone.now().date(), host='', address='',
+                    owner=owner, num_packets=0, distribution=distribution)
+                # Add the owner as an editor too, matching create_question_set,
+                # so the set is editable/deletable from the normal UI (not just
+                # admin).
+                owner.question_set_editor.add(qset)
+                category_lookup = _build_distribution(sections['dist'], qset)
+                summary['categories_created'] = len(category_lookup)
 
             # Pre-create placeholder commenter accounts in the outer transaction
             # (not inside a per-row savepoint), so a row rollback can't leave the
@@ -497,13 +535,18 @@ def import_set_from_file(uploaded_file, set_name, owner):
                 except Exception as ex:
                     summary['errors'].append('Bonus row skipped: {0}'.format(ex))
 
-            # Estimate a packet count from the imported volume (default 20
-            # questions/packet). Leaving num_packets at 0 would make the
-            # packetize page's "recommended per packet" (set total / packets)
-            # divide by 1 and show the whole set total per packet.
-            est_packets = max(1, round(max(summary['tossups'], summary['bonuses']) / 20.0))
-            qset.num_packets = est_packets
-            qset.save(update_fields=['num_packets'])
+            # Estimate a packet count from the volume the set now holds
+            # (default 20 questions/packet). Leaving num_packets at 0 would make
+            # the packetize page's "recommended per packet" (set total /
+            # packets) divide by 1 and show the whole set total per packet.
+            # For a set being added to, count what is in it rather than what
+            # this file brought, and never shrink a number an editor chose.
+            total_t = Tossup.objects.filter(question_set=qset).count()
+            total_b = Bonus.objects.filter(question_set=qset).count()
+            est_packets = max(1, round(max(total_t, total_b) / 20.0))
+            if target_set is None or est_packets > (qset.num_packets or 0):
+                qset.num_packets = est_packets
+                qset.save(update_fields=['num_packets'])
 
             summary['question_set'] = qset
             summary['users_created'] = sum(1 for u in user_cache.values()

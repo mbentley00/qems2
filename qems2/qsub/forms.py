@@ -384,9 +384,42 @@ class QuestionUploadForm(forms.Form):
     questions_file = forms.FileField()
 
 class ImportSetForm(forms.Form):
+    """Import a sheet as a new set, or into one that already exists.
 
-    set_name = forms.CharField(max_length=200, label='New set name')
+    Same shape as ImportPacketsForm: a name or a target, never both. Adding to
+    an existing set is what lets a large archive arrive in several uploads
+    instead of one, without leaving a set behind per file.
+    """
+
+    set_name = forms.CharField(max_length=200, required=False, label='New set name')
+    target_set = forms.ModelChoiceField(
+        queryset=QuestionSet.objects.none(), required=False,
+        label='\u2026or add these questions to an existing set')
     set_file = forms.FileField(label='TSV or CSV file (in export format)')
+
+    def __init__(self, *args, **kwargs):
+        """`writer` limits the target list to sets that writer works on. The
+        ModelChoiceField validates the posted id against this queryset, so the
+        list is the permission check as well as the menu -- importing thousands
+        of questions into somebody else's tournament is not undoable by hand."""
+        writer = kwargs.pop('writer', None)
+        super(ImportSetForm, self).__init__(*args, **kwargs)
+        if writer is not None:
+            self.fields['target_set'].queryset = QuestionSet.objects.filter(
+                Q(owner=writer) | Q(co_owners=writer) | Q(editor=writer)
+            ).distinct().order_by('name')
+
+    def clean(self):
+        cleaned = super().clean()
+        name = (cleaned.get('set_name') or '').strip()
+        target = cleaned.get('target_set')
+        if not name and not target:
+            raise forms.ValidationError(
+                'Enter a new set name, or choose an existing set to add to.')
+        if name and target:
+            raise forms.ValidationError(
+                'Choose either a new set name or an existing set, not both.')
+        return cleaned
 
 class MultipleFileInput(forms.ClearableFileInput):
     allow_multiple_selected = True
