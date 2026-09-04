@@ -26,89 +26,34 @@
 </div>
 
 {% comment %}
-Notes on the category come first: they are what the last person working here
-left for the next one, and they bear on what you are about to do. The standing
-explanation of what tags are goes to the foot of the page -- it is the same
-every visit, and you stop needing it after the first.
+Order of the page, top to bottom: what you came to do, what the last person
+left you, the tags themselves, the questions to tag, and only then the form for
+making a new one. Writing a question for the category and reading its notes
+happen every visit; defining a tag happens once and then rarely again.
 {% endcomment %}
-{% if focus_path %}
-{% include "_category_comments.html" %}
-{% endif %}
-{% if messages %}{% for m in messages %}<div class="alert-box {% if m.tags == 'error' %}warning{% elif m.tags == 'warning' %}warning{% else %}success{% endif %}">{{ m }}</div>{% endfor %}{% endif %}
-
-
-{% if can_edit %}
-<form action="" method="post" class="panel radius tag-ajax-form" id="tag-add-form">
-    {% csrf_token %}
-    <input type="hidden" name="action" value="add">
-    <div class="row">
-        <div class="small-4 columns">
-            <label>Applies to
-                <select name="category_path">
-                    {% comment %}
-                    A tag can belong to the whole set: use it for the things
-                    that cut across the distribution -- a period, a region,
-                    a source -- instead of repeating one per category.
-                    {% endcomment %}
-                    <option value="{{ set_wide_token }}"{% if focus_set_wide or selected_path == set_wide_token %} selected{% endif %}>{{ set_wide_label }}</option>
-                    {% for path in path_choices %}
-                    <option value="{{ path }}"{% if path == selected_path or path == focus_path %} selected{% endif %}>{{ path }}</option>
-                    {% endfor %}
-                </select>
-            </label>
-        </div>
-        <div class="small-4 columns">
-            <label>Tag Name
-                <input type="text" name="tag_name" placeholder="e.g. Asian Literature" autocomplete="off" data-1p-ignore data-lpignore="true">
-            </label>
-        </div>
-        <div class="small-4 columns">
-            <label>Group
-                <input type="text" name="group_name" list="tag-group-choices" placeholder="e.g. Location" autocomplete="off" data-1p-ignore data-lpignore="true">
-                <datalist id="tag-group-choices">
-                    {% for g in group_choices %}<option value="{{ g }}">{% endfor %}
-                </datalist>
-            </label>
-        </div>
-    </div>
-    <div class="row">
-        <div class="small-10 columns">
-            <div class="tag-quota-fields">
-                <span class="tag-quota-head">How many:</span>
-                <span class="tag-quota-field">
-                    <span class="tag-quota-name">Tossups</span>
-                    <input type="number" name="num_tossups" min="0" value="0" placeholder="min" title="Fewest tossups this tag needs. 0 asks for no minimum.">
-                    <span class="tag-quota-to">to</span>
-                    <input type="number" name="max_tossups" min="0" placeholder="max" title="Most tossups this tag allows. Empty allows any number; 0 allows none.">
-                </span>
-                <span class="tag-quota-field">
-                    <span class="tag-quota-name">Bonuses</span>
-                    <input type="number" name="num_bonuses" min="0" value="0" placeholder="min" title="Fewest bonuses this tag needs. 0 asks for no minimum.">
-                    <span class="tag-quota-to">to</span>
-                    <input type="number" name="max_bonuses" min="0" placeholder="max" title="Most bonuses this tag allows. Empty allows any number; 0 allows none.">
-                </span>
-                <span class="tag-quota-field">
-                    <span class="tag-quota-name tag-nowrap">Any&nbsp;type</span>
-                    <input type="number" name="num_questions" min="0" value="0" placeholder="min" title="Fewest questions of either type (tossups and bonuses both count). 0 asks for no minimum.">
-                    <span class="tag-quota-to">to</span>
-                    <input type="number" name="max_questions" min="0" placeholder="max" title="Most questions of either type. Empty allows any number.">
-                </span>
-            </div>
-        </div>
-        <div class="small-2 columns">
-            <input type="submit" value="Add" class="button small primary tag-add-button">
-        </div>
-    </div>
-    <p class="home-note">Adding a tag that already exists in that category updates its group and counts. Each quota has two ends and either may be left off: a minimum of 0 asks for no minimum, and an empty maximum sets no ceiling &mdash; so &ldquo;This Empire Indicator&rdquo; can cap the set at 7/0 without demanding any. &ldquo;Any type&rdquo; counts tossups and bonuses together.</p>
-</form>
-{% endif %}
-
 {% if focused %}
 <p class="cat-actions">
     {% if focus_path %}{% include "_add_question_links.html" with add_qset_id=qset.id add_category_path=focus_path %}{% endif %}
     <a href="/category_tags/{{ qset.id }}/" class="button small secondary">&laquo; All categories</a>
 </p>
-{% else %}
+{% endif %}
+
+{% if focus_path %}
+{% include "_category_comments.html" %}
+{% endif %}
+
+{% comment %}
+Notes on the category come first: they are what the last person working here
+left for the next one, and they bear on what you are about to do. The standing
+explanation of what tags are goes to the foot of the page -- it is the same
+every visit, and you stop needing it after the first.
+{% endcomment %}
+{% if messages %}{% for m in messages %}<div class="alert-box {% if m.tags == 'error' %}warning{% elif m.tags == 'warning' %}warning{% else %}success{% endif %}">{{ m }}</div>{% endfor %}{% endif %}
+
+
+
+
+{% if not focused %}
 <div class="panel radius cat-index" id="tag-index-region">
     <div class="cat-index-head">Every scope in this set &mdash; open one to work on its tags</div>
     <div class="cat-index-list">
@@ -349,6 +294,75 @@ time, and where the questions nobody has tagged stand out.
 {% endif %}
 
 </div>{# /tag-questions-region #}
+
+<div class="tag-newtag">
+    <div class="tag-newtag-head">Define a new tag</div>
+{% if can_edit %}
+<form action="" method="post" class="panel radius tag-ajax-form" id="tag-add-form">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="add">
+    <div class="row">
+        <div class="small-4 columns">
+            <label>Applies to
+                <select name="category_path">
+                    {% comment %}
+                    A tag can belong to the whole set: use it for the things
+                    that cut across the distribution -- a period, a region,
+                    a source -- instead of repeating one per category.
+                    {% endcomment %}
+                    <option value="{{ set_wide_token }}"{% if focus_set_wide or selected_path == set_wide_token %} selected{% endif %}>{{ set_wide_label }}</option>
+                    {% for path in path_choices %}
+                    <option value="{{ path }}"{% if path == selected_path or path == focus_path %} selected{% endif %}>{{ path }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+        </div>
+        <div class="small-4 columns">
+            <label>Tag Name
+                <input type="text" name="tag_name" placeholder="e.g. Asian Literature" autocomplete="off" data-1p-ignore data-lpignore="true">
+            </label>
+        </div>
+        <div class="small-4 columns">
+            <label>Group
+                <input type="text" name="group_name" list="tag-group-choices" placeholder="e.g. Location" autocomplete="off" data-1p-ignore data-lpignore="true">
+                <datalist id="tag-group-choices">
+                    {% for g in group_choices %}<option value="{{ g }}">{% endfor %}
+                </datalist>
+            </label>
+        </div>
+    </div>
+    <div class="row">
+        <div class="small-10 columns">
+            <div class="tag-quota-fields">
+                <span class="tag-quota-head">How many:</span>
+                <span class="tag-quota-field">
+                    <span class="tag-quota-name">Tossups</span>
+                    <input type="number" name="num_tossups" min="0" value="0" placeholder="min" title="Fewest tossups this tag needs. 0 asks for no minimum.">
+                    <span class="tag-quota-to">to</span>
+                    <input type="number" name="max_tossups" min="0" placeholder="max" title="Most tossups this tag allows. Empty allows any number; 0 allows none.">
+                </span>
+                <span class="tag-quota-field">
+                    <span class="tag-quota-name">Bonuses</span>
+                    <input type="number" name="num_bonuses" min="0" value="0" placeholder="min" title="Fewest bonuses this tag needs. 0 asks for no minimum.">
+                    <span class="tag-quota-to">to</span>
+                    <input type="number" name="max_bonuses" min="0" placeholder="max" title="Most bonuses this tag allows. Empty allows any number; 0 allows none.">
+                </span>
+                <span class="tag-quota-field">
+                    <span class="tag-quota-name tag-nowrap">Any&nbsp;type</span>
+                    <input type="number" name="num_questions" min="0" value="0" placeholder="min" title="Fewest questions of either type (tossups and bonuses both count). 0 asks for no minimum.">
+                    <span class="tag-quota-to">to</span>
+                    <input type="number" name="max_questions" min="0" placeholder="max" title="Most questions of either type. Empty allows any number.">
+                </span>
+            </div>
+        </div>
+        <div class="small-2 columns">
+            <input type="submit" value="Add" class="button small primary tag-add-button">
+        </div>
+    </div>
+    <p class="home-note">Adding a tag that already exists in that category updates its group and counts. Each quota has two ends and either may be left off: a minimum of 0 asks for no minimum, and an empty maximum sets no ceiling &mdash; so &ldquo;This Empire Indicator&rdquo; can cap the set at 7/0 without demanding any. &ldquo;Any type&rdquo; counts tossups and bonuses together.</p>
+</form>
+{% endif %}
+</div>
 
 <div class="panel radius tag-io-panel">
     <div class="tag-io-head">Tags as a spreadsheet</div>
@@ -645,6 +659,10 @@ $(function () {
     height: auto; padding: 4px 5px; }
 .tag-axis-add .tag-quota-to { color: var(--qx-muted, #8a8f9c); }
 .tag-axis-add button { margin: 0; }
+/* The new-tag form, below the tags and questions it is used to add to. */
+.tag-newtag { margin-top: 22px; }
+.tag-newtag-head { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--qx-muted, #8a8f9c); margin-bottom: 6px; }
 .tag-explainer { margin-top: 22px; }
 .tag-explainer-head { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;
     color: var(--qx-muted, #8a8f9c); margin-bottom: 6px; }
