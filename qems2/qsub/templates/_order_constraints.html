@@ -54,7 +54,8 @@ Context: qset, constraint_qtype, constraint_qid, constraint_rows, read_only.
 </div>
 
 <div id="oc-pick-dialog" title="Find the other question" style="display:none;">
-    <p class="oc-muted">Searches every question in this set, the same way swapping does.</p>
+    <p class="oc-muted">Searches every question in this set, the same way swapping does.
+        Pick a result to use it, or Cancel to close.</p>
     <div style="margin-bottom:8px;">
         <label style="display:inline; margin-right:12px;"><input type="radio" name="oc-pick-type" value="tossup" checked> Tossups</label>
         <label style="display:inline;"><input type="radio" name="oc-pick-type" value="bonus"> Bonuses</label>
@@ -101,7 +102,11 @@ $(function () {
     var qtype = $panel.data('qtype'), qid = $panel.data('qid'), qsetId = $panel.data('qset');
     var chosen = null;
     var $dialog = $('#oc-pick-dialog').dialog({
-        autoOpen: false, modal: true, width: 620, closeOnEscape: true });
+        autoOpen: false, modal: true, width: 620, closeOnEscape: true,
+        // A titlebar X on a wide dialog is easy to miss, and picking a result
+        // is otherwise the only way out -- which you don't want if you opened
+        // it by mistake.
+        buttons: [{text: 'Cancel', click: function () { $(this).dialog('close'); }}] });
 
     function csrf() { return $('input[name=csrfmiddlewaretoken]').first().val(); }
     function flash(msg, bad) {

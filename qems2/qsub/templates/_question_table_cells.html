@@ -3,7 +3,12 @@ One question's cells, in the order the set asked for. Used by both tables on the
 category page, so tossups and bonuses cannot drift apart.
 
 Context: q (the question), qtype ('tossup'/'bonus'), columns (from
-QuestionSet.question_table_headers), edit_url.
+QuestionSet.question_table_headers).
+
+The link to the question is built here rather than handed in: a caller wrote it
+as `"/edit_tossup/"|add:q.id`, which reads like concatenation but returns "" --
+`add` tries integer addition first, and string + int fails both ways -- so every
+question on the page linked to nowhere.
 
 The caller is inside {% autoescape off %} because the previews are rendered
 markup, so anything here that is a writer's own words escapes explicitly.
@@ -13,9 +18,9 @@ markup, so anything here that is a writer's own words escapes explicitly.
     {% if col.key == 'author' %}
     <td>{{ q.author|escape }}</td>
     {% elif col.key == 'preview' %}
-    <td><a href="{{ edit_url }}">{% if qtype == 'tossup' %}{{ q.tossup_text|safe|preview|question_html }}{% else %}{{ q|bonus_leadin }}{% endif %}</a></td>
+    <td><a href="/edit_{{ qtype }}/{{ q.id }}/">{% if qtype == 'tossup' %}{{ q.tossup_text|safe|preview|question_html }}{% else %}{{ q|bonus_leadin }}{% endif %}</a></td>
     {% elif col.key == 'answer' %}
-    <td><a href="{{ edit_url }}">{% if qtype == 'tossup' %}{{ q|tossup_answer }}{% else %}{{ q|bonus_answers }}{% endif %}</a></td>
+    <td><a href="/edit_{{ qtype }}/{{ q.id }}/">{% if qtype == 'tossup' %}{{ q|tossup_answer }}{% else %}{{ q|bonus_answers }}{% endif %}</a></td>
     {% elif col.key == 'category' %}
     <td>{{ q.category|escape }}</td>
     {% elif col.key == 'tags' %}

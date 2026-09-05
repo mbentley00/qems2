@@ -1000,16 +1000,14 @@ $(function() {
             }).fail(function() { alert('Could not save the comment.'); $btn.prop('disabled', false); });
     });
 
-    // Delete a comment or reply. Only hides it (the question's History page
-    // still has it), but a stray click in a dense margin is easy, so it asks.
+    // Delete a comment or reply. It only hides it -- the question's History
+    // page still has it -- so it goes straight through rather than asking.
     // The gutter is re-fetched rather than patched: deleting a comment that had
     // replies promotes them, and only the server knows the shape that leaves.
     $(document).on('click', '.doc-c-delete', function(e) {
         e.preventDefault();
         e.stopPropagation();
         var $link = $(this), $c = $link.closest('.doc-comment');
-        var isReply = $c.hasClass('doc-comment-reply');
-        if (!window.confirm(isReply ? 'Delete this reply?' : 'Delete this comment?')) { return; }
         $link.addClass('doc-c-busy');
         $.post('/delete_comment/', { comment_id: $c.data('comment-id'), qset_id: window.QEMS_QSET_ID },
             function(response) {

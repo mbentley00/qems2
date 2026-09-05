@@ -243,7 +243,9 @@ time, and where the questions nobody has tagged stand out.
 {% endcomment %}
 <div class="tag-questions">
     <div class="tag-questions-head">
-        <strong>Questions in {{ focus_label }}</strong>
+        <strong>{% if only_tag %}Questions tagged &ldquo;{{ only_tag.name }}&rdquo; in {{ focus_label }}{% else %}Questions in {{ focus_label }}{% endif %}</strong>
+        {% if only_tag %}<a class="tag-clear-filter"
+            href="/category_tags/{{ qset.id }}/?category={{ focus_path|urlencode }}">show all &times;</a>{% endif %}
         <span class="tag-cat-counts">{{ focus_questions.tossups }} tossup{{ focus_questions.tossups|pluralize }},
             {{ focus_questions.bonuses }} bonus{{ focus_questions.bonuses|pluralize:"es" }}
             {% if focus_questions.untagged %}&middot; <span class="tag-cat-open">{{ focus_questions.untagged }} without a tag</span>{% endif %}</span>
@@ -252,7 +254,7 @@ time, and where the questions nobody has tagged stand out.
         {% endif %}
     </div>
     {% if not focus_questions.rows %}
-    <p class="home-note">No questions in this category yet.</p>
+    <p class="home-note">{% if only_tag %}No question here carries that tag yet.{% else %}No questions in this category yet.{% endif %}</p>
     {% else %}
     <table class="table-striped table-hover tag-table tag-question-table">
         <thead>
@@ -759,6 +761,7 @@ $(function () {
 .tag-no-out { font-size: 0.72em; text-transform: uppercase; letter-spacing: 0.04em;
     color: #8a8f9c; background: #f0f0f3; border-radius: 3px; padding: 1px 4px; margin-left: 6px; }
 .tag-questions { margin-top: 18px; }
+.tag-clear-filter { font-size: 0.8rem; margin-left: 6px; white-space: nowrap; }
 .tag-questions-head { display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline; margin-bottom: 6px; }
 .tag-untagged-filter { margin-left: auto; font-size: 0.85em; }
 .tag-untagged-filter input { margin: 0 4px 0 0; }

@@ -8362,6 +8362,156 @@ class InterlacedExportTests(TestCase):
             self.assertIn(needle, joined)
 
 
+class ExportSectionHeadingTests(TestCase):
+    """A "Tossups" heading tells a reader the bonuses are somewhere else. When
+    the packet has only one kind, that is a lie, so neither export prints it."""
+
+    def setUp(self):
+        import io as _io
+        import zipfile as _zip
+        from docx import Document as _Doc
+        self._io, self._zip, self._Doc = _io, _zip, _Doc
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        self.acf_tu = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.acf_bn = QuestionType.objects.get(question_type=ACF_STYLE_BONUS)
+        self.ou = User.objects.create_user('esh_owner', password='pw', email='esh@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='esh dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='Science', subcategory='Biology')
+        self.qset = QuestionSet.objects.create(
+            name='ESH Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.owner.question_set_editor.add(self.qset)
+        self.packet = Packet.objects.create(
+            question_set=self.qset, packet_name='Packet 1', created_by=self.owner)
+        Tossup.objects.create(
+            author=self.owner, question_set=self.qset, packet=self.packet,
+            question_type=self.acf_tu, category=self.de, question_number=1,
+            tossup_text='Tossup 1 stem. (*) end.', tossup_answer='_TossupAnswer1_',
+            created_date=datetime.now(), last_changed_date=datetime.now())
+        self.client.login(username='esh_owner', password='pw')
+
+    def _add_bonus(self):
+        Bonus.objects.create(
+            author=self.owner, question_set=self.qset, packet=self.packet,
+            question_type=self.acf_bn, category=self.de, question_number=1,
+            leadin='Bonus 1 leadin.', part1_text='P1', part1_answer='_BonusAnswer1_',
+            part2_text='P2', part2_answer='_Beta_', part3_text='P3', part3_answer='_Gamma_',
+            created_date=datetime.now(), last_changed_date=datetime.now())
+
+    def _docx_text(self):
+        resp = self.client.get(
+            '/export_question_set/{0}/docx-packetized/'.format(self.qset.id))
+        self.assertEqual(resp.status_code, 200)
+        zf = self._zip.ZipFile(self._io.BytesIO(resp.content))
+        doc = self._Doc(self._io.BytesIO(zf.read('Packet 1.docx')))
+        return '\n'.join(p.text for p in doc.paragraphs)
+
+    def _pdf_text(self):
+        from pypdf import PdfReader
+        resp = self.client.get('/export_question_set/{0}/pdf/'.format(self.qset.id))
+        self.assertEqual(resp.status_code, 200)
+        zf = self._zip.ZipFile(self._io.BytesIO(resp.content))
+        name = [n for n in zf.namelist() if 'Packet 1' in n][0]
+        reader = PdfReader(self._io.BytesIO(zf.read(name)))
+        return '\n'.join(p.extract_text() or '' for p in reader.pages)
+
+    def test_a_tossup_only_packet_gets_no_section_heading(self):
+        self.assertNotIn('Tossups', self._docx_text())
+        self.assertNotIn('Tossups', self._pdf_text())
+
+    def test_a_packet_with_both_still_labels_them(self):
+        self._add_bonus()
+        for text in (self._docx_text(), self._pdf_text()):
+            self.assertIn('Tossups', text)
+            self.assertIn('Bonuses', text)
+
+    def test_the_questions_are_still_there_without_the_heading(self):
+        text = self._pdf_text()
+        self.assertIn('Tossup 1 stem', text)
+        self.assertIn('TossupAnswer1', text)
+
+
+class ExportedPdfMatchesWordTests(TestCase):
+    """The PDF and the Word export are meant to be the same document: Times on
+    half-inch margins, guides set apart, and questions kept whole."""
+
+    def setUp(self):
+        import io as _io
+        import zipfile as _zip
+        self._io, self._zip = _io, _zip
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf_tu = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('pdfm_owner', password='pw', email='pm@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='pdfm dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='Science', subcategory='Biology')
+        self.qset = QuestionSet.objects.create(
+            name='PDFM Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.owner.question_set_editor.add(self.qset)
+        self.packet = Packet.objects.create(
+            question_set=self.qset, packet_name='Packet 1', created_by=self.owner)
+        # Long enough that five of them cross a page, with a guide, a note and
+        # a character Times cannot encode in the first.
+        filler = 'Filler clue text that goes on for a while. ' * 20
+        for n in range(1, 6):
+            extra = ('The architect \\PEero Saarinen\\P ("arrow SAH-ree-nen") built it, '
+                     '\\Nread slowly\\N, and \u03b1 appears. ') if n == 1 else ''
+            Tossup.objects.create(
+                author=self.owner, question_set=self.qset, packet=self.packet,
+                question_type=self.acf_tu, category=self.de, question_number=n,
+                tossup_text='{0}{1}For 10 (*) points, name question {2}.'.format(extra, filler, n),
+                tossup_answer='_Answer{0}_'.format(n),
+                created_date=datetime.now(), last_changed_date=datetime.now())
+        self.client.login(username='pdfm_owner', password='pw')
+
+    def _pdf(self):
+        from pypdf import PdfReader
+        resp = self.client.get('/export_question_set/{0}/pdf/'.format(self.qset.id))
+        self.assertEqual(resp.status_code, 200)
+        zf = self._zip.ZipFile(self._io.BytesIO(resp.content))
+        name = [n for n in zf.namelist() if 'Packet 1' in n][0]
+        return PdfReader(self._io.BytesIO(zf.read(name)))
+
+    def _fonts(self, reader):
+        out = set()
+        for page in reader.pages:
+            res = page.get('/Resources')
+            fonts = res.get('/Font') if res else None
+            for value in (fonts or {}).values():
+                out.add(str(value.get_object().get('/BaseFont')))
+        return out
+
+    def test_the_body_is_set_in_times(self):
+        fonts = self._fonts(self._pdf())
+        self.assertTrue(any('Times' in f for f in fonts), fonts)
+
+    def test_a_pronunciation_guide_is_set_apart_in_a_sans_face(self):
+        fonts = self._fonts(self._pdf())
+        self.assertTrue(any('Helvetica' in f for f in fonts), fonts)
+
+    def test_a_character_times_cannot_carry_falls_back_rather_than_failing(self):
+        reader = self._pdf()
+        self.assertIn('\u03b1', '\n'.join(p.extract_text() or '' for p in reader.pages))
+        self.assertTrue(any('DejaVu' in f for f in self._fonts(reader)), self._fonts(reader))
+
+    def test_no_question_is_split_across_a_page(self):
+        reader = self._pdf()
+        self.assertGreater(len(reader.pages), 1)  # otherwise this proves nothing
+        for page in reader.pages:
+            lines = [l for l in (page.extract_text() or '').splitlines() if l.strip()]
+            if not lines:
+                continue
+            # A page that ends mid-question ends on clue text; one that ends
+            # where a question does ends on its answer or attribution line.
+            self.assertTrue(lines[-1].startswith('<') or lines[-1].startswith('ANSWER:'),
+                            'page ends mid-question: {0!r}'.format(lines[-1]))
+
+
 class EditPacketTitleTests(TestCase):
     """The Edit Packet tab/title names the packet, so several open packets are
     tellable apart."""
@@ -9512,21 +9662,86 @@ class QuestionNoteMarkupTests(TestCase):
             def __init__(self):
                 self.runs = []
                 self._style = ''
+                self._family = ''
+                self._color = (0, 0, 0)
+
+            def set_font(self, name, style, size):
+                self._family, self._style = name, style
+
+            def set_text_color(self, r, g, b):
+                self._color = (r, g, b)
+
+            def write(self, height, text):
+                self.runs.append((self._style, text, self._family, self._color))
+
+        pdf = FakePdf()
+        _RunWriter(pdf).feed(
+            'clue <span class="q-note">note <span class="pg-target">word</span> on</span> after')
+        styles = {t.strip(): st for st, t, _f, _c in pdf.runs if t.strip()}
+        self.assertEqual(styles['clue'], '')
+        self.assertEqual(styles['note'], 'I')
+        self.assertEqual(styles['word'], 'I')      # still inside the note
+        self.assertEqual(styles['after'], '')      # the note ended
+
+    def test_pdf_run_writer_colours_the_way_the_word_export_does(self):
+        """The two exports are meant to be the same document, so a guide, its
+        target word and a note have to come out the same colour in both."""
+        from qems2.qsub.pdf_export import (_RunWriter, GUIDE_GREY, NOTE_GREY,
+                                           PG_TEAL, BLACK, _SANS)
+
+        class FakePdf:
+            def __init__(self):
+                self.runs = []
+                self._family, self._color = '', BLACK
+
+            def set_font(self, name, style, size):
+                self._family = name
+
+            def set_text_color(self, r, g, b):
+                self._color = (r, g, b)
+
+            def write(self, height, text):
+                self.runs.append((text, self._family, self._color))
+
+        pdf = FakePdf()
+        _RunWriter(pdf).feed(
+            'clue <span class="pg-target">Saarinen</span> '
+            '<strong class="pronunciation-guide">("SAH-ree-nen")</strong> '
+            '<span class="q-note">read slowly</span>')
+        seen = {t.strip(): (fam, col) for t, fam, col in pdf.runs if t.strip()}
+        self.assertEqual(seen['clue'][1], BLACK)
+        self.assertEqual(seen['Saarinen'][1], PG_TEAL)
+        self.assertEqual(seen['("SAH-ree-nen")'], (_SANS, GUIDE_GREY))
+        self.assertEqual(seen['read slowly'][1], NOTE_GREY)
+
+    def test_pdf_run_writer_never_bolds_an_aside_inside_a_power_region(self):
+        """A guide or a note inside the bolded power region is still an aside:
+        bolding it made it read as part of the clue."""
+        from qems2.qsub.pdf_export import _RunWriter
+
+        class FakePdf:
+            def __init__(self):
+                self.runs = []
+                self._style = ''
 
             def set_font(self, name, style, size):
                 self._style = style
+
+            def set_text_color(self, r, g, b):
+                pass
 
             def write(self, height, text):
                 self.runs.append((self._style, text))
 
         pdf = FakePdf()
         _RunWriter(pdf).feed(
-            'clue <span class="q-note">note <span class="pg-target">word</span> on</span> after')
-        styles = {text.strip(): style for style, text in pdf.runs if text.strip()}
-        self.assertEqual(styles['clue'], '')
-        self.assertEqual(styles['note'], 'I')
-        self.assertEqual(styles['word'], 'I')      # still inside the note
-        self.assertEqual(styles['after'], '')      # the note ended
+            '<strong>bolded clue '
+            '<strong class="pronunciation-guide">("guide")</strong> '
+            '<span class="q-note">aside</span></strong>')
+        styles = {t.strip(): st for st, t in pdf.runs if t.strip()}
+        self.assertEqual(styles['bolded clue'], 'B')
+        self.assertNotIn('B', styles['("guide")'])
+        self.assertNotIn('B', styles['aside'])
 
     def test_the_character_count_matches_end_to_end_on_a_saved_question(self):
         QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)

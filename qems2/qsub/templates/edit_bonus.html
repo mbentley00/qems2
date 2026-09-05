@@ -276,6 +276,7 @@ $(function () {
 {% endif %}
 {% if bonus %}{% include "_style_check_panel.html" with question_type="bonus" q_id=bonus.id qset_id=qset.id %}{% endif %}
 {% include "_discord_threads.html" %}
+{% include "_order_constraints.html" %}
 {% include "_playtest_results.html" %}
 </div>{# .edit-main #}
 <div class="edit-comments">
@@ -336,8 +337,6 @@ $(function () {
 {% endif %}
 </div>{# .edit-comments #}
 </div>{# .edit-layout #}
-
-{% include "_order_constraints.html" %}
 
 {% include "dialog.html" %}
 {% if bonus and role == "editor" %}{% include "_swap_dialog.html" %}{% endif %}

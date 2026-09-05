@@ -86,7 +86,9 @@
             // The same rich editor the edit pages use, so formatting, paste
             // conversion and pronunciation-guide tools behave identically.
             if (window.QemsRichEditor && window.QemsRichEditor.enhanceField) {
-                window.QemsRichEditor.enhanceField($ta[0], {});
+                // Line breaks allowed, as on the edit pages: reflowing a stored
+                // question is most of what this box is for.
+                window.QemsRichEditor.enhanceField($ta[0], {multiline: true});
             }
         });
 

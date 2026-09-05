@@ -51,7 +51,7 @@
             <tbody>
             {% autoescape off %}
                 {% for tossup in tossups %}
-                <tr>{% include "_question_table_cells.html" with q=tossup qtype="tossup" columns=table_columns edit_url="/edit_tossup/"|add:tossup.id|stringformat:"s" %}</tr>
+                <tr>{% include "_question_table_cells.html" with q=tossup qtype="tossup" columns=table_columns %}</tr>
                 {% endfor %}
             {% endautoescape %}
             </tbody>
@@ -70,7 +70,7 @@
             <tbody>
             {% autoescape off %}
                 {% for bonus in bonuses %}
-                <tr>{% include "_question_table_cells.html" with q=bonus qtype="bonus" columns=table_columns edit_url="/edit_bonus/"|add:bonus.id|stringformat:"s" %}</tr>
+                <tr>{% include "_question_table_cells.html" with q=bonus qtype="bonus" columns=table_columns %}</tr>
                 {% endfor %}
             {% endautoescape %}
             </tbody>

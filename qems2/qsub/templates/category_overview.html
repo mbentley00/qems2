@@ -69,21 +69,29 @@
                 {{ row.bs_in_cat|check_mark_if_100_pct:row.bs_req }} {{ row.bs_in_cat|percent:row.bs_req }}
             </td>
             {% comment %}
-            The category's own tags, grouped by the axis they run along. Editors
-            add and remove them here; the full page is still a click away for
-            the answer lines behind each one.
+            The category's own tags, grouped by the axis they run along. They
+            flow inline rather than one axis per line: this column sits beside
+            six others, and a block apiece pushed the table off the screen.
+
+            Each tag links to its own questions in that category -- from here,
+            "which questions are these?" is the next thing you want, and it was
+            three pages away.
+
+            The add form is behind a toggle for the same reason: eight inputs
+            open on every row, on the chance that somebody adds a tag.
             {% endcomment %}
             <td class="cat-tags-cell">
+                <div class="cat-tag-flow">
                 {% for tg in row.tag_groups %}
-                <div class="cat-tag-axis">
                     {% if tg.name %}<span class="cat-tag-axis-name">{{ tg.label }}</span>{% endif %}
                     {% for entry in tg.tags %}
-                    <span class="cat-tag{% if entry.over %} cat-tag-over{% elif entry.complete %} cat-tag-done{% endif %}"
-                          title="{{ entry.tu_done }} tossups, {{ entry.bs_done }} bonuses{% if entry.tag.has_quota %} &mdash; wants {{ entry.tag.quota_summary }}{% endif %}{% if entry.over %} (over){% endif %}">
-                        {{ entry.tag.name }}<span class="cat-tag-count">{{ entry.count_label }}</span>
+                    <span class="cat-tag{% if entry.over %} cat-tag-over{% elif entry.complete %} cat-tag-done{% endif %}">
+                        <a href="/category_tags/{{ qset.id }}/?category={{ row.name|urlencode }}&amp;tag={{ entry.tag.id }}"
+                           title="{{ entry.tu_done }} tossups, {{ entry.bs_done }} bonuses{% if entry.tag.has_quota %} &mdash; wants {{ entry.tag.quota_summary }}{% endif %}{% if entry.over %} (over){% endif %} &mdash; show these questions"
+                        >{{ entry.tag.name }}<span class="cat-tag-count">{{ entry.count_label }}</span></a>
                         {% if can_edit_tags %}
                         <form action="/category_tags/{{ qset.id }}/" method="post" class="cat-tag-del"
-                              onsubmit="return confirm('Delete the tag '{{ entry.tag.name }}'?');">
+                              onsubmit="return confirm('Delete the tag &#39;{{ entry.tag.name }}&#39;?');">
                             {% csrf_token %}
                             <input type="hidden" name="action" value="delete">
                             <input type="hidden" name="tag_id" value="{{ entry.tag.id }}">
@@ -93,17 +101,23 @@
                         {% endif %}
                     </span>
                     {% endfor %}
-                </div>
                 {% empty %}
-                <span class="cat-tag-none">&mdash;</span>
+                    {% if not can_edit_tags or row.is_group %}<span class="cat-tag-none">&mdash;</span>{% endif %}
                 {% endfor %}
+                {% if row.tag_count %}
+                <a class="cat-tag-more" href="/category_tags/{{ qset.id }}/?category={{ row.name|urlencode }}">all {{ row.tag_count }} &rarr;</a>
+                {% endif %}
                 {% if can_edit_tags and not row.is_group %}
-                <form action="/category_tags/{{ qset.id }}/" method="post" class="cat-tag-add">
+                <button type="button" class="cat-tag-toggle" title="Add a tag to this category">+ tag</button>
+                {% endif %}
+                </div>
+                {% if can_edit_tags and not row.is_group %}
+                <form action="/category_tags/{{ qset.id }}/" method="post" class="cat-tag-add" hidden>
                     {% csrf_token %}
                     <input type="hidden" name="action" value="add">
                     <input type="hidden" name="category_path" value="{{ row.name }}">
                     <input type="hidden" name="next" value="/category_overview/{{ qset.id }}/">
-                    <input type="text" name="name" placeholder="tag" required>
+                    <input type="text" name="tag_name" placeholder="tag" required>
                     <input type="text" name="group_name" list="cat-tag-groups" placeholder="group">
                     <input type="number" name="num_tossups" min="0" value="0" title="Fewest tossups needed (0 = no minimum)">
                     <input type="number" name="max_tossups" min="0" placeholder="max" title="Most tossups allowed (empty = no maximum)">
@@ -113,9 +127,6 @@
                     <input type="number" name="max_questions" min="0" placeholder="max" title="Most questions of either type (empty = no maximum)">
                     <button type="submit" class="button tiny secondary">Add</button>
                 </form>
-                {% endif %}
-                {% if row.tag_count %}
-                <a class="cat-tag-more" href="/category_tags/{{ qset.id }}/?category={{ row.name|urlencode }}">all {{ row.tag_count }} &rarr;</a>
                 {% endif %}
             </td>
         </tr>
@@ -305,31 +316,61 @@
 </datalist>
 
 <style>
-.cat-tags-cell { min-width: 25em; }
-.cat-tag-axis { margin-bottom: 3px; }
-.cat-tag-axis-name { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em;
-    color: var(--qx-muted, #8a8f9c); margin-right: 4px; }
-.cat-tag { display: inline-flex; align-items: center; gap: 4px; margin: 0 4px 3px 0;
-    padding: 1px 7px; border-radius: 10px; font-size: 0.78em;
+.cat-tags-cell { min-width: 16em; max-width: 30em; }
+/* Tags flow together with their axis as a prefix; a line each made this the
+   widest column on a table that already has six others. */
+.cat-tag-flow { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 3px; }
+.cat-tag-axis-name { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--qx-muted, #8a8f9c); }
+.cat-tag { display: inline-flex; align-items: center; margin: 0;
+    padding: 0 5px; border-radius: 9px; font-size: 0.74em; line-height: 1.6;
     background: var(--qx-elevate, #eef2f7); color: var(--qx-ink, #2b2f3a); }
+.cat-tag a { color: inherit; }
+.cat-tag a:hover { text-decoration: underline; }
+.cat-tag-toggle { margin: 0; border: 1px dashed var(--qx-border, #c9cedb); background: none;
+    color: var(--qx-muted, #8a8f9c); border-radius: 9px; padding: 0 6px;
+    font-size: 0.74em; line-height: 1.6; cursor: pointer; }
+.cat-tag-toggle:hover { color: var(--qx-ink, #2b2f3a); }
 .cat-tag-done { background: #e3f0e4; color: #1b5e20; }
 /* Past a ceiling: the tag has too many, which reads differently from unfinished */
 .cat-tag-over { background: #f9e3e0; color: #922b21; }
-.cat-tag-count { color: var(--qx-muted, #8a8f9c); font-size: 0.9em; }
-.cat-tag-del { display: inline; margin: 0; }
-.cat-tag-del button { border: none; background: none; cursor: pointer; padding: 0 0 0 2px;
-    color: var(--qx-muted, #8a8f9c); font-size: 1em; line-height: 1; }
+.cat-tag-count { color: inherit; opacity: 0.7; font-size: 0.9em; margin-left: 3px; }
+/* Inside a flex pill the form has to be a flex item too, or its button sits
+   on its own baseline above the tag name. */
+.cat-tag-del { display: inline-flex; align-items: center; margin: 0; }
+/* Foundation gives every button a 20px bottom margin, which was inflating each
+   pill to twice its text height and pushing the x to the top of it. */
+.cat-tag-del button { border: none; background: none; cursor: pointer; padding: 0 0 0 3px;
+    margin: 0; color: inherit; opacity: 0.45; font-size: 1em; line-height: 1; }
+.cat-tag-del button:focus, .cat-tag:hover .cat-tag-del button { opacity: 1; }
 .cat-tag-del button:hover { color: #c0392b; }
 .cat-tag-none { color: var(--qx-muted, #8a8f9c); }
 .cat-tag-add { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin: 4px 0 0; }
+/* An author `display` beats the browser's own [hidden] rule, so the toggle had
+   no effect until this said so explicitly. */
+.cat-tag-add[hidden] { display: none; }
 .cat-tag-add input[type=text] { width: 7.5em; margin: 0; font-size: 0.8em; height: 26px; }
 /* Wide enough for a two-digit count next to the browser's spinner, which sits
    inside the box and was clipping a single "0". */
 .cat-tag-add input[type=number] { width: 5em; margin: 0; font-size: 0.8em; height: 26px;
     padding-right: 2px; }
 .cat-tag-add button { margin: 0; }
-.cat-tag-more { font-size: 0.75em; }
+/* Pushed to the end of the flow so the tags read as one group. */
+.cat-tag-more { font-size: 0.72em; margin-left: auto; white-space: nowrap; }
 </style>
+<script>
+// The add form is one per category row, so it is opened next to the row you
+// clicked rather than all at once.
+document.addEventListener('click', function (e) {
+    var btn = e.target.closest && e.target.closest('.cat-tag-toggle');
+    if (!btn) { return; }
+    var form = btn.closest('td').querySelector('.cat-tag-add');
+    if (!form) { return; }
+    form.hidden = !form.hidden;
+    if (!form.hidden) { form.querySelector('input[name=tag_name]').focus(); }
+});
+</script>
+
 <style>
 html[data-theme="dark"] .cat-tag-done { background: #1c3527; color: #86d29d; }
 html[data-theme="dark"] .cat-tag-over { background: #3a201d; color: #e8a49b; }

@@ -152,6 +152,7 @@
 
 {% if tossup %}{% include "_style_check_panel.html" with question_type="tossup" q_id=tossup.id qset_id=qset.id %}{% endif %}
 {% include "_discord_threads.html" %}
+{% include "_order_constraints.html" %}
 {% include "_playtest_results.html" %}
 </div>{# .edit-main #}
 <div class="edit-comments">
@@ -214,8 +215,6 @@
 </div>{# .edit-layout #}
 
 <p>Do not include the word ANSWER: in answer lines. See the <a href="/help/#guidelines">formatting guide</a> on the help page.</p>
-
-{% include "_order_constraints.html" %}
 
 {% include "dialog.html" %}
 {% if tossup and role == "editor" %}{% include "_swap_dialog.html" %}{% endif %}

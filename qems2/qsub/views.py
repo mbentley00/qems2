@@ -6508,13 +6508,18 @@ def export_question_set(request, qset_id, output_format):
                     if interlace:
                         write_interlaced_to_doc(document, tossup_qs, bonus_qs)
                         return
+                    # Only label the sections when there are two of them: a
+                    # lone "Tossups" heading implies bonuses somewhere else.
+                    label = bool(tossup_qs) and bool(bonus_qs)
                     if tossup_qs:
-                        document.add_heading('Tossups', level=2)
+                        if label:
+                            document.add_heading('Tossups', level=2)
                         for i, tossup in enumerate(tossup_qs, 1):
                             num = tossup.question_number if tossup.question_number else i
                             add_tossup_to_doc(document, tossup, num)
                     if bonus_qs:
-                        document.add_heading('Bonuses', level=2)
+                        if label:
+                            document.add_heading('Bonuses', level=2)
                         for i, bonus in enumerate(bonus_qs, 1):
                             num = bonus.question_number if bonus.question_number else i
                             add_bonus_to_doc(document, bonus, num)
@@ -11203,12 +11208,16 @@ def _reorder_tags(qset, ids):
             t.save(update_fields=['sort_order'])
 
 
-def _category_question_rows(qset, path, tag_rows):
+def _category_question_rows(qset, path, tag_rows, only_tag=None):
     """Every question in the category at ``path`` with the tags it carries.
 
     The tags offered for assignment are the ones on this page (those at the
     path itself); a tag a question carries from a parent or child path still
     shows, it just cannot be added from here.
+
+    ``only_tag`` narrows the list to the questions carrying that one tag, which
+    is what clicking a tag on the category overview asks for -- "show me these"
+    is a different question from "show me everything here".
     """
     page_tags = [r['tag'] for r in tag_rows]
     page_tag_ids = {t.id for t in page_tags}
@@ -11237,6 +11246,8 @@ def _category_question_rows(qset, path, tag_rows):
             tags = sorted((t for t in q.category_tags.all() if t.question_set_id == qset.id),
                           key=lambda t: (t.group_name, t.sort_order, t.name))
             have = {t.id for t in tags}
+            if only_tag is not None and only_tag not in have:
+                continue
             rows.append({
                 'qtype': qtype,
                 'id': q.id,
@@ -11253,6 +11264,7 @@ def _category_question_rows(qset, path, tag_rows):
             })
     rows.sort(key=lambda r: (r['packet_key'], r['qtype'] != 'tossup'))
     return {'rows': rows,
+            'only_tag': only_tag,
             # The tags any row here can be given, listed once for the page
             # instead of once per row -- see the template.
             'assignable': [{'id': t.id,
@@ -12110,8 +12122,18 @@ def category_tags(request, qset_id):
     # With one category open, the page is also where that category's
     # questions get their tags: every question in it, what it carries, and a
     # way to add or drop a tag without opening each question.
-    focus_questions = _category_question_rows(qset, focus_path, groups[0]['rows'] if groups else []) \
+    # ?tag=<id> narrows the question list to one tag -- where the category
+    # overview sends you when you click a tag there.
+    only_tag = None
+    raw_tag = (request.GET.get('tag') or '').strip()
+    if raw_tag.isdigit():
+        only_tag = CategoryTag.objects.filter(
+            question_set=qset, id=int(raw_tag)).values_list('id', flat=True).first()
+    focus_questions = _category_question_rows(
+        qset, focus_path, groups[0]['rows'] if groups else [], only_tag=only_tag) \
         if focused else None
+    only_tag_obj = (CategoryTag.objects.filter(question_set=qset, id=only_tag).first()
+                    if only_tag else None)
 
     context = {'qset': qset,
                'user': user,
@@ -12122,6 +12144,7 @@ def category_tags(request, qset_id):
                'set_wide_token': SET_WIDE_TOKEN,
                'set_wide_label': SET_WIDE_LABEL,
                'focus_questions': focus_questions,
+               'only_tag': only_tag_obj,
                'assignable_tags': (focus_questions or {}).get('assignable', []),
                'path_choices': path_choices,
                'category_index': category_index,
