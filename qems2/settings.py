@@ -61,6 +61,15 @@ if os.environ.get('DB_HOST'):
             # Azure Database for PostgreSQL requires SSL; 'require' is safe for
             # any managed Postgres. Override with DB_SSLMODE if needed.
             'OPTIONS': {'sslmode': os.environ.get('DB_SSLMODE', 'require')},
+            # Hold the connection open between requests. Without this Django
+            # opens a fresh one every time, and against a managed Postgres that
+            # means a TLS handshake and an authentication round trip before the
+            # page does any work of its own -- a fixed tax on every request,
+            # including the small AJAX ones a page fires several of.
+            'CONN_MAX_AGE': int(os.environ.get('DB_CONN_MAX_AGE', 600)),
+            # A reused connection the server has since dropped would otherwise
+            # surface as an error on the next request that borrowed it.
+            'CONN_HEALTH_CHECKS': True,
         }
     }
 else:

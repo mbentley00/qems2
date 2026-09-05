@@ -143,6 +143,26 @@ class Writer (models.Model):
     def __str__(self):
         return '{0!s} {1!s} ({2!s})'.format(self.user.first_name, self.user.last_name, self.user.username)
 
+def touch_set_activity(qset_id):
+    """Note that something happened to a question in this set.
+
+    Read by the nav's activity badge, which is cached: without a stamp to key
+    on, a change made a moment ago would not show until the cache expired.
+    """
+    if not qset_id:
+        return
+    from django.core.cache import cache
+    import time as _time
+    cache.set('activityver:{0}'.format(qset_id), repr(_time.time()), 24 * 60 * 60)
+
+
+def set_activity_version(qset_id):
+    """The current stamp for a set, or '-' if nothing has been saved since the
+    cache was last cleared."""
+    from django.core.cache import cache
+    return cache.get('activityver:{0}'.format(qset_id)) or '-'
+
+
 class QuestionSet (models.Model):
     name = models.CharField(max_length=200)
     date = models.DateField()
@@ -1445,6 +1465,7 @@ class Tossup (models.Model):
                 .order_by('-id').first())
 
     def save_question(self, edit_type, changer):
+        touch_set_activity(self.question_set_id)
 
         if (self.question_history is None):
             qh = QuestionHistory()
@@ -1854,6 +1875,7 @@ class Bonus(models.Model):
                 .order_by('-id').first())
 
     def save_question(self, edit_type, changer):
+        touch_set_activity(self.question_set_id)
         if (self.question_history is None):
             qh = QuestionHistory()
             qh.save()
@@ -1918,7 +1940,10 @@ class TossupHistory(models.Model):
     def to_html(self):
         output = ''
         output = output + "<p>" + get_formatted_question_html(self.tossup_text, False, True, False, True) + "<br />"
-        output = output + get_formatted_question_html(self.tossup_answer, True, True, False, False) + "<br />"
+        # "ANSWER:" the same as everywhere else the question is shown: without
+        # it a stored version reads as though the answer were another sentence
+        # of the stem. (BonusHistory always labelled its parts.)
+        output = output + "ANSWER: " + get_formatted_question_html(self.tossup_answer, True, True, False, False) + "<br />"
         output = output + "Changed by " + str(self.changer) + " on " + str(self.change_date) + "</p>"
         return output
 

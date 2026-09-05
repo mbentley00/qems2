@@ -28,10 +28,24 @@ def _natural_packet_key(packet):
     return (1 if is_special else 0, number, lower)
 
 
-def sorted_packets(qset):
+def sorted_packets(qset, with_counts=False):
     """Packets in display order: an explicit user-set order (Packet.sort_order)
-    when present, otherwise a natural sort by name with extras/tiebreakers last."""
+    when present, otherwise a natural sort by name with extras/tiebreakers last.
+
+    `with_counts` attaches .tossup_count and .bonus_count to each packet in two
+    queries, for the pages that show how full every packet is; without it those
+    pages counted one packet at a time.
+    """
     packets = list(qset.packet_set.all())
+    if with_counts:
+        from django.db.models import Count
+        tu = dict(qset.tossup_set.exclude(packet=None).values_list('packet_id')
+                  .annotate(n=Count('id')).values_list('packet_id', 'n'))
+        bs = dict(qset.bonus_set.exclude(packet=None).values_list('packet_id')
+                  .annotate(n=Count('id')).values_list('packet_id', 'n'))
+        for p in packets:
+            p.tossup_count = tu.get(p.id, 0)
+            p.bonus_count = bs.get(p.id, 0)
     if any(p.sort_order is not None for p in packets):
         packets.sort(key=lambda p: (p.sort_order is None,
                                     p.sort_order if p.sort_order is not None else 0,
@@ -521,40 +535,39 @@ def attach_question_comments(tossup_dict, bonus_dict):
             question.cached_comments.append(comment)
 
 def get_tossup_and_bonuses_in_set(qset, question_limit=30, preview_only=False):
-    tossup_dict = {}
+    """The newest questions in a set, with their comments attached.
+
+    Only `question_limit` of each kind are fetched. This used to read every
+    question in the set and keep the ones past the limit purely so the comment
+    tab had somewhere to look a question up; on a large set that meant building
+    a hundred thousand model objects in order to show thirty rows.
+    get_comment_tab_list now fetches what it needs by id instead.
+    """
     tossups = []
-    tossup_count = 0
-    for tossup in Tossup.objects.filter(question_set=qset).order_by('-id').select_related(*QUESTION_LIST_RELATED):
-        if (tossup_count < question_limit):
-            tossup.question_length = tossup.character_count()
-            if (preview_only):
-                tossup.tossup_text = preview(tossup.tossup_text)
-                tossup.tossup_answer = preview(get_primary_answer(tossup.tossup_answer))
-            
-            tossups.append(tossup)            
-            tossup_count += 1
-        tossup_dict[tossup.id] = tossup
+    for tossup in (Tossup.objects.filter(question_set=qset).order_by('-id')
+                   .select_related(*QUESTION_LIST_RELATED)[:question_limit]):
+        tossup.question_length = tossup.character_count()
+        if preview_only:
+            tossup.tossup_text = preview(tossup.tossup_text)
+            tossup.tossup_answer = preview(get_primary_answer(tossup.tossup_answer))
+        tossups.append(tossup)
 
-    bonus_dict = {}
     bonuses = []
-    short_bonuses = []
-    bonus_count = 0
-    for bonus in Bonus.objects.filter(question_set=qset).order_by('-id').select_related(*QUESTION_LIST_RELATED):
-        if (bonus_count < question_limit):
-            bonus.question_length = bonus.character_count()
-            if (preview_only):
-                bonus.leadin = preview(bonus.leadin)
-                bonus.part1_text = preview(bonus.part1_text)
-                bonus.part1_answer = preview(get_primary_answer(bonus.part1_answer))
-                bonus.part2_text = preview(bonus.part2_text)
-                bonus.part2_answer = preview(get_primary_answer(bonus.part2_answer))
-                bonus.part3_text = preview(bonus.part3_text)
-                bonus.part3_answer = preview(get_primary_answer(bonus.part3_answer))
-            
-            bonuses.append(bonus)
-            bonus_count += 1
-        bonus_dict[bonus.id] = bonus
+    for bonus in (Bonus.objects.filter(question_set=qset).order_by('-id')
+                  .select_related(*QUESTION_LIST_RELATED)[:question_limit]):
+        bonus.question_length = bonus.character_count()
+        if preview_only:
+            bonus.leadin = preview(bonus.leadin)
+            bonus.part1_text = preview(bonus.part1_text)
+            bonus.part1_answer = preview(get_primary_answer(bonus.part1_answer))
+            bonus.part2_text = preview(bonus.part2_text)
+            bonus.part2_answer = preview(get_primary_answer(bonus.part2_answer))
+            bonus.part3_text = preview(bonus.part3_text)
+            bonus.part3_answer = preview(get_primary_answer(bonus.part3_answer))
+        bonuses.append(bonus)
 
+    tossup_dict = {t.id: t for t in tossups}
+    bonus_dict = {b.id: b for b in bonuses}
     attach_question_comments(tossup_dict, bonus_dict)
 
     return tossups, tossup_dict, bonuses, bonus_dict
@@ -589,13 +602,26 @@ def get_comment_tab_list(tossup_dict, bonus_dict, comment_limit=60, qset=None):
     if qset is not None:
         packet_dict = {p.id: p for p in Packet.objects.filter(question_set=qset)}
 
+    # Which questions count as "this set". Given a set, ask for its question ids
+    # directly rather than for the questions themselves -- the caller no longer
+    # holds them all, and building them just to list their ids is what made this
+    # page slow.
+    if qset is not None:
+        tossup_ids = list(Tossup.objects.filter(question_set=qset)
+                          .values_list('id', flat=True))
+        bonus_ids = list(Bonus.objects.filter(question_set=qset)
+                         .values_list('id', flat=True))
+    else:
+        tossup_ids = list(tossup_dict)
+        bonus_ids = list(bonus_dict)
+
     comment_filter = Q()
-    if tossup_dict:
+    if tossup_ids:
         comment_filter |= Q(content_type_id=tossup_content_type_id,
-                            object_pk__in=[str(pk) for pk in tossup_dict])
-    if bonus_dict:
+                            object_pk__in=[str(pk) for pk in tossup_ids])
+    if bonus_ids:
         comment_filter |= Q(content_type_id=bonus_content_type_id,
-                            object_pk__in=[str(pk) for pk in bonus_dict])
+                            object_pk__in=[str(pk) for pk in bonus_ids])
     if packet_dict:
         comment_filter |= Q(content_type_id=packet_content_type_id,
                             object_pk__in=[str(pk) for pk in packet_dict])
@@ -611,6 +637,22 @@ def get_comment_tab_list(tossup_dict, bonus_dict, comment_limit=60, qset=None):
                 .exclude(id__in=replies_to_resolved)
                 .select_related('user').order_by('-submit_date')[:comment_limit])
     comments = mark_discord_comments(comments)
+
+    # Load the questions these comments are actually on -- at most
+    # `comment_limit` of them, rather than every question in the set.
+    wanted_tu = {int(c.object_pk) for c in comments
+                 if c.content_type_id == tossup_content_type_id}
+    wanted_bs = {int(c.object_pk) for c in comments
+                 if c.content_type_id == bonus_content_type_id}
+    tossup_dict = dict(tossup_dict or {})
+    bonus_dict = dict(bonus_dict or {})
+    missing_tu = wanted_tu - set(tossup_dict)
+    missing_bs = wanted_bs - set(bonus_dict)
+    if missing_tu:
+        tossup_dict.update(Tossup.objects.in_bulk(missing_tu))
+    if missing_bs:
+        bonus_dict.update(Bonus.objects.in_bulk(missing_bs))
+
     for comment in comments:
         if (comment.content_type_id == tossup_content_type_id):
             tossup = tossup_dict[int(comment.object_pk)]
@@ -634,7 +676,17 @@ def get_comment_tab_list(tossup_dict, bonus_dict, comment_limit=60, qset=None):
     return comment_tab_list
 
 def get_category_overview(qset):
-    entries = qset.setwidedistributionentry_set.all().order_by('dist_entry__category', 'dist_entry__subcategory')
+    entries = (qset.setwidedistributionentry_set.select_related('dist_entry')
+               .order_by('dist_entry__category', 'dist_entry__subcategory'))
+
+    # How many questions of each type sit in each category, in two queries
+    # rather than two per category: a set with eighty categories was asking the
+    # database a hundred and sixty times to count what one GROUP BY answers.
+    from django.db.models import Count
+    tu_counts = dict(qset.tossup_set.values_list('category_id')
+                     .annotate(n=Count('id')).values_list('category_id', 'n'))
+    bs_counts = dict(qset.bonus_set.values_list('category_id')
+                     .annotate(n=Count('id')).values_list('category_id', 'n'))
 
     # Build a tree of category stats
     # tree[path_tuple] = {'tu_req': ..., 'tu_in_cat': ..., 'bs_req': ..., 'bs_in_cat': ..., 'category_id': ..., 'is_leaf': bool}
@@ -644,8 +696,8 @@ def get_category_overview(qset):
     for entry in entries:
         tu_required = entry.num_tossups
         bs_required = 0 if tossups_only else entry.num_bonuses
-        tu_written = qset.tossup_set.filter(category=entry.dist_entry).count()
-        bs_written = qset.bonus_set.filter(category=entry.dist_entry).count()
+        tu_written = tu_counts.get(entry.dist_entry_id, 0)
+        bs_written = bs_counts.get(entry.dist_entry_id, 0)
 
         # Build path from category + subcategory parts
         parts = [entry.dist_entry.category]

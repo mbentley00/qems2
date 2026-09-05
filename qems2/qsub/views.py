@@ -1256,7 +1256,7 @@ def edit_question_set(request, qset_id):
                                            'bs_needed': bs_needed,
                                            'tossups': tossups,
                                            'bonuses': bonuses,
-                                           'packets': sorted_packets(qset),
+                                           'packets': sorted_packets(qset, with_counts=True),
                                            'comment_list': comment_tab_list,
                                            'role': role,
                                            'new_activity': new_activity,
@@ -1324,7 +1324,7 @@ def edit_question_set(request, qset_id):
                                'upload_form': QuestionUploadForm(),
                                'tossups': tossups,
                                'bonuses': bonuses,
-                               'packets': sorted_packets(qset),
+                               'packets': sorted_packets(qset, with_counts=True),
                                'comment_tab_list': comment_tab_list,
                                'qset': qset,
                                'role': role,
@@ -1381,12 +1381,16 @@ def categories(request, qset_id, category_id):
     if user not in qset_editors and not qset.is_owner(user) and user not in qset.writer.all():
         message = 'You are not authorized to view this set'
     else:
+        # The table has a tags column; without prefetching it, showing it
+        # costs one query per question in the category.
         tossups = _table_order(qset, Tossup.objects
                                .filter(question_set=qset, category=category_id)
-                               .select_related(*QUESTION_LIST_RELATED))
+                               .select_related(*QUESTION_LIST_RELATED)
+                               .prefetch_related('category_tags'))
         bonuses = _table_order(qset, Bonus.objects
                                .filter(question_set=qset, category=category_id)
-                               .select_related(*QUESTION_LIST_RELATED))
+                               .select_related(*QUESTION_LIST_RELATED)
+                               .prefetch_related('category_tags'))
         attach_question_comments({t.id: t for t in tossups}, {b.id: b for b in bonuses})
 
     return render(request, 'categories.html',
@@ -2348,8 +2352,17 @@ def edit_packet(request, packet_id):
 
     if request.method in ('GET', 'POST'):
         if qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all():
-            tossups = packet.tossup_set.order_by('question_number').all()
-            bonuses = packet.bonus_set.order_by('question_number').all()
+            # The table shows each question's author, editor, category, type
+            # and comments. Without this the page asked the database for every
+            # one of those a row at a time -- 2,500 queries for a 24-question
+            # packet, which is slow anywhere and painful against a managed
+            # Postgres, where each one is a network round trip.
+            tossups = list(packet.tossup_set.order_by('question_number')
+                           .select_related(*QUESTION_LIST_RELATED))
+            bonuses = list(packet.bonus_set.order_by('question_number')
+                           .select_related(*QUESTION_LIST_RELATED))
+            attach_question_comments({t.id: t for t in tossups},
+                                     {b.id: b for b in bonuses})
             if user not in qset.writer.all():
                 read_only = False
 
@@ -2410,13 +2423,29 @@ def edit_packet(request, packet_id):
                     return 'flex', 'This packet already meets the category total, so this subcategory is optional here.'
                 return '', ''
 
+            # How many of this packet's questions sit in each category, in one
+            # query per type. The rows below want this per category and per
+            # subcategory, which was two queries apiece -- 160 of them on a set
+            # with eighty categories, to count a couple of dozen questions.
+            def _counts_by_entry(model):
+                return dict(model.objects.filter(packet=packet)
+                            .values_list('category_id')
+                            .annotate(n=Count('id'))
+                            .values_list('category_id', 'n'))
+
+            tu_by_entry = _counts_by_entry(Tossup)
+            bs_by_entry = _counts_by_entry(Bonus)
+
+            def _in_top(counts, entries):
+                return sum(counts.get(e.dist_entry_id, 0) for e in entries)
+
             tossup_status = []
             bonus_status = []
             for top, swdes in by_top.items():
                 tu_total = sum(s.num_tossups or 0 for s in swdes)
                 bs_total = sum(s.num_bonuses or 0 for s in swdes)
-                tu_in_top = Tossup.objects.filter(packet=packet, category__category=top).count()
-                bs_in_top = Bonus.objects.filter(packet=packet, category__category=top).count()
+                tu_in_top = _in_top(tu_by_entry, swdes)
+                bs_in_top = _in_top(bs_by_entry, swdes)
 
                 # Each entry's share for this packet, worked out first: a
                 # category asks for exactly what its parts add up to, so the
@@ -2451,13 +2480,13 @@ def edit_packet(request, packet_id):
                     if not de.subcategory:
                         continue
                     tu_req, bs_req = entry_reqs[swde.id]
-                    tu_in = Tossup.objects.filter(packet=packet, category=de).count()
+                    tu_in = tu_by_entry.get(de.id, 0)
                     tu_state, tu_note = _sub_status(tu_in, tu_req, tu_top_met)
                     tossup_status.append({
                         'label': de.subcategory, 'is_sub': True,
                         'tu_req': tu_req, 'tu_in_cat': tu_in,
                         'state': tu_state, 'note': tu_note})
-                    bs_in = Bonus.objects.filter(packet=packet, category=de).count()
+                    bs_in = bs_by_entry.get(de.id, 0)
                     bs_state, bs_note = _sub_status(bs_in, bs_req, bs_top_met)
                     bonus_status.append({
                         'label': de.subcategory, 'is_sub': True,
@@ -8819,10 +8848,15 @@ def view_packet(request, packet_id):
         }
 
     tag_names = _tag_names_by_question(qset)
+    # question_set and question_type come along too: rendering a question asks
+    # its set whether guides need quotes and asks a bonus what type it is, and
+    # without them that is two more queries per question on the page.
     packet_tossups = list(packet.tossup_set.order_by('question_number')
-                          .select_related('category', 'author__user', 'editor__user'))
+                          .select_related('category', 'author__user', 'editor__user',
+                                          'question_set', 'question_type'))
     packet_bonuses = list(packet.bonus_set.order_by('question_number')
-                          .select_related('category', 'author__user', 'editor__user'))
+                          .select_related('category', 'author__user', 'editor__user',
+                                          'question_set', 'question_type'))
     tossup_changers = latest_changers(TossupHistory, packet_tossups)
     bonus_changers = latest_changers(BonusHistory, packet_bonuses)
 
@@ -9908,28 +9942,73 @@ def _change_item(model, hist_model, edit_url, rows, q, user, with_role=True):
     return item
 
 
+def _mentions_of_user_in_set(user, qset, since=None):
+    """The user's unresolved @mentions on this set's questions.
+
+    Asked from the mentions end rather than the set's: a person has a handful of
+    mentions, while naming every question in the set meant sending the database
+    a list of eleven thousand ids to find them.
+    """
+    tu_ct = ContentType.objects.get_for_model(Tossup)
+    bs_ct = ContentType.objects.get_for_model(Bonus)
+    mentions = (CommentMention.objects.filter(mentioned=user)
+                .filter(comment__content_type__in=(tu_ct, bs_ct))
+                .exclude(comment__resolution__resolved=True))
+    if since is not None:
+        mentions = mentions.filter(created_date__gt=since)
+
+    rows = list(mentions.values_list('id', 'comment__content_type_id', 'comment__object_pk'))
+    if not rows:
+        return []
+    wanted = {tu_ct.id: set(), bs_ct.id: set()}
+    for _mid, ct_id, pk in rows:
+        try:
+            wanted.setdefault(ct_id, set()).add(int(pk))
+        except (TypeError, ValueError):
+            continue
+    in_set = {
+        tu_ct.id: set(Tossup.objects.filter(question_set=qset, id__in=wanted[tu_ct.id])
+                      .values_list('id', flat=True)),
+        bs_ct.id: set(Bonus.objects.filter(question_set=qset, id__in=wanted[bs_ct.id])
+                      .values_list('id', flat=True)),
+    }
+    keep = []
+    for mid, ct_id, pk in rows:
+        try:
+            if int(pk) in in_set.get(ct_id, ()):
+                keep.append(mid)
+        except (TypeError, ValueError):
+            continue
+    return keep
+
+
 def _new_activity_count(user, qset):
     """Count activity (mentions + others' changes to your questions) newer than
-    the last time the user viewed their activity feed for this set."""
+    the last time the user viewed their activity feed for this set.
+
+    Cached for a minute. This runs from the nav context processor, so every page
+    in the app pays for it, and answering it honestly means reading the set's
+    questions and their history. The "last seen" time is part of the key, so
+    opening the activity feed clears the badge immediately rather than a minute
+    later; new activity arriving meanwhile shows up a moment late, which is what
+    a badge is for.
+    """
     seen = ActivitySeen.objects.filter(writer=user, question_set=qset).first()
     last = seen.last_seen if seen else None
 
-    tu_ct = ContentType.objects.get_for_model(Tossup)
-    bs_ct = ContentType.objects.get_for_model(Bonus)
-    tu_ids = [str(i) for i in qset.tossup_set.values_list('id', flat=True)]
-    bs_ids = [str(i) for i in qset.bonus_set.values_list('id', flat=True)]
+    key = 'navactivity:{0}:{1}:{2}:{3}'.format(
+        user.id, qset.id, last.isoformat() if last else '-',
+        set_activity_version(qset.id))
+    hit = cache.get(key)
+    if hit is not None:
+        return hit
 
-    mentions = CommentMention.objects.filter(mentioned=user).filter(
-        Q(comment__content_type=tu_ct, comment__object_pk__in=tu_ids) |
-        Q(comment__content_type=bs_ct, comment__object_pk__in=bs_ids)
-    ).exclude(comment__resolution__resolved=True)
-    if last is not None:
-        mentions = mentions.filter(created_date__gt=last)
-    count = mentions.count()
+    count = len(_mentions_of_user_in_set(user, qset, since=last))
     # Same rule as the feed, so the badge never promises items the page won't
     # show (and the cap matches the number the feed lists).
     own, watched = _activity_feeds(user, qset, since=last)
     count += len(own) + len(watched)
+    cache.set(key, count, 60)
     return count
 
 

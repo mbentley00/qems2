@@ -845,6 +845,16 @@ $(function () {
         return (isFirst && showFirstClue()) ? text : '||' + text + '||';
     }
 
+    // Bold a stretch of the power region.
+    //
+    // Discord cannot nest ** inside **, and the region can already contain
+    // some: QEMS's _x_ becomes __**x**__ and \Bx\B becomes **x**. Inside a
+    // bolded region both are redundant -- the text is bold either way -- so the
+    // inner pair is dropped and the underline, which is not redundant, stays.
+    function boldPowerText(text) {
+        return '**' + text.replace(/\*\*/g, '') + '**';
+    }
+
     // How many sentences at the front of the question are only a note to the
     // moderator or players. A note is not a clue -- it is what the reader says
     // before the question starts -- so it must not use up the one sentence the
@@ -879,9 +889,13 @@ $(function () {
             // clue -- any note in front of it comes along, since it is not a
             // clue and hiding it would tell a reader nothing. The bold run is
             // unaffected either way: power is about scoring, not hiding.
-            result = '**' + beforeChunks.map(function (c) {
-                return spoil(c.text, c.sentence <= noteLead);
-            }).join(' ') + '**';
+            // Bold each chunk inside its own spoiler rather than wrapping the
+            // whole run: Discord parses ||...|| as a node of its own, and a **
+            // spanning several of them mis-pairs -- the bold escaped past the
+            // power mark and swallowed a ** from the answer line.
+            result = beforeChunks.map(function (c) {
+                return spoil(boldPowerText(c.text), c.sentence <= noteLead);
+            }).join(' ');
 
             // Post-power: spoiler only, and never the opening.
             if (afterChunks.length > 0) {
