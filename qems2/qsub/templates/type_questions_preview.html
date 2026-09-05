@@ -52,12 +52,11 @@
             {% endif %}
 
             {% if category_errors %}
-            <div class="alert-box alert">
-                <strong>These questions can't be submitted yet — every question needs a
-                category tag from this set's distribution.</strong>
-                <ul style="margin: 0.5rem 0 0 1.2rem;">
-                    {% for err in category_errors %}<li>{{ err }}</li>{% endfor %}
-                </ul>
+            <div class="alert-box warning" id="tq-category-warning">
+                <strong>Some questions have no category.</strong> Every question needs one
+                from this set's distribution. Pick one below on each question marked
+                <em>no category</em> &mdash; or go back and add a
+                {Category - Subcategory} tag to the answer line.
             </div>
             {% endif %}
 
@@ -70,26 +69,19 @@
                         &#123;{{ tossup.category|safe}}&#125;
                     {% else %}
                         <span class="label alert">no category</span>
+                        {% include "_tq_category_picker.html" with prefix="tossup" idx=forloop.counter0 %}
                     {% endif %}<br>
                     Type: {{ tossup.question_type|safe}}
                 </p>
                 {% if tossup.structured_preview %}{% include "_structure_preview.html" with preview=tossup.structured_preview %}{% endif %}
-                {% if tossup.tag_choices %}{% with qidx=forloop.counter0 %}
-                <div class="tq-tags">
-                    <span class="tq-tags-head">Tags</span>
-                    {% for section in tossup.tag_choices %}{% for g in section.groups %}{% for item in g.items %}
-                    <label class="tq-tag{% if item.checked %} tq-tag-checked{% endif %}{% if item.over %} tq-tag-over{% elif item.complete %} tq-tag-done{% endif %}"
-                           title="{% if g.name %}{{ g.label|escape }} &middot; {% endif %}{{ item.label|default:'No quota'|escape }}">
-                        <input type="checkbox" name="tossup-tags-{{ qidx }}" value="{{ item.tag.id }}"{% if item.checked %} checked{% endif %}>
-                        {{ item.tag.name|escape }}
-                    </label>
-                    {% endfor %}{% endfor %}{% endfor %}
+                {# Always present, even when empty: a category chosen above fills it in. #}
+                <div class="tq-tags" data-tags-for="tossup-tags-{{ forloop.counter0 }}">
+                    {% include "_tq_tag_chips.html" with tag_choices=tossup.tag_choices prefix="tossup" idx=forloop.counter0 %}
                 </div>
-                {% endwith %}{% endif %}
                 {% include "_preview_checks.html" with issues=tossup.style_issues dups=tossup.dup_matches repeats=tossup.batch_repeats %}
                 <input type="hidden" name="tossup-text-{{ forloop.counter0 }}" value="{{ tossup.tossup_text|force_escape }}">
                 <input type="hidden" name="tossup-answer-{{ forloop.counter0 }}" value="{{ tossup.tossup_answer|force_escape }}">
-                <input type="hidden" name="tossup-category-{{ forloop.counter0 }}" value="{{ tossup.category|force_escape|escape }}">
+                {% if tossup.category %}<input type="hidden" name="tossup-category-{{ forloop.counter0 }}" value="{{ tossup.category|force_escape|escape }}">{% endif %}
                 <input type="hidden" name="tossup-type-{{ forloop.counter0 }}" value="{{ tossup.question_type|force_escape }}">
                 {% endfor %}
             {% endautoescape %}
@@ -98,25 +90,17 @@
             {% autoescape off %}
                 {% for bonus in bonuses %}
                 {{ bonus|bonus_html_verbose }}
-                {% if not bonus.category %}<p><span class="label alert">no category</span></p>{% endif %}
+                {% if not bonus.category %}<p><span class="label alert">no category</span>
+                    {% include "_tq_category_picker.html" with prefix="bonus" idx=forloop.counter0 %}</p>{% endif %}
                 {% for preview in bonus.structured_preview %}{% include "_structure_preview.html" with preview=preview label=preview.label %}{% endfor %}
 
 
-                {% if bonus.tag_choices %}{% with qidx=forloop.counter0 %}
-                <div class="tq-tags">
-                    <span class="tq-tags-head">Tags</span>
-                    {% for section in bonus.tag_choices %}{% for g in section.groups %}{% for item in g.items %}
-                    <label class="tq-tag{% if item.checked %} tq-tag-checked{% endif %}{% if item.over %} tq-tag-over{% elif item.complete %} tq-tag-done{% endif %}"
-                           title="{% if g.name %}{{ g.label|escape }} &middot; {% endif %}{{ item.label|default:'No quota'|escape }}">
-                        <input type="checkbox" name="bonus-tags-{{ qidx }}" value="{{ item.tag.id }}"{% if item.checked %} checked{% endif %}>
-                        {{ item.tag.name|escape }}
-                    </label>
-                    {% endfor %}{% endfor %}{% endfor %}
+                <div class="tq-tags" data-tags-for="bonus-tags-{{ forloop.counter0 }}">
+                    {% include "_tq_tag_chips.html" with tag_choices=bonus.tag_choices prefix="bonus" idx=forloop.counter0 %}
                 </div>
-                {% endwith %}{% endif %}
                 {% include "_preview_checks.html" with issues=bonus.style_issues dups=bonus.dup_matches repeats=bonus.batch_repeats %}
                 <input type="hidden" name="bonus-leadin-{{ forloop.counter0 }}" value="{{ bonus.leadin|force_escape }}">
-                <input type="hidden" name="bonus-category-{{ forloop.counter0 }}" value="{{ bonus.category|force_escape|escape }}">
+                {% if bonus.category %}<input type="hidden" name="bonus-category-{{ forloop.counter0 }}" value="{{ bonus.category|force_escape|escape }}">{% endif %}
                 <input type="hidden" name="bonus-type-{{ forloop.counter0 }}" value="{{ bonus.question_type|force_escape }}">
                 <input type="hidden" name="bonus-part1-{{ forloop.counter0 }}" value="{{ bonus.part1_text|force_escape }}">
                 <input type="hidden" name="bonus-answer1-{{ forloop.counter0 }}" value="{{ bonus.part1_answer|force_escape }}">
@@ -137,17 +121,78 @@
             {# Type Questions requires a category on every question; complete_upload checks it. #}
             <input type="hidden" name="require-categories" value="1" />
             <ul class="button-group right">
-                {# No Submit while a question is missing its category — the server refuses it anyway. #}
-                {% if not category_errors %}
-                <li><input type="submit" class="button primary" value="Submit" /></li>
-                {% endif %}
+                {% comment %}
+                Submit stays on the page now that a missing category can be fixed
+                here; it is disabled until every question has one, and the server
+                refuses the post anyway.
+                {% endcomment %}
+                <li><input type="submit" class="button primary" id="tq-submit" value="Submit"
+                           {% if category_errors %}disabled{% endif %} /></li>
                 <li><a href="#" onclick="history.back(); return false;" class="button secondary">Back to Editing</a></li>
             </ul>
         </div>
     </div>
 </form>
 
+<script>
+$(function () {
+    var $form = $('#tq-submit').closest('form');
+
+    // A category chosen here decides which tags the question can carry, so the
+    // chips are fetched for it -- a question that parsed without a category had
+    // none to show.
+    function loadTags($select) {
+        var field = $select.data('tags-field');
+        var $slot = $('[data-tags-for="' + field + '"]');
+        var entry = $select.find('option:selected').data('entry');
+        if (!$slot.length) { return; }
+        if (!entry) { $slot.empty(); return; }
+        $.getJSON('/typed_question_tags/' + $form.find('[name=qset-id]').val() + '/',
+                  {category: entry, field: field},
+                  function (resp) { $slot.html((resp && resp.html) || ''); });
+    }
+
+    // Submit waits until every question that needs a category has one.
+    function refreshSubmit() {
+        var missing = $('.tq-category-picker select').filter(function () {
+            return !$(this).val();
+        }).length;
+        $('#tq-submit').prop('disabled', missing > 0);
+        $('#tq-category-warning').toggle(missing > 0);
+    }
+
+    $form.on('change', '.tq-category-picker select', function () {
+        loadTags($(this));
+        refreshSubmit();
+    });
+    refreshSubmit();
+
+    // Tags are optional, but forgetting them is the usual way a batch arrives
+    // untagged -- and this is the last screen where ticking one is a click.
+    $form.on('submit', function () {
+        var untagged = [];
+        $('.tq-tags').each(function () {
+            var $slot = $(this);
+            if (!$slot.find('input[type=checkbox]').length) { return; }  // nothing on offer
+            if ($slot.find('input[type=checkbox]:checked').length) { return; }
+            var field = $slot.data('tags-for') || '';
+            var m = /^(tossup|bonus)-tags-(\d+)$/.exec(field);
+            if (m) { untagged.push(m[1].charAt(0).toUpperCase() + m[1].slice(1) + ' ' + (+m[2] + 1)); }
+        });
+        if (!untagged.length) { return true; }
+        return window.confirm(
+            untagged.length + ' question' + (untagged.length === 1 ? '' : 's') +
+            ' will be submitted with no category tag:\n\n' + untagged.join(', ') +
+            '\n\nSubmit anyway?');
+    });
+});
+</script>
+
 <style>
+/* Picking a category for a question that arrived without one. */
+.tq-category-picker { display: inline-flex; align-items: center; gap: 6px; margin-left: 6px; }
+.tq-category-picker select { margin: 0; height: auto; padding: 2px 22px 2px 6px; font-size: 0.85rem;
+    width: auto; max-width: 22em; }
 /* Tags a typed question can be given before it is created, so a batch does not
    have to be walked again question by question afterwards. */
 .tq-tags { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin: 4px 0 8px; }

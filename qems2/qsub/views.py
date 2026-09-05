@@ -4891,6 +4891,7 @@ def type_questions(request, qset_id=None):
                 return render(request, 'type_questions_preview.html',
                                          {'tossups': tossups,
                                           'bonuses': bonuses,
+                                          'category_choices': _category_choices(qset),
                                           'tossup_errors': tossup_errors,
                                           'bonus_errors': bonus_errors,
                                           'category_errors': category_errors,
@@ -4995,6 +4996,57 @@ def _answer_preview(text, limit=60):
     """Short, markup-free answer for an error message."""
     plain = strip_markup(text or '').strip()
     return (plain[:limit] + '…') if len(plain) > limit else (plain or '(no answer)')
+
+
+def _category_choices(qset):
+    """The categories a typed question may be filed under: the label
+    complete_upload matches on, plus the entry id the tag lookup needs.
+
+    Taken from the whole distribution, which is what complete_upload validates
+    against -- offering only the set-wide rows would leave out categories the
+    server would have accepted.
+    """
+    entries = (DistributionEntry.objects.filter(distribution_id=qset.distribution_id)
+               .order_by('category', 'subcategory'))
+    return [{'id': e.id, 'label': str(e)} for e in entries]
+
+
+@login_required
+def typed_question_tags(request, qset_id):
+    """The tag chips for one category, for a question being typed.
+
+    The Type Questions preview asks for these when a category is chosen there:
+    which tags a question may carry follows from its category, so a question
+    that parsed without one has nothing to show until it has been given one.
+    """
+    user = request.user.writer
+    qset = QuestionSet.objects.get(id=qset_id)
+    if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+        return HttpResponse(json.dumps({'html': ''}), content_type='application/json')
+
+    raw = (request.GET.get('category') or '').strip()
+    entry = None
+    if raw.isdigit():
+        # Only a category of this set's own distribution: the id comes from a
+        # form field, so it is the caller's word for it.
+        entry = DistributionEntry.objects.filter(
+            id=int(raw), distribution_id=qset.distribution_id).first()
+    if entry is None:
+        return HttpResponse(json.dumps({'html': ''}), content_type='application/json')
+
+    # The chips have to post under the same field the page already uses for
+    # this question, so the caller names it and it is checked rather than
+    # trusted.
+    m = re.match(r'^(tossup|bonus)-tags-(\d+)$', (request.GET.get('field') or '').strip())
+    if not m:
+        return HttpResponse(json.dumps({'html': ''}), content_type='application/json')
+
+    from django.template.loader import render_to_string
+    html = render_to_string('_tq_tag_chips.html',
+                            {'tag_choices': build_tag_checkboxes(qset, None, entry),
+                             'prefix': m.group(1), 'idx': m.group(2)},
+                            request=request)
+    return HttpResponse(json.dumps({'html': html}), content_type='application/json')
 
 
 def _uncategorized_errors(tossups, bonuses):

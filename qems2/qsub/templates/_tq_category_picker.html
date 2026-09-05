@@ -1,0 +1,20 @@
+{% comment %}
+A category for a question that was typed without one.
+
+The preview used to name the problem and send you back to the text to retype a
+{Category - Subcategory} tag; this posts under the same field name the parsed
+questions use, so complete_upload sees no difference between a category that
+came from the text and one chosen here.
+
+Context: prefix ("tossup"/"bonus") and idx (the question's index), which name
+the fields; category_choices (from _category_choices).
+{% endcomment %}
+<span class="tq-category-picker">
+    <select name="{{ prefix }}-category-{{ idx }}" data-tags-field="{{ prefix }}-tags-{{ idx }}"
+            aria-label="Category for this question">
+        <option value="">Choose a category&hellip;</option>
+        {% for c in category_choices %}
+        <option value="{{ c.label }}" data-entry="{{ c.id }}">{{ c.label }}</option>
+        {% endfor %}
+    </select>
+</span>

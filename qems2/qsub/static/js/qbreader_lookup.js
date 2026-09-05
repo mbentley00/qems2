@@ -1,7 +1,10 @@
-/* Frequency lookup against the qbreader database for highlighted text.
+/* Frequency lookup against the qbreader database for a phrase.
  *
- * Select a phrase in a question field (the editor, a textarea, or a saved
- * question's preview) and a small popup reports how often it appears in the
+ * Two ways in. Selecting a phrase in a saved question's preview raises a small
+ * popup on its own; selecting one in the editor does not, because there
+ * selecting text is part of writing and a popup on every selection was in the
+ * way -- the DB button on the toolbar asks for the same lookup when you want
+ * it. Either way the answer is how often the phrase appears in the
  * qbreader database — a fast read on whether a clue is fresh or worn out —
  * with a link to the full qbreader results for the term.
  *
@@ -39,6 +42,24 @@
         if (node.nodeType === 3) { node = node.parentNode; }
         if (!$(node).closest('.rich-editor, .anchor-region').length) { return ''; }
         return s.toString();
+    }
+
+    // Where a selection may raise the popup on its own: the rendered question
+    // above the form. The editor and its fields are excluded on purpose -- you
+    // select text there to change it, not to ask about it, and a popup on every
+    // such selection was noise. The DB button still reads those selections.
+    function selectionIsInPreview() {
+        var el = document.activeElement;
+        if (el && (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') &&
+                el.selectionStart !== el.selectionEnd) {
+            return false;
+        }
+        var s = window.getSelection();
+        if (!s || s.isCollapsed || !s.rangeCount) { return false; }
+        var node = s.getRangeAt(0).commonAncestorContainer;
+        if (node.nodeType === 3) { node = node.parentNode; }
+        if ($(node).closest('.rich-editor').length) { return false; }
+        return !!$(node).closest('.anchor-region').length;
     }
 
     function cleanTerm(text) {
@@ -200,7 +221,10 @@
         $(document).on('mouseup', function (e) { mouse.x = e.clientX; mouse.y = e.clientY; });
         $(document).on('selectionchange', function () {
             clearTimeout(timer);
-            if (!cleanTerm(selectedQuestionText())) { hide(); return; }
+            if (!selectionIsInPreview() || !cleanTerm(selectedQuestionText())) {
+                hide();
+                return;
+            }
             timer = setTimeout(lookup, DEBOUNCE_MS);
         });
         $(document).on('keydown', function (e) { if (e.key === 'Escape') { hide(); } });

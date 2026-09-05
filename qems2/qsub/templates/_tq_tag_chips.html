@@ -1,0 +1,23 @@
+{% comment %}
+The category tags a typed question can be given, as compact chips.
+
+Shared by the Type Questions preview (rendered with the page) and by
+/typed_question_tags/, which re-renders them when a question's category is
+chosen on the preview itself -- the tags on offer depend on the category, so a
+question that arrives without one has none until it gets one.
+
+Context: tag_choices (from build_tag_checkboxes), prefix ("tossup"/"bonus")
+and idx (the question's index), which name the field these post under. The name
+is built here rather than passed in because Django's `add` filter returns "" for
+string + int, so composing it at the call site silently produced nothing.
+{% endcomment %}
+{% if tag_choices %}
+<span class="tq-tags-head">Tags</span>
+{% for section in tag_choices %}{% for g in section.groups %}{% for item in g.items %}
+<label class="tq-tag{% if item.checked %} tq-tag-checked{% endif %}{% if item.over %} tq-tag-over{% elif item.complete %} tq-tag-done{% endif %}"
+       title="{% if g.name %}{{ g.label|escape }} &middot; {% endif %}{{ item.label|default:'No quota'|escape }}">
+    <input type="checkbox" name="{{ prefix }}-tags-{{ idx }}" value="{{ item.tag.id }}"{% if item.checked %} checked{% endif %}>
+    {{ item.tag.name|escape }}
+</label>
+{% endfor %}{% endfor %}{% endfor %}
+{% endif %}

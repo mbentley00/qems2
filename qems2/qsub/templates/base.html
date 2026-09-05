@@ -70,12 +70,12 @@
             <form class="app-search" id="app-search-form" method="get" action="/search/">
                 <span class="app-search-field">
                     <i class="fa fa-magnifying-glass"></i>
-                    <input type="search" name="q" id="app-search-input" placeholder="Search answer lines, press enter for full text search" autocomplete="off">
+                    <input type="search" name="q" id="app-search-input" placeholder="Search answer lines, press enter for full text search in a new tab" autocomplete="off">
                     <span class="app-search-kbd">Ctrl K</span>
                     <div class="app-search-results" id="app-search-results"></div>
                 </span>
                 <button type="button" class="app-search-newtab" id="app-search-newtab"
-                        title="Full text search in a new tab (Ctrl+Enter)" aria-label="Search in a new tab">
+                        title="Full text search in a new tab (or press Enter)" aria-label="Search in a new tab">
                     <i class="fa fa-magnifying-glass-arrow-right"></i>
                 </button>
                 <input type="hidden" name="qset" value="{{ nav_active.id }}">
@@ -193,8 +193,9 @@
                     sXhr.send();
                 }, 160);
             });
-            // The icon button (and Ctrl/Cmd+Enter) runs the same full text search
-            // the form would, but in a new tab so you keep your place.
+            // The full text search opens in a new tab, from the icon button or
+            // from Enter: you search from wherever you are working, and losing
+            // that page to the results was the wrong trade.
             function sOpenNewTab() {
                 var q = sInput.value.trim();
                 var url = '/search/?qset=' + encodeURIComponent(sQset)
@@ -207,7 +208,7 @@
             if (sNewTab) { sNewTab.addEventListener('click', sOpenNewTab); }
             sInput.addEventListener('keydown', function (e) {
                 if (e.key === 'Escape') { sHide(); }
-                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); sOpenNewTab(); }
+                if (e.key === 'Enter') { e.preventDefault(); sOpenNewTab(); }
             });
             document.addEventListener('click', function (e) { if (!sForm.contains(e.target)) { sHide(); } });
         }
@@ -219,9 +220,9 @@
 {% endif %}
 
     <script src="{% static 'js/paste_convert.js' %}?v=37"></script>
-    <script src="{% static 'js/rich_editor.js' %}?v=19"></script>
+    <script src="{% static 'js/rich_editor.js' %}?v=20"></script>
     <script src="{% static 'js/comment_strike.js' %}?v=3"></script>
-    <script src="{% static 'js/qbreader_lookup.js' %}?v=1"></script>
+    <script src="{% static 'js/qbreader_lookup.js' %}?v=2"></script>
     <script src="{% static 'foundation/js/foundation.min.js' %}"></script>
     <script>
         $(document).foundation({

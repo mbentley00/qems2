@@ -7360,22 +7360,83 @@ class PostSubmitFlowTests(TestCase):
         self.assertEqual(Tossup.objects.filter(question_set=self.qset).count(), 0)
         self.assertIn('Nothing was submitted', resp.content.decode())
 
+    UNTAGGED_TYPED = ('1. This is a typed tossup about a thing that is (*) notable. '
+                      'For 10 points, name this test.\nANSWER: _the test_\n')
+
+    def _preview(self, questions):
+        return self.client.post('/type_questions/{0}/'.format(self.qset.id), {
+            'questions': questions, 'qset_id': self.qset.id}).content.decode()
+
     def test_type_questions_preview_blocks_submit_without_a_category(self):
-        untagged = ('1. This is a typed tossup about a thing that is (*) notable. '
-                    'For 10 points, name this test.\nANSWER: _the test_\n')
-        body = self.client.post('/type_questions/{0}/'.format(self.qset.id), {
-            'questions': untagged, 'qset_id': self.qset.id}).content.decode()
-        self.assertIn('be submitted yet', body)
-        self.assertNotIn('value="Submit"', body)
+        body = self._preview(self.UNTAGGED_TYPED)
+        # Submit is on the page but disabled: the category can be supplied here
+        # now, so the button has something to wait for.
+        self.assertIn('id="tq-submit"', body)
+        self.assertIn('id="tq-submit" value="Submit"\n                           disabled',
+                      body.replace('\r\n', '\n'))
+        self.assertIn('have no category', body)
+
+    def test_the_preview_offers_a_category_picker_for_an_untagged_question(self):
+        body = self._preview(self.UNTAGGED_TYPED)
+        self.assertIn('name="tossup-category-0"', body)
+        self.assertIn('data-tags-field="tossup-tags-0"', body)
+        # Posting under the same field name means nothing downstream can tell a
+        # category chosen here from one that came out of the answer line.
+        self.assertIn('<option value="History - European"', body)
+
+    def test_a_question_that_has_a_category_keeps_its_hidden_field(self):
+        tagged = ('1. This is a typed tossup about a thing that is (*) notable. '
+                  'For 10 points, name this test.\n'
+                  'ANSWER: _the test_ {History - European}\n')
+        body = self._preview(tagged)
+        self.assertIn('name="tossup-category-0" value="History - European"', body)
+        self.assertNotIn('<select name="tossup-category-0"', body)
 
     def test_type_questions_preview_allows_a_tagged_question(self):
         tagged = ('1. This is a typed tossup about a thing that is (*) notable. '
                   'For 10 points, name this test.\n'
                   'ANSWER: _the test_ {History - European}\n')
-        body = self.client.post('/type_questions/{0}/'.format(self.qset.id), {
-            'questions': tagged, 'qset_id': self.qset.id}).content.decode()
-        self.assertNotIn('be submitted yet', body)
+        body = self._preview(tagged)
+        self.assertNotIn('have no category', body)
         self.assertIn('value="Submit"', body)
+        # The button itself carries no disabled attribute; the word appears
+        # elsewhere on the page, so look at the input.
+        submit = body[body.find('id="tq-submit"'):body.find('id="tq-submit"') + 120]
+        self.assertNotIn('disabled', submit)
+
+    def test_the_tags_endpoint_answers_for_a_category_of_this_set(self):
+        import json as _json
+        entry = DistributionEntry.objects.filter(
+            distribution=self.qset.distribution, category='History',
+            subcategory='European').first()
+        CategoryTag.objects.create(question_set=self.qset,
+                                   category_path='History - European',
+                                   name='Renaissance', num_tossups=1)
+        resp = self.client.get('/typed_question_tags/{0}/'.format(self.qset.id),
+                               {'category': entry.id, 'field': 'tossup-tags-0'})
+        html = _json.loads(resp.content.decode())['html']
+        self.assertIn('Renaissance', html)
+        # The chips must post under the field the page already uses for it.
+        self.assertIn('name="tossup-tags-0"', html)
+
+    def test_the_tags_endpoint_refuses_a_field_name_it_did_not_expect(self):
+        import json as _json
+        entry = DistributionEntry.objects.filter(
+            distribution=self.qset.distribution, category='History',
+            subcategory='European').first()
+        for field in ('evil', 'tossup-text-0', 'tossup-tags-x'):
+            resp = self.client.get('/typed_question_tags/{0}/'.format(self.qset.id),
+                                   {'category': entry.id, 'field': field})
+            self.assertEqual(_json.loads(resp.content.decode())['html'], '', field)
+
+    def test_the_tags_endpoint_refuses_a_category_from_another_distribution(self):
+        import json as _json
+        other_dist = Distribution.objects.create(name='Someone else dist')
+        other = DistributionEntry.objects.create(
+            distribution=other_dist, category='Science', subcategory='Biology')
+        resp = self.client.get('/typed_question_tags/{0}/'.format(self.qset.id),
+                               {'category': other.id, 'field': 'tossup-tags-0'})
+        self.assertEqual(_json.loads(resp.content.decode())['html'], '')
 
     def _num_cols(self, body):
         """Row-number cells, counting the spare row at the bottom of each grid
