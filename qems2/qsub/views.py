@@ -5516,6 +5516,9 @@ def _apply_move(question, qtype, dest_qset, post):
 
     raw_author = (post.get('author') or '').strip()
     author = Writer.objects.filter(id=int(raw_author)).first() if raw_author.isdigit() else None
+    # A question must have an author; if the form didn't name a usable one,
+    # keep the one it has rather than failing the save outright.
+    author = author or question.author
 
     wanted = {int(v) for v in post.getlist('tags') if str(v).isdigit()}
 

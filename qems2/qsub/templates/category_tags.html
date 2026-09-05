@@ -228,8 +228,10 @@ its one category, since that is the whole page then.
 </div>{# /tag-groups-region #}
 
 {% if focus_questions and can_edit %}
-{# The tags a question on this page can be given, once for the page rather than
-   once per row. The selects read it when they are opened. #}
+{% comment %}
+The tags a question on this page can be given, once for the page rather than
+once per row. The selects read it when they are opened.
+{% endcomment %}
 {{ assignable_tags|json_script:"tag-assignable" }}
 {% endif %}
 <div id="tag-questions-region">

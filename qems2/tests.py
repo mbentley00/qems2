@@ -6548,7 +6548,7 @@ class SetWideCategoryTagTests(TestCase):
 
     def test_creating_a_set_wide_tag_through_the_page(self):
         resp = self.client.post('/category_tags/{0}/'.format(self.qset.id), {
-            'action': 'add', 'category_path': '__SET__', 'name': 'Needs PG',
+            'action': 'add', 'category_path': '__SET__', 'tag_name': 'Needs PG',
             'group_name': 'Production', 'num_tossups': '0', 'num_bonuses': '0',
             'num_questions': '0'})
         self.assertEqual(resp.status_code, 200)
@@ -6558,7 +6558,7 @@ class SetWideCategoryTagTests(TestCase):
 
     def test_a_tag_still_needs_a_scope(self):
         self.client.post('/category_tags/{0}/'.format(self.qset.id), {
-            'action': 'add', 'category_path': '', 'name': 'Nameless scope',
+            'action': 'add', 'category_path': '', 'tag_name': 'Nameless scope',
             'num_tossups': '0', 'num_bonuses': '0', 'num_questions': '0'})
         self.assertFalse(CategoryTag.objects.filter(
             question_set=self.qset, name='Nameless scope').exists())
@@ -6732,7 +6732,9 @@ class InlineDocumentEditTests(TestCase):
     def test_the_poll_reports_each_questions_revision(self):
         resp = self.client.get('/packet_revision/{0}/'.format(self.packet.id))
         data = json.loads(resp.content)
-        self.assertEqual(data['questions']['tossup-{0}'.format(self.tu.id)],
+        # The poll carries the revision and how many changes stand behind it,
+        # so the page can tell "someone else edited this" from "you did".
+        self.assertEqual(data['questions']['tossup-{0}'.format(self.tu.id)]['rev'],
                          self._revision(self.tu))
         self.assertIn('bonus-{0}'.format(self.bn.id), data['questions'])
 
@@ -12185,7 +12187,7 @@ class CategoryTagGroupingTests(TestCase):
         self.client.login(username='ctg_owner', password='pw')
 
     def _add(self, name, group='', path='History - European', **extra):
-        data = {'action': 'add', 'category_path': path, 'name': name,
+        data = {'action': 'add', 'category_path': path, 'tag_name': name,
                 'group_name': group, 'num_tossups': 1, 'num_bonuses': 1}
         data.update(extra)
         return self.client.post('/category_tags/{0}/'.format(self.qset.id), data)
@@ -12345,7 +12347,7 @@ class CategoryTagEditingTests(TestCase):
             question_set=self.qset, group_name='Time')]
 
     def test_a_tag_can_be_renamed_and_recounted(self):
-        self._post(action='edit', tag_id=self.china.id, name='Greater China', group_name='Location',
+        self._post(action='edit', tag_id=self.china.id, tag_name='Greater China', group_name='Location',
                    num_tossups=1, num_bonuses=2, num_questions=4)
         tag = CategoryTag.objects.get(id=self.china.id)
         self.assertEqual((tag.name, tag.num_tossups, tag.num_bonuses, tag.num_questions),
@@ -12353,12 +12355,12 @@ class CategoryTagEditingTests(TestCase):
         self.assertEqual(tag.tossups.count(), 1)   # assignments survive a rename
 
     def test_renaming_onto_an_existing_tag_is_refused(self):
-        resp = self._post(action='edit', tag_id=self.china.id, name='Pre-500 CE', group_name='Location')
+        resp = self._post(action='edit', tag_id=self.china.id, tag_name='Pre-500 CE', group_name='Location')
         self.assertContains(resp, 'already a tag called')
         self.assertEqual(CategoryTag.objects.get(id=self.china.id).name, 'China')
 
     def test_a_tag_can_change_group(self):
-        self._post(action='edit', tag_id=self.china.id, name='China', group_name='Region',
+        self._post(action='edit', tag_id=self.china.id, tag_name='China', group_name='Region',
                    num_tossups=2, num_bonuses=0, num_questions=0)
         self.assertEqual(CategoryTag.objects.get(id=self.china.id).group_name, 'Region')
 
@@ -12405,12 +12407,12 @@ class CategoryTagEditingTests(TestCase):
 
     def test_a_new_tag_joins_a_hand_ordered_group_at_the_end(self):
         self._post(action='move', tag_id=self.pre.id, direction='up')
-        self._post(action='add', category_path=self.path, name='1453-1700', group_name='Time',
+        self._post(action='add', category_path=self.path, tag_name='1453-1700', group_name='Time',
                    num_tossups=1, num_bonuses=0)
         self.assertEqual(self._time_order()[-1], '1453-1700')
 
     def test_a_new_tag_in_an_untouched_group_stays_alphabetical(self):
-        self._post(action='add', category_path=self.path, name='Africa', group_name='Location',
+        self._post(action='add', category_path=self.path, tag_name='Africa', group_name='Location',
                    num_tossups=1, num_bonuses=0)
         self.assertEqual([t.name for t in CategoryTag.objects.filter(
             question_set=self.qset, group_name='Location')], ['Africa', 'China'])
@@ -12423,8 +12425,10 @@ class CategoryTagEditingTests(TestCase):
         by_id = {r['id']: r for r in fq['rows']}
         self.assertEqual([t.name for t in by_id[self.tu.id]['tags']], ['China'])
         self.assertTrue(by_id[self.tu2.id]['untagged'])
-        self.assertNotIn(self.china, by_id[self.tu.id]['addable'])
-        self.assertIn(self.china, by_id[self.tu2.id]['addable'])
+        assignable = {a['id'] for a in fq['assignable']}
+        self.assertIn(self.china.id, assignable)
+        self.assertIn(self.china, by_id[self.tu.id]['tags'])
+        self.assertNotIn(self.china, by_id[self.tu2.id]['tags'])
         self.assertContains(resp, '1 without a tag')
 
     def test_the_whole_set_page_has_no_question_list(self):
@@ -12463,6 +12467,8 @@ class MovedQuestionTagTests(TestCase):
         self.a, self.b = mk('MQT A'), mk('MQT B')
         for q in (self.a, self.b):
             q.editor.add(self.owner)
+            SetWideDistributionEntry.objects.create(
+                question_set=q, dist_entry=self.de, num_tossups=2, num_bonuses=2)
         self.tu = Tossup.objects.create(
             question_set=self.a, question_type=self.acf, category=self.de, author=self.owner,
             tossup_text='This person. (*) end.', tossup_answer='_X_',
@@ -12476,8 +12482,20 @@ class MovedQuestionTagTests(TestCase):
         self.client.login(username='mqt_owner', password='pw')
 
     def _move(self):
-        resp = self.client.post('/move_tossup/{0}/{1}/'.format(self.a.id, self.tu.id),
-                                {'move_sets': self.b.id})
+        # Choosing the destination only gets you the confirmation screen, which
+        # is where what the question carries is decided. Post its own defaults
+        # back, the way someone who accepts what it proposes would.
+        url = '/move_tossup/{0}/{1}/'.format(self.a.id, self.tu.id)
+        resp = self.client.post(url, {'move_sets': self.b.id})
+        self.assertEqual(resp.status_code, 200)
+        ctx = resp.context
+        data = {'move_sets': self.b.id, 'confirm': '1',
+                'tags': [t['tag'].id for t in ctx['dest_tags'] if t['checked']]}
+        if ctx['selected_category_id']:
+            data['category'] = ctx['selected_category_id']
+        if ctx['selected_author_id']:
+            data['author'] = ctx['selected_author_id']
+        resp = self.client.post(url, data)
         self.assertEqual(resp.status_code, 200)
         self.tu.refresh_from_db()
         self.assertEqual(self.tu.question_set_id, self.b.id)
@@ -12973,7 +12991,7 @@ class CategoryOverviewTagTests(TestCase):
 
     def test_an_editor_can_add_a_tag_from_the_overview(self):
         resp = self.client.post('/category_tags/{0}/'.format(self.qset.id), {
-            'action': 'add', 'category_path': 'History - European', 'name': 'Iberia',
+            'action': 'add', 'category_path': 'History - European', 'tag_name': 'Iberia',
             'group_name': 'Location', 'num_tossups': 1, 'num_bonuses': 0,
             'next': '/category_overview/{0}/'.format(self.qset.id)})
         self.assertEqual(resp.status_code, 302)
@@ -13003,7 +13021,7 @@ class CategoryOverviewTagTests(TestCase):
         self.client.logout()
         self.client.login(username='cot_writer', password='pw')
         self.client.post('/category_tags/{0}/'.format(self.qset.id), {
-            'action': 'add', 'category_path': 'History - European', 'name': 'Sneaky',
+            'action': 'add', 'category_path': 'History - European', 'tag_name': 'Sneaky',
             'next': '/category_overview/{0}/'.format(self.qset.id)})
         self.assertFalse(CategoryTag.objects.filter(name='Sneaky').exists())
 
@@ -13037,7 +13055,7 @@ class CategoryTagMaximumTests(TestCase):
 
     def _post(self, **extra):
         data = {'action': 'add', 'category_path': 'History - European',
-                'name': 'This Empire Indicator', 'group_name': 'Subject',
+                'tag_name': 'This Empire Indicator', 'group_name': 'Subject',
                 'num_tossups': 0, 'num_bonuses': 0, 'num_questions': 0}
         data.update(extra)
         return self.client.post('/category_tags/{0}/'.format(self.qset.id), data)
@@ -13132,13 +13150,13 @@ class CategoryTagMaximumTests(TestCase):
         self._post(max_tossups=7)
         tag = self._tag()
         url = '/category_tags/{0}/'.format(self.qset.id)
-        self.client.post(url, {'action': 'edit', 'tag_id': tag.id, 'name': tag.name,
+        self.client.post(url, {'action': 'edit', 'tag_id': tag.id, 'tag_name': tag.name,
                                'group_name': tag.group_name, 'num_tossups': 0,
                                'num_bonuses': 0, 'num_questions': 0, 'max_tossups': 4,
                                'show_in_output': '1'})
         tag.refresh_from_db()
         self.assertEqual(tag.max_tossups, 4)
-        self.client.post(url, {'action': 'edit', 'tag_id': tag.id, 'name': tag.name,
+        self.client.post(url, {'action': 'edit', 'tag_id': tag.id, 'tag_name': tag.name,
                                'group_name': tag.group_name, 'num_tossups': 0,
                                'num_bonuses': 0, 'num_questions': 0, 'max_tossups': '',
                                'show_in_output': '1'})
