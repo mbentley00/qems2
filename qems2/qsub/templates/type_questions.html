@@ -136,23 +136,13 @@ $(function () {
             }
         }
 
-        // Walk backward from cursor line to find nearest ANSWER: line
-        var answerLineIdx = -1;
-        var ansRegex = /^answer/i;
-        for (var i = cursorLine; i >= 0; i--) {
-            if (ansRegex.test(lines[i].trim())) {
-                answerLineIdx = i;
-                break;
-            }
-        }
-
+        // The same rule the rich editor uses, from the same place, so the two
+        // paths cannot drift apart.
+        var answerLineIdx = window.QemsRichEditor
+            ? window.QemsRichEditor.answerLineFor(lines, cursorLine) : -1;
         if (answerLineIdx >= 0) {
-            var tagRegex = /\{.+\}\s*$/;
-            if (tagRegex.test(lines[answerLineIdx])) {
-                lines[answerLineIdx] = lines[answerLineIdx].replace(tagRegex, tag);
-            } else {
-                lines[answerLineIdx] = lines[answerLineIdx].trimEnd() + ' ' + tag;
-            }
+            lines[answerLineIdx] = window.QemsRichEditor.placeTagOnLine(
+                lines[answerLineIdx], tag);
             textarea.value = lines.join('\n');
         } else {
             textarea.value = text.slice(0, cursorPos) + tag + text.slice(cursorPos);

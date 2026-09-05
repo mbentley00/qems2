@@ -518,6 +518,7 @@ $(function () {
         if (textarea.id) {
             registry[textarea.id] = {
                 root: $editor[0], syncDown: syncDown, resyncUp: resyncUp,
+                multiline: multiline,
                 getSavedRange: function () { return savedRange; }
             };
         }
@@ -530,6 +531,44 @@ $(function () {
     // plain-textarea handling). Uses the caret saved before focus moved to the
     // tag button, and inserts via execCommand so the native undo stack stays
     // intact (direct DOM edits broke undo and ignored the caret).
+    // Where a category tag belongs in a run of typed questions: at the end of
+    // the answer line of the question the caret is in. Looks back first (the
+    // caret is usually somewhere in the stem above), then forward for a
+    // question being typed from the top down. Returns -1 when the box holds no
+    // answer line at all.
+    function answerLineFor(lines, cursorLine) {
+        var isAnswer = /^answer/i;
+        var i;
+        for (i = Math.min(cursorLine, lines.length - 1); i >= 0; i--) {
+            if (isAnswer.test((lines[i] || '').trim())) { return i; }
+        }
+        for (i = cursorLine + 1; i < lines.length; i++) {
+            if (isAnswer.test((lines[i] || '').trim())) { return i; }
+        }
+        return -1;
+    }
+
+    // Put the tag on that line, replacing whatever category was there before:
+    // clicking a second category means you changed your mind, not that the
+    // question has two.
+    function placeTagOnLine(line, tag) {
+        var existing = /\{[^{}]*\}\s*$/;
+        if (existing.test(line)) { return line.replace(existing, tag); }
+        return line.replace(/\s+$/, '') + ' ' + tag;
+    }
+
+    // Which line of the editor the caret sits on. Multiline editors keep one
+    // <div> per line, so the caret's line is the index of the line element it
+    // is inside.
+    function caretLineIndex(editor, range) {
+        if (!range || !editor.contains(range.startContainer)) { return -1; }
+        var node = range.startContainer;
+        while (node && node.parentNode !== editor) { node = node.parentNode; }
+        if (!node) { return -1; }
+        var idx = Array.prototype.indexOf.call(editor.childNodes, node);
+        return idx < 0 ? -1 : idx;
+    }
+
     function insertCategoryTag(textareaId, tag) {
         var reg = registry[textareaId];
         if (!reg) { return false; }
@@ -538,6 +577,40 @@ $(function () {
 
         var sel = window.getSelection();
         var range = reg.getSavedRange && reg.getSavedRange();
+
+        // A run of typed questions: the tag goes at the end of the relevant
+        // answer line rather than at the caret, which is usually still in the
+        // stem the writer was reading.
+        var $ta = $('#' + textareaId);
+        if (reg.multiline && $ta.length) {
+            reg.syncDown();
+            var lines = String($ta.val() || '').split('\n');
+            var cursorLine = caretLineIndex(editor, range);
+            if (cursorLine < 0) { cursorLine = lines.length - 1; }
+            var target = answerLineFor(lines, cursorLine);
+            if (target >= 0) {
+                lines[target] = placeTagOnLine(lines[target], tag);
+                $ta.val(lines.join('\n'));
+                reg.resyncUp();
+                // Leave the caret at the end of the line the tag went on, so
+                // the writer can see where it landed.
+                var lineEl = editor.childNodes[target];
+                if (lineEl) {
+                    var r = document.createRange();
+                    r.selectNodeContents(lineEl);
+                    r.collapse(false);
+                    sel.removeAllRanges();
+                    sel.addRange(r);
+                    // resyncUp rebuilt the editor, so the remembered caret
+                    // points at nodes that no longer exist. Save the new one
+                    // the same way a click does, or the next tag would find no
+                    // caret and fall back to the last question in the box.
+                    $(editor).trigger('keyup');
+                }
+                return true;
+            }
+        }
+
         if (range && editor.contains(range.startContainer)) {
             sel.removeAllRanges();
             sel.addRange(range);
@@ -566,6 +639,10 @@ $(function () {
     window.QemsRichEditor = {
         get: function (textareaId) { return registry[textareaId] || null; },
         insertCategoryTag: insertCategoryTag,
+        // Shared with the plain-textarea fallback on the Type Questions page,
+        // so both agree on where a category tag belongs.
+        answerLineFor: answerLineFor,
+        placeTagOnLine: placeTagOnLine,
         // Enhance a field the page built after load (a structured answer row
         // added by its + button).
         enhanceField: function (field, opts) {
