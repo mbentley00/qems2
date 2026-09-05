@@ -579,13 +579,13 @@ $(function () {
 
     /* ---------- Wire up the pages ---------- */
 
-    // Add-tossup / add-bonus and edit-tossup / edit-bonus pages: per-field editors.
-    // Edit pages allow line breaks (you sometimes need to reflow a stored
-    // question); the add pages stay single-line.
+    // Add-tossup / add-bonus and edit-tossup / edit-bonus pages: per-field
+    // editors, all of which take line breaks. Writing a question is the same
+    // job as reflowing one -- you paste a draft, you break a clue apart to look
+    // at it -- so Enter works the same way on both.
     var $qForm = $('#add-tossups, #add-bonuses, #edit-tossup, #edit-bonus').first();
-    var allowLineBreaks = $qForm.is('#edit-tossup, #edit-bonus');
     $qForm.find(FIELD_SELECTOR).each(function () {
-        enhance(this, allowLineBreaks);
+        enhance(this, true);
     });
 
     // Structured answer lines: every text field is rich, so a writer sees the
