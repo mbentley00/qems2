@@ -8362,6 +8362,88 @@ class InterlacedExportTests(TestCase):
             self.assertIn(needle, joined)
 
 
+class ShuffledQuestionTableTests(TestCase):
+    """"Shuffle the question tables" has to actually shuffle them: the setting
+    saved and the page said "Shuffled", but no view ever read it."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('shuf_owner', password='pw', email='sh@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='shuf dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='Science', subcategory='Biology')
+        self.qset = QuestionSet.objects.create(
+            name='Shuf Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.owner.question_set_editor.add(self.qset)
+        SetWideDistributionEntry.objects.create(
+            question_set=self.qset, dist_entry=self.de, num_tossups=12, num_bonuses=0)
+        # Enough that a shuffle is overwhelmingly unlikely to repeat itself.
+        for n in range(1, 13):
+            Tossup.objects.create(
+                author=self.owner, question_set=self.qset, question_type=self.acf,
+                category=self.de, question_number=n,
+                tossup_text='Stem {0}. (*) end.'.format(n),
+                tossup_answer='_Answer{0}_'.format(n),
+                created_date=datetime.now(), last_changed_date=datetime.now())
+        self.client.login(username='shuf_owner', password='pw')
+        self.url = '/categories/{0}/{1}/'.format(self.qset.id, self.de.id)
+
+    def _order(self):
+        import re
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 200)
+        ids = re.findall(r'href="/edit_tossup/(\d+)/"', resp.content.decode('utf-8'))
+        # Each row links to its question more than once (preview and answer).
+        out = []
+        for i in ids:
+            if not out or out[-1] != i:
+                out.append(i)
+        return out
+
+    def _set_shuffle(self, on):
+        self.qset.question_table_random_order = on
+        self.qset.save(update_fields=['question_table_random_order'])
+
+    def test_off_means_the_same_order_every_visit(self):
+        self._set_shuffle(False)
+        first = self._order()
+        self.assertEqual(len(first), 12)
+        self.assertEqual(first, self._order())
+        self.assertEqual(first, self._order())
+
+    def test_on_means_a_different_order_across_visits(self):
+        self._set_shuffle(True)
+        seen = {tuple(self._order()) for _ in range(8)}
+        self.assertGreater(len(seen), 1, 'every visit came back in the same order')
+
+    def test_shuffling_reorders_and_never_loses_a_question(self):
+        self._set_shuffle(True)
+        for _ in range(5):
+            order = self._order()
+            self.assertEqual(sorted(order), sorted(self._reference()))
+
+    def _reference(self):
+        return [str(t.id) for t in Tossup.objects.filter(question_set=self.qset)]
+
+    def test_all_questions_honours_it_too(self):
+        self._set_shuffle(True)
+        import re
+        seen = set()
+        for _ in range(8):
+            resp = self.client.get('/view_all_questions/{0}/'.format(self.qset.id))
+            self.assertEqual(resp.status_code, 200)
+            # This page's links carry no trailing slash, unlike the category
+            # page's -- match without one or the regex finds nothing and the
+            # test passes on an empty tuple.
+            found = re.findall(r'/edit_tossup/(\d+)', resp.content.decode('utf-8'))
+            self.assertEqual(len(set(found)), 12)
+            seen.add(tuple(found))
+        self.assertGreater(len(seen), 1)
+
+
 class ExportSectionHeadingTests(TestCase):
     """A "Tossups" heading tells a reader the bonuses are somewhere else. When
     the packet has only one kind, that is a lie, so neither export prints it."""

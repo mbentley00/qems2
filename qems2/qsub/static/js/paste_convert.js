@@ -704,6 +704,88 @@ $(function () {
         return result;
     }
 
+    // A spoiler a reader has to open is worth roughly a clue. Past this a
+    // single reveal is a paragraph, which is what the sentence-only split gave
+    // for the long ones.
+    var SPOILER_CHUNK_MAX = 160;
+    // Below this a piece reads as a fragment rather than a clue, so it is kept
+    // with its neighbour instead of standing alone.
+    var SPOILER_CHUNK_MIN = 45;
+
+    /**
+     * Whether Discord's inline markup is closed in this piece of text.
+     *
+     * A chunk cut inside **bold** would leave the opening ** in one spoiler
+     * and its partner in the next, and Discord prints both literally.
+     */
+    function markupBalanced(text) {
+        function count(hay, needle) { return hay.split(needle).length - 1; }
+        // Blank the doubled forms first so the leftover single characters can
+        // be counted without them.
+        var singles = text.replace(/\*\*/g, '\u0000').replace(/__/g, '\u0001');
+        return count(text, '**') % 2 === 0 &&
+               count(text, '__') % 2 === 0 &&
+               count(singles, '*') % 2 === 0 &&
+               count(singles, '_') % 2 === 0;
+    }
+
+    /**
+     * Cut one over-long sentence at its clause breaks.
+     *
+     * Greedy: keep adding clauses until the next one would take the piece past
+     * SPOILER_CHUNK_MAX. A sentence with nowhere sensible to break is left
+     * whole -- hard-wrapping prose mid-clause reads worse than a long reveal.
+     */
+    function splitLongSentence(sentence) {
+        if (sentence.length <= SPOILER_CHUNK_MAX) { return [sentence]; }
+        // After a comma, semicolon or colon; before a dash, which introduces
+        // what follows it rather than ending what precedes it.
+        var re = /[;:,]\s+|\s+(?=[\u2014-]{1,2}\s)/g;
+        var points = [], m;
+        while ((m = re.exec(sentence)) !== null) {
+            points.push(m.index + m[0].length);
+        }
+        if (!points.length) { return [sentence]; }
+
+        var chunks = [], start = 0;
+        for (var i = 0; i < points.length; i++) {
+            var here = points[i];
+            var next = (i + 1 < points.length) ? points[i + 1] : sentence.length;
+            var piece = sentence.substring(start, here);
+            if (next - start > SPOILER_CHUNK_MAX &&
+                    piece.trim().length >= SPOILER_CHUNK_MIN &&
+                    markupBalanced(piece)) {
+                chunks.push(piece.trim());
+                start = here;
+            }
+        }
+        var tail = sentence.substring(start).trim();
+        if (tail) {
+            if (chunks.length && tail.length < SPOILER_CHUNK_MIN) {
+                chunks[chunks.length - 1] += ' ' + tail;
+            } else {
+                chunks.push(tail);
+            }
+        }
+        return chunks.length ? chunks : [sentence];
+    }
+
+    /**
+     * The pieces a question's text is spoilered in, as
+     * [{text, sentence}] -- `sentence` being which sentence the piece came
+     * from, so anything decided per sentence (the readable opening) still
+     * covers all of that sentence's pieces.
+     */
+    function splitIntoSpoilerChunks(text) {
+        var out = [];
+        splitIntoSentences(text).forEach(function (sentence, si) {
+            splitLongSentence(sentence).forEach(function (piece) {
+                out.push({ text: piece, sentence: si });
+            });
+        });
+        return out;
+    }
+
     /**
      * Get author and category from the form select fields.
      */
@@ -790,27 +872,27 @@ $(function () {
             var beforePower = text.substring(0, powerIdx + 3); // include (*)
             var afterPower = text.substring(powerIdx + 3).trim();
 
-            var beforeSentences = splitIntoSentences(qemsToDiscordMarkup(beforePower));
-            var afterSentences = splitIntoSentences(qemsToDiscordMarkup(afterPower));
+            var beforeChunks = splitIntoSpoilerChunks(qemsToDiscordMarkup(beforePower));
+            var afterChunks = splitIntoSpoilerChunks(qemsToDiscordMarkup(afterPower));
 
             // Pre-power: bold + spoiler. The readable opening is the first
             // clue -- any note in front of it comes along, since it is not a
             // clue and hiding it would tell a reader nothing. The bold run is
             // unaffected either way: power is about scoring, not hiding.
-            result = '**' + beforeSentences.map(function (s, i) {
-                return spoil(s, i <= noteLead);
+            result = '**' + beforeChunks.map(function (c) {
+                return spoil(c.text, c.sentence <= noteLead);
             }).join(' ') + '**';
 
             // Post-power: spoiler only, and never the opening.
-            if (afterSentences.length > 0) {
-                result += ' ' + afterSentences.map(function (s) {
-                    return spoil(s, false);
+            if (afterChunks.length > 0) {
+                result += ' ' + afterChunks.map(function (c) {
+                    return spoil(c.text, false);
                 }).join(' ');
             }
         } else {
-            var sentences = splitIntoSentences(qemsToDiscordMarkup(text));
-            result = sentences.map(function (s, i) {
-                return spoil(s, i <= noteLead);
+            var chunks = splitIntoSpoilerChunks(qemsToDiscordMarkup(text));
+            result = chunks.map(function (c) {
+                return spoil(c.text, c.sentence <= noteLead);
             }).join(' ');
         }
 

@@ -1341,6 +1341,19 @@ def edit_question_set(request, qset_id):
                                'message': message,
                                'message_class': message_class})
 
+def _table_order(qset, questions):
+    """The order a set's question tables list in.
+
+    Shuffled when the set asks for it, so the questions at the end of a long
+    category get looked at as often as the ones at the top; otherwise left in
+    whatever order the query returned, which is stable and roughly by age.
+    """
+    questions = list(questions)
+    if qset.question_table_random_order:
+        random.shuffle(questions)
+    return questions
+
+
 @login_required
 def categories(request, qset_id, category_id):
     user = request.user.writer
@@ -1368,10 +1381,12 @@ def categories(request, qset_id, category_id):
     if user not in qset_editors and not qset.is_owner(user) and user not in qset.writer.all():
         message = 'You are not authorized to view this set'
     else:
-        tossups = list(Tossup.objects.filter(question_set=qset).filter(category=category_id)
-                       .select_related(*QUESTION_LIST_RELATED))
-        bonuses = list(Bonus.objects.filter(question_set=qset).filter(category=category_id)
-                       .select_related(*QUESTION_LIST_RELATED))
+        tossups = _table_order(qset, Tossup.objects
+                               .filter(question_set=qset, category=category_id)
+                               .select_related(*QUESTION_LIST_RELATED))
+        bonuses = _table_order(qset, Bonus.objects
+                               .filter(question_set=qset, category=category_id)
+                               .select_related(*QUESTION_LIST_RELATED))
         attach_question_comments({t.id: t for t in tossups}, {b.id: b for b in bonuses})
 
     return render(request, 'categories.html',
@@ -1736,7 +1751,9 @@ def view_all_questions(request, qset_id):
                                   'message_class': 'alert-box alert'})        
     else:
         tossups, tossup_dict, bonuses, bonus_dict = get_tossup_and_bonuses_in_set(qset, question_limit=10000, preview_only=True)
-            
+        tossups = _table_order(qset, tossups)
+        bonuses = _table_order(qset, bonuses)
+
     return render(request, 'view_all_questions.html',
         {
         'user': user,

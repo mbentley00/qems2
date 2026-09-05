@@ -1,5 +1,4 @@
 {% extends "base.html" %}
-{% load cache %}
 
 {% block header %}
 {% include "header.html" %}
@@ -9,7 +8,6 @@
 {% load filters %}
 {% load comments %}
 
-{% cache 500 allquestions qset %}
 
     {% block title %}{% if qset %}{{ qset.name }} - All Questions - QEMS3{% else %}All Questions - QEMS3{% endif %}{% endblock %}
 
@@ -111,5 +109,5 @@
 
     {% endblock %}
     
-{% endcache %}
+
 

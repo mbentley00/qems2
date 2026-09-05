@@ -944,6 +944,13 @@ body.grid-page .app-content { max-width: none; }
     border-collapse: separate; border-spacing: 0; overflow: hidden; background: #fff; }
 .app-content table:not(.packet-grid) thead th { background: #fafafc; color: var(--qx-muted);
     text-transform: uppercase; font-size: .68rem; letter-spacing: .06em; border-bottom: 1px solid var(--qx-border); }
+/* A tablesorter header sorts on click, but it looked like ordinary text: the
+   I-beam said "select me", not "click me". The library marks every sortable
+   header with .header, so this follows what is actually sortable rather than
+   every table that happens to be a .tablesorter. */
+.app-content table thead th.header,
+.app-content table thead th.headerSortUp,
+.app-content table thead th.headerSortDown { cursor: pointer; user-select: none; }
 .app-content table:not(.packet-grid) td, .app-content table:not(.packet-grid) th { border: none; border-bottom: 1px solid #f1f1f4; }
 .app-content table:not(.packet-grid) tr:last-child td { border-bottom: none; }
 /* Dashboard tab tables (Recent Comments/Questions, Writers, Packets) should use

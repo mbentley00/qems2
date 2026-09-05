@@ -1,5 +1,4 @@
 {% extends "base.html" %}
-{% load cache %}
 
 {% block header %}
 {% include "header.html" %}
@@ -11,8 +10,13 @@
 
 {% block title %}{% if category %}{{ category }} - QEMS3{% else %}Category View - QEMS3{% endif %}{% endblock %}
 
-{% cache 500 categorycache category qset qset.question_table_columns qset.question_table_random_order %}
-
+{% comment %}
+This page used to wrap its content in {% templatetag openblock %} cache {% templatetag closeblock %}. It never ran: the tag
+sat around a {% templatetag openblock %} block {% templatetag closeblock %} in a template that extends another, and Django
+renders such a block straight from the block context rather than through
+whatever encloses it. It cached nothing, and it read as an explanation for a
+page that looked stale.
+{% endcomment %}
     {% block content %}
 
     <h3 class="page-header">{{ category }}</h3>
@@ -90,5 +94,3 @@
 html[data-theme="dark"] .qtable-tag { background: var(--qx-elevate); color: var(--qx-text); }
 </style>
     {% endblock %}
-    
-{% endcache %}
