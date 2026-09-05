@@ -1,0 +1,194 @@
+{% comment %}
+Where a question's placement rules live, on its edit page.
+
+"These two must not share a packet" or "this one gives that one away" is
+something a writer knows the moment they notice it and, until now, had nowhere
+to put -- so it was remembered until packetization, or it was not. Recording it
+here lets the packet grid and the style check say when the set breaks it.
+
+Context: qset, constraint_qtype, constraint_qid, constraint_rows, read_only.
+{% endcomment %}
+{% if constraint_qid %}
+<div class="oc-panel" id="order-constraints"
+     data-qtype="{{ constraint_qtype }}" data-qid="{{ constraint_qid }}"
+     data-qset="{{ qset.id }}">
+    <div class="oc-head">Placement rules
+        <small>Where this question has to sit relative to another. Checked on the
+        packet grid and in the style check.</small></div>
+
+    <div class="oc-list">
+        {% for row in constraint_rows %}
+        <div class="oc-row{% if row.missing %} oc-gone{% endif %}" data-id="{{ row.constraint.id }}">
+            {% if row.violated %}<span class="oc-bad" title="The set breaks this rule right now">&#9888; broken</span>{% endif %}
+            <span class="oc-phrase">Must be <strong>{{ row.phrase }}</strong></span>
+            {% if row.missing %}
+            <span class="oc-other oc-muted">a question that no longer exists</span>
+            {% else %}
+            <a class="oc-other" href="{{ row.other_edit_url }}">{{ row.other_answer }}</a>
+            <span class="oc-muted">{% if row.other_packet %}{{ row.other_packet }}{% else %}not in a packet &mdash; nothing to check yet{% endif %}</span>
+            {% endif %}
+            {% if row.constraint.note %}<span class="oc-note">{{ row.constraint.note }}</span>{% endif %}
+            {% if not read_only %}<button type="button" class="oc-del" title="Remove this rule">&times;</button>{% endif %}
+        </div>
+        {% empty %}
+        <p class="oc-muted oc-empty">No placement rules on this question.</p>
+        {% endfor %}
+    </div>
+
+    {% if not read_only %}
+    <div class="oc-add">
+        <select class="oc-kind">
+            <option value="apart">must be at least</option>
+            <option value="before">must come before</option>
+            <option value="after">must come after</option>
+        </select>
+        <input type="number" class="oc-packets" min="1" value="1" title="How many packets apart">
+        <span class="oc-packets-unit">packet(s) away from</span>
+        <button type="button" class="button tiny secondary oc-pick">Choose a question&hellip;</button>
+        <input type="text" class="oc-note" placeholder="Why (optional)" maxlength="200">
+        <button type="button" class="button tiny primary oc-save" disabled>Add rule</button>
+        <span class="oc-chosen"></span>
+    </div>
+    <div class="oc-flash"></div>
+    {% endif %}
+</div>
+
+<div id="oc-pick-dialog" title="Find the other question" style="display:none;">
+    <p class="oc-muted">Searches every question in this set, the same way swapping does.</p>
+    <div style="margin-bottom:8px;">
+        <label style="display:inline; margin-right:12px;"><input type="radio" name="oc-pick-type" value="tossup" checked> Tossups</label>
+        <label style="display:inline;"><input type="radio" name="oc-pick-type" value="bonus"> Bonuses</label>
+    </div>
+    <input type="text" id="oc-pick-search" placeholder="Type to search by answer or text&hellip;" style="width:100%;">
+    <div id="oc-pick-results"></div>
+</div>
+
+<style>
+.oc-panel { border: 1px solid var(--qx-border, #e9e9ef); border-radius: 8px;
+    background: var(--qx-card, #fff); padding: 10px 14px; margin: 14px 0; }
+.oc-head { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--qx-muted, #8a8f9c); margin-bottom: 6px; }
+.oc-head small { display: block; text-transform: none; letter-spacing: 0; margin-top: 3px; }
+.oc-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px;
+    padding: 4px 0; border-top: 1px solid var(--qx-border, #f0f0f3); font-size: 0.9rem; }
+.oc-row:first-child { border-top: none; }
+.oc-gone { opacity: 0.6; }
+.oc-bad { color: #c0392b; font-weight: 600; font-size: 0.85em; white-space: nowrap; }
+html[data-theme="dark"] .oc-bad, html[data-theme="dark"] .oc-del:hover { color: #f08c8c; }
+.oc-muted { color: var(--qx-muted, #8a8f9c); font-size: 0.85em; }
+.oc-note { font-style: italic; color: var(--qx-muted, #8a8f9c); }
+.oc-del { margin-left: auto; border: none; background: none; cursor: pointer;
+    color: var(--qx-muted, #8a8f9c); font-size: 1.1rem; line-height: 1; }
+.oc-del:hover { color: #c0392b; }
+.oc-empty { margin: 0; }
+.oc-add { display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+    margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--qx-border, #f0f0f3); }
+.oc-add select, .oc-add input { margin: 0; height: auto; padding: 4px 6px; font-size: 0.85rem; width: auto; }
+.oc-add .oc-packets { width: 4.5em; }
+.oc-add .oc-note { flex: 1 1 12em; min-width: 8em; }
+.oc-add .button { margin: 0; }
+.oc-chosen { font-size: 0.85rem; font-weight: 600; flex-basis: 100%; }
+.oc-flash { font-size: 0.85rem; margin-top: 6px; }
+.oc-pick-result { padding: 6px 8px; border-bottom: 1px solid var(--qx-border, #eee); cursor: pointer; font-size: 0.9em; }
+.oc-pick-result:hover { background: var(--qx-hover, #d9edf7); }
+#oc-pick-results { max-height: 320px; overflow-y: auto; }
+</style>
+
+<script>
+$(function () {
+    var $panel = $('#order-constraints');
+    if (!$panel.length) { return; }
+    var qtype = $panel.data('qtype'), qid = $panel.data('qid'), qsetId = $panel.data('qset');
+    var chosen = null;
+    var $dialog = $('#oc-pick-dialog').dialog({
+        autoOpen: false, modal: true, width: 620, closeOnEscape: true });
+
+    function csrf() { return $('input[name=csrfmiddlewaretoken]').first().val(); }
+    function flash(msg, bad) {
+        $panel.find('.oc-flash').text(msg || '')
+            .css('color', bad ? '#a94442' : '#1b5e20');
+    }
+
+    // "at least N packets away" is the only rule with a number in it.
+    function syncKind() {
+        var apart = $panel.find('.oc-kind').val() === 'apart';
+        $panel.find('.oc-packets, .oc-packets-unit').toggle(apart);
+    }
+    $panel.on('change', '.oc-kind', syncKind);
+    syncKind();
+
+    function search() {
+        var term = $('#oc-pick-search').val().trim();
+        var type = $('input[name=oc-pick-type]:checked').val();
+        var $out = $('#oc-pick-results');
+        if (term.length < 2) { $out.html('<p class="oc-muted">Type at least two letters.</p>'); return; }
+        $out.html('<em>Searching&hellip;</em>');
+        // The swap search with no source question: every question in the set.
+        $.get('/swap_candidates/', {question_type: type, qset_id: qsetId, q: term},
+            function (resp) {
+                var json = (typeof resp === 'string') ? JSON.parse(resp) : resp;
+                if (json.error) { $out.html($('<div class="alert-box warning">').text(json.error)); return; }
+                if (!json.candidates.length) { $out.html('<em>Nothing matched.</em>'); return; }
+                $out.empty();
+                $.each(json.candidates, function (_, cand) {
+                    if (type === qtype && cand.id === qid) { return; }
+                    var where = cand.unpacketized ? 'not in a packet'
+                        : cand.packet_name + ' #' + cand.number;
+                    $('<div class="oc-pick-result">')
+                        .append($('<strong>').text(where + ': '))
+                        .append($('<span>').text(cand.answer))
+                        .append($('<div class="oc-muted">').text(cand.category))
+                        .on('click', function () {
+                            chosen = {type: type, id: cand.id, answer: cand.answer, where: where};
+                            $panel.find('.oc-chosen').text('Related to: ' + cand.answer + ' (' + where + ')');
+                            $panel.find('.oc-save').prop('disabled', false);
+                            $dialog.dialog('close');
+                        })
+                        .appendTo($out);
+                });
+            });
+    }
+    var timer = null;
+    $('#oc-pick-search').on('input', function () {
+        clearTimeout(timer); timer = setTimeout(search, 300);
+    });
+    $('input[name=oc-pick-type]').on('change', search);
+    $panel.on('click', '.oc-pick', function () {
+        $('#oc-pick-results').empty();
+        $dialog.dialog('open');
+        $('#oc-pick-search').focus();
+    });
+
+    $panel.on('click', '.oc-save', function () {
+        if (!chosen) { return; }
+        var $b = $(this).prop('disabled', true);
+        $.post('/question_constraint/', {
+            action: 'add', csrfmiddlewaretoken: csrf(),
+            question_type: qtype, question_id: qid,
+            other_type: chosen.type, other_id: chosen.id,
+            kind: $panel.find('.oc-kind').val(),
+            packets: $panel.find('.oc-packets').val(),
+            note: $panel.find('.oc-note').val()
+        }, function (resp) {
+            var j = (typeof resp === 'string') ? JSON.parse(resp) : resp;
+            if (!j.ok) { flash(j.error, true); $b.prop('disabled', false); return; }
+            window.location.reload();
+        }).fail(function () { flash('Could not save that rule.', true); $b.prop('disabled', false); });
+    });
+
+    $panel.on('click', '.oc-del', function () {
+        var $row = $(this).closest('.oc-row');
+        $.post('/question_constraint/', {
+            action: 'delete', csrfmiddlewaretoken: csrf(), id: $row.data('id')
+        }, function (resp) {
+            var j = (typeof resp === 'string') ? JSON.parse(resp) : resp;
+            if (!j.ok) { flash(j.error, true); return; }
+            $row.remove();
+            if (!$panel.find('.oc-row').length) {
+                $panel.find('.oc-list').html('<p class="oc-muted oc-empty">No placement rules on this question.</p>');
+            }
+        }).fail(function () { flash('Could not remove that rule.', true); });
+    });
+});
+</script>
+{% endif %}

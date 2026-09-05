@@ -2003,6 +2003,56 @@ def password_change_callback(sender, request, user, **kwargs):
 post_save.connect(create_user_profile, sender=User)
 
 
+class QuestionOrderConstraint(models.Model):
+    """A rule about where one question may sit relative to another.
+
+    Two questions on the same answer, or one that gives away another, cannot
+    share a packet or must be read in a particular order. That is knowledge a
+    writer has at the moment they notice it and nowhere to put, so it lives in
+    somebody's head until the set is packetized and it is too late.
+
+    Questions are addressed by type and id rather than by two foreign keys,
+    because either end may be a tossup or a bonus. Nothing cascades from the
+    question, so a constraint can outlive what it points at; the checker treats
+    a missing question as nothing to check, and the edit page offers to remove
+    it.
+    """
+    BEFORE = 'before'
+    AFTER = 'after'
+    APART = 'apart'
+    KINDS = [
+        (BEFORE, 'must come in an earlier packet than'),
+        (AFTER, 'must come in a later packet than'),
+        (APART, 'must be at least this many packets away from'),
+    ]
+
+    question_set = models.ForeignKey(QuestionSet, on_delete=models.CASCADE,
+                                     related_name='order_constraints')
+    source_type = models.CharField(max_length=6)
+    source_id = models.PositiveIntegerField()
+    target_type = models.CharField(max_length=6)
+    target_id = models.PositiveIntegerField()
+    kind = models.CharField(max_length=8, choices=KINDS, default=APART)
+    # Only meaningful for APART: how many packets have to separate them.
+    packets = models.PositiveIntegerField(default=1)
+    note = models.CharField(max_length=200, blank=True, default='')
+    created_by = models.ForeignKey(Writer, on_delete=models.SET_NULL, null=True, blank=True)
+    created_date = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [models.Index(fields=['question_set', 'source_type', 'source_id']),
+                   models.Index(fields=['question_set', 'target_type', 'target_id'])]
+
+    def kind_label(self):
+        return dict(self.KINDS).get(self.kind, self.kind)
+
+    def describe(self):
+        if self.kind == self.APART:
+            return 'at least {0} packet{1} away from'.format(
+                self.packets, '' if self.packets == 1 else 's')
+        return 'in an earlier packet than' if self.kind == self.BEFORE else 'in a later packet than'
+
+
 class CommentReply(models.Model):
     """Links a comment to its parent comment, enabling threaded discussions."""
     comment = models.OneToOneField(

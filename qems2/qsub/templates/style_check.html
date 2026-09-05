@@ -122,8 +122,34 @@ no difficulty tags at all -- is visible in one place.
 </details>
 {% endif %}
 
+{% if placement_violations %}
+{% comment %}
+Placement rules are checked here as well as on the grid: the grid tells you
+which question is wrong, this tells you what the whole set still owes.
+{% endcomment %}
+<div class="sc-placement">
+    <h5>Placement rules broken ({{ placement_violations|length }})</h5>
+    <ul>
+        {% for v in placement_violations %}
+        <li>
+            <a href="{{ v.source_url }}" target="_blank" rel="noopener">{{ v.source_answer }}</a>
+            <span class="sc-guide-note">({{ v.source_where|default:"not in a packet" }})</span>
+            must be <strong>{{ v.constraint.describe }}</strong>
+            <a href="{{ v.target_url }}" target="_blank" rel="noopener">{{ v.target_answer }}</a>
+            <span class="sc-guide-note">({{ v.target_where|default:"not in a packet" }})</span>
+            &mdash; it {{ v.problem }}.
+            {% if v.note %}<span class="sc-guide-note">&middot; {{ v.note }}</span>{% endif %}
+        </li>
+        {% endfor %}
+    </ul>
+    <p class="sc-guide-note">Fix these on the
+        <a href="/packet_grid/{{ qset.id }}/">packet grid</a>, or drop the rule
+        from either question's edit page.</p>
+</div>
+{% endif %}
+
 {% if not results %}
-<div class="alert-box success">No style issues found for this guide. Nice work!</div>
+<div class="alert-box success">No style issues found for this guide.{% if not placement_violations %} Nice work!{% endif %}</div>
 {% else %}
 <div class="bulk-bar" style="position:sticky; top:0; z-index:5;">
     <label class="sc-inline"><input type="checkbox" id="select-all-issues" autocomplete="off"> Select all</label>
@@ -173,6 +199,11 @@ no difficulty tags at all -- is visible in one place.
            border-radius:10px; font-size:0.78rem; font-weight:bold; color:#fff; line-height:1.5; }
 .sc-pill.err { background:#c0392b; } .sc-pill.warn { background:#d4870c; } .sc-pill.info { background:#9aa0a6; }
 .sc-pill.zero { background:#e2e4e6; color:#9aa0a6; }
+.sc-placement { border-left:4px solid #d4870c; background:#fdf6e9; padding:0.6rem 0.9rem;
+                margin:0 0 0.9rem; border-radius:0 3px 3px 0; }
+.sc-placement h5 { margin:0 0 0.4rem; font-size:0.95rem; }
+.sc-placement ul { margin:0; }
+.sc-placement p { margin:0.4rem 0 0; }
 .sc-guide-note { color:#999; font-size:0.8rem; }
 .sc-config-toggle { font-size:0.85rem; }
 
@@ -701,5 +732,6 @@ $(function () {
 .sc-diff-missing-list { list-style: none; margin: 0; font-size: 0.9em; }
 .sc-diff-missing-list li { margin: 0 0 2px; }
 html[data-theme="dark"] .sc-diff-missing { color: #f08c8c; }
+html[data-theme="dark"] .sc-placement { background: #2f2718; border-left-color: #b3760a; }
 </style>
 {% endblock %}

@@ -215,6 +215,8 @@
 
 <p>Do not include the word ANSWER: in answer lines. See the <a href="/help/#guidelines">formatting guide</a> on the help page.</p>
 
+{% include "_order_constraints.html" %}
+
 {% include "dialog.html" %}
 {% if tossup and role == "editor" %}{% include "_swap_dialog.html" %}{% endif %}
 

@@ -3148,6 +3148,10 @@ def edit_tossup(request, tossup_id):
              'playtest': _question_buzz_data(tossup, 'tossup'),
              'discord_threads': tossup.discord_threads.order_by('created_date'),
              'new_checks': new_checks,
+             'constraint_qtype': 'tossup',
+             'constraint_qid': tossup.id if tossup else None,
+             'constraint_rows': (_constraint_rows(qset, 'tossup', tossup.id)
+                                 if tossup else []),
              'user': user,
              **_structured_tossup_ctx(qset, tossup),
              **_suggestion_render_ctx(user, tossup, 'tossup', qset)})
@@ -3322,6 +3326,10 @@ def edit_bonus(request, bonus_id):
             {'bonus': bonus,
              'packet_nav': _packet_neighbors(bonus, 'bonus'),
              'new_checks': new_checks,
+             'constraint_qtype': 'bonus',
+             'constraint_qid': bonus.id if bonus else None,
+             'constraint_rows': (_constraint_rows(qset, 'bonus', bonus.id)
+                                 if bonus else []),
              'char_count': char_count,
              'question_type': question_type,
              'form': form,
@@ -8102,7 +8110,7 @@ def _tag_names_by_question(qset, for_output=False):
     return out
 
 
-def _grid_cell_payload(question, qtype, tag_names=None):
+def _grid_cell_payload(question, qtype, tag_names=None, warnings=None):
     """What the packet grid shows in one occupied slot. Shared by the page
     render and the live-refresh endpoint, so a cell repainted in place looks
     exactly like a freshly loaded one."""
@@ -8121,6 +8129,7 @@ def _grid_cell_payload(question, qtype, tag_names=None):
         'edited': question.edited,
         'proofread': question.proofread,
         'tags': (tag_names or {}).get((qtype, question.id), []),
+        'warnings': (warnings or {}).get('{0}-{1}'.format(qtype, question.id), []),
     }
 
 
@@ -8173,6 +8182,7 @@ def packet_grid(request, qset_id):
     spare_rows = 0 if read_only else 1
 
     tag_names = _tag_names_by_question(qset)
+    warnings = constraint_violation_map(qset)
 
     def build_rows(question_model, preview_func, edit_url, target_rows=0):
         qtype = 'tossup' if question_model is Tossup else 'bonus'
@@ -8186,7 +8196,7 @@ def packet_grid(request, qset_id):
         for question in (question_model.objects.filter(question_set=qset, packet__in=packets)
                          .select_related('category', 'packet').order_by('question_number', 'id')):
             number = question.question_number or 0
-            cell = _grid_cell_payload(question, qtype, tag_names)
+            cell = _grid_cell_payload(question, qtype, tag_names, warnings)
             # A question with no number, or a duplicate number within its packet,
             # can't be placed in the number-keyed grid — surfacing it here keeps
             # it from silently vanishing (this is how a tiebreaker could "not
@@ -9117,6 +9127,239 @@ def _swap_search_candidates(model, qset, question_type, search, exclude_id=None)
     return out
 
 
+#########################################################################
+# Question order constraints
+#
+# "These two must not share a packet", "this one gives that one away, so it
+# has to come later". A writer knows these at the moment they notice them;
+# without somewhere to record them they are remembered until packetization,
+# or not.
+#########################################################################
+
+def _constraint_question(qtype, qid, seen=None):
+    """The question a constraint end points at, or None if it is gone."""
+    if seen is not None and (qtype, qid) in seen:
+        return seen[(qtype, qid)]
+    model = Tossup if qtype == 'tossup' else Bonus if qtype == 'bonus' else None
+    q = None
+    if model is not None:
+        q = model.objects.filter(id=qid).select_related('packet', 'category').first()
+    if seen is not None:
+        seen[(qtype, qid)] = q
+    return q
+
+
+def _packet_positions(qset):
+    """Packet id -> its place in reading order, so 'earlier' has a meaning."""
+    return {p.id: i for i, p in enumerate(sorted_packets(qset))}
+
+
+def constraint_violations(qset):
+    """Every constraint in the set that its questions currently break.
+
+    Returns a list of dicts, and a question with nothing wrong appears in none
+    of them. A question not yet in a packet cannot break an ordering rule --
+    there is no order to break -- so it is reported as unplaced rather than as
+    a violation, which keeps a set that has not been packetized from lighting
+    up red.
+    """
+    positions = _packet_positions(qset)
+    seen = {}
+    out = []
+    for c in qset.order_constraints.all().select_related('created_by__user'):
+        src = _constraint_question(c.source_type, c.source_id, seen)
+        dst = _constraint_question(c.target_type, c.target_id, seen)
+        if src is None or dst is None:
+            continue
+        a = positions.get(src.packet_id) if src.packet_id else None
+        b = positions.get(dst.packet_id) if dst.packet_id else None
+        if a is None or b is None:
+            continue
+        if c.kind == QuestionOrderConstraint.BEFORE:
+            ok = a < b
+            problem = 'is not in an earlier packet'
+        elif c.kind == QuestionOrderConstraint.AFTER:
+            ok = a > b
+            problem = 'is not in a later packet'
+        else:
+            gap = abs(a - b)
+            ok = gap >= c.packets
+            problem = ('is in the same packet' if gap == 0 else
+                       'is only {0} packet{1} away'.format(gap, '' if gap == 1 else 's'))
+        if ok:
+            continue
+        src_answer = _grid_answer_preview(_constraint_answer(src), 40)
+        dst_answer = _grid_answer_preview(_constraint_answer(dst), 40)
+        src_where = str(src.packet) if src.packet_id else ''
+        dst_where = str(dst.packet) if dst.packet_id else ''
+        out.append({
+            'constraint': c, 'source': src, 'target': dst,
+            'source_key': '{0}-{1}'.format(c.source_type, c.source_id),
+            'target_key': '{0}-{1}'.format(c.target_type, c.target_id),
+            'source_type': c.source_type, 'target_type': c.target_type,
+            'source_answer': src_answer, 'target_answer': dst_answer,
+            'source_where': src_where, 'target_where': dst_where,
+            'source_url': '/edit_{0}/{1}/'.format(c.source_type, c.source_id),
+            'target_url': '/edit_{0}/{1}/'.format(c.target_type, c.target_id),
+            'problem': problem,
+            'note': c.note,
+            'source_message': 'Must be {0} "{1}" ({2}), but is in {3}.'.format(
+                c.describe(), dst_answer, dst_where or 'no packet', src_where),
+            'target_message': 'Must be {0} "{1}" ({2}), but is in {3}.'.format(
+                _constraint_inverse_phrase(c), src_answer,
+                src_where or 'no packet', dst_where),
+            'description': '{0} {1} {2}'.format(src_answer, c.describe(), dst_answer),
+        })
+    return out
+
+
+def _constraint_inverse_phrase(c):
+    """The same rule read from the other question's side: if A must come before
+    B, then B must come after A."""
+    if c.kind == QuestionOrderConstraint.BEFORE:
+        return 'in a later packet than'
+    if c.kind == QuestionOrderConstraint.AFTER:
+        return 'in an earlier packet than'
+    return c.describe()
+
+
+def _constraint_answer(question):
+    """The answer line to show for either kind of question."""
+    return (question.tossup_answer if isinstance(question, Tossup)
+            else question.part1_answer)
+
+
+def constraint_violation_map(qset):
+    """'tossup-12' -> what that question is breaking, worded from its own side,
+    for the grid's warning marks.
+
+    Deliberately uncached: what makes a rule pass or fail is where the questions
+    sit, and moving a question between packets doesn't touch the question-edit
+    fingerprint the other reports cache on -- so a cached mark would go on
+    contradicting the grid the writer is looking at. Sets almost always have no
+    constraints at all, and that costs one count query."""
+    if not qset.order_constraints.exists():
+        return {}
+    marks = {}
+    for v in constraint_violations(qset):
+        marks.setdefault(v['source_key'], []).append(v['source_message'])
+        marks.setdefault(v['target_key'], []).append(v['target_message'])
+    return marks
+
+
+def _question_constraints(qset, qtype, qid):
+    """Both directions, since a rule about A and B belongs to both of them."""
+    return qset.order_constraints.filter(
+        Q(source_type=qtype, source_id=qid) | Q(target_type=qtype, target_id=qid))
+
+
+def _constraint_rows(qset, qtype, qid):
+    """A question's constraints, described from its own side, for its edit
+    page. A rule stored as 'B is after A' reads as 'before B' on A's page."""
+    constraints = list(_question_constraints(qset, qtype, qid))
+    # Most questions have no placement rules; don't make them pay for the ones
+    # that do -- this runs on every edit-page load.
+    if not constraints:
+        return []
+    positions = _packet_positions(qset)
+    broken = {v['constraint'].id for v in constraint_violations(qset)}
+    seen = {}
+    rows = []
+    for c in constraints:
+        mine_is_source = (c.source_type == qtype and c.source_id == qid)
+        other_type = c.target_type if mine_is_source else c.source_type
+        other_id = c.target_id if mine_is_source else c.source_id
+        other = _constraint_question(other_type, other_id, seen)
+        if c.kind == QuestionOrderConstraint.APART:
+            phrase = c.describe()
+        elif mine_is_source:
+            phrase = c.describe()
+        else:
+            phrase = ('in a later packet than' if c.kind == QuestionOrderConstraint.BEFORE
+                      else 'in an earlier packet than')
+        a = positions.get(_question_packet_id(qset, qtype, qid))
+        b = positions.get(other.packet_id) if (other is not None and other.packet_id) else None
+        rows.append({
+            'constraint': c,
+            'other': other,
+            'other_type': other_type,
+            'other_answer': (_grid_answer_preview(_constraint_answer(other), 60)
+                             if other is not None else ''),
+            'other_packet': (str(other.packet) if other is not None and other.packet_id
+                             else ''),
+            'other_edit_url': ('/edit_{0}/{1}/'.format(other_type, other_id)
+                               if other is not None else ''),
+            'phrase': phrase,
+            'missing': other is None,
+            'unplaced': other is not None and (a is None or b is None),
+            'violated': c.id in broken,
+        })
+    return rows
+
+
+def _question_packet_id(qset, qtype, qid):
+    model = Tossup if qtype == 'tossup' else Bonus
+    return model.objects.filter(id=qid).values_list('packet_id', flat=True).first()
+
+
+@login_required
+def question_constraint(request):
+    """Add or remove an ordering constraint. POST only, answered as JSON so the
+    edit page can keep its place."""
+    user = request.user.writer
+    if request.method != 'POST':
+        return HttpResponse(json.dumps({'ok': False, 'error': 'POST required'}), status=405)
+    action = request.POST.get('action', 'add')
+
+    if action == 'delete':
+        c = QuestionOrderConstraint.objects.filter(id=request.POST.get('id') or 0).first()
+        if c is None:
+            return HttpResponse(json.dumps({'ok': False, 'error': 'That rule is already gone.'}))
+        qset = c.question_set
+        if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+            return HttpResponse(json.dumps({'ok': False, 'error': 'Not authorized.'}), status=403)
+        c.delete()
+        return HttpResponse(json.dumps({'ok': True, 'message': 'Rule removed.'}))
+
+    qtype = request.POST.get('question_type', '')
+    other_type = request.POST.get('other_type', '')
+    if qtype not in ('tossup', 'bonus') or other_type not in ('tossup', 'bonus'):
+        return HttpResponse(json.dumps({'ok': False, 'error': 'Unknown question type.'}))
+    try:
+        qid = int(request.POST['question_id'])
+        other_id = int(request.POST['other_id'])
+    except (KeyError, ValueError):
+        return HttpResponse(json.dumps({'ok': False, 'error': 'Pick a question to relate this to.'}))
+
+    src = _constraint_question(qtype, qid)
+    dst = _constraint_question(other_type, other_id)
+    if src is None or dst is None:
+        return HttpResponse(json.dumps({'ok': False, 'error': 'One of those questions no longer exists.'}))
+    if qtype == other_type and qid == other_id:
+        return HttpResponse(json.dumps({'ok': False, 'error': 'A question cannot be placed relative to itself.'}))
+    qset = src.question_set
+    if dst.question_set_id != qset.id:
+        return HttpResponse(json.dumps({'ok': False, 'error': 'Both questions have to be in the same set.'}))
+    if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+        return HttpResponse(json.dumps({'ok': False, 'error': 'Not authorized.'}), status=403)
+
+    kind = request.POST.get('kind', QuestionOrderConstraint.APART)
+    if kind not in dict(QuestionOrderConstraint.KINDS):
+        return HttpResponse(json.dumps({'ok': False, 'error': 'Unknown rule.'}))
+    try:
+        packets = max(1, int(request.POST.get('packets') or 1))
+    except ValueError:
+        packets = 1
+
+    QuestionOrderConstraint.objects.update_or_create(
+        question_set=qset, source_type=qtype, source_id=qid,
+        target_type=other_type, target_id=other_id,
+        defaults={'kind': kind, 'packets': packets,
+                  'note': (request.POST.get('note') or '').strip()[:200],
+                  'created_by': user})
+    return HttpResponse(json.dumps({'ok': True, 'message': 'Rule saved.'}))
+
+
 @login_required
 def swap_candidates(request):
     """JSON list of questions that could go in a slot. With a source
@@ -9278,6 +9521,7 @@ def packet_grid_state(request, qset_id):
     unplaced = 0
     unpacketized = {}
     tag_names = _tag_names_by_question(qset)
+    warnings = constraint_violation_map(qset)
     for model, qtype in ((Tossup, 'tossup'), (Bonus, 'bonus')):
         # Same ordering as the page build, so a duplicate number resolves to the
         # same winner and the two views never disagree about who holds a slot.
@@ -9290,7 +9534,7 @@ def packet_grid_state(request, qset_id):
                 unplaced += 1
                 continue
             max_num[qtype] = max(max_num[qtype], number)
-            cells[key] = _grid_cell_payload(question, qtype, tag_names)
+            cells[key] = _grid_cell_payload(question, qtype, tag_names, warnings)
         unpacketized[qtype] = model.objects.filter(question_set=qset, packet=None).count()
 
     tu_rows = max(max_num['tossup'], _per_packet_target(qset, 'tossup'))
@@ -10041,8 +10285,12 @@ def style_check(request, qset_id):
                 b.packet.packet_name if b.packet else '', b.question_number,
                 '/edit_bonus/{0}/'.format(b.id))
 
+    placement = constraint_violations(qset)
+    counts['warning'] += len(placement)
+
     return render(request, 'style_check.html',
                   {'qset': qset, 'user': user, 'results': results, 'counts': counts,
+                   'placement_violations': placement,
                    'difficulty_orders': _bonus_difficulty_orders(qset),
                    'checked': checked, 'flagged': flagged, 'guide': guide,
                    'dismissed_count': dismissed_count, 'show_dismissed': show_dismissed,

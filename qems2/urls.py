@@ -92,6 +92,7 @@ urlpatterns = [
     re_path(r'^inline_save_question/$', inline_save_question),
     re_path(r'^grammar_texts/(?P<qset_id>[0-9]+)/$', grammar_texts),
     re_path(r'^swap_candidates/$', swap_candidates),
+    re_path(r'^question_constraint/$', question_constraint),
     re_path(r'^category_tags/(?P<qset_id>[0-9]+)/$', category_tags),
     re_path(r'^category_comment/(?P<qset_id>[0-9]+)/$', category_comment),
     re_path(r'^category_problems/(?P<qset_id>[0-9]+)/$', category_problems),

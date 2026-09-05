@@ -141,7 +141,7 @@
                 {% for cell in row.cells %}
                 <td class="grid-cell{% if cell.empty %} grid-cell-empty{% endif %}" data-qtype="tossup" data-num="{{ row.num }}">
                     {% if cell.id %}
-                        <a href="{{ cell.edit_url }}" class="cell-answer" data-qid="{{ cell.id }}" target="_blank" rel="noopener">{{ cell.answer }}</a>
+                        <a href="{{ cell.edit_url }}" class="cell-answer" data-qid="{{ cell.id }}" target="_blank" rel="noopener">{% if cell.warnings %}<span class="cell-warn" title="{{ cell.warnings|join:'&#10;' }}">&#9888;</span>{% endif %}{{ cell.answer }}</a>
                         <div class="cell-category">{{ cell.category }}{% if cell.edited %}<span class="cell-tag tag-edited" title="Edited">E</span>{% endif %}{% if cell.proofread %}<span class="cell-tag tag-proofread" title="Proofread">P</span>{% endif %}</div>{% if cell.tags %}<div class="cell-ctags">{% for n in cell.tags %}<span class="cell-ctag">{{ n }}</span>{% endfor %}</div>{% endif %}
                         {% if not read_only %}<a href="#" class="swap-btn" title="Swap with a question from another packet">&#8644;</a><a href="#" class="unassign-btn" title="Remove from packet (unassign)">&#10005;</a>{% endif %}
                     {% elif not read_only %}
@@ -174,7 +174,7 @@
                 {% for cell in row.cells %}
                 <td class="grid-cell{% if cell.empty %} grid-cell-empty{% endif %}" data-qtype="bonus" data-num="{{ row.num }}">
                     {% if cell.id %}
-                        <a href="{{ cell.edit_url }}" class="cell-answer" data-qid="{{ cell.id }}" target="_blank" rel="noopener">{{ cell.answer }}</a>
+                        <a href="{{ cell.edit_url }}" class="cell-answer" data-qid="{{ cell.id }}" target="_blank" rel="noopener">{% if cell.warnings %}<span class="cell-warn" title="{{ cell.warnings|join:'&#10;' }}">&#9888;</span>{% endif %}{{ cell.answer }}</a>
                         <div class="cell-category">{{ cell.category }}{% if cell.edited %}<span class="cell-tag tag-edited" title="Edited">E</span>{% endif %}{% if cell.proofread %}<span class="cell-tag tag-proofread" title="Proofread">P</span>{% endif %}</div>{% if cell.tags %}<div class="cell-ctags">{% for n in cell.tags %}<span class="cell-ctag">{{ n }}</span>{% endfor %}</div>{% endif %}
                         {% if not read_only %}<a href="#" class="swap-btn" title="Swap with a question from another packet">&#8644;</a><a href="#" class="unassign-btn" title="Remove from packet (unassign)">&#10005;</a>{% endif %}
                     {% elif not read_only %}
@@ -336,6 +336,10 @@
 .packet-grid .spare-row:hover { opacity: 1; }
 .packet-grid .spare-row .num-col { font-style: italic; }
 .cell-answer { display: block; font-weight: bold; }
+/* A placement rule this question is breaking. The grid is where placement is
+   decided, so it is where the rule has to speak up. */
+.cell-warn { color: #c0392b; margin-right: 3px; cursor: help; }
+html[data-theme="dark"] .cell-warn { color: #f08c8c; }
 .cell-category { color: #777; font-size: 0.9em; }
 /* The question's category tags, names only: the axis would not fit a cell. */
 .cell-ctags { margin-top: 1px; line-height: 1.3; }
@@ -1064,8 +1068,13 @@ $(function() {
         var tags = '';
         if (data.edited) tags += '<span class="cell-tag tag-edited" title="Edited">E</span>';
         if (data.proofread) tags += '<span class="cell-tag tag-proofread" title="Proofread">P</span>';
+        var warn = '';
+        if (data.warnings && data.warnings.length) {
+            warn = '<span class="cell-warn" title="' + esc(data.warnings.join('\n')) +
+                   '">&#9888;</span>';
+        }
         var html = '<a href="' + esc(data.edit_url) + '" class="cell-answer" data-qid="' +
-                   esc(data.id) + '" target="_blank" rel="noopener">' + esc(data.answer) + '</a>' +
+                   esc(data.id) + '" target="_blank" rel="noopener">' + warn + esc(data.answer) + '</a>' +
                    '<div class="cell-category">' + esc(data.category) + tags + '</div>';
         if (data.tags && data.tags.length) {
             html += '<div class="cell-ctags">' + data.tags.map(function (n) {

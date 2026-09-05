@@ -337,6 +337,8 @@ $(function () {
 </div>{# .edit-comments #}
 </div>{# .edit-layout #}
 
+{% include "_order_constraints.html" %}
+
 {% include "dialog.html" %}
 {% if bonus and role == "editor" %}{% include "_swap_dialog.html" %}{% endif %}
 
