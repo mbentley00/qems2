@@ -192,7 +192,7 @@ def _meta_line(q, opts):
     Category tags come from ``opts['tag_names']``, keyed ('tossup'|'bonus', id)
     -- the caller has them in one query, and an empty (or missing) map is how a
     set that keeps its tags out of its packets says so."""
-    author = _real_name(q.author) if opts['writers'] else ''
+    author = _credited_name(q) if opts['writers'] else ''
     cat = str(q.category).strip() if q.category else ''
     if author and cat:
         head = '<{0}, {1}>'.format(author, cat)
@@ -214,6 +214,16 @@ def _meta_line(q, opts):
         if ename:
             parts.append('<Editor: {0}>'.format(ename))
     return ' '.join(p for p in parts if p).strip()
+
+
+def _credited_name(q):
+    """Who the question is credited to: a freeform name when it carries one,
+    otherwise the account that owns it."""
+    getter = getattr(q, 'author_real_name', None)
+    if callable(getter):
+        import html as _html
+        return _html.unescape(getter() or '').strip()
+    return _real_name(q.author)
 
 
 def _real_name(writer):

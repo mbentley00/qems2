@@ -44,7 +44,7 @@
         <div class="anchor-region" data-question-type="bonus" data-question-id="{{ bonus.id }}">
         {{ bonus|bonus_html_verbose }}
         </div>
-            <p><strong>Written by:</strong> {{ bonus.author|escape }} on {{ bonus.created_date }}</p>
+            <p><strong>Written by:</strong> {{ bonus.author_name|escape }} on {{ bonus.created_date }}</p>
             {% if bonus.edited and bonus.editor %}
                 <p><strong>Edited by:</strong> {{ bonus.editor|escape }} on {{ bonus.edited_date }}</p>
             {% endif %}
@@ -176,6 +176,14 @@
             <div class="qmeta-field"><label for="{{ field.id_for_label }}">Category</label>{{ field }}{{ field.errors }}</div>
             {% elif field.html_name == "author" %}
             <div class="qmeta-field"><label for="{{ field.id_for_label }}">Author</label>{{ field }}{{ field.errors }}</div>
+            {% elif field.html_name == "author_text" %}
+            {% comment %}
+            Credit for someone with no QEMS account -- a guest writer, or a
+            question carried in from another set. When it is filled in it is the
+            name shown and exported; the Author select above still says which
+            account owns the question, which is what decides who may edit it.
+            {% endcomment %}
+            <div class="qmeta-field"><label for="{{ field.id_for_label }}">Credit to (no account)</label>{{ field }}{{ field.errors }}</div>
             {% endif %}
         {% endfor %}
         </div>

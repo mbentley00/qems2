@@ -16,7 +16,7 @@ markup, so anything here that is a writer's own words escapes explicitly.
 {% load filters %}
 {% for col in columns %}
     {% if col.key == 'author' %}
-    <td>{{ q.author|escape }}</td>
+    <td>{{ q.author_name|escape }}</td>
     {% elif col.key == 'preview' %}
     <td><a href="/edit_{{ qtype }}/{{ q.id }}/">{% if qtype == 'tossup' %}{{ q.tossup_text|safe|preview|question_html }}{% else %}{{ q|bonus_leadin }}{% endif %}</a></td>
     {% elif col.key == 'answer' %}

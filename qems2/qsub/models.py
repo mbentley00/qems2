@@ -1246,6 +1246,11 @@ class Tossup (models.Model):
     location = models.CharField(max_length=500)
     question_type = models.ForeignKey(QuestionType, on_delete=models.CASCADE, null=True)
     author = models.ForeignKey(Writer, on_delete=models.CASCADE)
+    #: Who the question is credited to when that is not a QEMS account: a guest
+    #: writer, or a question carried in from another set. Empty means the author
+    #: above speaks for itself. The foreign key keeps its job either way -- it is
+    #: what decides who may edit the question and whose work it counts as.
+    author_text = models.CharField(max_length=200, blank=True, default='')
 
     locked = models.BooleanField(default=False)
     edited = models.BooleanField(default=False)
@@ -1440,6 +1445,30 @@ class Tossup (models.Model):
             self.search_question_content = strip_special_chars(self.tossup_text)
             self.search_question_answers = strip_special_chars(self.tossup_answer)
 
+    def author_name(self):
+        """Who this question is credited to, for anything that shows a name.
+
+        A freeform credit wins over the account: the account is who owns the
+        row, which is not always who wrote the question.
+        """
+        credited = (self.author_text or '').strip()
+        if credited:
+            return credited
+        return str(self.author) if self.author_id else ''
+
+    def author_real_name(self):
+        """The same, in the form exports want: a person's name, without the
+        account's username after it."""
+        credited = (self.author_text or '').strip()
+        if credited:
+            return credited
+        if not self.author_id:
+            return ''
+        try:
+            return (self.author.get_real_name() or '').strip()
+        except Exception:
+            return ''
+
     def get_question_set(self):
         try:
             return self.question_set
@@ -1540,6 +1569,11 @@ class Bonus(models.Model):
     question_history = models.ForeignKey(QuestionHistory, on_delete=models.CASCADE, null=True)
 
     author = models.ForeignKey(Writer, on_delete=models.CASCADE)
+    #: Who the question is credited to when that is not a QEMS account: a guest
+    #: writer, or a question carried in from another set. Empty means the author
+    #: above speaks for itself. The foreign key keeps its job either way -- it is
+    #: what decides who may edit the question and whose work it counts as.
+    author_text = models.CharField(max_length=200, blank=True, default='')
 
     locked = models.BooleanField(default=False)
     edited = models.BooleanField(default=False)
@@ -1845,6 +1879,30 @@ class Bonus(models.Model):
         else:
             self.search_question_content = strip_special_chars(self.leadin) + " " + strip_special_chars(self.part1_text) + " " + strip_special_chars(self.part2_text) + " " + strip_special_chars(self.part3_text)
             self.search_question_answers = strip_special_chars(self.part1_answer) + " " + strip_special_chars(self.part2_answer) + " " + strip_special_chars(self.part3_answer)
+
+    def author_name(self):
+        """Who this question is credited to, for anything that shows a name.
+
+        A freeform credit wins over the account: the account is who owns the
+        row, which is not always who wrote the question.
+        """
+        credited = (self.author_text or '').strip()
+        if credited:
+            return credited
+        return str(self.author) if self.author_id else ''
+
+    def author_real_name(self):
+        """The same, in the form exports want: a person's name, without the
+        account's username after it."""
+        credited = (self.author_text or '').strip()
+        if credited:
+            return credited
+        if not self.author_id:
+            return ''
+        try:
+            return (self.author.get_real_name() or '').strip()
+        except Exception:
+            return ''
 
     def get_question_set(self):
         try:

@@ -6361,7 +6361,9 @@ def export_question_set(request, qset_id, output_format):
                     each optional."""
                     # get_real_name() pads with spaces and is blank when a writer
                     # has no name, so strip before deciding what to include.
-                    author = html.unescape(safe_name(q.author)).strip() if include_writers else ''
+                    # author_real_name() is the freeform credit when there is
+                    # one, and the account's name otherwise.
+                    author = html.unescape(q.author_real_name()).strip() if include_writers else ''
                     cat = html.unescape(safe_category(q.category)).strip()
                     if author and cat:
                         head = '<{0}, {1}>'.format(author, cat)

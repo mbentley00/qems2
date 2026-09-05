@@ -8505,6 +8505,126 @@ class ShuffledQuestionTableTests(TestCase):
         self.assertGreater(len(seen), 1)
 
 
+class FreeformAuthorTests(TestCase):
+    """A question can be credited to someone who has no account -- a guest
+    writer, or one carried in from another set. The account still owns the row:
+    that is what decides who may edit it."""
+
+    def setUp(self):
+        for qt in (ACF_STYLE_TOSSUP, ACF_STYLE_BONUS):
+            QuestionType.objects.get_or_create(question_type=qt)
+        self.acf_tu = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.acf_bn = QuestionType.objects.get(question_type=ACF_STYLE_BONUS)
+        self.ou = User.objects.create_user('fa_owner', password='pw', email='fa@t.com',
+                                           first_name='Own', last_name='Er')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='fa dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='Science', subcategory='Biology')
+        self.qset = QuestionSet.objects.create(
+            name='FA Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.owner.question_set_editor.add(self.qset)
+        SetWideDistributionEntry.objects.create(
+            question_set=self.qset, dist_entry=self.de, num_tossups=1, num_bonuses=1)
+        self.packet = Packet.objects.create(
+            question_set=self.qset, packet_name='Packet 1', created_by=self.owner)
+        self.tu = Tossup.objects.create(
+            author=self.owner, question_set=self.qset, packet=self.packet,
+            question_type=self.acf_tu, category=self.de, question_number=1,
+            tossup_text='A stem. (*) end.', tossup_answer='_Answer_',
+            created_date=datetime.now(), last_changed_date=datetime.now())
+        self.bn = Bonus.objects.create(
+            author=self.owner, question_set=self.qset, packet=self.packet,
+            question_type=self.acf_bn, category=self.de, question_number=1,
+            leadin='A leadin.', part1_text='P1', part1_answer='_One_',
+            part2_text='P2', part2_answer='_Two_', part3_text='P3', part3_answer='_Three_',
+            created_date=datetime.now(), last_changed_date=datetime.now())
+        self.client.login(username='fa_owner', password='pw')
+
+    def test_without_a_credit_the_account_is_the_author(self):
+        self.assertEqual(self.tu.author_name(), str(self.owner))
+        self.assertEqual(self.bn.author_name(), str(self.owner))
+
+    def test_a_credit_replaces_the_account_name(self):
+        for q in (self.tu, self.bn):
+            q.author_text = 'Ada Lovelace'
+            q.save(update_fields=['author_text'])
+            q.refresh_from_db()
+            self.assertEqual(q.author_name(), 'Ada Lovelace')
+            self.assertEqual(q.author_real_name(), 'Ada Lovelace')
+            # ...and the row is still owned by the account that made it.
+            self.assertEqual(q.author_id, self.owner.id)
+
+    def test_the_edit_pages_show_and_offer_it(self):
+        self.tu.author_text = 'Ada Lovelace'
+        self.tu.save(update_fields=['author_text'])
+        body = self.client.get('/edit_tossup/{0}/'.format(self.tu.id)).content.decode()
+        self.assertIn('Ada Lovelace', body)
+        self.assertIn('name="author_text"', body)
+        body = self.client.get('/edit_bonus/{0}/'.format(self.bn.id)).content.decode()
+        self.assertIn('name="author_text"', body)
+
+    def test_the_add_pages_offer_it(self):
+        for url in ('/add_tossups/{0}/'.format(self.qset.id),
+                    '/add_bonuses/{0}/{1}/'.format(self.qset.id, ACF_STYLE_BONUS)):
+            self.assertIn('name="author_text"', self.client.get(url).content.decode())
+
+    def test_the_word_export_credits_it(self):
+        import io as _io
+        import zipfile as _zip
+        from docx import Document as _Doc
+        self.tu.author_text = 'Ada Lovelace'
+        self.tu.save(update_fields=['author_text'])
+        resp = self.client.get(
+            '/export_question_set/{0}/docx-packetized/'.format(self.qset.id))
+        zf = _zip.ZipFile(_io.BytesIO(resp.content))
+        text = ''
+        for name in [n for n in zf.namelist() if n.endswith('.docx')]:
+            doc = _Doc(_io.BytesIO(zf.read(name)))
+            text += '\n'.join(p.text for p in doc.paragraphs)
+        self.assertIn('<Ada Lovelace, Science - Biology>', text)
+        # Only the credited question changes; the bonus still has the account.
+        self.assertIn('<Own Er, Science - Biology>', text)
+
+    def test_the_pdf_export_credits_it(self):
+        import io as _io
+        import zipfile as _zip
+        from pypdf import PdfReader
+        self.tu.author_text = 'Ada Lovelace'
+        self.tu.save(update_fields=['author_text'])
+        resp = self.client.get('/export_question_set/{0}/pdf/'.format(self.qset.id))
+        zf = _zip.ZipFile(_io.BytesIO(resp.content))
+        text = ''
+        for name in [n for n in zf.namelist() if n.endswith('.pdf')]:
+            text += '\n'.join(p.extract_text() or ''
+                              for p in PdfReader(_io.BytesIO(zf.read(name))).pages)
+        self.assertIn('Ada Lovelace', text)
+
+    def test_the_category_table_shows_the_credit(self):
+        self.tu.author_text = 'Ada Lovelace'
+        self.tu.save(update_fields=['author_text'])
+        body = self.client.get('/categories/{0}/{1}/'.format(
+            self.qset.id, self.de.id)).content.decode()
+        self.assertIn('Ada Lovelace', body)
+
+    def test_it_saves_and_clears_through_the_edit_form(self):
+        def post(credit):
+            return self.client.post('/edit_tossup/{0}/'.format(self.tu.id), {
+                'tossup_text': self.tu.tossup_text, 'tossup_answer': self.tu.tossup_answer,
+                'author': self.owner.id, 'author_text': credit,
+                'category': self.de.id, 'question_type': self.acf_tu.id,
+                'packet': self.packet.id, 'period': ''})
+
+        post('Grace Hopper')
+        self.tu.refresh_from_db()
+        self.assertEqual(self.tu.author_text, 'Grace Hopper')
+        post('')
+        self.tu.refresh_from_db()
+        self.assertEqual(self.tu.author_text, '')
+        self.assertEqual(self.tu.author_name(), str(self.owner))
+
+
 class ExportSectionHeadingTests(TestCase):
     """A "Tossups" heading tells a reader the bonuses are somewhere else. When
     the packet has only one kind, that is a lie, so neither export prints it."""

@@ -109,6 +109,11 @@
         <div class="qmeta-fields">
             <div class="qmeta-field"><label for="{{ form.category.id_for_label }}">Category</label>{{ form.category }}{{ form.category.errors }}</div>
             <div class="qmeta-field"><label for="{{ form.author.id_for_label }}">Author</label>{{ form.author }}{{ form.author.errors }}</div>
+            {% comment %}
+            Credit for someone with no QEMS account. The Author select still
+            says which account owns the question.
+            {% endcomment %}
+            <div class="qmeta-field"><label for="{{ form.author_text.id_for_label }}">Credit to (no account)</label>{{ form.author_text }}{{ form.author_text.errors }}</div>
         </div>
 <div id="category-tag-checkboxes"></div>
 <script>
