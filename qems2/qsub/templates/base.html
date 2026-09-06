@@ -10,7 +10,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
 
     <link rel="stylesheet" href="{% static 'css/app.min.css' %}">
-    <link rel="stylesheet" href="{% static 'css/base.css' %}?v=68">
+    <link rel="stylesheet" href="{% static 'css/base.css' %}?v=69">
     <link rel="stylesheet" href="{% static 'fontawesome/css/all.min.css' %}">
 
     {# Apply saved sidebar-collapsed + theme preferences before first paint (shared across tabs via localStorage). #}
@@ -172,9 +172,13 @@
                     sRes.style.display = 'block'; return;
                 }
                 sRes.innerHTML = list.slice(0, 8).map(function (r) {
+                    // Where it sits and what it is filed under -- two questions
+                    // on the same answer are told apart by the category. Same
+                    // order as the Quick Search page's own result lines.
+                    var loc = [r.location, r.category].filter(Boolean).join(' · ');
                     return '<a class="app-search-item" href="' + r.edit_url + '" target="_blank" rel="noopener">'
                         + '<span class="ass-ans">' + sEsc(r.answer) + '</span>'
-                        + '<span class="ass-loc">' + sEsc(r.location || '') + '</span></a>';
+                        + '<span class="ass-loc">' + sEsc(loc) + '</span></a>';
                 }).join('');
                 sRes.style.display = 'block';
             }
@@ -225,7 +229,7 @@
     </div>{# /row #}
 {% endif %}
 
-    <script src="{% static 'js/paste_convert.js' %}?v=37"></script>
+    <script src="{% static 'js/paste_convert.js' %}?v=38"></script>
     <script src="{% static 'js/rich_editor.js' %}?v=22"></script>
     <script src="{% static 'js/comment_strike.js' %}?v=3"></script>
     <script src="{% static 'js/qbreader_lookup.js' %}?v=2"></script>

@@ -189,6 +189,127 @@ def _answer_batch(client, model, items):
             for a in data.get('suggestions', [])], None
 
 
+# --- category tag suggestions ---------------------------------------------
+
+_TAG_SCHEMA = {
+    'type': 'object',
+    'properties': {
+        'assignments': {
+            'type': 'array',
+            'items': {
+                'type': 'object',
+                'properties': {
+                    'ref': {'type': 'string',
+                            'description': 'The exact ref label of the question this applies to.'},
+                    'tag': {'type': 'string',
+                            'description': 'The tag name, copied exactly as given in the tag list.'},
+                    'confidence': {'type': 'string', 'enum': ['high', 'medium']},
+                    'explanation': {'type': 'string',
+                                    'description': 'One short sentence: what in the question puts '
+                                                   'it under this tag.'},
+                },
+                'required': ['ref', 'tag', 'confidence', 'explanation'],
+                'additionalProperties': False,
+            },
+        },
+    },
+    'required': ['assignments'],
+    'additionalProperties': False,
+}
+
+_TAG_SYSTEM = (
+    "You are an experienced quizbowl editor filing questions under a set's own "
+    "category tags. You are given the set's tag list, then a batch of "
+    "questions, each preceded by a ref label. For each question, say which of "
+    "the listed tags it belongs under.\n\n"
+    "RULES:\n"
+    "- Use ONLY tag names from the list, copied exactly. Never invent a tag, "
+    "and never propose one that is already listed as a tag the question "
+    "carries.\n"
+    "- Tag what the question is ABOUT -- its answer and the subject its clues "
+    "belong to -- not every proper noun that appears in it. A passing mention "
+    "is not what a tag is for. A question whose answer is a French novel is a "
+    "French question even if it mentions a German city in one clue.\n"
+    "- A question may take several tags (they usually run along different "
+    "axes, e.g. a period and a region), or none at all. Returning nothing for "
+    "a question is a perfectly good answer, and better than a guess.\n"
+    "- Prefer the most specific tag that fits. A tag broad enough to cover "
+    "nearly every question in the category tells an editor nothing, so propose "
+    "one only where no more specific tag in the list applies.\n"
+    "- Where a tag's name carries a definition in the list (a period, a region, "
+    "a form), hold the question to it. Do not stretch a tag to fit.\n"
+    "- Use 'high' confidence only when the question plainly belongs under the "
+    "tag and an editor would agree without argument; use 'medium' when it is a "
+    "reasonable call someone might make differently. If it is weaker than that, "
+    "leave it out.\n"
+    "- The answer line is the strongest evidence of what a question is about. "
+    "It follows 'ANSWER:'."
+)
+
+# Fewer questions per call than the proofreading passes: the tag list rides
+# along in every request, and each question is being judged rather than scanned.
+_TAG_BATCH_SIZE = 20
+
+
+def _tag_batch(client, model, items, tag_block):
+    """Propose tags for one batch. Returns (assignments, error)."""
+    body = '\n\n'.join('[{0}]\n{1}'.format(it['ref'], it['text']) for it in items)
+    try:
+        resp = client.messages.create(
+            model=model, max_tokens=8000,
+            system=[{'type': 'text', 'text': _TAG_SYSTEM},
+                    # The tag list is the same in every batch of a run, so it is
+                    # cached rather than re-read at full price each time.
+                    {'type': 'text', 'text': 'The tags defined for this category:\n\n' + tag_block,
+                     'cache_control': {'type': 'ephemeral'}}],
+            messages=[{'role': 'user',
+                       'content': 'Which of those tags does each of these questions belong '
+                                  'under?\n\n' + body}],
+            output_config={'format': {'type': 'json_schema', 'schema': _TAG_SCHEMA}})
+    except Exception as ex:
+        return [], 'The AI tag suggestion failed: {0}'.format(ex)
+    text = next((b.text for b in resp.content if getattr(b, 'type', '') == 'text'), '')
+    try:
+        data = json.loads(text)
+    except (ValueError, TypeError):
+        return [], 'The AI returned an unexpected response.'
+    return data.get('assignments', []), None
+
+
+def suggest_category_tags(items, tags, model=None):
+    """Propose category tags for questions.
+
+    `items` is a list of {'ref': str, 'text': str} (the question, with its
+    answer line, and any tags it already carries). `tags` is the list of tags
+    on offer as {'name': str, 'description': str} -- the description carries
+    the tag's group and quota so the model can see what the tag is for.
+    Returns (assignments, error), where each assignment is a dict of
+    ref/tag/confidence/explanation. The caller matches the tag name back to a
+    real CategoryTag and discards anything that doesn't match: the names come
+    from a model, so they are checked rather than trusted. On a mid-run
+    failure, whatever was gathered so far is returned alongside the error.
+    """
+    client = _client()
+    if client is None:
+        return [], 'AI features are not configured (no API key).'
+    if not items or not tags:
+        return [], None
+
+    tag_block = '\n'.join(
+        '- {0}{1}'.format(t['name'], (': ' + t['description']) if t.get('description') else '')
+        for t in tags)
+    tag_model = model or getattr(settings, 'AI_TAG_MODEL', None) or settings.AI_DEFAULT_MODEL
+
+    assignments = []
+    for start in range(0, len(items), _TAG_BATCH_SIZE):
+        batch, error = _tag_batch(client, tag_model, items[start:start + _TAG_BATCH_SIZE],
+                                  tag_block)
+        if error:
+            return assignments, error
+        assignments.extend(batch)
+    return assignments, None
+
+
 def grammar_check_questions(items, model=None, answer_items=None):
     """Proofread the questions AND suggest alternate acceptable answers.
 

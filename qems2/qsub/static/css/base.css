@@ -247,6 +247,36 @@ html[data-theme="dark"] .rich-editor-toolbar a.rich-editor-btn.rich-editor-note 
     border-color: #cbd3dd;
 }
 
+/* Unsaved changes on an edit page: a bar that stays under the top bar for the
+   length of the page, so Save is in reach from wherever you are in a long
+   question. Sticky rather than fixed, so it needs no arithmetic against the
+   sidebar; 45 keeps it under the top bar (50) rather than over the search. */
+.q-savebar {
+    position: sticky;
+    top: 60px;
+    z-index: 45;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: -10px 0 16px;
+    padding: 8px 14px;
+    border: 1px solid #f0c98a;
+    border-radius: 8px;
+    background: #fdf6e7;
+    box-shadow: 0 2px 6px rgba(20, 20, 40, 0.08);
+}
+/* An author `display` beats the UA stylesheet's [hidden] rule, so the bar has
+   to hide itself explicitly or it is on the page from the moment it loads. */
+.q-savebar[hidden] { display: none; }
+.q-savebar-label { font-weight: 600; font-size: 0.85rem; color: #8a5a12; }
+.q-savebar .button { margin: 0; }
+html[data-theme="dark"] .q-savebar {
+    background: #3a2f1c;
+    border-color: #6b5426;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+html[data-theme="dark"] .q-savebar-label { color: #f0c98a; }
+
 /* The Type Questions box's "start a bonus for me" button: a long label, so it
    is set at the same reduced size as the other named tools on that toolbar. */
 .rich-editor-toolbar a.rich-editor-btn.rich-editor-skel {

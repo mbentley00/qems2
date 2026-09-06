@@ -671,6 +671,37 @@ class AIGrammarFinding(models.Model):
             self.question_type, self.question_id)
 
 
+class AITagSuggestion(models.Model):
+    """A category tag the AI thinks a question should carry.
+
+    A proposal, never an assignment: it shows on the question's row on the
+    Category Tags page until an editor accepts it (which assigns the tag and
+    deletes the row) or dismisses it (which just deletes the row). Suggestions
+    for a category are replaced wholesale on each run, the way the AI grammar
+    findings are.
+    """
+    question_set = models.ForeignKey(QuestionSet, on_delete=models.CASCADE,
+                                     related_name='ai_tag_suggestions')
+    question_type = models.CharField(max_length=10)  # 'tossup' | 'bonus'
+    question_id = models.PositiveIntegerField()
+    tag = models.ForeignKey('CategoryTag', on_delete=models.CASCADE,
+                            related_name='ai_suggestions')
+    confidence = models.CharField(max_length=10, default='medium')  # 'high' | 'medium'
+    explanation = models.TextField(blank=True, default='')
+    created_by = models.ForeignKey(Writer, on_delete=models.SET_NULL, null=True)
+    created_date = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['id']
+        # One live proposal per tag per question: a rerun replaces rather than
+        # piles a second copy of the same suggestion onto the row.
+        unique_together = ('question_type', 'question_id', 'tag')
+
+    def __str__(self):
+        return 'ai tag suggestion {0} on {1} {2}'.format(
+            self.tag_id, self.question_type, self.question_id)
+
+
 class DistributionPerPacket(models.Model):
 
     #packet = models.ManyToManyField(Packet)

@@ -10625,6 +10625,135 @@ def ai_grammar_check(request, qset_id):
                                     'checked': len(items)}))
 
 
+def _ai_tags_available(user):
+    """Whether to offer the AI tag suggester at all: admin, and a key set."""
+    from . import ai
+    return _is_ai_user(user) and ai.ai_enabled()
+
+
+def _ai_tag_question_text(q, qtype):
+    """One question as the tag suggester reads it: the prose and every answer
+    line, markup stripped."""
+    if qtype == 'tossup':
+        parts = [_clean_for_ai(q.tossup_text), 'ANSWER: ' + _clean_for_ai(q.tossup_answer)]
+    else:
+        parts = [_clean_for_ai(q.leadin),
+                 _clean_for_ai(q.part1_text), 'ANSWER: ' + _clean_for_ai(q.part1_answer),
+                 _clean_for_ai(q.part2_text), 'ANSWER: ' + _clean_for_ai(q.part2_answer),
+                 _clean_for_ai(q.part3_text), 'ANSWER: ' + _clean_for_ai(q.part3_answer)]
+    return '\n'.join(p for p in parts if p.strip())
+
+
+def _ai_tag_description(tag):
+    """What a tag is for, as far as the set records it: its group (the axis it
+    runs along) and its quota. Both are what an editor reads to decide whether
+    a tag fits, so the model gets them too."""
+    bits = []
+    if tag.group_name:
+        bits.append('group: {0}'.format(tag.group_name))
+    quota = []
+    if tag.num_tossups:
+        quota.append('{0}+ tossups'.format(tag.num_tossups))
+    if tag.num_bonuses:
+        quota.append('{0}+ bonuses'.format(tag.num_bonuses))
+    if tag.num_questions:
+        quota.append('{0}+ questions'.format(tag.num_questions))
+    if quota:
+        bits.append('needs ' + ', '.join(quota))
+    return '; '.join(bits)
+
+
+@login_required
+def ai_suggest_tags(request, qset_id):
+    """Admin-only: ask Claude which of a category's tags each of its questions
+    should carry. Proposals only -- they are persisted and shown on the rows,
+    and an editor accepts or dismisses each one. A rerun replaces the previous
+    proposals for the same category."""
+    from . import ai
+    if request.method != 'POST':
+        return HttpResponse(json.dumps({'ok': False, 'message': 'POST required'}), status=405)
+    if not _is_ai_user(request.user):
+        return HttpResponse(json.dumps({'ok': False, 'message': 'Not authorized.'}), status=403)
+    if not ai.ai_enabled():
+        return HttpResponse(json.dumps({'ok': False, 'message': 'AI features are not configured.'}))
+    user = request.user.writer
+    try:
+        qset = QuestionSet.objects.get(id=qset_id)
+    except QuestionSet.DoesNotExist:
+        return HttpResponse(json.dumps({'ok': False, 'message': 'Set not found.'}))
+    if not (qset.is_owner(user) or user in qset.editor.all()):
+        return HttpResponse(json.dumps({'ok': False, 'message': 'Only editors can tag questions.'}),
+                            status=403)
+
+    raw_focus = (request.POST.get('category') or '').strip()
+    if not raw_focus:
+        return HttpResponse(json.dumps({'ok': False,
+                                        'message': 'Open a category first — tags are suggested '
+                                                   'one category at a time.'}))
+    path = scope_from_token(raw_focus)
+
+    # Exactly the tags this page can assign, so every proposal is one the
+    # editor can accept with the button next to it.
+    tags = list(CategoryTag.objects.filter(question_set=qset, category_path=path))
+    if not tags:
+        return HttpResponse(json.dumps({'ok': False,
+                                        'message': 'This category has no tags to choose from yet.'}))
+    by_name = {t.name.strip().lower(): t for t in tags}
+
+    # The same questions the page lists under this category.
+    category_ids = None
+    if (path or '').strip():
+        category_ids = [e.id for e in DistributionEntry.objects.filter(
+            distribution_id=qset.distribution_id)
+            if str(e) == path or str(e).startswith(path + ' - ')]
+
+    items, questions = [], {}
+    for model, qtype in ((Tossup, 'tossup'), (Bonus, 'bonus')):
+        qs = model.objects.filter(question_set=qset).prefetch_related('category_tags')
+        if category_ids is not None:
+            qs = qs.filter(category_id__in=category_ids)
+        for q in qs:
+            ref = '{0}-{1}'.format(qtype, q.id)
+            questions[ref] = q
+            have = sorted(t.name for t in q.category_tags.all() if t.question_set_id == qset.id)
+            text = _ai_tag_question_text(q, qtype)
+            if have:
+                text += '\nAlready tagged: ' + ', '.join(have)
+            items.append({'ref': ref, 'text': text})
+
+    if not items:
+        return HttpResponse(json.dumps({'ok': False, 'message': 'No questions in this category.'}))
+
+    assignments, error = ai.suggest_category_tags(
+        items, [{'name': t.name, 'description': _ai_tag_description(t)} for t in tags])
+
+    kept = 0
+    with transaction.atomic():
+        AITagSuggestion.objects.filter(question_set=qset, tag__in=tags).delete()
+        for a in assignments:
+            ref = a.get('ref', '')
+            tag = by_name.get((a.get('tag') or '').strip().lower())
+            q = questions.get(ref)
+            # A name the set doesn't define, a ref for a question that wasn't in
+            # the batch, or a tag the question already carries: all dropped
+            # rather than shown. The model's output is checked, not trusted.
+            if tag is None or q is None:
+                continue
+            if any(t.id == tag.id for t in q.category_tags.all()):
+                continue
+            qtype, _, qid = ref.partition('-')
+            _, made = AITagSuggestion.objects.get_or_create(
+                question_set=qset, question_type=qtype, question_id=int(qid), tag=tag,
+                defaults={'confidence': a.get('confidence', 'medium'),
+                          'explanation': a.get('explanation', ''),
+                          'created_by': user})
+            kept += 1 if made else 0
+
+    if error:
+        return HttpResponse(json.dumps({'ok': False, 'message': error, 'suggested': kept}))
+    return HttpResponse(json.dumps({'ok': True, 'suggested': kept, 'checked': len(items)}))
+
+
 @login_required
 def dismiss_ai_grammar_finding(request):
     """Delete a single persisted AI grammar finding (admin only)."""
@@ -11373,6 +11502,16 @@ def _category_question_rows(qset, path, tag_rows, only_tag=None):
     page_tag_ids = {t.id for t in page_tags}
     set_wide = not (path or '').strip()
 
+    # Any AI proposals standing for this category's tags, by question. They ride
+    # on the rows they belong to, so a page refresh (which is how every action
+    # here redraws) keeps them.
+    suggested = {}
+    for s in AITagSuggestion.objects.filter(
+            question_set=qset, tag__id__in=page_tag_ids).select_related('tag'):
+        suggested.setdefault((s.question_type, s.question_id), []).append(
+            {'id': s.id, 'tag_id': s.tag_id, 'name': s.tag.name,
+             'confidence': s.confidence, 'explanation': s.explanation})
+
     # Which categories count as "in" this path: the path itself and anything
     # under it. Worked out once against the distribution, so the questions can
     # be asked for by category instead of reading the whole set and throwing
@@ -11410,11 +11549,13 @@ def _category_question_rows(qset, path, tag_rows, only_tag=None):
                 'packet_key': (0, q.packet.packet_name, q.question_number or 0) if q.packet_id else (1, '', q.id),
                 'author': str(q.author) if q.author_id else '',
                 'tags': tags,
+                'suggested': suggested.get((qtype, q.id), []),
                 'untagged': not any(t.id in page_tag_ids for t in tags),
             })
     rows.sort(key=lambda r: (r['packet_key'], r['qtype'] != 'tossup'))
     return {'rows': rows,
             'only_tag': only_tag,
+            'suggestions': sum(len(r['suggested']) for r in rows),
             # The tags any row here can be given, listed once for the page
             # instead of once per row -- see the template.
             'assignable': [{'id': t.id,
@@ -12144,11 +12285,35 @@ def category_tags(request, qset_id):
                         relation.remove(q)
                         message = 'Removed "{0}"'.format(tag.name)
                     message_class = 'alert-box success'
+                elif action in ('accept_suggestion', 'reject_suggestion'):
+                    # An AI proposal is only ever a proposal: accepting is the
+                    # ordinary assign, and either verdict takes the row away.
+                    sugg = AITagSuggestion.objects.select_related('tag').get(
+                        question_set=qset, id=int(request.POST['suggestion_id']))
+                    if action == 'accept_suggestion':
+                        if sugg.question_type == 'tossup':
+                            sugg.tag.tossups.add(Tossup.objects.get(question_set=qset,
+                                                                    id=sugg.question_id))
+                        else:
+                            sugg.tag.bonuses.add(Bonus.objects.get(question_set=qset,
+                                                                   id=sugg.question_id))
+                        message = 'Tagged "{0}"'.format(sugg.tag.name)
+                    else:
+                        message = 'Suggestion dismissed'
+                    sugg.delete()
+                    message_class = 'alert-box success'
+                elif action == 'clear_suggestions':
+                    path = scope_from_token(request.POST.get('category_path', ''))
+                    AITagSuggestion.objects.filter(
+                        question_set=qset, tag__category_path=path).delete()
+                    message = 'Suggestions cleared'
+                    message_class = 'alert-box success'
                 elif action == 'delete':
                     CategoryTag.objects.filter(question_set=qset, id=int(request.POST['tag_id'])).delete()
                     message = 'Tag deleted'
                     message_class = 'alert-box success'
-            except (CategoryTag.DoesNotExist, Tossup.DoesNotExist, Bonus.DoesNotExist):
+            except (CategoryTag.DoesNotExist, Tossup.DoesNotExist, Bonus.DoesNotExist,
+                    AITagSuggestion.DoesNotExist):
                 message = 'That tag or question no longer exists'
                 message_class = 'alert-box warning'
             except (ValueError, KeyError) as ex:
@@ -12302,6 +12467,9 @@ def category_tags(request, qset_id):
                'can_edit': can_edit,
                'selected_path': selected_path,
                'focus_path': focus_path,
+               # The AI tag suggester is the admin's, and only when a key is
+               # configured — the button isn't rendered otherwise.
+               'ai_tags_available': _ai_tags_available(request.user),
                'message': message,
                'message_class': message_class}
     # Notes belong with the category being worked on, so they show on the

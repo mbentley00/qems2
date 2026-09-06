@@ -252,6 +252,22 @@ time, and where the questions nobody has tagged stand out.
         {% if focus_questions.untagged and focus_questions.untagged != focus_questions.total %}
         <label class="tag-untagged-filter"><input type="checkbox" id="tag-untagged-only"> Only show untagged</label>
         {% endif %}
+        {% comment %}
+        Admin-only: ask Claude which of this category's tags each question
+        belongs under. What comes back is a proposal on each row, accepted or
+        dismissed one at a time — nothing is tagged without an editor saying so.
+        {% endcomment %}
+        {% if ai_tags_available and can_edit and focus_questions.rows %}
+        <span class="tag-ai-tools">
+            <button type="button" class="button tiny secondary tag-ai-suggest"
+                    data-category="{% if focus_set_wide %}{{ set_wide_token }}{% else %}{{ focus_path }}{% endif %}"
+                    title="Ask the AI which of this category's tags each question belongs under. Suggestions appear on the rows for you to accept or dismiss.">AI: suggest tags</button>
+            {% if focus_questions.suggestions %}
+            <button type="button" class="button tiny secondary tag-ai-clear"
+                    title="Remove every outstanding AI suggestion in this category">Clear {{ focus_questions.suggestions }} suggestion{{ focus_questions.suggestions|pluralize }}</button>
+            {% endif %}
+        </span>
+        {% endif %}
     </div>
     {% if not focus_questions.rows %}
     <p class="home-note">{% if only_tag %}No question here carries that tag yet.{% else %}No questions in this category yet.{% endif %}</p>
@@ -290,6 +306,10 @@ time, and where the questions nobody has tagged stand out.
                     <span class="tag-chip" data-tag-id="{{ tag.id }}">{{ tag.name }}{% if can_edit %}<button type="button" class="tag-unassign" title="Remove this tag">&times;</button>{% endif %}</span>
                     {% empty %}
                     <span class="tag-q-flag">No tags</span>
+                    {% endfor %}
+                    {% for s in q.suggested %}
+                    <span class="tag-chip tag-chip-ai tag-conf-{{ s.confidence }}" data-sugg-id="{{ s.id }}"
+                          title="AI suggestion ({{ s.confidence }} confidence){% if s.explanation %} — {{ s.explanation }}{% endif %}">{{ s.name }}{% if can_edit %}<button type="button" class="tag-sugg-accept" title="Add this tag"><i class="fa fa-check"></i></button><button type="button" class="tag-sugg-reject" title="Dismiss this suggestion">&times;</button>{% endif %}</span>
                     {% endfor %}
                     {% if can_edit %}
                     <select class="tag-assign"><option value="">+ tag&hellip;</option></select>
@@ -506,6 +526,51 @@ $(function () {
         $sel.find('option:selected').remove();
         $sel.val('');
         $row.removeClass('tag-q-untagged');
+    });
+
+    // An AI proposal: accept it (which assigns the tag) or dismiss it. Both go
+    // through the ordinary post/refresh, so the counts and quota bars settle
+    // the same way they do for a hand-assigned tag.
+    $(document).on('click', '.tag-sugg-accept, .tag-sugg-reject', function () {
+        var $chip = $(this).closest('.tag-chip');
+        var accept = $(this).hasClass('tag-sugg-accept');
+        postData({action: accept ? 'accept_suggestion' : 'reject_suggestion',
+                  suggestion_id: $chip.data('sugg-id')});
+        $chip.remove();
+    });
+
+    // Suggesting runs over every question in the category and takes a while, so
+    // the button says so rather than looking inert.
+    $(document).on('click', '.tag-ai-suggest', function () {
+        var $btn = $(this);
+        if ($btn.prop('disabled')) { return; }
+        $btn.prop('disabled', true).text('Reading the category…');
+        flash('Asking the AI which tags these questions belong under…', 'alert-box secondary');
+        $.ajax({url: '/ai_suggest_tags/{{ qset.id }}/', type: 'POST', dataType: 'json',
+                data: {csrfmiddlewaretoken: csrf(), category: $btn.data('category')}})
+            .done(function (resp) {
+                if (resp && resp.ok) {
+                    flash(resp.suggested
+                            ? resp.suggested + ' suggestion' + (resp.suggested === 1 ? '' : 's')
+                              + ' from ' + resp.checked + ' question'
+                              + (resp.checked === 1 ? '' : 's') + ' — accept or dismiss each.'
+                            : 'The AI had nothing to suggest here.',
+                          'alert-box success');
+                } else {
+                    flash((resp && resp.message) || 'The AI run did not finish.',
+                          'alert-box warning');
+                }
+                refresh();
+            })
+            .fail(function () {
+                flash('The AI run did not finish — try again.', 'alert-box warning');
+                $btn.prop('disabled', false).text('AI: suggest tags');
+            });
+    });
+
+    $(document).on('click', '.tag-ai-clear', function () {
+        postData({action: 'clear_suggestions', category_path: $('.tag-ai-suggest').data('category')});
+        $('.tag-chip-ai').remove();
     });
 
     $(document).on('click', '.tag-unassign', function () {
@@ -772,6 +837,21 @@ $(function () {
 .tag-chip { display: inline-flex; align-items: center; gap: 2px; margin: 0 4px 2px 0;
     padding: 0 7px; border-radius: 10px; font-size: 0.9em;
     background: var(--qx-elevate, #eef2f7); color: var(--qx-ink, #2b2f3a); }
+/* An AI proposal, which is not a tag the question has: outlined rather than
+   filled, so a glance down the column separates what is tagged from what is
+   only suggested. A medium-confidence one is fainter than a high one. */
+.tag-chip-ai { background: transparent; border: 1px dashed #7c5cd6; color: #5b3fbf; }
+.tag-chip-ai.tag-conf-medium { border-style: dotted; opacity: 0.85; }
+.tag-chip-ai button { border: none; background: none; cursor: pointer; padding: 0 0 0 3px;
+    font-size: 0.95em; line-height: 1; color: inherit; }
+/* The tick is a Font Awesome icon, not a U+2713: the page's font stack has no
+   glyph for that character and drew a tofu box in its place. */
+.tag-sugg-accept { color: #2b6a3f !important; }
+.tag-sugg-accept .fa { font-size: 0.8em; }
+.tag-sugg-accept:hover { color: #1d4d2c !important; }
+.tag-sugg-reject:hover { color: #c0392b !important; }
+.tag-ai-tools { margin-left: auto; display: inline-flex; gap: 6px; }
+.tag-ai-tools .button { margin: 0; }
 .tag-chip-del { display: inline; margin: 0; }
 .tag-chip-del button { border: none; background: none; cursor: pointer; padding: 0 0 0 2px;
     color: var(--qx-muted, #8a8f9c); font-size: 1em; line-height: 1; }
@@ -806,6 +886,8 @@ $(function () {
 html[data-theme="dark"] .tag-cat-open { color: #f08c8c; }
 html[data-theme="dark"] .tag-q-untagged td { background-color: #3a2424 !important; }
 html[data-theme="dark"] .tag-q-flag, html[data-theme="dark"] .tag-chip-del button:hover { color: #f08c8c; }
+html[data-theme="dark"] .tag-chip-ai { border-color: #9b83e8; color: #c3b3f5; }
+html[data-theme="dark"] .tag-sugg-accept { color: #7fc79a !important; }
 </style>
 
 {% endblock %}

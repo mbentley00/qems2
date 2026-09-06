@@ -13076,6 +13076,165 @@ class CategoryTagEditingTests(TestCase):
         self.assertNotIn(self.tu2, self.pre.tossups.all())
 
 
+class AITagSuggestionTests(TestCase):
+    """The admin-only AI pass that proposes category tags for a category's
+    questions. The model is never called here -- what is tested is everything
+    around it: who may run it, what is kept from what comes back, how a
+    proposal reaches the page, and what accepting or dismissing one does."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_superuser('ait_admin', password='pw', email='ait@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='AIT dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='History', subcategory='World',
+            min_tossups=2, min_bonuses=2)
+        self.qset = QuestionSet.objects.create(
+            name='AIT Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.qset.editor.add(self.owner)
+        self.path = 'History - World'
+        self.page = '/category_tags/{0}/?category=History%20-%20World'.format(self.qset.id)
+        self.run_url = '/ai_suggest_tags/{0}/'.format(self.qset.id)
+        self.china = CategoryTag.objects.create(question_set=self.qset, category_path=self.path,
+                                                name='China', group_name='Location', num_tossups=2)
+        self.modern = CategoryTag.objects.create(question_set=self.qset, category_path=self.path,
+                                                 name='Modern', group_name='Time')
+        self.tu = Tossup.objects.create(
+            question_set=self.qset, question_type=self.acf, category=self.de,
+            author=self.owner, tossup_text='This leader led the Long March. (*) end.',
+            tossup_answer='_Mao Zedong_',
+            created_date=timezone.now(), last_changed_date=timezone.now())
+        self.client.login(username='ait_admin', password='pw')
+
+    def _run(self, assignments, error=None, category=None):
+        """Run the endpoint with the model's answer stubbed in."""
+        from qems2.qsub import ai
+        real = ai.suggest_category_tags
+        ai.suggest_category_tags = lambda items, tags, model=None: (assignments, error)
+        try:
+            return self.client.post(self.run_url,
+                                    {'category': category or self.path})
+        finally:
+            ai.suggest_category_tags = real
+
+    def _json(self, resp):
+        import json as _json
+        return _json.loads(resp.content.decode())
+
+    def _suggestion(self):
+        return AITagSuggestion.objects.filter(question_set=self.qset).first()
+
+    def test_a_suggestion_is_stored_against_the_question_and_tag(self):
+        with self.settings(ANTHROPIC_API_KEY='test-key'):
+            resp = self._run([{'ref': 'tossup-{0}'.format(self.tu.id), 'tag': 'China',
+                               'confidence': 'high', 'explanation': 'The Long March.'}])
+        self.assertTrue(self._json(resp)['ok'])
+        s = self._suggestion()
+        self.assertEqual((s.question_type, s.question_id, s.tag_id, s.confidence),
+                         ('tossup', self.tu.id, self.china.id, 'high'))
+        # A proposal is not an assignment.
+        self.assertEqual(self.china.tossups.count(), 0)
+
+    def test_a_tag_name_the_set_does_not_define_is_dropped(self):
+        with self.settings(ANTHROPIC_API_KEY='test-key'):
+            self._run([{'ref': 'tossup-{0}'.format(self.tu.id), 'tag': 'Ming Dynasty',
+                        'confidence': 'high', 'explanation': 'invented'}])
+        self.assertEqual(AITagSuggestion.objects.count(), 0)
+
+    def test_a_tag_the_question_already_has_is_dropped(self):
+        self.china.tossups.add(self.tu)
+        with self.settings(ANTHROPIC_API_KEY='test-key'):
+            self._run([{'ref': 'tossup-{0}'.format(self.tu.id), 'tag': 'China',
+                        'confidence': 'high', 'explanation': 'already there'}])
+        self.assertEqual(AITagSuggestion.objects.count(), 0)
+
+    def test_a_rerun_replaces_the_previous_suggestions(self):
+        with self.settings(ANTHROPIC_API_KEY='test-key'):
+            self._run([{'ref': 'tossup-{0}'.format(self.tu.id), 'tag': 'China',
+                        'confidence': 'high', 'explanation': 'one'}])
+            self._run([{'ref': 'tossup-{0}'.format(self.tu.id), 'tag': 'Modern',
+                        'confidence': 'medium', 'explanation': 'two'}])
+        self.assertEqual([s.tag_id for s in AITagSuggestion.objects.all()], [self.modern.id])
+
+    def test_the_page_shows_a_suggestion_on_its_question(self):
+        with self.settings(ANTHROPIC_API_KEY='test-key'):
+            self._run([{'ref': 'tossup-{0}'.format(self.tu.id), 'tag': 'China',
+                        'confidence': 'high', 'explanation': 'The Long March.'}])
+            body = self.client.get(self.page).content.decode()
+        self.assertIn('tag-chip-ai', body)
+        self.assertIn('The Long March.', body)
+        self.assertIn('secondary tag-ai-suggest"', body)
+
+    def test_accepting_a_suggestion_tags_the_question(self):
+        with self.settings(ANTHROPIC_API_KEY='test-key'):
+            self._run([{'ref': 'tossup-{0}'.format(self.tu.id), 'tag': 'China',
+                        'confidence': 'high', 'explanation': 'The Long March.'}])
+        self.client.post(self.page, {'action': 'accept_suggestion',
+                                     'suggestion_id': self._suggestion().id})
+        self.assertIn(self.tu, self.china.tossups.all())
+        self.assertEqual(AITagSuggestion.objects.count(), 0)
+
+    def test_dismissing_a_suggestion_leaves_the_question_alone(self):
+        with self.settings(ANTHROPIC_API_KEY='test-key'):
+            self._run([{'ref': 'tossup-{0}'.format(self.tu.id), 'tag': 'China',
+                        'confidence': 'high', 'explanation': 'The Long March.'}])
+        self.client.post(self.page, {'action': 'reject_suggestion',
+                                     'suggestion_id': self._suggestion().id})
+        self.assertEqual(self.china.tossups.count(), 0)
+        self.assertEqual(AITagSuggestion.objects.count(), 0)
+
+    def test_clearing_removes_every_suggestion_in_the_category(self):
+        with self.settings(ANTHROPIC_API_KEY='test-key'):
+            self._run([{'ref': 'tossup-{0}'.format(self.tu.id), 'tag': 'China',
+                        'confidence': 'high', 'explanation': 'a'},
+                       {'ref': 'tossup-{0}'.format(self.tu.id), 'tag': 'Modern',
+                        'confidence': 'medium', 'explanation': 'b'}])
+            self.assertEqual(AITagSuggestion.objects.count(), 2)
+            self.client.post(self.page, {'action': 'clear_suggestions',
+                                         'category_path': self.path})
+        self.assertEqual(AITagSuggestion.objects.count(), 0)
+
+    def test_a_non_admin_editor_cannot_run_it_and_is_not_offered_it(self):
+        eu = User.objects.create_user('ait_editor', password='pw', email='aite@t.com')
+        editor = Writer.objects.get(user=eu)
+        self.qset.editor.add(editor)
+        self.client.login(username='ait_editor', password='pw')
+        with self.settings(ANTHROPIC_API_KEY='test-key'):
+            resp = self._run([{'ref': 'tossup-{0}'.format(self.tu.id), 'tag': 'China',
+                               'confidence': 'high', 'explanation': 'x'}])
+            self.assertEqual(resp.status_code, 403)
+            self.assertNotIn('secondary tag-ai-suggest"',
+                             self.client.get(self.page).content.decode())
+        self.assertEqual(AITagSuggestion.objects.count(), 0)
+
+    def test_the_button_is_hidden_when_no_api_key_is_configured(self):
+        with self.settings(ANTHROPIC_API_KEY=''):
+            body = self.client.get(self.page).content.decode()
+            self.assertNotIn('secondary tag-ai-suggest"', body)
+            self.assertIn('not configured', self._json(self._run([]))['message'])
+
+    def test_a_category_with_no_tags_says_so_instead_of_calling_the_model(self):
+        CategoryTag.objects.filter(question_set=self.qset).delete()
+        with self.settings(ANTHROPIC_API_KEY='test-key'):
+            resp = self._run([{'ref': 'x', 'tag': 'y', 'confidence': 'high', 'explanation': 'z'}])
+        body = self._json(resp)
+        self.assertFalse(body['ok'])
+        self.assertIn('no tags', body['message'])
+
+    def test_a_partial_run_keeps_what_it_got_and_reports_the_error(self):
+        with self.settings(ANTHROPIC_API_KEY='test-key'):
+            resp = self._run([{'ref': 'tossup-{0}'.format(self.tu.id), 'tag': 'China',
+                               'confidence': 'high', 'explanation': 'The Long March.'}],
+                             error='The AI tag suggestion failed: boom')
+        body = self._json(resp)
+        self.assertFalse(body['ok'])
+        self.assertIn('boom', body['message'])
+        self.assertEqual(AITagSuggestion.objects.count(), 1)
+
+
 class MovedQuestionTagTests(TestCase):
     """A question moved to another set takes its tags only where the new set
     has the same tag, and the old set stops counting it."""

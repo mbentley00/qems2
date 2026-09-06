@@ -171,6 +171,13 @@ AI_DEFAULT_MODEL = os.environ.get('AI_DEFAULT_MODEL', 'claude-haiku-4-5')
 # it uses a stronger model by default. Sonnet 5 gives near-Opus knowledge and
 # reasoning with structured-output support at lower cost than Opus.
 AI_ANSWER_MODEL = os.environ.get('AI_ANSWER_MODEL', 'claude-sonnet-5')
+# Proposing category tags is a judgment call about what a question is really
+# about, made against the set's own tag definitions -- the kind of thing a
+# weaker model gets superficially right (it tags on a word that appears in the
+# question) and substantively wrong. Opus by default; drop it to
+# claude-sonnet-5 here or in the app settings if the cost of a whole-set run
+# matters more than the hit rate.
+AI_TAG_MODEL = os.environ.get('AI_TAG_MODEL', 'claude-opus-5')
 
 #SECRET_KEY = '%&amp;5&amp;wmrx-g8zpk8=m*kttzkxfy^38ziedy$1kf-4uwme8bksba'
 

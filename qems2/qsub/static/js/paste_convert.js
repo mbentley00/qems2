@@ -1244,6 +1244,77 @@ $(function () {
         return dirty;
     }
 
+    // ---- The save bar --------------------------------------------------
+    //
+    // Save sits at the top of the edit page, so by the time you have changed
+    // something several screens down it is off the screen -- and the way to
+    // save is to scroll back up and find it. This bar appears the moment the
+    // form differs from what was loaded and rides under the top bar for the
+    // rest of the page, so Save is always one click away.
+    //
+    // It saves by clicking the form's own button rather than submitting the
+    // form itself: the page hangs checks off that button (the leading-bold
+    // warning on a tossup, the rich editors' sync), and going around it would
+    // skip them.
+    function setupSaveBar() {
+        var $form = $('#edit-tossup, #edit-bonus').first();
+        if (!$form.length || !$editForm.length || !$form.is($editForm)) { return; }
+        // Whichever save this person actually has: an editor gets the real
+        // one, a writer on someone else's locked question gets "save as
+        // suggested changes", and the bar says which it is.
+        var $save = $form.find('.qmeta-save').first();
+        var suggestion = false;
+        if (!$save.length) {
+            $save = $form.find('button[name="save_as_suggestion"]').first();
+            suggestion = true;
+        }
+        if (!$save.length) { return; }
+
+        var $bar = $(
+            '<div class="q-savebar" hidden>' +
+            '  <span class="q-savebar-label">Unsaved changes</span>' +
+            '  <button type="button" class="button tiny primary q-savebar-save"></button>' +
+            '</div>');
+        $bar.find('.q-savebar-save')
+            .text(suggestion ? 'Save as suggested changes' : 'Save')
+            .on('click', function () { $save.trigger('click'); });
+        // First thing in the content column, so it sticks under the top bar for
+        // the whole page rather than only as far as the form reaches.
+        var $host = $('.app-content').first();
+        if ($host.length) { $host.prepend($bar); } else { $form.before($bar); }
+
+        // A bonus opens in the unified editor, whose textarea carries no name
+        // and so is invisible to the form-field comparison: it is only parsed
+        // back into the per-part fields on submit. Watch it directly, or
+        // editing a bonus the ordinary way would never raise the bar. Its
+        // value is set from the saved fields further up this same handler, so
+        // by here it holds what was loaded.
+        var $unified = $('#unified-bonus-text');
+        var unifiedInitial = $unified.length ? $unified.val() : null;
+
+        var timer = null;
+        function sync() {
+            var dirty = hasUnsavedChanges() ||
+                (unifiedInitial !== null && $unified.val() !== unifiedInitial);
+            $bar.prop('hidden', !dirty);
+        }
+        function schedule() {
+            clearTimeout(timer);
+            // After the rich editor's own input handler has written through to
+            // the textarea this reads.
+            timer = setTimeout(sync, 200);
+        }
+        $form.on('input change', 'input, textarea, select', schedule);
+        $form.on('input', '.rich-editor', schedule);
+        // A submit can still be called off -- the missing-difficulty warning on
+        // a bonus, the bolded-power one on a tossup -- so the bar is not taken
+        // away on the way out; it is rechecked once the other handlers have had
+        // their say. (On a save that goes through, the page reloads anyway.)
+        $form.on('submit', schedule);
+        sync();
+    }
+    setupSaveBar();
+
     // Warn before posting a top-level comment if there are unsaved question changes
     $(document).on('submit', 'form:has(input[name="next"])', function (e) {
         if (hasUnsavedChanges()) {
