@@ -99,6 +99,56 @@ $(function () {
     var registry = {};
     var resyncFns = [];
 
+    /* ---------- Special characters (the toolbar's Omega button) ---------- */
+
+    // Accented letters are pairs so the panel's Caps toggle can show the
+    // upper-case form of the same grid rather than doubling its height.
+    // Ordered by base letter, which is how a writer hunts for one.
+    var SYMBOL_LETTERS = [
+        ['á', 'Á'], ['à', 'À'], ['â', 'Â'], ['ä', 'Ä'], ['ã', 'Ã'], ['å', 'Å'],
+        ['ā', 'Ā'], ['ą', 'Ą'], ['æ', 'Æ'],
+        ['é', 'É'], ['è', 'È'], ['ê', 'Ê'], ['ë', 'Ë'], ['ē', 'Ē'], ['ě', 'Ě'],
+        ['ę', 'Ę'],
+        ['í', 'Í'], ['ì', 'Ì'], ['î', 'Î'], ['ï', 'Ï'], ['ī', 'Ī'], ['ı', 'İ'],
+        ['ó', 'Ó'], ['ò', 'Ò'], ['ô', 'Ô'], ['ö', 'Ö'], ['õ', 'Õ'], ['ő', 'Ő'],
+        ['ø', 'Ø'], ['œ', 'Œ'],
+        ['ú', 'Ú'], ['ù', 'Ù'], ['û', 'Û'], ['ü', 'Ü'], ['ū', 'Ū'], ['ů', 'Ů'],
+        ['ű', 'Ű'],
+        ['ý', 'Ý'], ['ÿ', 'Ÿ'],
+        ['ç', 'Ç'], ['ć', 'Ć'], ['č', 'Č'], ['ď', 'Ď'], ['đ', 'Đ'], ['ğ', 'Ğ'],
+        ['ł', 'Ł'], ['ñ', 'Ñ'], ['ń', 'Ń'], ['ř', 'Ř'], ['ś', 'Ś'], ['š', 'Š'],
+        ['ş', 'Ş'], ['ť', 'Ť'], ['ź', 'Ź'], ['ż', 'Ż'], ['ž', 'Ž'],
+        ['ð', 'Ð'], ['þ', 'Þ'], ['ß', 'ß']
+    ];
+
+    var SYMBOL_CURRENCY = [
+        ['€', 'Euro'], ['£', 'Pound'], ['¥', 'Yen / yuan'], ['¢', 'Cent'],
+        ['₹', 'Indian rupee'], ['₽', 'Russian ruble'], ['₩', 'Korean won'],
+        ['₪', 'Israeli shekel'], ['₺', 'Turkish lira'], ['₴', 'Ukrainian hryvnia'],
+        ['₦', 'Nigerian naira'], ['₫', 'Vietnamese dong'], ['ƒ', 'Florin / guilder'],
+        ['¤', 'Generic currency sign']
+    ];
+
+    // Dashes, quotes and the marks that come up while proofreading a question.
+    var SYMBOL_MARKS = [
+        ['—', 'Em dash'], ['–', 'En dash'], ['…', 'Ellipsis'],
+        ['“', 'Left double quote'], ['”', 'Right double quote'],
+        ['‘', 'Left single quote'], ['’', 'Right single quote / apostrophe'],
+        ['«', 'Left guillemet'], ['»', 'Right guillemet'],
+        ['′', 'Prime (feet, minutes)'], ['″', 'Double prime (inches, seconds)'],
+        ['°', 'Degree'], ['·', 'Middle dot'], ['•', 'Bullet'],
+        ['§', 'Section'], ['¶', 'Pilcrow'], ['†', 'Dagger'], ['‡', 'Double dagger'],
+        ['©', 'Copyright'], ['®', 'Registered'], ['™', 'Trademark'],
+        ['±', 'Plus-minus'], ['×', 'Multiplication'], ['÷', 'Division'],
+        ['−', 'Minus sign'], ['≈', 'Approximately equal'], ['≠', 'Not equal'],
+        ['≤', 'Less than or equal'], ['≥', 'Greater than or equal'],
+        ['½', 'One half'], ['⅓', 'One third'], ['¼', 'One quarter'],
+        ['¾', 'Three quarters'],
+        ['¡', 'Inverted exclamation'], ['¿', 'Inverted question mark']
+    ];
+
+    var enhanceCount = 0;
+
     // `opts.compact` drops the toolbar and sizes the editor like an ordinary
     // one-line input: the structured answer rows are four fields wide, and a
     // toolbar apiece would bury the fields under their own chrome. Ctrl+B/U/I
@@ -106,6 +156,9 @@ $(function () {
     function enhance(textarea, multiline, opts) {
         opts = opts || {};
         var $ta = $(textarea);
+        // Distinguishes this editor's document-level handlers from the other
+        // fields' (a page has one editor per question field).
+        var editorSeq = ++enhanceCount;
         // Server-side validation still applies; a hidden required field
         // would silently block submission.
         $ta.removeAttr('required');
@@ -119,6 +172,12 @@ $(function () {
             '  <a href="#" class="rich-editor-btn" data-cmd="italic" title="Italic (Ctrl+I)"><i>I</i></a>' +
             '  <a href="#" class="rich-editor-btn" data-cmd="subscript" title="Subscript">x<sub>2</sub></a>' +
             '  <a href="#" class="rich-editor-btn" data-cmd="superscript" title="Superscript">x<sup>2</sup></a>' +
+            // Characters no keyboard here has: the accents European names need,
+            // currency signs, and the dashes and marks that come up in
+            // proofreading. Opens a panel under the toolbar; the caret stays
+            // where it was, so a click drops the character into the sentence.
+            '  <a href="#" class="rich-editor-btn rich-editor-sym" data-cmd="symbols" ' +
+            'title="Special characters: accents, currency, dashes and proofreading marks">Ω</a>' +
             // Pronunciation-guide target: select the word(s) together with the
             // following ("...") guide, and this wraps just the word(s) in \P...\P.
             // With the caret inside an existing mark it removes that mark, so PG
@@ -139,6 +198,17 @@ $(function () {
             '  <a href="#" class="rich-editor-btn rich-editor-qb" data-cmd="qbfreq" title="How often the selected phrase appears in the qbreader database. Select a phrase first.">DB</a>' +
             '  <a href="#" class="rich-editor-btn rich-editor-plain" data-cmd="plaintext" title="Edit the raw QEMS markup directly (e.g. ~foo~ for italics, _foo_ for answer underlines)">Raw</a>' +
             '</div>');
+        // Type Questions is the one box where a bonus is typed from nothing --
+        // everywhere else the [10] parts are separate fields the page supplies.
+        // The shape (leadin line, three parts, an ANSWER line apiece) is what
+        // the parser is strict about, so it's worth handing over ready-made.
+        if (textarea.id === 'id_questions') {
+            $toolbar.find('.rich-editor-qb').before(
+                '<a href="#" class="rich-editor-btn rich-editor-skel" data-cmd="bonusskel" ' +
+                'title="Start a bonus: the &quot;For 10 points each:&quot; line, three [10] parts ' +
+                'and an ANSWER line for each. Added at the end of the box, with the caret where ' +
+                'the leadin goes.">Bonus skeleton</a>');
+        }
         var $editor = $('<div class="rich-editor" contenteditable="true" spellcheck="true"></div>');
         // Only the big bulk "type questions" box gets the extra-tall sizing.
         // (Edit-page fields are also multiline so Enter works, but size by role.)
@@ -194,6 +264,9 @@ $(function () {
         // wrong. Each side is converted into the other on switch.
         function setPlainMode(on) {
             if (on === plainMode) { return; }
+            // The panel inserts into the rich editor, which is about to be
+            // hidden; leaving it open would float it over the raw textarea.
+            showSymbolPanel(false);
             if (on) {
                 $ta.val(htmlToQems($editor[0].innerHTML, multiline));
                 plainMode = true;
@@ -396,6 +469,155 @@ $(function () {
         }
         $editor.on('keyup mouseup blur', saveSelection);
 
+        /* ---------- The special-characters panel ---------- */
+
+        // Built on first use and then reused: several dozen buttons per field
+        // is a lot of DOM to create for editors nobody opens it on.
+        var $symPanel = null;
+
+        function symGrid(pairs, isLetters) {
+            return '<div class="sym-grid">' + pairs.map(function (p) {
+                if (isLetters) {
+                    return '<a href="#" class="sym-btn" data-lower="' + p[0] +
+                        '" data-upper="' + p[1] + '">' + p[0] + '</a>';
+                }
+                return '<a href="#" class="sym-btn" title="' + p[1] + '">' + p[0] + '</a>';
+            }).join('') + '</div>';
+        }
+
+        function buildSymbolPanel() {
+            $symPanel = $(
+                '<div class="rich-editor-symbols">' +
+                '  <div class="sym-head">' +
+                '    <span class="sym-heading">Special characters</span>' +
+                '    <a href="#" class="sym-caps" title="Show the capital letters">Caps</a>' +
+                '    <a href="#" class="sym-close" title="Close (Esc)">&times;</a>' +
+                '  </div>' +
+                '  <div class="sym-label">Letters</div>' + symGrid(SYMBOL_LETTERS, true) +
+                '  <div class="sym-label">Currency</div>' + symGrid(SYMBOL_CURRENCY) +
+                '  <div class="sym-label">Punctuation and marks</div>' + symGrid(SYMBOL_MARKS) +
+                '</div>');
+            // Keep the caret: focus must never leave the editor on the way in.
+            $symPanel.on('mousedown', function (e) { e.preventDefault(); });
+            $symPanel.on('click', '.sym-btn', function (e) {
+                e.preventDefault();
+                insertSymbol($(this).text());
+            });
+            $symPanel.on('click', '.sym-caps', function (e) {
+                e.preventDefault();
+                var caps = !$symPanel.hasClass('sym-uppercase');
+                $symPanel.toggleClass('sym-uppercase', caps);
+                $(this).toggleClass('active', caps)
+                    .attr('title', caps ? 'Show the small letters' : 'Show the capital letters');
+                $symPanel.find('.sym-btn[data-lower]').each(function () {
+                    $(this).text($(this).attr(caps ? 'data-upper' : 'data-lower'));
+                });
+            });
+            $symPanel.on('click', '.sym-close', function (e) {
+                e.preventDefault();
+                showSymbolPanel(false);
+            });
+            $wrapper.append($symPanel);
+        }
+
+        function showSymbolPanel(on) {
+            if (on && !$symPanel) { buildSymbolPanel(); }
+            if (!$symPanel) { return; }
+            $symPanel.toggle(!!on);
+            $toolbar.find('.rich-editor-sym').toggleClass('active', !!on);
+            if (on) {
+                // Sits directly under the toolbar, whatever height it wrapped to.
+                $symPanel.css('top', $toolbar.outerHeight() + 'px');
+                $(document).on('mousedown.qsym' + editorSeq, function (e) {
+                    if (!$symPanel[0].contains(e.target) &&
+                        !$toolbar.find('.rich-editor-sym')[0].contains(e.target)) {
+                        showSymbolPanel(false);
+                    }
+                });
+                $(document).on('keydown.qsym' + editorSeq, function (e) {
+                    if (e.key === 'Escape') { showSymbolPanel(false); }
+                });
+            } else {
+                $(document).off('mousedown.qsym' + editorSeq)
+                           .off('keydown.qsym' + editorSeq);
+            }
+        }
+
+        /* ---------- Bonus skeleton (Type Questions) ---------- */
+
+        var BONUS_LEADIN_LINE = 'For 10 points each:';
+        var BONUS_SKELETON = [BONUS_LEADIN_LINE,
+                              '[10] ', 'ANSWER: ',
+                              '[10] ', 'ANSWER: ',
+                              '[10] ', 'ANSWER: '];
+
+        // Append a blank bonus at the end of the box. The end, rather than the
+        // caret: the box holds a run of whole questions, and dropping seven
+        // lines into the middle of one would split it in two.
+        //
+        // Written through the textarea and rebuilt from it (rather than
+        // inserted into the editor) so the editor keeps one <div> per line,
+        // which is how the category-tag button finds the line the caret is on.
+        function insertBonusSkeleton() {
+            syncDown();
+            var text = String($ta.val() || '').replace(/\s+$/, '');
+            // A blank line off the last question, the way questions are spaced
+            // when they're typed by hand. (The parser ignores blank lines.)
+            var lines = (text ? text.split('\n').concat(['']) : [])
+                .concat(BONUS_SKELETON);
+            $ta.val(lines.join('\n'));
+            resyncUp();
+            caretAtLineStart(lines.length - BONUS_SKELETON.length);
+            updatePlaceholder();
+            // The character-count panel listens for this.
+            $editor.trigger('input');
+        }
+
+        // Put the caret at the front of the skeleton's "For 10 points each:"
+        // line, which is where the leadin gets typed -- the first thing you
+        // write, and the one line the skeleton can't start for you.
+        function caretAtLineStart(index) {
+            var lineEl = $editor[0].childNodes[index];
+            if (!lineEl) { return; }
+            $editor.focus();
+            var range = document.createRange();
+            range.selectNodeContents(lineEl);
+            range.collapse(true);
+            var sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+            // resyncUp rebuilt the editor, so the remembered caret points at
+            // nodes that are gone; save this one the way a click would.
+            $editor.trigger('keyup');
+        }
+
+        // Drop a character in at the caret. The caret was saved when focus left
+        // the editor for the toolbar, so the character lands where the writer
+        // was typing rather than at the end of the field. insertText (rather
+        // than a DOM edit) keeps the native undo stack intact, and the
+        // character picks up whatever formatting is active there.
+        function insertSymbol(ch) {
+            $editor.focus();
+            var sel = window.getSelection();
+            if (!sel) { return; }
+            if (!sel.rangeCount || !$editor[0].contains(sel.anchorNode)) {
+                var range;
+                if (savedRange && $editor[0].contains(savedRange.startContainer)) {
+                    range = savedRange;
+                } else {
+                    range = document.createRange();
+                    range.selectNodeContents($editor[0]);
+                    range.collapse(false);
+                }
+                sel.removeAllRanges();
+                sel.addRange(range);
+            }
+            document.execCommand('insertText', false, ch);
+            saveSelection();
+            syncDown();
+            updatePlaceholder();
+        }
+
         // Reflect the formatting at the caret/selection on the toolbar buttons
         // (a button appears "pressed" when its style is active).
         function updateToolbarState() {
@@ -403,7 +625,10 @@ $(function () {
             var inNote = !!currentNote();
             $toolbar.find('.rich-editor-btn').each(function () {
                 var cmd = $(this).attr('data-cmd');
-                if (cmd === 'pgauto') { return; }
+                // None of these is a formatting state: PG auto and the bonus
+                // skeleton are one-shot actions, and the symbols button is lit
+                // while its panel is open.
+                if (cmd === 'pgauto' || cmd === 'symbols' || cmd === 'bonusskel') { return; }
                 var active;
                 if (cmd === 'pgtarget') {
                     // Pressed while the caret is inside a mark, so it reads as a
@@ -499,6 +724,14 @@ $(function () {
             // The formatting buttons act on the rich editor; ignore them while
             // the raw textarea is showing.
             if (plainMode) { return; }
+            if (cmd === 'symbols') {
+                showSymbolPanel(!$symPanel || !$symPanel.is(':visible'));
+                return;
+            }
+            if (cmd === 'bonusskel') {
+                insertBonusSkeleton();
+                return;
+            }
             $editor.focus();
             if (cmd === 'pgtarget') {
                 wrapPgTarget();
@@ -526,26 +759,58 @@ $(function () {
 
     /* ---------- Category tag insertion (Type Questions page) ---------- */
 
-    // Insert a category tag at the caret in the rich editor for the given
-    // textarea id. Returns false if no such editor exists (caller falls back to
-    // plain-textarea handling). Uses the caret saved before focus moved to the
-    // tag button, and inserts via execCommand so the native undo stack stays
-    // intact (direct DOM edits broke undo and ignored the caret).
+    // The parser's own line shapes (packet_parser.py: ansregex, bpart_regex,
+    // vhsl_bpart_regex), which are what decide where one question ends.
+    var ANSWER_LINE = /^a..?wers?:/i;
+    var BONUS_PART_LINE = /^\[V?\d+[emh]?\]/i;
+
+    // Group a run of typed questions into blocks of line indexes. An ANSWER
+    // line closes a question -- unless the next line is another [10] part, in
+    // which case the same bonus is still going. That is the whole difference
+    // between a tossup (one answer line) and a bonus (three), and it is why a
+    // bonus's category tag belongs on the last of them.
+    function questionBlocks(lines) {
+        var blocks = [], current = null, closed = true, i, line;
+        for (i = 0; i < lines.length; i++) {
+            line = (lines[i] || '').trim();
+            if (!line) { continue; }
+            if (closed && !BONUS_PART_LINE.test(line)) {
+                current = {start: i, lastAnswer: -1};
+                blocks.push(current);
+            }
+            closed = false;
+            if (ANSWER_LINE.test(line)) {
+                current.lastAnswer = i;
+                closed = true;   // reopened above if the next line is a [10] part
+            }
+        }
+        return blocks;
+    }
+
     // Where a category tag belongs in a run of typed questions: at the end of
-    // the answer line of the question the caret is in. Looks back first (the
-    // caret is usually somewhere in the stem above), then forward for a
-    // question being typed from the top down. Returns -1 when the box holds no
-    // answer line at all.
+    // the last answer line of the question the caret is in -- the only answer
+    // line of a tossup, the third part's for a bonus. A caret between questions
+    // (or past the end) belongs to the question above, which is the one just
+    // typed. Returns -1 when no question around the caret has an answer line
+    // yet, and the caller drops the tag at the caret instead.
     function answerLineFor(lines, cursorLine) {
-        var isAnswer = /^answer/i;
-        var i;
-        for (i = Math.min(cursorLine, lines.length - 1); i >= 0; i--) {
-            if (isAnswer.test((lines[i] || '').trim())) { return i; }
+        var blocks = questionBlocks(lines);
+        if (!blocks.length) { return -1; }
+        // The last question that starts at or above the caret is the one the
+        // caret is in (or, in the gap between two, the one just finished).
+        var chosen = blocks[0], i;
+        for (i = 0; i < blocks.length && cursorLine >= blocks[i].start; i++) {
+            chosen = blocks[i];
         }
-        for (i = cursorLine + 1; i < lines.length; i++) {
-            if (isAnswer.test((lines[i] || '').trim())) { return i; }
+        // A question still being typed has no answer line to hang the tag on;
+        // fall back to the nearest complete question above it.
+        if (chosen.lastAnswer < 0) {
+            for (i = blocks.indexOf(chosen) - 1; i >= 0; i--) {
+                if (blocks[i].lastAnswer >= 0) { return blocks[i].lastAnswer; }
+            }
+            return -1;
         }
-        return -1;
+        return chosen.lastAnswer;
     }
 
     // Put the tag on that line, replacing whatever category was there before:
@@ -569,6 +834,11 @@ $(function () {
         return idx < 0 ? -1 : idx;
     }
 
+    // Insert a category tag in the rich editor for the given textarea id.
+    // Returns false if no such editor exists (the caller falls back to
+    // plain-textarea handling). Uses the caret saved before focus moved to the
+    // tag button, and inserts via execCommand so the native undo stack stays
+    // intact (direct DOM edits broke undo and ignored the caret).
     function insertCategoryTag(textareaId, tag) {
         var reg = registry[textareaId];
         if (!reg) { return false; }

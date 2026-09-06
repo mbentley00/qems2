@@ -7438,6 +7438,42 @@ class PostSubmitFlowTests(TestCase):
                                {'category': other.id, 'field': 'tossup-tags-0'})
         self.assertEqual(_json.loads(resp.content.decode())['html'], '')
 
+    TAGGED_TYPED = ('1. This is a typed tossup about a thing that is (*) notable. '
+                    'For 10 points, name this test.\n'
+                    'ANSWER: _the test_ {History - European}\n')
+
+    def test_the_untagged_warning_is_on_by_default(self):
+        self.assertTrue(self.qset.warn_missing_category_tags)
+        self.assertIn('will be submitted with no category tag',
+                      self._preview(self.TAGGED_TYPED))
+
+    def test_a_set_can_turn_the_untagged_warning_off(self):
+        self.qset.warn_missing_category_tags = False
+        self.qset.save()
+        body = self._preview(self.TAGGED_TYPED)
+        self.assertNotIn('will be submitted with no category tag', body)
+        # Only the dialog goes: the preview still submits, and a missing
+        # category is still caught.
+        self.assertIn('value="Submit"', body)
+        self.assertIn('have no category', self._preview(self.UNTAGGED_TYPED))
+
+    def test_the_set_page_carries_the_warning_option(self):
+        body = self.client.get('/edit_question_set/{0}/'.format(self.qset.id)).content.decode()
+        self.assertIn('name="warn_missing_category_tags"', body)
+        self.assertIn('checked', body[body.find('name="warn_missing_category_tags"') - 80:
+                                      body.find('name="warn_missing_category_tags"') + 80])
+
+    def test_saving_the_set_page_turns_the_warning_off_and_on(self):
+        data = {'name': self.qset.name, 'date': '2026-08-01', 'distribution': self.dist.id,
+                'num_packets': 1, 'max_acf_tossup_length': 750, 'max_acf_bonus_length': 400}
+        self.client.post('/edit_question_set/{0}/'.format(self.qset.id), data)
+        self.qset.refresh_from_db()
+        self.assertFalse(self.qset.warn_missing_category_tags)
+        data['warn_missing_category_tags'] = 'on'
+        self.client.post('/edit_question_set/{0}/'.format(self.qset.id), data)
+        self.qset.refresh_from_db()
+        self.assertTrue(self.qset.warn_missing_category_tags)
+
     def _num_cols(self, body):
         """Row-number cells, counting the spare row at the bottom of each grid
         (it carries a title attribute, so it doesn't match the plain form)."""
@@ -11804,6 +11840,119 @@ class TypedQuestionOutlineTests(TestCase):
         rows = self.outline(['This stem was typed', 'across two lines.', 'ANSWER: One'])
         self.assertEqual(len(rows), 1)
         self.assertEqual(len(rows[0]['text']), 2)
+
+    def test_a_wrapped_bonus_part_stays_with_its_part(self):
+        """A line under a part that has no answer yet continues that part; only
+        a line after an answer starts the next question."""
+        rows = self.outline(['A leadin. For 10 points each:',
+                             '[10] This part was typed',
+                             'across two lines.',
+                             'ANSWER: One',
+                             '[10] Part two.', 'ANSWER: Two',
+                             '[10] Part three.', 'ANSWER: Three'])
+        self.assertEqual([r['kind'] for r in rows], ['bonus'])
+        self.assertIn('across two lines.', rows[0]['text'])
+
+
+class MultiLineQuestionParseTests(TestCase):
+    """A question written across several lines keeps every one of them.
+
+    Line breaks inside a question are ordinary on the edit and add pages, so
+    typing or uploading one is not a reason to throw the earlier lines away --
+    which is what the parser used to do (and, for a split tossup with another
+    question after it, it dropped the whole question)."""
+
+    def setUp(self):
+        for qt in (ACF_STYLE_TOSSUP, ACF_STYLE_BONUS):
+            QuestionType.objects.get_or_create(question_type=qt)
+        self.ou = User.objects.create_user('ml_owner', password='pw', email='ml@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='ML dist')
+        DistributionEntry.objects.create(distribution=self.dist, category='History',
+                                         subcategory='European', min_tossups=1, min_bonuses=1)
+        self.qset = QuestionSet.objects.create(
+            name='ML Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+
+    def _parse(self, text):
+        from qems2.qsub.packet_parser import parse_packet_data
+        return parse_packet_data(text.split('\n'), self.qset)
+
+    def test_a_tossup_split_over_two_lines_keeps_both(self):
+        tus, bns, t_err, b_err = self._parse(
+            'Two members of this family kept a newspaper.\n'
+            'For 10 points, name this family.\n'
+            'ANSWER: the _Woolf_s')
+        self.assertEqual((len(tus), len(t_err)), (1, 0))
+        self.assertEqual(tus[0].tossup_text,
+                         'Two members of this family kept a newspaper.\n'
+                         'For 10 points, name this family.')
+
+    def test_a_split_tossup_does_not_swallow_the_question_after_it(self):
+        """The whole first question used to disappear: waiting for a stack of
+        exactly two lines meant a split tossup was never closed."""
+        tus, bns, t_err, b_err = self._parse(
+            'First line of the first tossup.\n'
+            'Second line. For 10 points, name it.\n'
+            'ANSWER: _first_\n'
+            'A second tossup on one line. For 10 points, name it.\n'
+            'ANSWER: _second_')
+        self.assertEqual(len(tus), 2)
+        self.assertEqual(tus[0].tossup_answer, '_first_')
+        self.assertEqual(tus[1].tossup_answer, '_second_')
+        self.assertIn('First line of the first tossup.', tus[0].tossup_text)
+
+    def test_a_bonus_leadin_split_over_two_lines_keeps_both(self):
+        tus, bns, t_err, b_err = self._parse(
+            'A leadin whose first line runs on\n'
+            'and finishes here. For 10 points each:\n'
+            '[10] Part one.\nANSWER: _one_\n'
+            '[10] Part two.\nANSWER: _two_\n'
+            '[10] Part three.\nANSWER: _three_')
+        self.assertEqual((len(bns), len(b_err)), (1, 0))
+        self.assertEqual(bns[0].leadin,
+                         'A leadin whose first line runs on\n'
+                         'and finishes here. For 10 points each:')
+        self.assertEqual(bns[0].part1_text, 'Part one.')
+
+    def test_a_bonus_part_split_over_two_lines_stays_one_bonus(self):
+        tus, bns, t_err, b_err = self._parse(
+            'A one line leadin. For 10 points each:\n'
+            '[10] Part one starts here\nand continues here.\nANSWER: _one_\n'
+            '[10] Part two.\nANSWER: _two_\n'
+            '[10] Part three.\nANSWER: _three_')
+        self.assertEqual((len(tus), len(bns), len(b_err)), (0, 1, 0))
+        self.assertEqual(bns[0].part1_text, 'Part one starts here\nand continues here.')
+        self.assertEqual(bns[0].part2_text, 'Part two.')
+
+    def test_a_category_tag_still_comes_off_the_answer_line(self):
+        tus, bns, t_err, b_err = self._parse(
+            'A stem typed\nacross two lines. For 10 points, name it.\n'
+            'ANSWER: _the answer_ {History - European}')
+        self.assertEqual(len(tus), 1)
+        # (The tag comes off where it stands, so the answer keeps the space
+        # that was in front of it -- as it did before, and as it does for a
+        # question written on one line.)
+        self.assertEqual(tus[0].tossup_answer.strip(), '_the answer_')
+        self.assertEqual(str(tus[0].category), 'History - European')
+
+    def test_a_bonus_keeps_its_tag_and_difficulty_shorthand(self):
+        tus, bns, t_err, b_err = self._parse(
+            'A leadin. For 10 points each:\n'
+            '[10] Part one.\nANSWER: _one_\n'
+            '[10] Part two.\nANSWER: _two_\n'
+            '[10] Part three.\nANSWER: _three_ {History - European} (emh)')
+        self.assertEqual((len(bns), len(b_err)), (1, 0))
+        self.assertEqual(bns[0].part3_answer, '_three_')
+        self.assertEqual(str(bns[0].category), 'History - European')
+        self.assertEqual([bns[0].part1_difficulty, bns[0].part2_difficulty,
+                          bns[0].part3_difficulty], ['e', 'm', 'h'])
+
+    def test_a_one_line_question_is_unchanged(self):
+        tus, bns, t_err, b_err = self._parse(
+            'A one line tossup. For 10 points, name it.\nANSWER: _it_')
+        self.assertEqual(len(tus), 1)
+        self.assertEqual(tus[0].tossup_text, 'A one line tossup. For 10 points, name it.')
 
 
 class TypedQuestionCountsViewTests(TestCase):

@@ -148,6 +148,8 @@
 /* Rich text question entry */
 .rich-editor-wrapper {
     margin-bottom: 1em;
+    /* The special-characters panel is positioned against this. */
+    position: relative;
 }
 
 .rich-editor-toolbar {
@@ -243,6 +245,96 @@ html[data-theme="dark"] .rich-editor-toolbar a.rich-editor-btn.rich-editor-note 
 .rich-editor-plainmode .rich-editor-plain {
     background-color: #eef2f7;
     border-color: #cbd3dd;
+}
+
+/* The Type Questions box's "start a bonus for me" button: a long label, so it
+   is set at the same reduced size as the other named tools on that toolbar. */
+.rich-editor-toolbar a.rich-editor-btn.rich-editor-skel {
+    color: #2b6a3f;
+    font-size: 0.85em;
+    letter-spacing: 0.02em;
+}
+html[data-theme="dark"] .rich-editor-toolbar a.rich-editor-btn.rich-editor-skel {
+    color: #7fc79a;
+}
+
+/* The special-characters panel: hangs under the toolbar (JS sets `top` to the
+   toolbar's height) so opening it never pushes the question field down. */
+.rich-editor-toolbar a.rich-editor-btn.rich-editor-sym {
+    font-size: 1.05em;
+    line-height: 1.3;
+}
+.rich-editor-symbols {
+    display: none;
+    position: absolute;
+    left: 0;
+    z-index: 900;
+    width: 30em;
+    max-width: 100%;
+    box-sizing: border-box;
+    padding: 0.5em 0.6em 0.7em;
+    border: 1px solid #bbb;
+    border-radius: 0 0 4px 4px;
+    background: #fff;
+    box-shadow: 0 4px 12px rgba(20, 20, 40, 0.18);
+}
+.rich-editor-symbols .sym-head {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    margin-bottom: 0.35em;
+}
+.rich-editor-symbols .sym-heading {
+    flex: 1 1 auto;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #555;
+}
+.rich-editor-symbols .sym-caps,
+.rich-editor-symbols .sym-close {
+    flex: 0 0 auto;
+    padding: 0.05em 0.45em;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    background: #f7f7f7;
+    color: #444;
+    font-size: 0.75rem;
+    line-height: 1.5;
+}
+.rich-editor-symbols .sym-caps:hover,
+.rich-editor-symbols .sym-close:hover { background: #eef4fa; border-color: #888; }
+.rich-editor-symbols .sym-caps.active {
+    background: #008cba;
+    border-color: #0079a8;
+    color: #fff;
+}
+.rich-editor-symbols .sym-label {
+    margin: 0.4em 0 0.2em;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #8a8f9c;
+}
+.rich-editor-symbols .sym-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+}
+.rich-editor-symbols a.sym-btn {
+    display: block;
+    min-width: 1.9em;
+    padding: 0.1em 0.2em;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    color: #222;
+    font-size: 1.05em;
+    line-height: 1.5;
+    text-align: center;
+}
+.rich-editor-symbols a.sym-btn:hover {
+    border-color: #888;
+    background: #eef4fa;
 }
 
 /* Keep a long question answer in the top breadcrumb from overflowing the bar. */
@@ -1501,6 +1593,30 @@ html[data-theme="dark"] .rich-editor-toolbar a.rich-editor-btn.active {
     background-color: #33384a;
 }
 html[data-theme="dark"] .rich-editor-toolbar a.rich-editor-btn.rich-editor-pg { color: #f0a868; }
+
+html[data-theme="dark"] .rich-editor-symbols {
+    background: var(--qx-card);
+    border-color: var(--qx-border);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+}
+html[data-theme="dark"] .rich-editor-symbols .sym-heading { color: var(--qx-ink); }
+html[data-theme="dark"] .rich-editor-symbols .sym-label { color: var(--qx-muted); }
+html[data-theme="dark"] .rich-editor-symbols a.sym-btn { color: var(--qx-ink); }
+html[data-theme="dark"] .rich-editor-symbols a.sym-btn:hover {
+    background: var(--qx-hover);
+    border-color: #4a4f5c;
+}
+html[data-theme="dark"] .rich-editor-symbols .sym-caps,
+html[data-theme="dark"] .rich-editor-symbols .sym-close {
+    background: var(--qx-elevate);
+    border-color: var(--qx-border);
+    color: var(--qx-ink);
+}
+html[data-theme="dark"] .rich-editor-symbols .sym-caps:hover,
+html[data-theme="dark"] .rich-editor-symbols .sym-close:hover {
+    background: var(--qx-hover);
+    border-color: #4a4f5c;
+}
 
 html[data-theme="dark"] ::selection { background: #4a3a80; color: #f4f2fb; }
 html[data-theme="dark"] ::-moz-selection { background: #4a3a80; color: #f4f2fb; }

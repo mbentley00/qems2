@@ -154,9 +154,12 @@ def outline(data):
                 pending['complete'] = True
             continue
 
-        # An ordinary line: it continues a tossup stem that wrapped, or it
-        # starts the next question after a finished bonus.
-        if pending['kind'] == 'bonus':
+        # An ordinary line: it continues a tossup stem that wrapped, or the
+        # part of a bonus that wrapped, or it starts the next question after a
+        # finished bonus. A bonus is finished only once its last part has an
+        # answer, so a line under a part that hasn't got one yet belongs to
+        # that part rather than to a question of its own.
+        if pending['kind'] == 'bonus' and pending['complete']:
             questions.append(pending)
             pending = start(line)
         else:
@@ -190,10 +193,15 @@ def parse_packet_data(data, question_set):
     
     question_stack = []
 
+    # What the line before this one was, so a plain line can be told apart from
+    # the start of the next question: inside a bonus, only a line that follows
+    # an answer begins something new.
+    prev_line_was_answer = False
+
     for i in range(len(data)):
 
         this_line = data[i].strip()
-        
+
         # push current line onto the stack
         question_stack.append(this_line)
 
@@ -214,9 +222,17 @@ def parse_packet_data(data, question_set):
         # print this_line
         # print tossup_flag, bonus_flag, vhsl_bonus_flag
 
-        # if there are two items on the stack and the second one is an ANSWER:
-        # pop the stack and create a tossup
-        if (len(question_stack) == 2 or i == len(data) - 1) and tossup_flag:
+        # The ANSWER line closes a tossup: it is what set the flag on this same
+        # pass, so the stack now holds the whole question. Everything above the
+        # answer is the stem, kept line for line -- a tossup written across
+        # several lines is one question, not one line of a question.
+        #
+        # This used to wait for a stack of exactly two lines. A stem split in
+        # two never made that count, so it fell through to the last-line arm,
+        # which popped a single line and dropped the rest -- and a split tossup
+        # with another question after it went in the bin entirely, because the
+        # flag stayed set until the end of the box.
+        if tossup_flag:
             if (len(question_stack) < 2):
                 # print "Tossups required both a question and answer, but only one item found on stack."
                 tossup = Tossup('', question_stack.pop(), i, '')
@@ -226,21 +242,25 @@ def parse_packet_data(data, question_set):
                 tossup_category = get_category(tossup_answer)
                 tossup_answer = remove_category(tossup_answer)
 
-                tossup_text = question_stack.pop()
-                tossup = None        
+                tossup_text = '\n'.join(question_stack)
+                del question_stack[:]
+                tossup = None
                 try:
                     tossup = create_tossup(tossup_text, tossup_answer, tossup_category, question_set=question_set)
-                    validate_tossup_category(tossup, tossup_category)                    
+                    validate_tossup_category(tossup, tossup_category)
                     tossup.is_valid()
                     tossups.append(tossup)
                 except InvalidTossup as ex:
                     # print ex
                     tossup_errors.append(ex)
-                tossup_flag = False
-            
-        # if we are in bonus mode and the line is not an answer or a bonus part
-        # then pop the stack until it's empty and form a bonus
-        elif bonus_flag and ((not is_answer(this_line) and not is_bpart(this_line)) or i == len(data) - 1):
+            tossup_flag = False
+
+        # A bonus ends at the line that starts the next question: a plain line
+        # arriving after an answer. A plain line under a part that has no
+        # answer yet is that part carrying on, not a new question -- reading it
+        # as one broke the bonus in half and lost the rest of the part.
+        elif bonus_flag and ((not is_answer(this_line) and not is_bpart(this_line)
+                              and prev_line_was_answer) or i == len(data) - 1):
             
             # If there are still lines to read, the top of the stack represents the first line
             # in the next question.  Otherwise, it's the last part of the bonus and we don't
@@ -253,48 +273,58 @@ def parse_packet_data(data, question_set):
             values = []
             answers = []
             difficulties = []
-            leadin = ''
+            leadin_lines = []
             category = ''
             difficulty_tag = ''
-            while question_stack != []:
-                bonus_line = question_stack.pop()
+            # Read the block in the order it was written. A line that is
+            # neither a part marker nor an answer continues whatever came
+            # before it: the leadin at the top of the bonus, otherwise the part
+            # or answer it sits under. Popping the stack bottom-up instead kept
+            # only one line of a leadin written across two, and made a split
+            # part into a question of its own.
+            where = 'leadin'
+            for bonus_line in question_stack:
                 # print "Bonus Line from question stack: " + bonus_line
                 if is_bpart(bonus_line):
                     # print "Is BPart"
-                    val = get_bonus_part_value(bonus_line)
-                    diff = get_bonus_part_difficulty(bonus_line)
-                    question = re.sub(bpart_regex, '', bonus_line).strip()
-                    values.append(val)
-                    parts.append(question)
-                    difficulties.append(diff)
+                    values.append(get_bonus_part_value(bonus_line))
+                    difficulties.append(get_bonus_part_difficulty(bonus_line))
+                    parts.append(re.sub(bpart_regex, '', bonus_line).strip())
+                    where = 'part'
                 elif is_answer(bonus_line):
                     # print "Is Answer"
-                    answer = bonus_line
-                    tempCategory = get_category(answer)
-                    # print "Answer Line: " + answer
-                    # print "TempCategory: " + tempCategory
-                    if (tempCategory != ''):
-                        category = tempCategory
-                        answer = remove_category(answer)
-
-                    # "(emh)" at the end of an answer line gives every part's
-                    # difficulty at once. The stack pops bottom-up, so the first
-                    # one seen is the one on the last answer line — where it's
-                    # meant to go — and it wins if someone tagged more than one.
-                    tag = get_bonus_difficulty_tag(answer)
-                    if tag:
-                        answer = remove_bonus_difficulty_tag(answer)
-                        if not difficulty_tag:
-                            difficulty_tag = tag
-
-                    answers.append(answer)
+                    answers.append(bonus_line)
+                    where = 'answer'
+                elif where == 'answer' and answers:
+                    answers[-1] += '\n' + bonus_line
+                elif where == 'part' and parts:
+                    parts[-1] += '\n' + bonus_line
                 else:
                     # print "Is Leadin"
-                    leadin = bonus_line
-            parts.reverse()
-            values.reverse()
-            answers.reverse()
-            difficulties.reverse()
+                    leadin_lines.append(bonus_line)
+            del question_stack[:]
+            leadin = '\n'.join(leadin_lines)
+
+            # The category tag and the "(emh)" difficulty shorthand ride on the
+            # answer lines, and are pulled off once the lines are whole. The
+            # first category tag in the bonus wins (as it did when the stack
+            # was read bottom-up) and the last "(emh)" does -- the last answer
+            # line is where that one is meant to go.
+            for idx, answer in enumerate(answers):
+                tempCategory = get_category(answer)
+                # print "Answer Line: " + answer
+                # print "TempCategory: " + tempCategory
+                if (tempCategory != ''):
+                    if category == '':
+                        category = tempCategory
+                    answer = remove_category(answer)
+
+                tag = get_bonus_difficulty_tag(answer)
+                if tag:
+                    answer = remove_bonus_difficulty_tag(answer)
+                    difficulty_tag = tag
+
+                answers[idx] = answer
 
             # Fill in from the "(emh)" shorthand, one letter per part in order.
             # A per-part marker ([10e]) is more specific, so it stays put.
@@ -343,7 +373,9 @@ def parse_packet_data(data, question_set):
                 # print ex
                 bonus_errors.append(ex)
             vhsl_bonus_flag = False
- 
+
+        prev_line_was_answer = is_answer(this_line)
+
     return tossups, bonuses, tossup_errors, bonus_errors
 
 def validate_tossup_category(tossup, category_text):

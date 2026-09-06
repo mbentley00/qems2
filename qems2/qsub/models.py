@@ -332,6 +332,15 @@ class QuestionSet (models.Model):
     # tags -- that is where the people writing the set look at them.
     export_category_tags = models.BooleanField(default=True)
 
+    # Whether submitting typed questions stops to ask about the ones carrying no
+    # category tag. On by default: forgetting the tags is the usual way a batch
+    # arrives untagged, and the preview is the last screen where ticking one is
+    # a click. A set that doesn't use tags -- or tags them later, in bulk, on
+    # the Category Tags page -- turns this off and submits without the dialog.
+    # It has nothing to do with a question's category, which is required either
+    # way and is fixed on the preview itself.
+    warn_missing_category_tags = models.BooleanField(default=True)
+
     class Admin: pass
 
     def is_owner(self, writer):

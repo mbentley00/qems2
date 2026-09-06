@@ -167,8 +167,10 @@ $(function () {
     });
     refreshSubmit();
 
+    {% if qset.warn_missing_category_tags %}
     // Tags are optional, but forgetting them is the usual way a batch arrives
     // untagged -- and this is the last screen where ticking one is a click.
+    // A set that doesn't work that way turns the dialog off in its settings.
     $form.on('submit', function () {
         var untagged = [];
         $('.tq-tags').each(function () {
@@ -185,6 +187,7 @@ $(function () {
             ' will be submitted with no category tag:\n\n' + untagged.join(', ') +
             '\n\nSubmit anyway?');
     });
+    {% endif %}
 });
 </script>
 

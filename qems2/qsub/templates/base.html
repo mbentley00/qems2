@@ -10,7 +10,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
 
     <link rel="stylesheet" href="{% static 'css/app.min.css' %}">
-    <link rel="stylesheet" href="{% static 'css/base.css' %}?v=67">
+    <link rel="stylesheet" href="{% static 'css/base.css' %}?v=68">
     <link rel="stylesheet" href="{% static 'fontawesome/css/all.min.css' %}">
 
     {# Apply saved sidebar-collapsed + theme preferences before first paint (shared across tabs via localStorage). #}
@@ -206,9 +206,15 @@
             }
             var sNewTab = document.getElementById('app-search-newtab');
             if (sNewTab) { sNewTab.addEventListener('click', sOpenNewTab); }
+            // Enter is handled on the form's submit, not on the input's keydown:
+            // cancelling the submit is what actually keeps the current tab put,
+            // wherever the submission came from (Enter, autofill, another script).
+            sForm.addEventListener('submit', function (e) {
+                e.preventDefault();
+                sOpenNewTab();
+            });
             sInput.addEventListener('keydown', function (e) {
                 if (e.key === 'Escape') { sHide(); }
-                if (e.key === 'Enter') { e.preventDefault(); sOpenNewTab(); }
             });
             document.addEventListener('click', function (e) { if (!sForm.contains(e.target)) { sHide(); } });
         }
@@ -220,7 +226,7 @@
 {% endif %}
 
     <script src="{% static 'js/paste_convert.js' %}?v=37"></script>
-    <script src="{% static 'js/rich_editor.js' %}?v=21"></script>
+    <script src="{% static 'js/rich_editor.js' %}?v=22"></script>
     <script src="{% static 'js/comment_strike.js' %}?v=3"></script>
     <script src="{% static 'js/qbreader_lookup.js' %}?v=2"></script>
     <script src="{% static 'foundation/js/foundation.min.js' %}"></script>

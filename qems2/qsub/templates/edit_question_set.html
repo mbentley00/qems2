@@ -201,6 +201,9 @@
                 <label class="set-info-check">{{ form.export_category_tags }}
                     <span>Print category tags in exported packets
                         <small>Adds each question's category tags after its attribution line in Word, PDF and YAPP output. Off: exports carry no tags. A single tag can be kept out on the <a href="/category_tags/{{ qset.id }}/">Category Tags</a> page; the document view always shows them.</small></span></label>
+                <label class="set-info-check">{{ form.warn_missing_category_tags }}
+                    <span>Ask before submitting questions with no category tag
+                        <small>On <a href="/type_questions/{{ qset.id }}/">Type Questions</a>, submitting the preview stops to list the questions carrying no tag. Off: they go in without the dialog, for a set that doesn't use tags or tags in bulk later on the <a href="/category_tags/{{ qset.id }}/">Category Tags</a> page. A question's category is still required either way.</small></span></label>
                 <label class="set-info-check">{{ form.public }}
                     <span>Public (listed for everyone)
                         <small>Anyone can see this set is being written and request to join (which emails you). It grants no access by itself.</small></span></label>
