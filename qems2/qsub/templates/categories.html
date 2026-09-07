@@ -85,12 +85,11 @@ page that looked stale.
     <p><a href="#bonuses">Jump to bonuses</a></p>
 
 
+{% comment %}
+The .qtable-* cell styles moved to base.css when the search results started
+using the same cells; only this page's own note style is left here.
+{% endcomment %}
 <style>
 .qtable-note { margin-bottom: 0.4rem; }
-.qtable-tag { display: inline-block; background: #eef2f7; color: #2b2f3a; border-radius: 9px;
-    padding: 0 7px; margin: 0 3px 2px 0; font-size: 0.75rem; white-space: nowrap; }
-.qtable-none { color: #b0b4c0; }
-.qtable-length { text-align: right; font-variant-numeric: tabular-nums; }
-html[data-theme="dark"] .qtable-tag { background: var(--qx-elevate); color: var(--qx-text); }
 </style>
     {% endblock %}

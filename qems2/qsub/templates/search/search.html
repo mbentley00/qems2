@@ -88,42 +88,38 @@
 
 {% if search_term and result %}
 <div class="panel callout radius text-center"><strong>Results</strong></div>
+{% comment %}
+The set's own question-table columns, so a search looks like the category pages
+of the set it was run from (see the view). The question column prints the whole
+question here rather than the opening -- the highlighter below marks the term
+inside it, and a search result whose match is off the end of a preview is no
+use. "Tournament" is the one column the preference has no key for; it is added
+only when the results can come from more than one set.
+{% endcomment %}
+<div class="search-results-wrap">
 <table class="tablesorter table-striped table-hover" id="search-results">
     <thead>
     <tr>
-        <th>Author</th>
-        <th>Question</th>
-        <th>Category</th>
-        <th>Created</th>
-        <th>Modified</th>
-        <th>Edited</th>  
-        <th>Proofread</th>      
-        <th>Tournament</th>
+        {% for col in table_columns %}<th>{{ col.label }}</th>{% endfor %}
+        {% if show_tournament %}<th>Tournament</th>{% endif %}
     </tr>
     </thead>
     <tbody>
     {% autoescape off %}
         {% for question in result %}
         <tr>
-            <td>{{ question.author }}</td>
             {% if question|class_name == "Tossup" %}
-            <td><a href="/edit_tossup/{{ question.id }}/">{{ question|tossup_html }}</a></td>
-            {% elif question|class_name == "Bonus" %}
-            <td>
-                <a href="/edit_bonus/{{ question.id }}/">{{ question|bonus_html }}</a>
+            {% include "_question_table_cells.html" with q=question qtype="tossup" columns=table_columns full_preview=True %}
+            {% else %}
+            {% include "_question_table_cells.html" with q=question qtype="bonus" columns=table_columns full_preview=True %}
             {% endif %}
-            </td>
-            <td><a href="/categories/{{ question|question_set_id }}/{{ question.category.id }}">{{ question.category }}</a></td>
-            <td>{{ question.created_date|to_short_datetime }}</td>
-            <td>{{ question.last_changed_date|to_short_datetime }}</td>
-            <td>{% if question.edited_date %} {{ question.edited_date|to_short_datetime }} {% endif %}</td>
-            <td>{% if question.proofread_date %} {{ question.proofread_date|to_short_datetime }} {% endif %}</td>
-            <td>{{ question.question_set.name}}</td>
+            {% if show_tournament %}<td>{{ question.question_set.name|escape }}</td>{% endif %}
         </tr>
         {% endfor %}
     {% endautoescape %}
     </tbody>
 </table>
+</div>
 {% elif search_term %}
 <div class="row">
     <div class="small-12 columns">

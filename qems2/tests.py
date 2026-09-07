@@ -3282,6 +3282,83 @@ class StyleCheckerExpandedRulesTests(TestCase):
         self.assertFalse(resp.context['can_configure'])
 
 
+class SearchResultColumnTests(TestCase):
+    """The full-text search results are laid out as the set's own question
+    table: a search is nearly always run from the set you are working in, so it
+    follows that set's column preference rather than a fixed list."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('src_owner', password='pw', email='src@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='SRC dist')
+        self.entry = DistributionEntry.objects.create(
+            distribution=self.dist, category='History', subcategory='European')
+        self.qset = QuestionSet.objects.create(
+            name='SRC Set', date=timezone.now(), host='', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.qset.editor.add(self.owner)
+        # The category page reads the set's own copy of the category.
+        SetWideDistributionEntry.objects.create(
+            question_set=self.qset, dist_entry=self.entry, num_tossups=1, num_bonuses=1)
+        self.packet = Packet.objects.create(packet_name='Round 01', question_set=self.qset,
+                                            created_by=self.owner)
+        self.tu = Tossup.objects.create(
+            author=self.owner, question_set=self.qset, packet=self.packet, question_number=1,
+            tossup_text='This ruler crossed the Rubicon with a legion. For 10 points, name him.',
+            tossup_answer='_Julius Caesar_', category=self.entry, question_type=self.acf,
+            created_date=timezone.now(), last_changed_date=timezone.now())
+        self.client.login(username='src_owner', password='pw')
+
+    def _headers(self, all_sets=False):
+        url = ('/search/?q=Rubicon&qset={0}&category=All&models=qsub.tossup'.format(self.qset.id)
+               + ('&models=qsub.search_all' if all_sets else ''))
+        body = self.client.get(url).content.decode()
+        table = body[body.find('id="search-results"'):]
+        head = table[:table.find('</thead>')]
+        return re.findall(r'<th>(.*?)</th>', head)
+
+    def test_the_results_use_the_set_s_columns(self):
+        self.qset.question_table_columns = 'preview,answer,category,packet'
+        self.qset.save()
+        self.assertEqual(self._headers(), ['Preview', 'Answer', 'Category', 'Packet'])
+
+    def test_the_default_preference_shows_the_default_columns(self):
+        headers = self._headers()
+        expected = [label for _k, label, on in QuestionSet.QUESTION_TABLE_COLUMNS if on]
+        self.assertEqual(headers, expected)
+
+    def test_the_results_and_the_category_page_agree(self):
+        self.qset.question_table_columns = 'answer,category,created'
+        self.qset.save()
+        page = self.client.get('/categories/{0}/{1}/'.format(
+            self.qset.id, self.entry.id)).content.decode()
+        self.assertEqual(self._headers(), ['Answer', 'Category', 'Created'])
+        for label in ('Answer', 'Category', 'Created'):
+            self.assertIn('<th>{0}</th>'.format(label), page)
+        self.assertNotIn('<th>Proofread</th>', page)
+
+    def test_which_set_a_result_came_from_is_named_only_across_sets(self):
+        self.assertNotIn('Tournament', self._headers())
+        self.assertEqual(self._headers(all_sets=True)[-1], 'Tournament')
+
+    def test_a_result_row_has_one_cell_per_column(self):
+        self.qset.question_table_columns = 'preview,answer,packet'
+        self.qset.save()
+        body = self.client.get('/search/?q=Rubicon&qset={0}&category=All&models=qsub.tossup'
+                               .format(self.qset.id)).content.decode()
+        row = body[body.find('<tbody>'):body.find('</tbody>')]
+        self.assertEqual(row.count('<td'), 3)
+
+    def test_the_whole_question_is_shown_not_the_opening(self):
+        """The point of a result row is the passage that matched, which a
+        truncated preview can cut off."""
+        body = self.client.get('/search/?q=Rubicon&qset={0}&category=All&models=qsub.tossup'
+                               .format(self.qset.id)).content.decode()
+        self.assertIn('For 10 points, name him', body)
+
+
 class QuickSearchTests(TestCase):
     """Fast type-ahead answer-line search page + JSON endpoint."""
 

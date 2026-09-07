@@ -247,6 +247,21 @@ html[data-theme="dark"] .rich-editor-toolbar a.rich-editor-btn.rich-editor-note 
     border-color: #cbd3dd;
 }
 
+/* The cells of a question table (_question_table_cells.html). Shared by the
+   category pages and the search results, which show the same columns in the
+   same order -- whatever the set asked for. */
+.qtable-tag { display: inline-block; background: #eef2f7; color: #2b2f3a; border-radius: 9px;
+    padding: 0 7px; margin: 0 3px 2px 0; font-size: 0.75rem; white-space: nowrap; }
+.qtable-none { color: #b0b4c0; }
+.qtable-length { text-align: right; font-variant-numeric: tabular-nums; }
+html[data-theme="dark"] .qtable-tag { background: var(--qx-elevate); color: var(--qx-text); }
+
+/* Search results print the whole question, so its column needs room: at a
+   dozen columns the browser had squeezed it to 150px and every row stood
+   1,400px tall. The table scrolls sideways instead. */
+.search-results-wrap { overflow-x: auto; }
+#search-results .qtable-preview { min-width: 26rem; }
+
 /* Unsaved changes on an edit page: a bar that stays under the top bar for the
    length of the page, so Save is in reach from wherever you are in a long
    question. Sticky rather than fixed, so it needs no arithmetic against the

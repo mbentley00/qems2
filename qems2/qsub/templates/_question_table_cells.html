@@ -3,7 +3,11 @@ One question's cells, in the order the set asked for. Used by both tables on the
 category page, so tossups and bonuses cannot drift apart.
 
 Context: q (the question), qtype ('tossup'/'bonus'), columns (from
-QuestionSet.question_table_headers).
+QuestionSet.question_table_headers), and optionally full_preview.
+
+`full_preview` prints the whole question rather than the opening: the search
+results use it, where the point of the row is to show the passage that matched
+(and the highlighter marks the term inside it), not to fit a tidy column.
 
 The link to the question is built here rather than handed in: a caller wrote it
 as `"/edit_tossup/"|add:q.id`, which reads like concatenation but returns "" --
@@ -18,7 +22,7 @@ markup, so anything here that is a writer's own words escapes explicitly.
     {% if col.key == 'author' %}
     <td>{{ q.author_name|escape }}</td>
     {% elif col.key == 'preview' %}
-    <td><a href="/edit_{{ qtype }}/{{ q.id }}/">{% if qtype == 'tossup' %}{{ q.tossup_text|safe|preview|question_html }}{% else %}{{ q|bonus_leadin }}{% endif %}</a></td>
+    <td class="qtable-preview"><a href="/edit_{{ qtype }}/{{ q.id }}/">{% if full_preview %}{% if qtype == 'tossup' %}{{ q|tossup_html }}{% else %}{{ q|bonus_html }}{% endif %}{% else %}{% if qtype == 'tossup' %}{{ q.tossup_text|safe|preview|question_html }}{% else %}{{ q|bonus_leadin }}{% endif %}{% endif %}</a></td>
     {% elif col.key == 'answer' %}
     <td><a href="/edit_{{ qtype }}/{{ q.id }}/">{% if qtype == 'tossup' %}{{ q|tossup_answer }}{% else %}{{ q|bonus_answers }}{% endif %}</a></td>
     {% elif col.key == 'category' %}

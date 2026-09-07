@@ -5316,14 +5316,26 @@ def search(request, passed_qset_id=None):
 
                 questions = []
                 if 'qsub.tossup' in search_models:
-                    tu_qs = Tossup.objects.filter(question_set_id__in=set_ids).select_related(*QUESTION_LIST_RELATED)
+                    tu_qs = (Tossup.objects.filter(question_set_id__in=set_ids)
+                             .select_related(*QUESTION_LIST_RELATED)
+                             .prefetch_related('category_tags'))
                     questions += list(fulltext_filter(tu_qs, query))
                 if 'qsub.bonus' in search_models:
-                    bs_qs = Bonus.objects.filter(question_set_id__in=set_ids).select_related(*QUESTION_LIST_RELATED)
+                    bs_qs = (Bonus.objects.filter(question_set_id__in=set_ids)
+                             .select_related(*QUESTION_LIST_RELATED)
+                             .prefetch_related('category_tags'))
                     questions += list(fulltext_filter(bs_qs, query))
 
                 if search_category and search_category != 'All':
                     questions = [q for q in questions if str(q.category) == search_category]
+
+                # The results table is the set's own question table, so the
+                # columns it can show are the ones the category pages show --
+                # tags and comments among them, which cost a query per row
+                # unless they are loaded for the whole page at once.
+                attach_question_comments(
+                    {q.id: q for q in questions if isinstance(q, Tossup)},
+                    {q.id: q for q in questions if isinstance(q, Bonus)})
 
                 result = questions
                 message = ''
@@ -5345,6 +5357,18 @@ def search(request, passed_qset_id=None):
                                        'tossups_selected': tossups_selected,
                                        'bonuses_selected': bonuses_selected,
                                        'search_all_selected': search_all_selected,
+                                       # The columns the set you are searching
+                                       # shows on its own question tables. A
+                                       # search can span sets, but it is nearly
+                                       # always run from the set you are working
+                                       # in -- which is the one the form carries
+                                       # -- so that is whose layout the results
+                                       # take, rather than a fixed one that
+                                       # ignores the preference entirely.
+                                       'table_columns': qset.question_table_headers(),
+                                       # Which set a result came from only needs
+                                       # saying when they can differ.
+                                       'show_tournament': search_all_selected == 'checked',
                                        'passed_q_set': passed_q_set,
                                        'message': message,
                                        'message_class': message_class})
