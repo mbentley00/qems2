@@ -3348,6 +3348,68 @@ class StyleCheckerExpandedRulesTests(TestCase):
         self.assertFalse(resp.context['can_configure'])
 
 
+class SidebarActiveSetTests(TestCase):
+    """The sidebar names the set the page is actually working in."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('sas_owner', password='pw', email='sas@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='SAS dist')
+        self.entry = DistributionEntry.objects.create(
+            distribution=self.dist, category='History', subcategory='European')
+        mk = lambda name: QuestionSet.objects.create(
+            name=name, date=timezone.now(), host='', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.a, self.b = mk('SAS Notes'), mk('SAS Nationals')
+        for q in (self.a, self.b):
+            q.editor.add(self.owner)
+            SetWideDistributionEntry.objects.create(question_set=q, dist_entry=self.entry,
+                                                    num_tossups=1, num_bonuses=1)
+            Tossup.objects.create(
+                question_set=q, question_type=self.acf, category=self.entry, author=self.owner,
+                tossup_text='A question about privacy. (*) end.', tossup_answer='_privacy_',
+                created_date=timezone.now(), last_changed_date=timezone.now())
+        # Somebody else's set, for the "cannot be pushed in by hand" case.
+        other_u = User.objects.create_user('sas_other', password='pw')
+        self.theirs = QuestionSet.objects.create(
+            name='SAS Someone Else', date=timezone.now(), host='', address='',
+            owner=Writer.objects.get(user=other_u), num_packets=1, distribution=self.dist)
+        self.client.login(username='sas_owner', password='pw')
+
+    def _sidebar_set(self, url):
+        html = self.client.get(url).content.decode()
+        start = html.find('app-setpicker-name')
+        return html[start:start + 140].split('>')[1].split('<')[0].strip() if start > 0 else ''
+
+    def test_a_search_scoped_to_a_set_puts_that_set_in_the_sidebar(self):
+        """The search carries its set in the query string, not the path, so the
+        sidebar used to fall back to whatever the session last remembered --
+        naming one set over results from another."""
+        self.client.get('/edit_question_set/{0}/'.format(self.a.id))
+        self.assertEqual(
+            self._sidebar_set('/search/?q=privacy&qset={0}&category=All&models=qsub.tossup'
+                              .format(self.b.id)),
+            'SAS Nationals')
+
+    def test_quick_search_scoped_to_a_set_does_the_same(self):
+        self.client.get('/edit_question_set/{0}/'.format(self.a.id))
+        self.assertEqual(self._sidebar_set('/quick_search/?qset={0}'.format(self.b.id)),
+                         'SAS Nationals')
+
+    def test_a_search_across_every_set_keeps_the_remembered_one(self):
+        """No single set is the subject there, so nothing should change."""
+        self.client.get('/edit_question_set/{0}/'.format(self.a.id))
+        self.assertEqual(self._sidebar_set('/quick_search/?qset=all'), 'SAS Notes')
+
+    def test_a_set_you_are_not_on_cannot_be_put_in_your_sidebar(self):
+        self.client.get('/edit_question_set/{0}/'.format(self.a.id))
+        self.assertEqual(
+            self._sidebar_set('/search/?q=privacy&qset={0}&category=All'.format(self.theirs.id)),
+            'SAS Notes')
+
+
 class SearchResultColumnTests(TestCase):
     """The full-text search results are laid out as the set's own question
     table: a search is nearly always run from the set you are working in, so it

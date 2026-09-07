@@ -76,6 +76,16 @@ def nav(request):
         active_id = _active_set_id(request)
         if active_id:
             active = sets.filter(id=active_id).first() or QuestionSet.objects.filter(id=active_id).first()
+        # Some pages carry the set in the query string rather than the path --
+        # the search form posts ?qset=<id>, and quick search the same. Without
+        # this the sidebar fell back to whatever the session last remembered,
+        # so a search scoped to one set sat under a sidebar naming another.
+        # Only the viewer's own sets: this one comes from a parameter anyone
+        # can type.
+        if active is None:
+            raw = (request.GET.get('qset') or '').strip()
+            if raw.isdigit():
+                active = sets.filter(id=int(raw)).first()
         if active is None and request.session.get('nav_active_set'):
             active = sets.filter(id=request.session['nav_active_set']).first()
         if active is None:
