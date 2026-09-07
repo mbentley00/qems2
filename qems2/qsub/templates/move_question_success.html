@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% load filters %}
+
+{% block title %}Moved to {{ dest_qset.name }} - QEMS3{% endblock %}
+
+{% block content %}
+
+{% comment %}
+What the move actually did, rather than a list of things to go and fix.
+
+This page used to say "you will need to re-assign this question's category and
+packet" -- true when moving took the destination and went, and wrong since the
+confirmation step: the category, the author and the tags are all settled on the
+way in. The one thing that really is left open is the packet, because a packet
+belongs to the set the question left.
+
+Replaces move_tossup_success.html and move_bonus_success.html, which were the
+same page twice and drifted from what the code does.
+{% endcomment %}
+
+<h3 class="page-header">Moved to {{ dest_qset.name }}</h3>
+
+<div class="alert-box success mvs-flash">
+    The {{ qtype }} is now in <a href="/edit_question_set/{{ dest_qset.id }}/">{{ dest_qset.name }}</a>.
+</div>
+
+<div class="panel radius mvs-panel">
+    <div class="mvs-head">What came with it</div>
+    <dl class="mvs-list">
+        <dt>Category</dt>
+        <dd>{% if question.category %}{{ question.category }}{% else %}<span class="mvs-open">Uncategorized</span> &mdash; set it on the question when you know where it belongs{% endif %}</dd>
+
+        <dt>Author</dt>
+        <dd>{% if question.author %}{{ question.author }}{% else %}<span class="mvs-open">None</span>{% endif %}</dd>
+
+        <dt>Tags</dt>
+        <dd>{% if carried_tags %}{% for t in carried_tags %}<span class="mvs-tag">{{ t.name }}</span>{% endfor %}{% else %}<span class="mvs-none">None &mdash; {{ dest_qset.name }} had none to carry over</span>{% endif %}</dd>
+    </dl>
+</div>
+
+<div class="panel radius mvs-panel">
+    <div class="mvs-head">Still open</div>
+    <ul class="mvs-todo">
+        <li><strong>A packet.</strong> A packet belongs to the set the {{ qtype }} left, so it
+            arrives unpacketized. Place it from the
+            <a href="/packet_grid/{{ dest_qset.id }}/">packet grid</a> whenever you like.</li>
+        {% if over_limit %}
+        <li><strong>Length.</strong> This {{ qtype }} is {{ char_count }} characters against
+            {{ dest_qset.name }}'s limit of {{ char_limit }}. Trim it on the
+            <a href="{{ edit_url }}">question</a>.</li>
+        {% elif char_limit %}
+        <li><strong>Length is fine here</strong> &mdash; {{ char_count }} characters against
+            this set's limit of {{ char_limit }}.</li>
+        {% endif %}
+        <li><strong>Style.</strong> Sets keep their own style rules, so it is worth a look on the
+            <a href="/style_check/{{ dest_qset.id }}/">style check</a>.</li>
+    </ul>
+</div>
+
+<p class="mvs-links">
+    <a href="{{ edit_url }}" class="button primary">Open the {{ qtype }}</a>
+    <a href="/edit_question_set/{{ q_set.id }}/" class="button secondary">Back to {{ q_set.name }}</a>
+</p>
+
+<style>
+.mvs-flash { margin-bottom: 16px; }
+.mvs-panel { background: var(--qx-card, #fff); max-width: 760px; margin-bottom: 16px; }
+.mvs-head { font-weight: 700; margin-bottom: 8px; }
+.mvs-list { display: grid; grid-template-columns: 8rem minmax(0, 1fr); gap: 6px 14px; margin: 0; }
+.mvs-list dt { font-weight: 600; color: var(--qx-muted, #6b7280); font-size: 0.86rem; margin: 0; }
+.mvs-list dd { margin: 0; }
+.mvs-open { color: #a94442; font-weight: 600; }
+.mvs-none { color: var(--qx-muted, #8a8f9c); }
+.mvs-tag { display: inline-block; border-radius: 9px; padding: 0 7px; margin: 0 4px 2px 0;
+    font-size: 0.78rem; background: var(--qx-elevate, #eef2f7); color: var(--qx-ink, #2b2f3a); }
+.mvs-todo { margin: 0 0 0 18px; }
+.mvs-todo li { margin-bottom: 5px; }
+.mvs-links .button { margin: 0 6px 0 0; }
+</style>
+
+{% endblock %}

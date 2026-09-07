@@ -35,6 +35,41 @@ found afterwards.
     {% autoescape off %}{% if qtype == 'tossup' %}{{ question|tossup_html }}{% else %}{{ question|bonus_html }}{% endif %}{% endautoescape %}
 </div>
 
+{% comment %}
+Whether the destination already has this answer. A question that repeats
+nothing where it was written can repeat something where it is going, and this
+is the last point before it lands -- so the check runs against the destination
+set, not the one being left.
+{% endcomment %}
+{% if dest_repeats %}
+<div class="alert-box warning radius mv-repeats">
+    <strong>{{ dest_qset.name }} already has {{ dest_repeats|length }} question{{ dest_repeats|length|pluralize }}
+    on this answer.</strong> Moving it there would make a repeat. Go back and think
+    again, or move it anyway and fix one of them.
+    <ul>
+    {% autoescape off %}
+    {% for m in dest_repeats %}
+        <li>
+            {% if m.type == 'tossup' %}
+                <a href="/edit_tossup/{{ m.id }}/" target="_blank">Tossup</a>
+            {% else %}
+                <a href="/edit_bonus/{{ m.id }}/" target="_blank">Bonus {{ m.part_label }}</a>
+            {% endif %}
+            &mdash; <strong>{{ m.answer_html }}</strong>
+            <small>({{ m.category_str|default:"uncategorized" }}{% if m.packet %}, {{ m.packet }}{% endif %} &mdash; {{ m.author|escape }})</small>
+        </li>
+    {% endfor %}
+    {% endautoescape %}
+    </ul>
+</div>
+{% elif dest_repeats_off %}
+<p class="mv-note mv-muted">{{ dest_qset.name }} has duplicate checking turned off,
+so this move was not checked for repeats there.</p>
+{% else %}
+<p class="mv-note mv-ok mv-repeats-ok">No question in {{ dest_qset.name }} answers
+the same thing.</p>
+{% endif %}
+
 <form action="" method="post" class="mv-form">
     {% csrf_token %}
     <input type="hidden" name="move_sets" value="{{ dest_qset.id }}">
@@ -137,6 +172,13 @@ found afterwards.
 .mv-carried { color: #1b5e20; font-size: 0.78rem; }
 .mv-tag { display: inline-block; border-radius: 9px; padding: 0 7px; margin: 0 3px 2px 0;
     font-size: 0.78rem; background: #f6e6e5; color: #a94442; }
+.mv-muted { color: var(--qx-muted, #8a8f9c); }
+/* The repeat check sits above the form, where it can still change the answer
+   to "should this move at all?". */
+.mv-repeats { margin-bottom: 16px; }
+.mv-repeats ul { margin: 6px 0 0 18px; }
+.mv-repeats li { margin-bottom: 3px; }
+.mv-repeats-ok { margin-bottom: 14px; }
 .mv-actions { margin-top: 14px; }
 .mv-actions .button { margin: 0 6px 0 0; }
 html[data-theme="dark"] .mv-tag { background: var(--qx-elevate); }

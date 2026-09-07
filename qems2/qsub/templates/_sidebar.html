@@ -76,6 +76,16 @@
         <i class="fa fa-table-cells-large"></i> My Sets</a>
     {% endif %}
 
+    {% comment %}
+    Outside the active-set block: a bug is worth reporting whether or not you
+    are in a set, and the form is the same either way.
+    {% endcomment %}
+    {% if nav_support_on %}
+    <div class="app-nav-section">Support</div>
+    <a class="app-nav-item{% if '/report_issue/' in request.path %} active{% endif %}" href="/report_issue/">
+        <i class="fa fa-bug"></i> Report a Bug / Idea</a>
+    {% endif %}
+
     <div class="app-sidebar-foot">
         <div class="app-usercard">
             <a class="app-usercard-main" href="/profile/" title="Your profile">

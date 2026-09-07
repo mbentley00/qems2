@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% block title %}Report a Bug or Idea - QEMS3{% endblock %}
+
+{% block content %}
+<h3 class="page-header">Report a bug or an idea</h3>
+
+{% if sent %}
+<div class="alert-box success ri-flash">
+    <strong>Sent.</strong> Thank you — it went to {{ support_email }}, with your email
+    address attached so you can be written back to. Send another below if you have more.
+</div>
+{% elif failed %}
+{% comment %}
+The mail did not go. Saying "thanks, sent!" would be a lie, and losing what
+someone took the trouble to write is worse than the failure itself, so the form
+below still holds it and the address is here to send it by hand.
+{% endcomment %}
+<div class="alert-box alert ri-flash">
+    <strong>That did not send.</strong> The mail server refused it — nothing you did.
+    What you wrote is still in the form below; please copy it into an email to
+    <a href="mailto:{{ support_email }}">{{ support_email }}</a>, and it will be
+    looked at either way (the failure is logged on the server).
+</div>
+{% endif %}
+
+<div class="ri-layout">
+    <form action="" method="post" class="ri-form">
+        {% csrf_token %}
+
+        <div class="ri-field ri-kind">
+            <label>{{ form.kind.label }}</label>
+            {{ form.kind }}
+            {{ form.kind.errors }}
+        </div>
+
+        <div class="ri-field">
+            <label for="{{ form.summary.id_for_label }}">{{ form.summary.label }}</label>
+            {{ form.summary }}
+            {{ form.summary.errors }}
+        </div>
+
+        <div class="ri-field">
+            <label for="{{ form.details.id_for_label }}">{{ form.details.label }}</label>
+            {% comment %}
+            Sits above the box rather than under it: by the time someone has
+            finished typing a question in, the warning has come too late.
+            {% endcomment %}
+            <p class="ri-warn"><i class="fa fa-triangle-exclamation"></i>
+            <strong>Don't paste question content.</strong> This goes out as ordinary
+            email to a personal inbox, so no unreleased question should travel with it
+            — no stems, no answer lines, not even a distinctive clue. Describe what
+            went wrong instead ("the answer line lost its underlines when I saved"),
+            and you'll be asked for anything more that is needed.</p>
+            {{ form.details }}
+            {{ form.details.errors }}
+        </div>
+
+        <div class="ri-contact">
+            <div class="ri-field">
+                <label for="{{ form.name.id_for_label }}">{{ form.name.label }}</label>
+                {{ form.name }}
+                {{ form.name.errors }}
+            </div>
+            <div class="ri-field">
+                <label for="{{ form.email.id_for_label }}">{{ form.email.label }}</label>
+                {{ form.email }}
+                <small class="ri-help">{{ form.email.help_text }}</small>
+                {{ form.email.errors }}
+            </div>
+        </div>
+
+        <button type="submit" class="button primary">Send report</button>
+    </form>
+
+    <aside class="ri-aside">
+        <div class="ri-aside-head">What gets sent</div>
+        <p>What you write above, and:</p>
+        <ul>
+            <li>your account name and the email in the form</li>
+            <li>the name of the set the sidebar was showing</li>
+            <li>your browser's identification string</li>
+        </ul>
+        <p class="ri-aside-note">Nothing that points at a question: no question text,
+        and no link to the page you came from. It goes to {{ support_email }} and
+        nowhere else.</p>
+    </aside>
+</div>
+
+<style>
+.ri-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 26px; align-items: start; }
+.ri-form { max-width: 720px; }
+.ri-field { margin-bottom: 16px; }
+.ri-field > label { display: block; font-weight: 600; font-size: 0.85rem;
+    color: var(--qx-ink, #2b2f3a); margin-bottom: 5px; }
+.ri-field input[type=text], .ri-field input[type=email], .ri-field textarea { margin: 0; width: 100%; }
+.ri-help { display: block; margin-top: 4px; color: var(--qx-muted, #8a8f9c); font-size: 0.75rem; }
+.ri-warn { margin: 0 0 8px; padding: 8px 11px; font-size: 0.8rem; line-height: 1.45;
+    border: 1px solid #f0c98a; border-left-width: 3px; border-radius: 6px;
+    background: #fdf6e7; color: #6f4e12; }
+.ri-warn .fa { color: #c98b1b; margin-right: 4px; }
+html[data-theme="dark"] .ri-warn { background: #3a2f1c; border-color: #6b5426; color: #f0c98a; }
+/* Django renders a radio group as a div of divs; lay the choices side by side
+   rather than stacking two one-line options. */
+.ri-kind > div { display: flex; gap: 20px; flex-wrap: wrap; }
+.ri-kind > div > div { margin: 0; }
+.ri-kind label { font-weight: normal; margin: 0; }
+.ri-kind input[type=radio] { margin: 0 5px 0 0; }
+.ri-contact { display: grid; grid-template-columns: 1fr 1fr; gap: 0 18px; }
+.ri-flash { margin-bottom: 18px; }
+.ri-aside { border: 1px solid var(--qx-border, #e9e9ef); border-radius: 10px;
+    padding: 14px 16px; background: var(--qx-card, #fff); font-size: 0.82rem;
+    color: var(--qx-muted, #6b7280); }
+.ri-aside-head { font-weight: 700; color: var(--qx-ink, #2b2f3a); margin-bottom: 6px; }
+.ri-aside ul { margin: 0 0 8px 18px; }
+.ri-aside li { margin-bottom: 3px; }
+.ri-aside-note { margin: 0; }
+@media (max-width: 1100px) {
+    .ri-layout { display: block; }
+    .ri-aside { margin-top: 18px; }
+    .ri-contact { grid-template-columns: 1fr; }
+}
+</style>
+{% endblock %}

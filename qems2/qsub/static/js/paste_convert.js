@@ -1461,6 +1461,21 @@ $(function () {
         $form.hide();
     });
 
+    // ---- Open the comment column on a question that has none ----
+    // The column is not given width when there is nothing in it (see
+    // .edit-layout-solo), so the question can use it. The Comment button in
+    // the question panel hands it back and puts the cursor in the box.
+    $(document).on('click', '.ec-open', function (e) {
+        e.preventDefault();
+        $('.edit-layout').removeClass('edit-layout-solo');
+        $(this).hide();
+        var $box = $('.edit-comments .new-comment-text').first();
+        if ($box.length) {
+            $box[0].scrollIntoView({block: 'nearest'});
+            $box.focus();
+        }
+    });
+
     // ---- Edit your own comment, in place ----
     // The rendered comment carries the raw markup in data-raw, so the editor
     // starts from what was typed rather than the formatted HTML.

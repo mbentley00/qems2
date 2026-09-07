@@ -469,26 +469,117 @@ html[data-theme="dark"] .rich-editor i, html[data-theme="dark"] .rich-editor em 
 .edit-main { min-width: 0; width: 100%; overflow-wrap: anywhere; }
 .edit-main > .panel.question, .edit-main > form { width: 100%; box-sizing: border-box; }
 .edit-comments {
-    flex: 0 0 330px; max-width: 330px;
+    max-width: 330px;
     position: sticky; top: 8px;
     max-height: calc(100vh - 24px); overflow-y: auto;
-    border-left: 1px solid #eee; padding-left: 14px;
+    padding-left: 14px;
 }
-.edit-comments .comment-item { font-size: 0.9em; }
-.edit-comments .reply-form { margin: 4px 0 6px; }
-.comments-heading { margin: 0 0 8px; padding-bottom: 4px;
-    border-bottom: 2px solid #008CBA; font-size: 1.1em; }
-.edit-comments .add-comment-form label { font-weight: bold; font-size: 0.9em; }
-/* The textarea sits inside the bold label, so reset its weight (and the reply
-   box) — typed comment text should be normal weight, not bold. */
-.edit-comments .add-comment-form textarea { margin-bottom: 6px; font-weight: normal; }
-.edit-comments .reply-form textarea { font-weight: normal; }
+/* A question nobody has commented on gives its column back to the question --
+   330px is a lot of width to hold open for an empty panel. The Comment button
+   in the question panel takes the class off again. */
+.edit-layout-solo { grid-template-columns: minmax(0, 1fr); }
+.edit-layout-solo .edit-comments { display: none; }
+
+/* ---- The comment column ------------------------------------------------
+   Cards rather than a run of text: a name, the comment, and quiet actions that
+   only come up under the pointer, so the column reads as a conversation
+   instead of a wall of links. Matches the doc view's gutter cards. */
+.edit-comments .ec-head {
+    display: flex; align-items: center; gap: 8px;
+    margin: 0 0 10px; padding-bottom: 6px;
+    border-bottom: 1px solid var(--qx-border, #e9e9ef);
+}
+.ec-title { font-weight: 700; font-size: 0.95rem; color: var(--qx-ink, #2b2f3a); }
+.ec-count {
+    font-size: 0.7rem; font-weight: 700; line-height: 1.6;
+    min-width: 1.5em; text-align: center; padding: 0 5px; border-radius: 9px;
+    background: var(--qx-elevate, #eef2f7); color: var(--qx-muted, #6b7280);
+}
+/* Sits beside the heading, not in the reading path: the page's link colour
+   would make deleting every comment the loudest thing in the column. */
+.edit-comments .ec-delete-all { margin-left: auto; font-size: 0.72rem;
+    color: var(--qx-muted, #8a8f9c); }
+.edit-comments .ec-delete-all:hover { color: #c0392b; }
+
+.edit-comments .ec-card {
+    margin: 0 0 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--qx-border, #e9e9ef);
+    border-radius: 8px;
+    background: var(--qx-card, #fff);
+    font-size: 0.85rem;
+}
+.edit-comments .ec-card:hover { border-color: #cfd4e0; }
+.ec-top { display: flex; align-items: baseline; gap: 6px; margin-bottom: 3px; }
+.ec-who { font-weight: 600; color: var(--qx-ink, #2b2f3a); min-width: 0; overflow-wrap: anywhere; }
+.ec-when { margin-left: auto; flex: 0 0 auto; font-size: 0.7rem; color: var(--qx-muted, #8a8f9c); }
+.ec-body { color: #3f434d; overflow-wrap: anywhere; }
+.ec-body p { margin: 0 0 4px; }
+.ec-body p:last-child { margin-bottom: 0; }
+.ec-chip {
+    flex: 0 0 auto; font-size: 0.62rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .04em; padding: 0 5px; border-radius: 3px; line-height: 1.7;
+}
+.ec-chip-discord { background: #e7e4fb; color: #4b3fa0; }
+.ec-chip-resolved { background: #dff3e6; color: #1c7c3e; }
+.ec-discord-link { display: inline-block; font-size: 0.72rem; margin-top: 2px; }
+
+/* Quiet until you want them, so the column is comments first and controls
+   second. Kept visible on touch, where there is no hover to reveal them. */
+.edit-comments .ec-actions {
+    margin: 4px 0 0; font-size: 0.72rem;
+    visibility: hidden;
+}
+.edit-comments .ec-card:hover > .ec-actions,
+.edit-comments .ec-reply:hover > .ec-actions,
+.edit-comments .ec-actions:focus-within { visibility: visible; }
+@media (hover: none) {
+    .edit-comments .ec-actions { visibility: visible; }
+}
+.edit-comments .ec-actions a { margin-right: 8px; color: var(--qx-muted, #8a8f9c); }
+.edit-comments .ec-actions a:hover { color: #008CBA; text-decoration: underline; }
+.edit-comments .ec-actions a.ec-danger:hover { color: #c0392b; }
+
+/* A resolved comment stays readable but settled: green rail, muted text. */
+.edit-comments .comment-resolved {
+    opacity: 1;
+    border-left: 3px solid #48a86b;
+    background: #f8fbf9;
+}
+.edit-comments .comment-resolved .ec-body,
+.edit-comments .comment-resolved .ec-who { color: #7f8c85; }
+
+.ec-replies { margin: 6px 0 0 6px; padding-left: 10px; border-left: 2px solid #e2ddf7; }
+.edit-comments .ec-reply { margin-bottom: 6px; }
+.edit-comments .ec-reply:last-child { margin-bottom: 0; }
+.ec-quote {
+    border-left: 3px solid #f4b400; background: #fef7e0; color: #7a6a2a;
+    padding: 2px 7px; margin: 0 0 5px; border-radius: 0 3px 3px 0;
+    font-style: italic; font-size: 0.75rem; cursor: pointer;
+}
+
+.ec-empty { color: var(--qx-muted, #8a8f9c); font-size: 0.82rem; font-style: italic;
+    margin: 0 0 10px; }
+
+/* Composer and reply boxes: the buttons sit under the field, right-aligned. */
+.edit-comments .ec-composer { margin-top: 10px; }
+.edit-comments .ec-composer textarea,
+.edit-comments .reply-form textarea {
+    margin: 0 0 6px; font-weight: normal; font-size: 0.85rem;
+}
+.ec-form-actions { display: flex; align-items: center; gap: 8px; }
+.ec-form-actions .button { margin: 0; }
+.ec-form-actions .button.primary { margin-left: auto; }
+.ec-hint { font-size: 0.68rem; color: var(--qx-muted, #b0b4c0); }
+.edit-comments .reply-form { margin: 6px 0 0; }
+.edit-comments .comment-edit-form textarea { font-size: 0.85rem; margin-bottom: 6px; }
+
 /* The fixed sidebar eats ~250px, so stack the comments below the editor well
    before the viewport itself gets narrow — otherwise the columns overlap. */
 @media (max-width: 1200px) {
     .edit-layout { display: block; }
     .edit-comments { max-width: none; position: static; max-height: none;
-        border-left: none; padding-left: 0; margin-top: 18px; }
+        padding-left: 0; margin-top: 18px; }
 }
 
 /* Edit-page meta: Category/Author dropdowns as clean labeled fields, plus a
@@ -1720,7 +1811,24 @@ html[data-theme="dark"] body.app-authed .app-content .button.secondary { backgro
 
 /* Comments sidebar */
 html[data-theme="dark"] .edit-comments { border-color: var(--qx-border); }
-html[data-theme="dark"] .comment-quote { background: var(--qx-elevate); }
+html[data-theme="dark"] .edit-comments .ec-card { background: var(--qx-card); border-color: var(--qx-border); }
+html[data-theme="dark"] .edit-comments .ec-card:hover { border-color: #4a4f5c; }
+html[data-theme="dark"] .ec-body { color: var(--qx-ink); }
+html[data-theme="dark"] .ec-chip-discord { background: #302a55; color: #c3b3f5; }
+html[data-theme="dark"] .ec-chip-resolved { background: #1c3527; color: #7fc79a; }
+html[data-theme="dark"] .edit-comments .comment-resolved { background: #1b2620; }
+html[data-theme="dark"] .edit-comments .comment-resolved .ec-body,
+html[data-theme="dark"] .edit-comments .comment-resolved .ec-who { color: #8fa397; }
+html[data-theme="dark"] .ec-replies { border-left-color: #3b3560; }
+/* The dark link colour is set on body.app-authed a, which outranks the light-mode rule for this one. */
+html[data-theme="dark"] body.app-authed .edit-comments .ec-delete-all,
+html[data-theme="dark"] body.app-authed .edit-comments .ec-actions a {
+    color: var(--qx-muted, #9aa0ad); }
+html[data-theme="dark"] body.app-authed .edit-comments .ec-actions a:hover { color: #7cc0f4; }
+html[data-theme="dark"] body.app-authed .edit-comments .ec-delete-all:hover,
+html[data-theme="dark"] body.app-authed .edit-comments .ec-actions a.ec-danger:hover { color: #f08c8c; }
+html[data-theme="dark"] .comment-quote, html[data-theme="dark"] .ec-quote {
+    background: #3a2f1c; border-left-color: #6b5426; color: #e2c78a; }
 
 /* The theme toggle button in the sidebar footer — kept the same compact size
    as the gear/logout icons so the username row doesn't get squeezed. */

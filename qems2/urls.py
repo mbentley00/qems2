@@ -27,6 +27,7 @@ urlpatterns = [
     re_path(r'^about/$', about),
     re_path(r'^help/$', help_page),
     re_path(r'^profile/$', profile),
+    re_path(r'^report_issue/$', report_issue),
 
     re_path(r'^question_sets/$', question_sets),
     re_path(r'^import_set/$', import_set),

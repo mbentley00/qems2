@@ -1,7 +1,9 @@
 import io
 import json
 import re
+from unittest import mock
 
+from django.conf import settings
 from django.test import TestCase, override_settings
 from django.core import mail
 from django.contrib.auth.models import AnonymousUser, User
@@ -2883,6 +2885,70 @@ class CommenterNameAndLayoutTests(TestCase):
         self.assertIn('edit-comments', html)
         self.assertIn('Will Alston ("cn_owner")', html)
 
+    def _bonus(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        return Bonus.objects.create(
+            author=self.owner, question_set=self.qset,
+            question_type=QuestionType.objects.get(question_type=ACF_STYLE_BONUS),
+            leadin='Answer these.', part1_text='p1', part1_answer='_a1_',
+            part2_text='p2', part2_answer='_a2_', part3_text='p3', part3_answer='_a3_',
+            created_date=timezone.now(), last_changed_date=timezone.now(), question_number=1)
+
+    def test_a_question_with_no_comments_keeps_the_column_s_width(self):
+        """330px of column is worth holding open only once there is something
+        in it, so an uncommented question gets the room for its own text."""
+        for url in ('/edit_tossup/{0}/'.format(self.tu.id),
+                    '/edit_bonus/{0}/'.format(self._bonus().id)):
+            html = self.client.get(url).content.decode()
+            self.assertIn('edit-layout edit-layout-solo', html, url)
+            # The panel is still in the page, so the Comment button can bring
+            # it back without a reload.
+            self.assertIn('class="add-comment-form ec-composer"', html, url)
+            self.assertIn('ec-open', html, url)
+
+    def test_one_comment_brings_the_column_back(self):
+        bonus = self._bonus()
+        for obj, url in ((self.tu, '/edit_tossup/{0}/'.format(self.tu.id)),
+                         (bonus, '/edit_bonus/{0}/'.format(bonus.id))):
+            from django.contrib.contenttypes.models import ContentType
+            self.Comment.objects.create(
+                content_type=ContentType.objects.get_for_model(obj), object_pk=str(obj.id),
+                site=self.site, user=self.ou, comment='look at this', is_public=True,
+                is_removed=False)
+            html = self.client.get(url).content.decode()
+            self.assertNotIn('edit-layout-solo', html, url)
+            self.assertIn('look at this', html, url)
+            # The count sits inside the region the page refreshes after a post.
+            self.assertIn('<span class="ec-count">1</span>', html, url)
+            self.assertNotIn('ec-open', html, url)
+
+    def test_short_ago_says_how_recent_in_a_few_characters(self):
+        """The column is names and text; a full timestamp on every comment
+        crowds both out, and the exact time is in the title attribute."""
+        from datetime import timedelta
+        from qems2.qsub.templatetags.filters import short_ago
+        now = timezone.now()
+        self.assertEqual(short_ago(None), '')
+        self.assertEqual(short_ago(now - timedelta(seconds=20)), 'just now')
+        self.assertEqual(short_ago(now - timedelta(minutes=12)), '12m')
+        self.assertEqual(short_ago(now - timedelta(hours=5)), '5h')
+        self.assertEqual(short_ago(now - timedelta(days=3)), '3d')
+        old = now - timedelta(days=40)
+        self.assertEqual(short_ago(old), '{0} {1}'.format(old.strftime('%b'), old.day))
+        # A date in the future (clock skew) reads as a date, not "-3d".
+        self.assertNotIn('-', short_ago(now + timedelta(days=2)))
+
+    def test_both_edit_pages_render_the_same_comment_partial(self):
+        """The two pages carried a copy of this markup each, which is how they
+        drifted apart; they share one partial now."""
+        bonus = self._bonus()
+        for obj, url, qtype in ((self.tu, '/edit_tossup/{0}/'.format(self.tu.id), 'tossup'),
+                                (bonus, '/edit_bonus/{0}/'.format(bonus.id), 'bonus')):
+            html = self.client.get(url).content.decode()
+            self.assertIn('data-target-type="{0}"'.format(qtype), html)
+            self.assertIn('class="comments"', html)
+            self.assertIn('ec-head', html)
+
 
 class StyleDismissAllAndLiveCountTests(TestCase):
     """Set-wide style dismissal and the live character-count endpoint."""
@@ -5666,6 +5732,110 @@ class RoleGroupPendingRequestTests(TestCase):
         self.assertTrue(self.group.members.filter(id=self.req.id).exists())
         self.assertFalse(RoleGroupJoinRequest.objects.filter(
             role_group=self.group, requester=self.req).exists())
+
+
+class IssueReportTests(TestCase):
+    """The sidebar's bug/idea form, and the mail it sends."""
+
+    def setUp(self):
+        self.u = User.objects.create_user('ir_user', password='pw', email='writer@t.com',
+                                          first_name='Pat', last_name='Writer')
+        self.writer = Writer.objects.get(user=self.u)
+        self.dist = Distribution.objects.create(name='IR dist')
+        self.qset = QuestionSet.objects.create(
+            name='IR Set', date=timezone.now(), host='', address='', owner=self.writer,
+            num_packets=1, distribution=self.dist)
+        self.client.login(username='ir_user', password='pw')
+
+    GOOD = {'kind': 'bug', 'summary': 'Saving loses the answer line',
+            'details': 'I typed an answer, saved, and it came back empty.',
+            'name': 'Pat Writer', 'email': 'reply-here@t.com'}
+
+    def test_the_sidebar_offers_it(self):
+        body = self.client.get('/question_sets/').content.decode()
+        self.assertIn('/report_issue/', body)
+        self.assertIn('Report a Bug', body)
+
+    def test_the_form_starts_from_the_account(self):
+        resp = self.client.get('/report_issue/',
+                               HTTP_REFERER='https://qems3.buzz/edit_tossup/9/')
+        html = resp.content.decode()
+        self.assertIn('value="writer@t.com"', html)
+        self.assertIn('value="Pat Writer"', html)
+
+    def test_nothing_that_points_at_a_question_is_collected(self):
+        """The report leaves the site as ordinary email, so an unreleased
+        set's questions must not travel with it -- including by way of a link
+        to the page the reporter came from."""
+        html = self.client.get(
+            '/report_issue/',
+            HTTP_REFERER='https://qems3.buzz/edit_tossup/9/').content.decode()
+        self.assertNotIn('edit_tossup/9', html)
+        self.assertNotIn('page_url', html)
+
+    def test_the_form_warns_against_pasting_question_content(self):
+        html = self.client.get('/report_issue/').content.decode()
+        self.assertIn('paste question content', html.lower())
+
+    def test_a_report_is_mailed_with_the_reporter_reachable(self):
+        from django.core import mail
+        mail.outbox = []
+        resp = self.client.post('/report_issue/', self.GOOD,
+                                HTTP_USER_AGENT='Mozilla/5.0 (Test)',
+                                HTTP_REFERER='https://qems3.buzz/edit_tossup/9/')
+        self.assertContains(resp, 'Sent.')
+        self.assertEqual(len(mail.outbox), 1)
+        msg = mail.outbox[0]
+        self.assertEqual(msg.to, ['bentley.michael.j@gmail.com'])
+        # Replying has to reach the person, but the From stays the verified
+        # sender the mail provider requires.
+        self.assertEqual(msg.reply_to, ['reply-here@t.com'])
+        self.assertEqual(msg.from_email, settings.DEFAULT_FROM_EMAIL)
+        self.assertIn('Saving loses the answer line', msg.subject)
+        for expected in ('I typed an answer', 'reply-here@t.com', 'ir_user',
+                         'Mozilla/5.0 (Test)'):
+            self.assertIn(expected, msg.body)
+        # No page, and nothing else that would lead to a question.
+        for forbidden in ('edit_tossup', 'edit_bonus', 'Page:'):
+            self.assertNotIn(forbidden, msg.body)
+
+    def test_a_feature_request_says_so_in_the_subject(self):
+        from django.core import mail
+        mail.outbox = []
+        data = dict(self.GOOD, kind='feature', summary='A dark mode for the packet grid')
+        self.client.post('/report_issue/', data)
+        self.assertIn('feature request', mail.outbox[0].subject)
+
+    def test_too_little_to_act_on_is_refused_rather_than_mailed(self):
+        from django.core import mail
+        mail.outbox = []
+        resp = self.client.post('/report_issue/', dict(self.GOOD, summary='hm', details='x'))
+        self.assertEqual(len(mail.outbox), 0)
+        self.assertContains(resp, 'longer summary')
+
+    def test_a_failed_send_keeps_what_was_written(self):
+        """Telling someone their report was sent when it wasn't loses the
+        report and their trust with it."""
+        from django.core import mail
+        mail.outbox = []
+        with mock.patch.object(mail.EmailMessage, 'send', side_effect=OSError('smtp down')):
+            resp = self.client.post('/report_issue/', self.GOOD)
+        body = resp.content.decode()
+        self.assertNotIn('Sent.', body)
+        self.assertIn('did not send', body)
+        self.assertIn('I typed an answer', body)      # still in the form
+
+    def test_with_no_address_configured_it_is_neither_offered_nor_usable(self):
+        with self.settings(SUPPORT_EMAIL=''):
+            self.assertNotIn('/report_issue/',
+                             self.client.get('/question_sets/').content.decode())
+            self.assertContains(self.client.get('/report_issue/'), 'not configured')
+
+    def test_it_needs_a_login(self):
+        self.client.logout()
+        resp = self.client.get('/report_issue/')
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn('login', resp['Location'])
 
 
 class RoleGroupSearchTests(TestCase):
@@ -13362,6 +13532,96 @@ class MovedQuestionTagTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.tu.refresh_from_db()
         self.assertEqual(self.tu.question_set_id, self.b.id)
+
+    def _confirm_page(self):
+        return self.client.post('/move_tossup/{0}/{1}/'.format(self.a.id, self.tu.id),
+                                {'move_sets': self.b.id})
+
+    def test_the_confirmation_checks_the_destination_for_repeats(self):
+        """A question that repeats nothing where it was written can repeat
+        something where it is going, and after the move it is too late to find
+        out cheaply."""
+        twin = Tossup.objects.create(
+            question_set=self.b, question_type=self.acf, category=self.de, author=self.owner,
+            tossup_text='Another question on the same person. (*) end.', tossup_answer='_X_',
+            created_date=timezone.now(), last_changed_date=timezone.now())
+        resp = self._confirm_page()
+        self.assertEqual([m['id'] for m in resp.context['dest_repeats']], [twin.id])
+        body = resp.content.decode()
+        self.assertIn('MQT B already has 1 question', body)
+        self.assertIn('/edit_tossup/{0}/'.format(twin.id), body)
+
+    def test_a_question_the_destination_does_not_have_is_reported_clear(self):
+        resp = self._confirm_page()
+        self.assertEqual(resp.context['dest_repeats'], [])
+        self.assertIn('No question in MQT B answers', resp.content.decode())
+
+    def test_the_source_set_s_own_copies_are_not_counted(self):
+        """The check is about the destination; a repeat in the set being left
+        is not a reason to stop the move."""
+        Tossup.objects.create(
+            question_set=self.a, question_type=self.acf, category=self.de, author=self.owner,
+            tossup_text='A repeat, but in the set being left. (*) end.', tossup_answer='_X_',
+            created_date=timezone.now(), last_changed_date=timezone.now())
+        self.assertEqual(self._confirm_page().context['dest_repeats'], [])
+
+    def test_a_destination_with_the_check_switched_off_says_so(self):
+        QuestionSet.objects.filter(id=self.b.id).update(enable_duplicate_checks=False)
+        Tossup.objects.create(
+            question_set=self.b, question_type=self.acf, category=self.de, author=self.owner,
+            tossup_text='Would have matched. (*) end.', tossup_answer='_X_',
+            created_date=timezone.now(), last_changed_date=timezone.now())
+        resp = self._confirm_page()
+        self.assertEqual(resp.context['dest_repeats'], [])
+        self.assertIn('duplicate checking turned off', resp.content.decode())
+
+    def test_a_bonus_move_is_checked_the_same_way(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        acf_bn = QuestionType.objects.get(question_type=ACF_STYLE_BONUS)
+        mk = lambda qset, a1, rest: Bonus.objects.create(
+            question_set=qset, question_type=acf_bn, category=self.de, author=self.owner,
+            leadin='Answer these.', part1_text='p1', part1_answer=a1,
+            part2_text='p2', part2_answer='_two {0}_'.format(rest),
+            part3_text='p3', part3_answer='_three {0}_'.format(rest),
+            created_date=timezone.now(), last_changed_date=timezone.now())
+        moving, twin = mk(self.a, '_Shared_', 'a'), mk(self.b, '_Shared_', 'b')
+        resp = self.client.post('/move_bonus/{0}/{1}/'.format(self.a.id, moving.id),
+                                {'move_sets': self.b.id})
+        self.assertEqual([m['id'] for m in resp.context['dest_repeats']], [twin.id])
+
+    def test_the_success_page_reports_what_the_move_did(self):
+        """It used to tell people to go and re-assign the category and packet;
+        the confirmation step settles the category, the author and the tags, so
+        the page says what they are and names the packet as the open one."""
+        self.tu.tossup_text = 'This person. (*) end.'
+        self.tu.save()
+        url = '/move_tossup/{0}/{1}/'.format(self.a.id, self.tu.id)
+        ctx = self.client.post(url, {'move_sets': self.b.id}).context
+        resp = self.client.post(url, {
+            'move_sets': self.b.id, 'confirm': '1',
+            'category': ctx['selected_category_id'], 'author': ctx['selected_author_id'],
+            'tags': [t['tag'].id for t in ctx['dest_tags'] if t['checked']]})
+        body = resp.content.decode()
+        self.assertNotIn('re-assign', body)
+        self.assertIn('Moved to MQT B', body)
+        self.assertIn('History - World', body)          # the category it kept
+        self.assertIn('China', body)                    # the tag it carried
+        self.assertIn('arrives unpacketized', body)
+        self.assertIn('/packet_grid/{0}/'.format(self.b.id), body)
+
+    def test_the_success_page_measures_length_against_the_new_set(self):
+        """Length limits belong to the set, so the one that matters after a
+        move is the destination's."""
+        QuestionSet.objects.filter(id=self.b.id).update(max_acf_tossup_length=10)
+        url = '/move_tossup/{0}/{1}/'.format(self.a.id, self.tu.id)
+        ctx = self.client.post(url, {'move_sets': self.b.id}).context
+        resp = self.client.post(url, {
+            'move_sets': self.b.id, 'confirm': '1',
+            'category': ctx['selected_category_id'], 'author': ctx['selected_author_id']})
+        self.assertTrue(resp.context['over_limit'])
+        body = resp.content.decode()
+        self.assertIn('limit of 10', body)
+        self.assertIn('17 characters', body)
 
     def test_tags_follow_where_the_new_set_has_them_and_drop_otherwise(self):
         self._move()

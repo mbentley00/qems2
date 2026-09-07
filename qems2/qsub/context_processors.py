@@ -51,7 +51,10 @@ def nav(request):
     u = request.user
     name = (u.get_full_name() or u.username).strip()
     initials = ''.join(p[0] for p in name.split()[:2]).upper() or u.username[:1].upper()
-    ctx = {'nav_display_name': name, 'nav_initials': initials, 'nav_username': u.username}
+    ctx = {'nav_display_name': name, 'nav_initials': initials, 'nav_username': u.username,
+           # The bug/idea form is only offered when its mail has somewhere to
+           # go; a form that quietly drops what people write is worse than none.
+           'nav_support_on': bool((getattr(settings, 'SUPPORT_EMAIL', '') or '').strip())}
 
     sets = (QuestionSet.objects
             .filter(Q(owner=writer) | Q(co_owners=writer) | Q(editor=writer) | Q(writer=writer))

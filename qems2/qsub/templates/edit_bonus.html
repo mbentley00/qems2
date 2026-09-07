@@ -36,7 +36,13 @@
 {# One-time style/repeat report when arriving straight from creating the question. #}
 {% include "_new_question_checks.html" %}
 
-<div class="edit-layout">
+{% if bonus %}{% get_threaded_comments bonus as thread_data %}{% endif %}
+{% comment %}
+A question with no comments gets the whole width: the column is worth
+330px of the question only once there is something in it. The Comment
+button in the question panel brings it back.
+{% endcomment %}
+<div class="edit-layout{% if not thread_data.count %} edit-layout-solo{% endif %}">
 <div class="edit-main">
 {% autoescape off %}
     {% if bonus %}
@@ -51,7 +57,14 @@
             {% if bonus.proofread and bonus.proofreader %}
                 <p><strong>Proofread by:</strong> {{ bonus.proofreader|escape }} on {{ bonus.proofread_date }}</p>
             {% endif %}
-            <p><strong>Last modified:</strong> {{ bonus.last_changed_date }}</p>
+            <div class="qmeta-lastrow">
+                <p class="qmeta-lastmod"><strong>Last modified:</strong> {{ bonus.last_changed_date }}</p>
+                {% if not thread_data.count %}
+                <div class="q-copy-tools">
+                    <a href="#" class="q-copy-btn ec-open" title="Add a comment on this bonus">Comment</a>
+                </div>
+                {% endif %}
+            </div>
         </div>
     {% endif %}
 {% endautoescape %}
@@ -288,61 +301,7 @@ $(function () {
 {% include "_playtest_results.html" %}
 </div>{# .edit-main #}
 <div class="edit-comments">
-{% if bonus %}
-<h5 class="comments-heading">Comments</h5>
-{% include "_comment_discord.html" %}
-<div class="comments">
-        {% autoescape off %}
-            {% get_threaded_comments bonus as thread_data %}
-            {% for comment in thread_data.top_level %}
-                {% with anchor=thread_data.anchors|get_anchor:comment.id %}
-                <div class="comment-item{% if comment.id in thread_data.resolved %} comment-resolved{% endif %}{% if comment.is_discord %} comment-discord{% endif %}" data-comment-id="{{ comment.id }}"{% if anchor %} data-anchor-text="{{ anchor.selected_text|force_escape }}" data-anchor-prefix="{{ anchor.prefix|force_escape }}" data-anchor-suffix="{{ anchor.suffix|force_escape }}"{% endif %}>
-                    {% if anchor %}<div class="comment-quote" title="Click to locate in question">{{ anchor.selected_text|force_escape }}</div>{% endif %}
-                    {% if comment.id in thread_data.resolved %}<span class="label success comment-resolved-badge">Resolved</span>{% endif %}
-                    <strong>{% if comment.is_discord %}<span class="discord-badge">Discord</span>{{ comment.user_name|escape }}{% else %}{{ comment|commenter_name }}{% endif %}{{ comment|commenter_tags:qset }}:</strong> <span class="comment-strikeable" data-comment-id="{{ comment.id }}" data-raw="{{ comment.comment|escape }}">{{ comment.comment|safe|comment_html|linebreaks }}</span> ({{ comment.submit_date }}){% if comment.is_discord and comment.discord_thread_url %} <a href="{{ comment.discord_thread_url }}" target="_blank" rel="noopener" class="discord-thread-link">Open Discord thread</a>{% endif %}
-                    <div class="comment-actions">
-                        {% if role == "editor" %}
-                            <a href="/delete_comment/{{ comment.id }}" class="delete_comment" value="{{ comment.id }}" qset="{{ qset.id }}">Delete</a>
-                        {% endif %}
-                        <a href="#" class="resolve-toggle" data-comment-id="{{ comment.id }}">{% if comment.id in thread_data.resolved %}Unresolve{% else %}Resolve{% endif %}</a>
-                        <a href="#" class="reply-toggle" data-comment-id="{{ comment.id }}">Reply</a>
-                        {% if comment.user_id == request.user.id %}<a href="#" class="edit-comment-toggle" data-comment-id="{{ comment.id }}">Edit</a>{% endif %}
-                    </div>
-                    <div class="reply-form" id="reply-form-{{ comment.id }}" style="display:none;">
-                        <textarea rows="3" class="reply-text" placeholder="Write a reply..."></textarea>
-                        <button class="button small primary post-reply" data-parent-id="{{ comment.id }}" data-qset-id="{{ qset.id }}">Post Reply</button>
-                        <button class="button small secondary cancel-reply">Cancel</button>
-                    </div>
-                    <div class="comment-replies">
-                        {% for reply in thread_data.replies|get_replies:comment.id %}
-                            <div class="comment-item{% if reply.is_discord %} comment-discord{% endif %}" data-comment-id="{{ reply.id }}">
-                                <strong>{% if reply.is_discord %}<span class="discord-badge">Discord</span>{{ reply.user_name|escape }}{% else %}{{ reply|commenter_name }}{% endif %}{{ reply|commenter_tags:qset }}:</strong> <span class="comment-strikeable" data-comment-id="{{ reply.id }}" data-raw="{{ reply.comment|escape }}">{{ reply.comment|safe|comment_html|linebreaks }}</span> ({{ reply.submit_date }}){% if reply.is_discord and reply.discord_thread_url %} <a href="{{ reply.discord_thread_url }}" target="_blank" rel="noopener" class="discord-thread-link">Open Discord thread</a>{% endif %}
-                                <div class="comment-actions">
-                                    {% if role == "editor" %}
-                                        <a href="/delete_comment/{{ reply.id }}" class="delete_comment" value="{{ reply.id }}" qset="{{ qset.id }}">Delete</a>
-                                    {% endif %}
-                                    <a href="#" class="reply-toggle" data-comment-id="{{ comment.id }}">Reply</a>
-                                    {% if reply.user_id == request.user.id %}<a href="#" class="edit-comment-toggle" data-comment-id="{{ reply.id }}">Edit</a>{% endif %}
-                                </div>
-                            </div>
-                        {% endfor %}
-                    </div>
-                </div>
-                {% endwith %}
-            {% endfor %}
-            {% if role == "editor" %}
-                <a href="/delete_all_comments/{{ bonus.id }}" class="delete_all_comments" value="{{ bonus.id }}" qset="{{ qset.id }}" question-type="bonus">Delete All Comments</a><br /><br />
-            {% endif %}
-        {% endautoescape %}
-
-        <div class="add-comment-form" data-target-type="bonus" data-target-id="{{ bonus.id }}" data-qset-id="{{ qset.id }}">
-            <label>Add a comment
-                <textarea rows="3" class="new-comment-text expanding"></textarea>
-            </label>
-            <button class="button small primary comment-submit">Post Comment</button>
-        </div>
-    </div>{# .comments #}
-{% endif %}
+{% if bonus %}{% include "_edit_comments.html" with question=bonus qtype="bonus" %}{% endif %}
 </div>{# .edit-comments #}
 </div>{# .edit-layout #}
 

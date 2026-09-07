@@ -77,6 +77,40 @@ def to_short_datetime(date):
         return ""
     return date.strftime("%m-%d-%y %H:%M %p")
     
+@register.filter(name='short_ago')
+def short_ago(date):
+    """How long ago, in as few characters as possible: "just now", "12m",
+    "5h", "3d", then the date itself once a week has passed.
+
+    A comment column is mostly names and text; a full timestamp on every one
+    of them ("Feb. 7, 2026, 10:06 p.m.") crowds both out, and what a reader
+    wants at a glance is how recent it is. The exact time goes in the title
+    attribute wherever this is used.
+    """
+    if date is None:
+        return ''
+    import datetime as _dt
+    from django.utils import timezone as _tz
+    # The dates come from the database, so they are aware when the project is;
+    # a naive one has to be compared against a naive now.
+    now = _tz.now() if _tz.is_aware(date) else _dt.datetime.now()
+    # Day and month spelled out rather than strftime: the no-padding flag is
+    # %-d on Linux and %#d on Windows, and this runs on both.
+    on_the_day = '{0} {1}'.format(date.strftime('%b'), date.day)
+    seconds = (now - date).total_seconds()
+    if seconds < 0:            # clock skew, or a date in the future
+        return on_the_day
+    if seconds < 60:
+        return 'just now'
+    if seconds < 3600:
+        return '{0}m'.format(int(seconds // 60))
+    if seconds < 86400:
+        return '{0}h'.format(int(seconds // 3600))
+    if seconds < 7 * 86400:
+        return '{0}d'.format(int(seconds // 86400))
+    return on_the_day
+
+
 @register.filter(name='percent')
 def percent(x, y):
     try:

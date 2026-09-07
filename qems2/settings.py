@@ -294,6 +294,11 @@ EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
 # approved on creation.
 SET_APPROVAL_EMAIL = os.environ.get('SET_APPROVAL_EMAIL', 'bentley.michael.j@gmail.com')
 
+# Where the "Report a bug or idea" form sends what people write. Comma-separate
+# for several recipients; blank takes the form out of the sidebar, since a form
+# whose submissions go nowhere is worse than no form.
+SUPPORT_EMAIL = os.environ.get('SUPPORT_EMAIL', 'bentley.michael.j@gmail.com')
+
 # Absolute base URL used to build links in notification emails (no trailing
 # slash). Override per-deployment with the BASE_URL env var.
 BASE_URL = os.environ.get('BASE_URL', 'https://qems2-bbhfewbrfzhyhvbk.westus3-01.azurewebsites.net').rstrip('/')

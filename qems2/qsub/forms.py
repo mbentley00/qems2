@@ -527,3 +527,46 @@ class MoveBonusForm(forms.Form):
         super(MoveBonusForm, self).__init__(*args, **kwargs)
 
         self.fields['move_sets'] = forms.ModelChoiceField(queryset=move_sets, required=True)
+
+
+class IssueReportForm(forms.Form):
+    """A bug report or a feature request, mailed to whoever runs the site.
+
+    The contact fields start filled in from the account (see the view) but stay
+    editable: the address someone wants a reply at is not always the one they
+    signed up with.
+    """
+
+    KINDS = [('bug', 'Something is broken'),
+             ('feature', 'I have an idea for a feature')]
+
+    kind = forms.ChoiceField(choices=KINDS, initial='bug',
+                             widget=forms.RadioSelect, label='What is this?')
+    summary = forms.CharField(max_length=140, label='Summary',
+                              widget=forms.TextInput(attrs={
+                                  'placeholder': 'One line: what happened, or what you want'}))
+    details = forms.CharField(label='Details', widget=forms.Textarea(attrs={
+        'rows': 8,
+        'placeholder': "For a bug: what you did, what you expected, and what "
+                       "happened instead. For an idea: what you are trying to "
+                       "do and why the app makes it hard. Describe the problem "
+                       "without quoting the question."}))
+    name = forms.CharField(max_length=100, required=False, label='Your name')
+    email = forms.EmailField(label='Your email',
+                             help_text='So you can be asked for more detail, or told when it is fixed.')
+
+    # Deliberately nothing here that identifies a question. This mail leaves the
+    # site for an ordinary inbox, and an unreleased set's questions must not go
+    # with it -- not the text, and not a link that would lead to it either.
+
+    def clean_summary(self):
+        summary = (self.cleaned_data.get('summary') or '').strip()
+        if len(summary) < 5:
+            raise ValidationError('Please give a slightly longer summary.')
+        return summary
+
+    def clean_details(self):
+        details = (self.cleaned_data.get('details') or '').strip()
+        if len(details) < 15:
+            raise ValidationError('Please say a little more — enough to act on.')
+        return details

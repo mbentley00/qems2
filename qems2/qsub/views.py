@@ -609,6 +609,96 @@ def _notify_new_set_pending(qset):
     return True
 
 
+def _remembered_set_name(request):
+    """The set the sidebar was last showing, for context in a report. The
+    reporting page belongs to no set of its own, so this is the nearest thing
+    to "what were you working on" -- the id the nav keeps in the session."""
+    set_id = request.session.get('nav_active_set')
+    if not set_id:
+        return '(none)'
+    qset = QuestionSet.objects.filter(id=set_id).first()
+    return '{0} (#{1})'.format(qset.name, qset.id) if qset else '(none)'
+
+
+def _support_recipients():
+    """Who gets what the bug/idea form collects. Blank setting = the form is
+    off, and the sidebar stops offering it."""
+    from django.conf import settings as dj_settings
+    raw = getattr(dj_settings, 'SUPPORT_EMAIL', '') or ''
+    return [addr.strip() for addr in raw.split(',') if addr.strip()]
+
+
+@login_required
+def report_issue(request):
+    """Report a bug or ask for a feature, by email to whoever runs the site.
+
+    Sent on the request rather than in the background: this is somebody
+    deliberately writing to a person, so the page has to be able to say whether
+    it actually went -- and if the mail fails, to hand them back what they
+    wrote instead of swallowing it.
+    """
+    from django.core.mail import EmailMessage
+    from django.conf import settings as dj_settings
+    from .forms import IssueReportForm
+
+    user = request.user.writer
+    recipients = _support_recipients()
+    if not recipients:
+        return render(request, 'failure.html',
+                      {'message': 'Reporting is not configured on this site.',
+                       'message_class': 'alert-box warning'})
+
+    sent = False
+    failed = False
+    if request.method == 'POST':
+        form = IssueReportForm(request.POST)
+        if form.is_valid():
+            data = form.cleaned_data
+            kind = 'Bug' if data['kind'] == 'bug' else 'Feature request'
+            # Who they are and what they were browsing with -- and nothing
+            # that points at a question. This mail leaves the site for an
+            # ordinary inbox, so no question text and no link that would lead
+            # to one travels with it, not even the page they came from.
+            context = [
+                'From:    {0} <{1}>'.format(data['name'] or _actor_name(user), data['email']),
+                'Account: {0}'.format(request.user.username),
+                'Set:     {0}'.format(_remembered_set_name(request)),
+                'Browser: {0}'.format((request.META.get('HTTP_USER_AGENT') or '?')[:200]),
+                'Site:    {0}'.format(dj_settings.BASE_URL),
+            ]
+            body = '{0}\n\n{1}\n\n{2}'.format(
+                data['details'].strip(), '-' * 40, '\n'.join(context))
+            message = EmailMessage(
+                subject='QEMS3 {0}: {1}'.format(kind.lower(), data['summary']),
+                body=body,
+                from_email=dj_settings.DEFAULT_FROM_EMAIL,
+                to=recipients,
+                # The From has to stay the verified sender, so the reporter's
+                # address goes here -- Reply lands on them, not on the site.
+                reply_to=[data['email']])
+            try:
+                message.send(fail_silently=False)
+                sent = True
+            except Exception as ex:
+                # Say so rather than claiming it went, and leave the form filled
+                # in so nothing they wrote is lost.
+                print('Issue report mail failed:', ex)
+                print('Unsent issue report:', body)
+                failed = True
+        return render(request, 'report_issue.html',
+                      {'form': IssueReportForm() if sent else form,
+                       'user': user, 'sent': sent, 'failed': failed,
+                       'support_email': recipients[0]})
+
+    form = IssueReportForm(initial={
+        'name': user.get_real_name().strip(),
+        'email': request.user.email,
+        'kind': request.GET.get('kind') if request.GET.get('kind') in ('bug', 'feature') else 'bug',
+    })
+    return render(request, 'report_issue.html',
+                  {'form': form, 'user': user, 'support_email': recipients[0]})
+
+
 @login_required
 def suggestion_quality(request):
     """Which style-check suggestions editors keep throwing out.
@@ -5557,6 +5647,45 @@ def forgot_username(request):
         sent = True
     return render(request, 'account/forgot_username.html', {'sent': sent})
 
+def _move_success_context(question, qtype, q_set, dest_qset):
+    """What the move did, for the page that reports it.
+
+    The category, author and tags were settled on the confirmation step, so
+    this says what they ended up as rather than telling anyone to go and set
+    them. The packet genuinely is open -- a packet belongs to the set the
+    question left -- and the destination's length limit is its own, so both are
+    worth naming here.
+    """
+    limit = (dest_qset.max_acf_tossup_length if qtype == 'tossup'
+             else dest_qset.max_acf_bonus_length)
+    count = question.character_count()
+    return {
+        'question': question, 'qtype': qtype,
+        'q_set': q_set, 'dest_qset': dest_qset,
+        'edit_url': '/edit_{0}/{1}/'.format(qtype, question.id),
+        'carried_tags': list(question.category_tags.all()),
+        'char_count': count,
+        'char_limit': limit,
+        'over_limit': bool(limit and count > limit),
+    }
+
+
+def _move_repeat_matches(question, qtype, dest_qset):
+    """Questions already in `dest_qset` that answer the same thing.
+
+    The same check the add pages run after a submit, pointed at the set the
+    question is moving to: the repeat that matters is a repeat where it is
+    going. Empty when the destination has duplicate checking turned off --
+    reading a whole set to answer this is exactly what that switch is for.
+    """
+    if not dest_qset.enable_duplicate_checks:
+        return []
+    matches = find_answer_matches(dest_qset, question, qtype)
+    for m in matches:
+        m['answer_html'] = _dup_render_answer(m['answer_raw'])
+    return matches
+
+
 def _move_confirm_context(question, qtype, q_set, dest_qset, post=None):
     """What moving this question would do to the things it carries.
 
@@ -5615,6 +5744,11 @@ def _move_confirm_context(question, qtype, q_set, dest_qset, post=None):
         'user': None, 'q_set': q_set, 'dest_qset': dest_qset,
         'question': question, 'qtype': qtype,
         'edit_url': '/edit_{0}/{1}/'.format(qtype, question.id),
+        # What the destination already has on this answer. A question that is
+        # not a repeat where it was written can easily be one where it is
+        # going, and after the move it is too late to find out cheaply.
+        'dest_repeats': _move_repeat_matches(question, qtype, dest_qset),
+        'dest_repeats_off': not dest_qset.enable_duplicate_checks,
         'dest_categories': dest_entries,
         'category_match': str(twin) if twin is not None else '',
         'selected_category_id': selected.id if selected is not None else None,
@@ -5729,15 +5863,9 @@ def move_tossup(request, q_set_id, tossup_id):
                         return render(request, 'move_question_confirm.html', ctx)
 
                     _apply_move(tossup, 'tossup', dest_qset, request.POST)
-                    message = "Successfully moved tossup to " + str(dest_qset)
-                    message_class = 'alert-box success'
-                    return render(request, 'move_tossup_success.html',
-                                        {'user': user,
-                                         'q_set': q_set,
-                                         'dest_q_set': dest_qset,
-                                         'tossup': tossup,
-                                         'message': message,
-                                         'message_class': message_class})
+                    ctx = _move_success_context(tossup, 'tossup', q_set, dest_qset)
+                    ctx['user'] = user
+                    return render(request, 'move_question_success.html', ctx)
                 else:
                     message = 'There was an error with your submission.  Hit the back button and make sure you selected a valid question set to move to.'
                     message_class = 'alert-box warning'
@@ -5841,11 +5969,9 @@ def move_bonus(request, q_set_id, bonus_id):
                         return render(request, 'move_question_confirm.html', ctx)
 
                     _apply_move(bonus, 'bonus', dest_qset, request.POST)
-                    return render(request, 'move_bonus_success.html',
-                                        {'user': user,
-                                         'q_set': q_set,
-                                         'dest_q_set': dest_qset,
-                                         'bonus': bonus})
+                    ctx = _move_success_context(bonus, 'bonus', q_set, dest_qset)
+                    ctx['user'] = user
+                    return render(request, 'move_question_success.html', ctx)
                 else:
                     message = 'There was an error with your submission.  Hit the back button and make sure you selected a valid question set to move to.'
                     message_class = 'alert-box warning'
