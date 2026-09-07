@@ -1215,7 +1215,9 @@ $(function () {
     // Snapshot initial values of the question edit form (the first form on page)
     var $editForm = $('form.clearfix').first();
     var initialValues = {};
-    if ($editForm.length) {
+    function snapshotEditForm() {
+        initialValues = {};
+        if (!$editForm.length) { return; }
         $editForm.find('input, textarea, select').each(function () {
             var $el = $(this);
             var name = $el.attr('name');
@@ -1226,6 +1228,30 @@ $(function () {
                 initialValues[name] = $el.val();
             }
         });
+    }
+    snapshotEditForm();
+
+    // What counts as "unchanged" is what this page would save if you saved it
+    // without typing anything -- not the bytes the server sent. Rendering a
+    // question in the rich editor and converting it back is not always
+    // byte-identical to what was stored (a trailing space after an answer, the
+    // order of nested markup in ~The _Title_~), and that difference appears the
+    // moment you click into a field. Comparing against the served text called
+    // that an edit: opening a question and touching nothing said there were
+    // unsaved changes. So once the editors exist, run each one's own round trip
+    // and take the snapshot from that.
+    //
+    // rich_editor.js enhances the fields in its own ready handler, which runs
+    // after this one; a zero timeout lands after it.
+    function rebaselineEditForm() {
+        if (!$editForm.length) { return; }
+        if (window.QemsRichEditor && window.QemsRichEditor.get) {
+            $editForm.find('textarea[id]').each(function () {
+                var reg = window.QemsRichEditor.get(this.id);
+                if (reg && reg.syncDown) { reg.syncDown(); }
+            });
+        }
+        snapshotEditForm();
     }
 
     function hasUnsavedChanges() {
@@ -1286,11 +1312,10 @@ $(function () {
         // A bonus opens in the unified editor, whose textarea carries no name
         // and so is invisible to the form-field comparison: it is only parsed
         // back into the per-part fields on submit. Watch it directly, or
-        // editing a bonus the ordinary way would never raise the bar. Its
-        // value is set from the saved fields further up this same handler, so
-        // by here it holds what was loaded.
+        // editing a bonus the ordinary way would never raise the bar. Like the
+        // named fields, its baseline is taken after its editor's round trip.
         var $unified = $('#unified-bonus-text');
-        var unifiedInitial = $unified.length ? $unified.val() : null;
+        var unifiedInitial = null;
 
         var timer = null;
         function sync() {
@@ -1311,7 +1336,11 @@ $(function () {
         // away on the way out; it is rechecked once the other handlers have had
         // their say. (On a save that goes through, the page reloads anyway.)
         $form.on('submit', schedule);
-        sync();
+        setTimeout(function () {
+            rebaselineEditForm();
+            unifiedInitial = $unified.length ? $unified.val() : null;
+            sync();
+        }, 0);
     }
     setupSaveBar();
 
