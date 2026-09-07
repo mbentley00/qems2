@@ -37,6 +37,7 @@
         </label>
         <p class="dist-visibility-help">{{ form.public.help_text }}</p>
     </div>
+    <div class="sticky-scroll">
     <table class="table-striped table-hover sticky-head" id="distribution-table">
         <thead>
         <tr>
@@ -74,6 +75,7 @@
         {% endfor %}
         </tbody>
     </table>
+    </div>
     {{ formset.management_form }}
     <div class="row">
         <input type="submit" value="Add Row" name="add_row" class="button secondary left" />

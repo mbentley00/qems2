@@ -98,6 +98,10 @@ $(function () {
 
     var registry = {};
     var resyncFns = [];
+    // Every enhanced field's write-through, including the ones the registry
+    // cannot name: the structured answer rows are <input>s with no id, so they
+    // are reachable only from here.
+    var syncDownFns = [];
 
     /* ---------- Special characters (the toolbar's Omega button) ---------- */
 
@@ -457,6 +461,7 @@ $(function () {
 
         $editor.on('input blur', syncDown);
         $editor.on('input blur focus', updatePlaceholder);
+        syncDownFns.push(syncDown);
 
         // Remember the caret/selection inside the editor so actions that move
         // focus away (toolbar buttons, the category-tag tree) can restore it.
@@ -908,6 +913,14 @@ $(function () {
 
     window.QemsRichEditor = {
         get: function (textareaId) { return registry[textareaId] || null; },
+        // Write every editor through to the field behind it. What "unchanged"
+        // means on an edit page is what the page would save right now, and
+        // that is only knowable once every editor has had its say.
+        syncAllDown: function () {
+            syncDownFns.forEach(function (fn) {
+                try { fn(); } catch (e) { /* one bad field must not stop the rest */ }
+            });
+        },
         insertCategoryTag: insertCategoryTag,
         // Shared with the plain-textarea fallback on the Type Questions page,
         // so both agree on where a category tag belongs.

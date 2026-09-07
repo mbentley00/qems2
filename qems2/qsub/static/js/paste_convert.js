@@ -1215,18 +1215,25 @@ $(function () {
     // Snapshot initial values of the question edit form (the first form on page)
     var $editForm = $('form.clearfix').first();
     var initialValues = {};
+
+    function fieldValue(el) {
+        var $el = $(el);
+        return $el.is(':checkbox, :radio') ? String($el.prop('checked')) : String($el.val());
+    }
+
+    // A name can belong to several fields at once -- every category-tag
+    // checkbox is called category_tags, and a structured answer line repeats
+    // its accept/prompt rows -- so each name keeps a LIST of values, in
+    // document order. Keeping one value per name meant the last field's value
+    // was compared against all of them, and a question with (say) the first of
+    // its three tags ticked read as edited from the moment it loaded.
     function snapshotEditForm() {
         initialValues = {};
         if (!$editForm.length) { return; }
         $editForm.find('input, textarea, select').each(function () {
-            var $el = $(this);
-            var name = $el.attr('name');
-            if (!name) return;
-            if ($el.is(':checkbox')) {
-                initialValues[name] = $el.prop('checked');
-            } else {
-                initialValues[name] = $el.val();
-            }
+            var name = $(this).attr('name');
+            if (!name) { return; }
+            (initialValues[name] = initialValues[name] || []).push(fieldValue(this));
         });
     }
     snapshotEditForm();
@@ -1245,7 +1252,9 @@ $(function () {
     // after this one; a zero timeout lands after it.
     function rebaselineEditForm() {
         if (!$editForm.length) { return; }
-        if (window.QemsRichEditor && window.QemsRichEditor.get) {
+        if (window.QemsRichEditor && window.QemsRichEditor.syncAllDown) {
+            window.QemsRichEditor.syncAllDown();
+        } else if (window.QemsRichEditor && window.QemsRichEditor.get) {
             $editForm.find('textarea[id]').each(function () {
                 var reg = window.QemsRichEditor.get(this.id);
                 if (reg && reg.syncDown) { reg.syncDown(); }
@@ -1255,17 +1264,20 @@ $(function () {
     }
 
     function hasUnsavedChanges() {
-        if (!$editForm.length) return false;
-        var dirty = false;
+        if (!$editForm.length) { return false; }
+        var seen = {}, dirty = false;
         $editForm.find('input, textarea, select').each(function () {
-            var $el = $(this);
-            var name = $el.attr('name');
-            if (!name || !(name in initialValues)) return;
-            if ($el.is(':checkbox')) {
-                if ($el.prop('checked') !== initialValues[name]) dirty = true;
-            } else {
-                if ($el.val() !== initialValues[name]) dirty = true;
-            }
+            var name = $(this).attr('name');
+            if (!name || !(name in initialValues)) { return; }
+            var index = seen[name] = (seen[name] === undefined ? 0 : seen[name] + 1);
+            // A field that was not there when the snapshot was taken (a row
+            // added to a structured answer) is itself a change.
+            if (initialValues[name][index] !== fieldValue(this)) { dirty = true; }
+        });
+        // ... and so is one that has gone (a row removed).
+        Object.keys(initialValues).forEach(function (name) {
+            var now = seen[name] === undefined ? 0 : seen[name] + 1;
+            if (now < initialValues[name].length) { dirty = true; }
         });
         return dirty;
     }
