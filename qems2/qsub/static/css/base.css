@@ -475,10 +475,25 @@ html[data-theme="dark"] .rich-editor i, html[data-theme="dark"] .rich-editor em 
     padding-left: 14px;
 }
 /* A question nobody has commented on gives its column back to the question --
-   330px is a lot of width to hold open for an empty panel. The Comment button
-   in the question panel takes the class off again. */
+   330px is a lot of width to hold open for an empty panel -- and so does one
+   whose column you have put away. The Comments button in the question panel
+   brings it back either way. */
 .edit-layout-solo { grid-template-columns: minmax(0, 1fr); }
 .edit-layout-solo .edit-comments { display: none; }
+/* The button lives in the question's own action row and only shows itself when
+   there is a column to bring back. */
+.q-copy-tools .ec-open { display: none; }
+.edit-layout-solo ~ * .ec-open,
+.edit-layout-solo .ec-open { display: inline-block; }
+/* Fold the column away from its own header. */
+.edit-comments .ec-hide {
+    margin: 0 0 0 6px; padding: 0 4px; border: none; background: none; cursor: pointer;
+    color: var(--qx-muted, #8a8f9c); font-size: 0.8rem; line-height: 1;
+}
+.edit-comments .ec-hide:hover { color: var(--qx-ink, #2b2f3a); }
+.ec-head .ec-delete-all + .ec-hide { margin-left: 6px; }
+.ec-head .ec-title + .ec-count + .ec-hide,
+.ec-head .ec-title + .ec-hide { margin-left: auto; }
 
 /* ---- The comment column ------------------------------------------------
    Cards rather than a run of text: a name, the comment, and quiet actions that
@@ -584,8 +599,11 @@ html[data-theme="dark"] .rich-editor i, html[data-theme="dark"] .rich-editor em 
 
 /* Edit-page meta: Category/Author dropdowns as clean labeled fields, plus a
    compact packet + status-flags bar (replaces the old prefix-box layout). */
-.app-content .qmeta-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 22px;
-    margin: 6px 0 16px; max-width: 860px; }
+/* Category, Author and "Credit to" on one line: at two columns the third
+   dropped to a row of its own and left a hole beside it. They are short fields
+   -- a category path is the longest of them -- so three fit comfortably. */
+.app-content .qmeta-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px 18px; margin: 6px 0 16px; max-width: 1080px; }
 .app-content .qmeta-field { display: flex; flex-direction: column; gap: 5px; }
 .app-content .qmeta-field > label { font-weight: 600; font-size: 0.82rem; color: #565b66; margin: 0; }
 .app-content .qmeta-field select,
@@ -707,6 +725,8 @@ html[data-theme="dark"] body.app-authed a.q-copy-btn:hover { background: var(--q
 .qmeta-flags label { display: inline-flex; align-items: center; gap: 6px; font-weight: 500;
     white-space: nowrap; margin: 0; cursor: pointer; }
 .qmeta-flags input[type="checkbox"] { margin: 0; }
+/* Two abreast once three would be cramped, one when even that is tight. */
+@media (max-width: 1250px) { .app-content .qmeta-fields { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 760px) { .app-content .qmeta-fields { grid-template-columns: 1fr; } }
 
 /* Tidy flag checkboxes (legacy markup elsewhere). */

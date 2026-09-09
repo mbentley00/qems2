@@ -1,10 +1,30 @@
 {% if available_tags %}
+{% load filters %}
 <div class="row">
     <div class="small-12 columns">
-        <div class="panel qtags-panel">
+        {% with chosen=available_tags|checked_tags %}
+        <div class="panel qtags-panel{% if chosen %} qtags-has-tags{% endif %}">
+        {% comment %}
+        A question that is already tagged shows what it carries and nothing
+        else: the full picker is a page of checkboxes, nearly all of them off,
+        and once the tagging is done that is a wall to read past on every
+        visit. Expanding brings the picker back. The checkboxes stay in the
+        form while folded away, so a save never drops a tag.
+        {% endcomment %}
+        {% if chosen %}
+        <div class="qtags-compact">
+            <strong>Category Tags</strong>
+            <span class="qtags-chosen">
+                {% for item in chosen %}<span class="qtags-chip" title="{% if item.tag.group_name %}{{ item.tag.group_name }}: {% endif %}{{ item.tag.name }}{% if item.label %} &mdash; {{ item.label }}{% endif %}">{{ item.tag.name }}</span>{% endfor %}
+            </span>
+            <button type="button" class="qtags-expand">Edit tags</button>
+        </div>
+        {% endif %}
+        <div class="qtags-full"{% if chosen %} hidden{% endif %}>
             <strong>Category Tags</strong>
             <small>(check the requirements this question fulfills &mdash;
                 {% if available_tags|length == 1 %}<a href="{{ available_tags.0.status_url }}">tag status</a>{% else %}tag status per category below{% endif %})</small>
+            {% if chosen %}<button type="button" class="qtags-collapse">Done</button>{% endif %}
             {% for section in available_tags %}
             <div class="qtags-section">
                 {% comment %}
@@ -38,10 +58,24 @@
             </div>
             {% endfor %}
         </div>
+        </div>{# .qtags-full #}
+        </div>{# .qtags-panel #}
+        {% endwith %}
     </div>
 </div>
 <style>
 .qtags-panel { padding: 8px 12px 4px; margin-bottom: 12px; }
+/* The folded view: what the question carries, and the way back to the picker. */
+.qtags-compact { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
+.qtags-chosen { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.qtags-chip { display: inline-block; border-radius: 9px; padding: 1px 9px; font-size: 0.78rem;
+    background: #ece8fb; color: #4b3fa0; }
+.qtags-expand, .qtags-collapse { margin: 0 0 0 auto; padding: 1px 9px; border: 1px solid #cbd3dd;
+    border-radius: 6px; background: #fff; color: #565b66; font-size: 0.75rem; cursor: pointer; }
+.qtags-expand:hover, .qtags-collapse:hover { border-color: #8a8f9c; color: #2b2f3a; }
+html[data-theme="dark"] .qtags-chip { background: #302a55; color: #c3b3f5; }
+html[data-theme="dark"] .qtags-expand, html[data-theme="dark"] .qtags-collapse {
+    background: var(--qx-elevate); border-color: var(--qx-border); color: var(--qx-ink); }
 .qtags-section { margin-top: 6px; }
 .qtags-path { font-weight: bold; margin: 6px 0 2px; }
 .qtags-path-setwide::before { content: "731 "; color: #6b5bbd; }

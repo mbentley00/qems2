@@ -1473,20 +1473,84 @@ $(function () {
         $form.hide();
     });
 
-    // ---- Open the comment column on a question that has none ----
+    // ---- The folded category-tag panel ----
+    // A tagged question shows its tags and keeps the picker folded; these open
+    // it and put it away again. The checkboxes are in the form either way, so
+    // folding never changes what a save writes.
+    $(document).on('click', '.qtags-expand', function (e) {
+        e.preventDefault();
+        var $panel = $(this).closest('.qtags-panel');
+        $panel.find('.qtags-compact').hide();
+        $panel.find('.qtags-full').prop('hidden', false);
+    });
+
+    $(document).on('click', '.qtags-collapse', function (e) {
+        e.preventDefault();
+        var $panel = $(this).closest('.qtags-panel');
+        $panel.find('.qtags-full').prop('hidden', true);
+        $panel.find('.qtags-compact').show();
+        // What it now carries, without a reload: the chips are the ticked boxes.
+        // The tag's name is the label's own text; its progress note is in a
+        // <small> of its own, which is why this reads the text nodes rather
+        // than the whole label.
+        var names = $panel.find('.qtags-full input[name=category_tags]:checked')
+            .map(function () {
+                return $.trim($(this).parent().contents().filter(function () {
+                    return this.nodeType === 3;
+                }).text());
+            })
+            .get();
+        if (names.length) {
+            var $chips = $panel.find('.qtags-chosen').empty();
+            names.forEach(function (name) {
+                $('<span class="qtags-chip"></span>').text(name).appendTo($chips);
+            });
+        } else {
+            // Nothing ticked any more: the picker is the only sensible view.
+            $panel.find('.qtags-compact').hide();
+            $panel.find('.qtags-full').prop('hidden', false);
+        }
+    });
+
+    // ---- Show or hide the comment column ----
+    //
     // The column is not given width when there is nothing in it (see
-    // .edit-layout-solo), so the question can use it. The Comment button in
-    // the question panel hands it back and puts the cursor in the box.
+    // .edit-layout-solo), and can be put away when there is. The choice is
+    // remembered across questions: someone working down a set who wants the
+    // width should not have to close the column on every one of them. A
+    // question with no comments still opens closed whatever the preference,
+    // since there is nothing to show.
+    var COMMENTS_KEY = 'qx_comments_hidden';
+
+    function rememberComments(hidden) {
+        try { window.localStorage.setItem(COMMENTS_KEY, hidden ? '1' : '0'); }
+        catch (e) { /* private mode: the choice just does not outlive the page */ }
+    }
+
+    function commentsHiddenPref() {
+        try { return window.localStorage.getItem(COMMENTS_KEY) === '1'; }
+        catch (e) { return false; }
+    }
+
     $(document).on('click', '.ec-open', function (e) {
         e.preventDefault();
         $('.edit-layout').removeClass('edit-layout-solo');
-        $(this).hide();
+        rememberComments(false);
         var $box = $('.edit-comments .new-comment-text').first();
         if ($box.length) {
             $box[0].scrollIntoView({block: 'nearest'});
             $box.focus();
         }
     });
+
+    $(document).on('click', '.ec-hide', function (e) {
+        e.preventDefault();
+        $('.edit-layout').addClass('edit-layout-solo');
+        rememberComments(true);
+    });
+
+    // Apply the remembered choice to a page that rendered the column open.
+    if (commentsHiddenPref()) { $('.edit-layout').addClass('edit-layout-solo'); }
 
     // ---- Edit your own comment, in place ----
     // The rendered comment carries the raw markup in data-raw, so the editor

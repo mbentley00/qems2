@@ -313,7 +313,7 @@ class QuestionSet (models.Model):
             "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' "
             "viewBox='0 0 64 64'><rect width='64' height='64' rx='12' fill='%23"
             + colour[1:] +
-            "'/><text x='32' y='47' font-size='42' font-weight='bold' fill='white' "
+            "'/><text x='31.4' y='45.9' font-size='42' font-weight='bold' fill='white' "
             "text-anchor='middle' font-family='Arial,sans-serif'>Q</text></svg>")
 
 

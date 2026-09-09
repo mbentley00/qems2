@@ -28,6 +28,13 @@ inserts itself after it), .reply-form#reply-form-<id>, .add-comment-form.
            value="{{ question.id }}" qset="{{ qset.id }}" question-type="{{ qtype }}"
            title="Delete every comment on this question">Delete all</a>
         {% endif %}
+        {% comment %}
+        Put the column away and give its width to the question. The choice is
+        remembered, so a writer working through a set does not have to close it
+        on every question.
+        {% endcomment %}
+        <button type="button" class="ec-hide" title="Hide the comments column">
+            <i class="fa fa-angles-right"></i></button>
     </div>
 
     {% include "_comment_discord.html" %}

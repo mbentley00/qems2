@@ -2920,7 +2920,11 @@ class CommenterNameAndLayoutTests(TestCase):
             self.assertIn('look at this', html, url)
             # The count sits inside the region the page refreshes after a post.
             self.assertIn('<span class="ec-count">1</span>', html, url)
-            self.assertNotIn('ec-open', html, url)
+            # The button that brings the column back is always in the page --
+            # the column can be put away by hand now, not only when a question
+            # has no comments -- and CSS shows it only when it is needed.
+            self.assertIn('ec-open', html, url)
+            self.assertIn('ec-hide', html, url)
 
     def test_short_ago_says_how_recent_in_a_few_characters(self):
         """The column is names and text; a full timestamp on every comment
@@ -3346,6 +3350,72 @@ class StyleCheckerExpandedRulesTests(TestCase):
         self.client.logout(); self.client.login(username='sx_writer', password='pw')
         resp = self.client.get('/style_check/{0}/'.format(self.qset.id))
         self.assertFalse(resp.context['can_configure'])
+
+
+class CompactQuestionTagsTests(TestCase):
+    """A tagged question shows the tags it carries; the picker folds away."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('cqt_owner', password='pw', email='cqt@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='CQT dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='History', subcategory='World',
+            min_tossups=1, min_bonuses=1)
+        self.qset = QuestionSet.objects.create(
+            name='CQT Set', date=timezone.now(), host='', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.qset.editor.add(self.owner)
+        SetWideDistributionEntry.objects.create(question_set=self.qset, dist_entry=self.de,
+                                                num_tossups=1, num_bonuses=1)
+        mk = lambda name: CategoryTag.objects.create(
+            question_set=self.qset, category_path='History - World', name=name, num_tossups=1)
+        self.china, self.japan, self.korea = mk('China'), mk('Japan'), mk('Korea')
+        self.tu = Tossup.objects.create(
+            question_set=self.qset, question_type=self.acf, category=self.de, author=self.owner,
+            tossup_text='This person. (*) end.', tossup_answer='_someone_',
+            created_date=timezone.now(), last_changed_date=timezone.now())
+        self.client.login(username='cqt_owner', password='pw')
+
+    def _page(self):
+        return self.client.get('/edit_tossup/{0}/'.format(self.tu.id)).content.decode()
+
+    def test_an_untagged_question_shows_the_picker(self):
+        html = self._page()
+        self.assertNotIn('<div class="qtags-compact">', html)
+        self.assertIn('<div class="qtags-full">', html)      # rendered open
+
+    def test_a_tagged_question_shows_only_what_it_carries(self):
+        self.china.tossups.add(self.tu)
+        self.korea.tossups.add(self.tu)
+        html = self._page()
+        compact = html[html.find('<div class="qtags-compact">'):
+                       html.find('<div class="qtags-full"')]
+        self.assertIn('China', compact)
+        self.assertIn('Korea', compact)
+        self.assertNotIn('Japan', compact)     # the ones it does not carry stay folded away
+        self.assertIn('Edit tags', compact)
+
+    def test_the_picker_is_still_in_the_form_while_folded(self):
+        """Folded, not removed: a save must not drop the tags because the
+        checkboxes were out of the page."""
+        self.china.tossups.add(self.tu)
+        html = self._page()
+        self.assertIn('<div class="qtags-full" hidden>', html)
+        for tag in (self.china, self.japan, self.korea):
+            self.assertIn('value="{0}"'.format(tag.id), html)
+
+    def test_saving_from_the_folded_view_keeps_the_tags(self):
+        self.china.tossups.add(self.tu)
+        self.korea.tossups.add(self.tu)
+        self.client.post('/edit_tossup/{0}/'.format(self.tu.id), {
+            'tossup_text': 'This person. (*) end.', 'tossup_answer': '_someone_',
+            'category': self.de.id, 'question_type': self.acf.id, 'author': self.owner.id,
+            'category_tags': [self.china.id, self.korea.id]})
+        self.assertEqual(sorted(t.name for t in self.tu.category_tags.all()),
+                         ['China', 'Korea'])
 
 
 class SidebarActiveSetTests(TestCase):

@@ -64,7 +64,7 @@ button in the question panel brings it back.
                     <a href="#" id="copy-full-tossup" class="q-copy-btn" title="Copy the full tossup to the clipboard (formatted)">Copy</a>
                     <a href="#" id="copy-for-discord-plain-tossup" class="q-copy-btn" title="Copy for Discord (standard, no spoiler tags)">Discord</a>
                     <a href="#" id="copy-for-discord-tossup" class="q-copy-btn" title="Copy for Discord with the answer hidden behind spoiler tags">Discord (spoiler)</a>
-                    {% if not thread_data.count %}<a href="#" class="q-copy-btn ec-open" title="Add a comment on this tossup">Comment</a>{% endif %}
+                    <a href="#" class="q-copy-btn ec-open" title="Show the comments column">Comments{% if thread_data.count %} ({{ thread_data.count }}){% endif %}</a>
                 </div>
                 {% endif %}
             </div>

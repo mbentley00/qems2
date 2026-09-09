@@ -77,6 +77,18 @@ def to_short_datetime(date):
         return ""
     return date.strftime("%m-%d-%y %H:%M %p")
     
+@register.filter(name='checked_tags')
+def checked_tags(sections):
+    """The tags a question actually carries, flattened out of the sections the
+    picker is grouped into. The edit pages show these on their own and keep the
+    full picker folded away until someone wants to change something."""
+    out = []
+    for section in sections or []:
+        for group in section.get('groups', []):
+            out.extend(item for item in group.get('items', []) if item.get('checked'))
+    return out
+
+
 @register.filter(name='short_ago')
 def short_ago(date):
     """How long ago, in as few characters as possible: "just now", "12m",

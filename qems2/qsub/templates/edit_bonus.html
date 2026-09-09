@@ -59,11 +59,9 @@ button in the question panel brings it back.
             {% endif %}
             <div class="qmeta-lastrow">
                 <p class="qmeta-lastmod"><strong>Last modified:</strong> {{ bonus.last_changed_date }}</p>
-                {% if not thread_data.count %}
                 <div class="q-copy-tools">
-                    <a href="#" class="q-copy-btn ec-open" title="Add a comment on this bonus">Comment</a>
+                    <a href="#" class="q-copy-btn ec-open" title="Show the comments column">Comments{% if thread_data.count %} ({{ thread_data.count }}){% endif %}</a>
                 </div>
-                {% endif %}
             </div>
         </div>
     {% endif %}
