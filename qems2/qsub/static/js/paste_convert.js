@@ -866,6 +866,34 @@ $(function () {
         return splitIntoSentences(qemsToDiscordMarkup(m[0])).length;
     }
 
+    // Discord blurs a spoiler's text but not its shape: a two-word block under
+    // ANSWER: is already half the answer, and a reader who has not opened it
+    // knows the answer is short. Every spoilered answer is padded out to the
+    // same minimum width, so the block says nothing about what is under it.
+    var ANSWER_MIN_WIDTH = 50;
+
+    // What the reader sees, in characters: Discord's markup is instructions to
+    // the renderer, so __**Sir Isaac Newton**__ is as wide as its name and no
+    // wider, and padding by the raw length would leave a marked-up short answer
+    // short on screen.
+    function visibleWidth(text) {
+        return text.replace(/\*\*|__|[*_]/g, '').length;
+    }
+
+    // Pad a spoilered answer out to ANSWER_MIN_WIDTH.
+    //
+    // The padding is ordinary spaces -- they add nothing a bot has to
+    // understand, and its trim() takes them straight back off -- except for the
+    // last character, a braille blank (U+2800). A run of spaces at the end of a
+    // spoiler is trailing whitespace, which Discord is free to collapse; U+2800
+    // is a printing character it always lays out at full width, so it holds the
+    // run in front of it as interior whitespace and the block keeps its width.
+    function padAnswer(answer) {
+        var missing = ANSWER_MIN_WIDTH - visibleWidth(answer);
+        if (missing <= 0) { return answer; }
+        return answer + new Array(missing).join(' ') + '\u2800';
+    }
+
     function formatTossupForDiscord(text, answer, author, category, qid) {
         text = (text || '').trim();
         answer = (answer || '').trim();
@@ -910,7 +938,7 @@ $(function () {
             }).join(' ');
         }
 
-        result += '\nANSWER: ||' + discordAnswer + '||' + qidSuffix(qid);
+        result += '\nANSWER: ||' + padAnswer(discordAnswer) + '||' + qidSuffix(qid);
         if (info.author || info.category) {
             result += '\n<' + info.author + ', ' + info.category + '>';
         }
@@ -945,7 +973,7 @@ $(function () {
             // goes out, spoilered, on the line under the author.
             var label = '[10]';
             result += label + ' ' + spoil(partText, i === 1) + '\n';
-            result += 'ANSWER: ||' + partAnswer + '||' + (i === 3 ? qidSuffix(qid) : '') + '\n';
+            result += 'ANSWER: ||' + padAnswer(partAnswer) + '||' + (i === 3 ? qidSuffix(qid) : '') + '\n';
             difficulties.push(diff || '?');
         }
 
