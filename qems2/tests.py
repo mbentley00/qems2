@@ -3557,6 +3557,68 @@ class SearchResultColumnTests(TestCase):
         self.assertIn('For 10 points, name him', body)
 
 
+class SearchNewTabPreferenceTests(TestCase):
+    """Where the top-bar search lands, and who decides."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.u = User.objects.create_user('snt_owner', password='pw', email='snt@t.com')
+        self.writer = Writer.objects.get(user=self.u)
+        self.dist = Distribution.objects.create(name='SNT dist')
+        self.entry = DistributionEntry.objects.create(
+            distribution=self.dist, category='History', subcategory='World')
+        self.qset = QuestionSet.objects.create(
+            name='SNT Set', date=timezone.now(), host='', address='', owner=self.writer,
+            num_packets=1, distribution=self.dist)
+        self.tu = Tossup.objects.create(
+            question_set=self.qset, question_type=self.acf, category=self.entry,
+            author=self.writer, tossup_text='This person. (*) end.',
+            tossup_answer='_someone_', created_date=timezone.now(),
+            last_changed_date=timezone.now())
+        self.client.login(username='snt_owner', password='pw')
+
+    def _newtab_attr(self, url):
+        html = self.client.get(url).content.decode()
+        m = re.search(r'id="app-search-form"[^>]*data-newtab="(\d)"', html, re.S)
+        self.assertIsNotNone(m, 'no search form on ' + url)
+        return m.group(1)
+
+    def test_a_new_account_gets_new_tabs(self):
+        """On by default: you search from the question you are working on."""
+        self.assertTrue(self.writer.search_in_new_tab)
+        self.assertEqual(self._newtab_attr('/edit_tossup/{0}/'.format(self.tu.id)), '1')
+
+    def test_the_search_pages_never_open_another_tab(self):
+        """Refining a search from the results should not leave a tab behind,
+        whatever the preference says."""
+        for url in ('/search/', '/quick_search/'):
+            self.assertEqual(self._newtab_attr(url), '0', url)
+
+    def test_turning_the_preference_off_navigates_in_place(self):
+        self.writer.search_in_new_tab = False
+        self.writer.save()
+        self.assertEqual(self._newtab_attr('/edit_tossup/{0}/'.format(self.tu.id)), '0')
+        # And the top bar stops promising a tab it will not open.
+        html = self.client.get('/edit_tossup/{0}/'.format(self.tu.id)).content.decode()
+        self.assertNotIn('full text search in a new tab', html)
+
+    def test_the_profile_saves_the_preference_both_ways(self):
+        # Names are required by the form; an empty one makes the whole submit
+        # invalid and nothing on the page saves.
+        fields = {'username': 'snt_owner', 'first_name': 'Sam', 'last_name': 'Tabb',
+                  'email': 'snt@t.com'}
+        self.assertIn('search_in_new_tab', self.client.get('/profile/').content.decode())
+
+        self.client.post('/profile/', dict(fields))          # unticked
+        self.writer.refresh_from_db()
+        self.assertFalse(self.writer.search_in_new_tab)
+
+        self.client.post('/profile/', dict(fields, search_in_new_tab='on'))
+        self.writer.refresh_from_db()
+        self.assertTrue(self.writer.search_in_new_tab)
+
+
 class QuickSearchTests(TestCase):
     """Fast type-ahead answer-line search page + JSON endpoint."""
 

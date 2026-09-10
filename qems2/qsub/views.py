@@ -5326,7 +5326,8 @@ def profile(request):
                         'first_name': user.first_name,
                         'last_name': user.last_name,
                         'email': user.email,
-                        'send_mail_on_comments': writer.send_mail_on_comments}
+                        'send_mail_on_comments': writer.send_mail_on_comments,
+                        'search_in_new_tab': writer.search_in_new_tab}
 
         form = WriterChangeForm(initial=initial_data)
 
@@ -5341,6 +5342,7 @@ def profile(request):
             user.last_name = form.cleaned_data['last_name']
             user.email = form.cleaned_data['email']
             writer.send_mail_on_comments = form.cleaned_data['send_mail_on_comments']
+            writer.search_in_new_tab = form.cleaned_data['search_in_new_tab']
             user.save()
             writer.save()
 

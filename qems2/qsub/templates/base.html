@@ -67,15 +67,24 @@
                 {% block page_crumb %}{% endblock %}
             </nav>
             {% if nav_active %}
-            <form class="app-search" id="app-search-form" method="get" action="/search/">
+            {% comment %}
+            data-newtab says where Enter and the button send you: the account's
+            own preference (Profile), except on the search pages themselves,
+            where a new tab per refinement helps nobody. The script reads it
+            rather than deciding for itself, so the placeholder and the button's
+            title can promise exactly what will happen.
+            {% endcomment %}
+            <form class="app-search" id="app-search-form" method="get" action="/search/"
+                  data-newtab="{% if nav_search_new_tab %}1{% else %}0{% endif %}">
                 <span class="app-search-field">
                     <i class="fa fa-magnifying-glass"></i>
-                    <input type="search" name="q" id="app-search-input" placeholder="Search answer lines, press enter for full text search in a new tab" autocomplete="off">
+                    <input type="search" name="q" id="app-search-input" placeholder="Search answer lines, press enter for full text search{% if nav_search_new_tab %} in a new tab{% endif %}" autocomplete="off">
                     <span class="app-search-kbd">Ctrl K</span>
                     <div class="app-search-results" id="app-search-results"></div>
                 </span>
                 <button type="button" class="app-search-newtab" id="app-search-newtab"
-                        title="Full text search in a new tab (or press Enter)" aria-label="Search in a new tab">
+                        title="Full text search{% if nav_search_new_tab %} in a new tab{% endif %} (or press Enter)"
+                        aria-label="Full text search">
                     <i class="fa fa-magnifying-glass-arrow-right"></i>
                 </button>
                 <input type="hidden" name="qset" value="{{ nav_active.id }}">
@@ -197,25 +206,30 @@
                     sXhr.send();
                 }, 160);
             });
-            // The full text search opens in a new tab, from the icon button or
-            // from Enter: you search from wherever you are working, and losing
-            // that page to the results was the wrong trade.
-            function sOpenNewTab() {
+            // Where the full text search lands, from the icon button or from
+            // Enter. A new tab keeps the page you searched from -- worth it
+            // from a question you are editing, which is why it is the default,
+            // and switchable from Profile for people who would rather not
+            // collect tabs. On the search page itself it always navigates in
+            // place: refining a search should not open a tab each time.
+            var sNewTabPref = sForm.getAttribute('data-newtab') !== '0';
+            function sRunSearch() {
                 var q = sInput.value.trim();
                 var url = '/search/?qset=' + encodeURIComponent(sQset)
                     + '&models=qsub.tossup&models=qsub.bonus'
                     + (q ? '&q=' + encodeURIComponent(q) : '');
-                window.open(url, '_blank', 'noopener');
+                if (sNewTabPref) { window.open(url, '_blank', 'noopener'); }
+                else { window.location.href = url; }
                 sHide();
             }
             var sNewTab = document.getElementById('app-search-newtab');
-            if (sNewTab) { sNewTab.addEventListener('click', sOpenNewTab); }
+            if (sNewTab) { sNewTab.addEventListener('click', sRunSearch); }
             // Enter is handled on the form's submit, not on the input's keydown:
             // cancelling the submit is what actually keeps the current tab put,
             // wherever the submission came from (Enter, autofill, another script).
             sForm.addEventListener('submit', function (e) {
                 e.preventDefault();
-                sOpenNewTab();
+                sRunSearch();
             });
             sInput.addEventListener('keydown', function (e) {
                 if (e.key === 'Escape') { sHide(); }

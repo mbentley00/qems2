@@ -134,6 +134,14 @@ class Writer (models.Model):
     # the bot's comments is unchanged — they still appear on the question.
     email_on_discord_comments = models.BooleanField(default=True)
 
+    # Whether the top-bar search opens its results in a new tab. On by default:
+    # you usually search from a question you are in the middle of, and losing
+    # that page to the results is the worse trade. Off suits people who search
+    # from the sidebar and would rather not collect tabs. Either way the search
+    # page itself navigates in place -- a new tab per refinement is nobody's
+    # preference.
+    search_in_new_tab = models.BooleanField(default=True)
+
     def get_real_name(self):
         return '{0!s} {1!s} '.format(self.user.first_name, self.user.last_name)
         

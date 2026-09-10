@@ -57,6 +57,11 @@
     <div class="row">
         <div class="small-6 small-offset-6 columns">
             <label>{{ form.send_mail_on_comments }} E-mail me when someone comments on my questions</label>
+            {% comment %}
+            The search pages ignore this and always navigate in place; a new tab
+            per refinement is not what anyone means by the preference.
+            {% endcomment %}
+            <label>{{ form.search_in_new_tab }} Open searches from the top bar in a new tab</label>
         </div>
     </div>
     <input type="submit" value="Update" class="button primary right" />

@@ -71,6 +71,14 @@ def nav(request):
         'edit_tiebreak',
     }
 
+    # Where the top-bar search sends you. A new tab keeps the page you searched
+    # from, which is what you want from a question you are editing -- but not
+    # from the results themselves, where each refinement would leave another
+    # tab behind. So the preference stands everywhere except the search pages.
+    ctx['nav_on_search_page'] = view_name in ('search', 'quick_search')
+    ctx['nav_search_new_tab'] = (bool(writer.search_in_new_tab)
+                                 and not ctx['nav_on_search_page'])
+
     active = None
     if view_name not in SET_AGNOSTIC_VIEWS:
         active_id = _active_set_id(request)
