@@ -82,19 +82,39 @@ $(function () {
         setTimeout(function () { $el.removeClass('anchor-flash'); }, 1500);
     }
 
-    $('.comment-item[data-anchor-text]').each(function () {
-        var $item = $(this);
-        var commentId = $item.attr('data-comment-id');
-        var start = locateAnchor($item.attr('data-anchor-text'),
-                                 $item.attr('data-anchor-prefix') || '',
-                                 $item.attr('data-anchor-suffix') || '');
-        if (start >= 0) {
-            highlightRange(start, start + $item.attr('data-anchor-text').length, commentId);
-        } else {
-            $item.find('.comment-quote').addClass('orphaned')
-                .attr('title', 'The question text this comment referred to has changed');
-        }
-    });
+    // Take every highlight back out, rejoining the text nodes that were split
+    // to make room for it, so the marks can be laid down again from scratch
+    // without nesting inside the ones already there.
+    function clearHighlights() {
+        $region.find('mark.anchored-highlight').each(function () {
+            var parent = this.parentNode;
+            while (this.firstChild) { parent.insertBefore(this.firstChild, this); }
+            parent.removeChild(this);
+            parent.normalize();
+        });
+    }
+
+    // Mark up the question for whatever anchored comments are in the column
+    // right now. Run at load, and again whenever the column is swapped out
+    // for a fresh copy -- a comment posted since then has no highlight until
+    // this runs, and a deleted one keeps its highlight until it does.
+    function applyHighlights() {
+        clearHighlights();
+        $('.comment-item[data-anchor-text]').each(function () {
+            var $item = $(this);
+            var commentId = $item.attr('data-comment-id');
+            var start = locateAnchor($item.attr('data-anchor-text'),
+                                     $item.attr('data-anchor-prefix') || '',
+                                     $item.attr('data-anchor-suffix') || '');
+            if (start >= 0) {
+                highlightRange(start, start + $item.attr('data-anchor-text').length, commentId);
+            } else {
+                $item.find('.comment-quote').addClass('orphaned')
+                    .attr('title', 'The question text this comment referred to has changed');
+            }
+        });
+    }
+    applyHighlights();
 
     // Clicking a highlight scrolls to its comment, and vice versa
     $region.on('click', '.anchored-highlight', function () {
@@ -190,6 +210,7 @@ $(function () {
         e.preventDefault();
         var commentText = $popup.find('textarea').val().trim();
         if (!commentText || !pendingAnchor) { return; }
+        var $post = $(this).prop('disabled', true);
         $.post('/add_anchored_comment/', {
             question_type: questionType,
             question_id: questionId,
@@ -199,11 +220,29 @@ $(function () {
             suffix: pendingAnchor.suffix
         }, function (data) {
             var response = JSON.parse(data);
-            if (response.message_class.indexOf('success') >= 0) {
-                location.reload();
-            } else {
+            $post.prop('disabled', false);
+            if (response.message_class.indexOf('success') < 0) {
                 alert(response.message);
+                return;
             }
-        });
+            hidePopup();
+            // The selection has been commented on; leaving it highlighted by
+            // the browser on top of the new mark just reads as a smear.
+            var sel = window.getSelection();
+            if (sel && sel.removeAllRanges) { sel.removeAllRanges(); }
+            // A question with no comments is rendered with the column folded
+            // away (.edit-layout-solo). It has one now, so give it its width
+            // back -- without writing to the remembered preference, which is
+            // about how the next question opens, not this one.
+            $('.edit-layout').removeClass('edit-layout-solo');
+            // Swap in a fresh comment column rather than reloading. These
+            // pages render their POST response directly, so a reload re-submits
+            // the stale question form over whatever was just saved -- and a
+            // reload is the full refresh this is here to avoid either way.
+            var refresh = window.qemsRefreshComments;
+            if (!(refresh && refresh(applyHighlights))) {
+                window.location.assign(window.location.pathname + window.location.search);
+            }
+        }).fail(function () { $post.prop('disabled', false); });
     });
 });

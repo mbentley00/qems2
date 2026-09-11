@@ -1411,6 +1411,16 @@ $(function () {
     // fidelity and the delegated action handlers). Returns true if it handled
     // the refresh; false (no .comments panel) lets callers fall back to a full
     // GET reload — doc view, packet grid, etc. don't have this sidebar.
+    // The Comments button sits in the question's own action row, outside the
+    // markup a refresh swaps, so its count has to be carried across by hand --
+    // otherwise posting a comment leaves the button still reading the number
+    // there was before it.
+    function syncCommentCount($panel) {
+        var $btn = $('.q-copy-tools .ec-open');
+        if (!$btn.length) { return; }
+        var n = $.trim($panel.find('.ec-count').first().text());
+        $btn.text(n ? 'Comments (' + n + ')' : 'Comments');
+    }
     function qemsRefreshComments(done) {
         // The edit pages keep comments in a sidebar; the doc view has the same
         // thread markup in its packet-comments panel. Either can refresh in place.
@@ -1419,7 +1429,7 @@ $(function () {
         if (!$panel.length) { return false; }
         $.get(window.location.pathname + window.location.search, function (html) {
             var $fresh = $(html).find(SEL).first();
-            if ($fresh.length) { $panel.html($fresh.html()); }
+            if ($fresh.length) { $panel.html($fresh.html()); syncCommentCount($panel); }
             else { qemsGetReload(); }
             if (typeof done === 'function') { done(); }
         }).fail(function () { qemsGetReload(); });

@@ -483,8 +483,11 @@ html[data-theme="dark"] .rich-editor i, html[data-theme="dark"] .rich-editor em 
 /* The button lives in the question's own action row and only shows itself when
    there is a column to bring back. */
 .q-copy-tools .ec-open { display: none; }
+/* inline-flex, not inline-block: the button is a .q-copy-btn, and a fixed
+   26px box that is not a flex container leaves its label sitting at the top
+   of it, a few pixels above the Copy/Discord pills it shares the row with. */
 .edit-layout-solo ~ * .ec-open,
-.edit-layout-solo .ec-open { display: inline-block; }
+.edit-layout-solo .ec-open { display: inline-flex; }
 /* Fold the column away from its own header. */
 .edit-comments .ec-hide {
     margin: 0 0 0 6px; padding: 0 4px; border: none; background: none; cursor: pointer;
