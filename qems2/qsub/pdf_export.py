@@ -368,6 +368,37 @@ def _text_block(pdf, text):
     pdf.ln(GAP)
 
 
+def _careful_notes(pdf, tossups, bonuses):
+    """The answer lines flagged "read answer carefully", listed at the top of
+    the packet so the moderator meets them before the room does.
+
+    The same block the Word export prints. The answers are drawn through the
+    QEMS renderer rather than as plain text, since what makes an answer worth
+    flagging is usually in its formatting -- which part is underlined, what is
+    only prompted on."""
+    flagged = []
+    for tossup, num in tossups:
+        if getattr(tossup, 'read_carefully', False):
+            flagged.append(('Tossup', num, tossup, [tossup.tossup_answer]))
+    for bonus, num in bonuses:
+        if getattr(bonus, 'read_carefully', False):
+            parts = [getattr(bonus, 'part{0}_answer'.format(i), '') for i in range(1, 4)]
+            flagged.append(('Bonus', num, bonus, [p for p in parts if p]))
+    if not flagged:
+        return
+    _write_text(pdf, 'Moderator \u2014 read these answer lines carefully:', _SERIF, 'B', SIZE)
+    pdf.ln(LINE_H)
+    for label, num, question, answers in flagged:
+        quoted = _quoted_guides(question)
+        _write_text(pdf, '{0} {1}: '.format(label, num if num else '?'), _SERIF, 'B', SIZE)
+        for i, answer in enumerate(answers):
+            if i:
+                _write_text(pdf, ' / ', _SERIF, '', SIZE)
+            _write_qems(pdf, answer, is_answer=True, quoted_guides=quoted)
+        pdf.ln(LINE_H)
+    pdf.ln(GAP)
+
+
 def build_packetized_pdf(set_name, groups, opts, credits=None, front_matter=None):
     """Build a packetized PDF.
 
@@ -384,6 +415,9 @@ def build_packetized_pdf(set_name, groups, opts, credits=None, front_matter=None
     `front_matter` is an optional list of plain-text blocks -- credits the set's
     owner wrote, a note belonging to this packet -- printed above the first
     tossup, in place of the generated `credits` when there are any.
+
+    Questions flagged "read answer carefully" are listed under all of that, as
+    they are in the Word export.
     """
     pdf = FPDF(unit='pt', format='letter')
     # Curly quotes and dashes are cp1252, not latin-1, and a packet is full of
@@ -403,6 +437,7 @@ def build_packetized_pdf(set_name, groups, opts, credits=None, front_matter=None
                 _text_block(pdf, block)
         elif gi == 0 and opts.get('credits') and credits:
             _credits(pdf, credits[0], credits[1])
+        _careful_notes(pdf, _numbered(tossups), _numbered(bonuses))
         if opts.get('interlace'):
             tus, bss = _numbered(tossups), _numbered(bonuses)
             label = 'Questions' if (tus or bss) else None

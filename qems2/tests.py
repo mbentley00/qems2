@@ -15243,3 +15243,77 @@ class MoveConfirmAnswerTests(TestCase):
         """Stated up front, not left to be picked out of the stem."""
         body = self._confirm_page('/move_tossup/{0}/{1}/'.format(self.src.id, self.tu.id))
         self.assertLess(body.index('mv-answers'), body.index('mv-question'))
+
+
+class CarefulAnswerNotesInPdfTests(TestCase):
+    """A question flagged "read answer carefully" warns the moderator at the top
+    of the packet. The Word export and the document view have always said so;
+    the PDF -- the copy a room is actually read from -- did not."""
+
+    def setUp(self):
+        import io as _io, zipfile as _zip
+        self._io, self._zip = _io, _zip
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        self.acf_tu = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.acf_bn = QuestionType.objects.get(question_type=ACF_STYLE_BONUS)
+        self.u = User.objects.create_user('careful_owner', password='pw', email='cf@t.com')
+        self.owner = Writer.objects.get(user=self.u)
+        self.dist = Distribution.objects.create(name='Careful dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='History', subcategory='World',
+            min_tossups=1, min_bonuses=1)
+        self.qset = QuestionSet.objects.create(
+            name='Careful Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.qset.editor.add(self.owner)
+        self.packet = Packet.objects.create(question_set=self.qset, packet_name='Packet 1',
+                                            created_by=self.owner)
+        self.tu = Tossup.objects.create(
+            author=self.owner, question_set=self.qset, packet=self.packet,
+            question_type=self.acf_tu, category=self.de,
+            tossup_text='A clue about a city.', tossup_answer='_Rome_',
+            created_date=datetime.now(), last_changed_date=datetime.now(), question_number=3)
+        self.bn = Bonus.objects.create(
+            author=self.owner, question_set=self.qset, packet=self.packet,
+            question_type=self.acf_bn, category=self.de, leadin='Answer these.',
+            part1_text='P1', part1_answer='_Alpha_', part2_text='P2', part2_answer='_Beta_',
+            part3_text='P3', part3_answer='_Gamma_',
+            created_date=datetime.now(), last_changed_date=datetime.now(), question_number=5)
+        self.client.login(username='careful_owner', password='pw')
+
+    def _pdf_text(self):
+        """The PDF's text, read back out of the built file."""
+        resp = self.client.get('/export_question_set/{0}/pdf/'.format(self.qset.id))
+        self.assertEqual(resp.status_code, 200)
+        zf = self._zip.ZipFile(self._io.BytesIO(resp.content))
+        raw = zf.read('Packet 1.pdf')
+        from pypdf import PdfReader
+        reader = PdfReader(self._io.BytesIO(raw))
+        return '\n'.join(page.extract_text() or '' for page in reader.pages)
+
+    def test_a_flagged_tossup_is_listed_for_the_moderator(self):
+        self.tu.read_carefully = True
+        self.tu.save()
+        text = self._pdf_text()
+        self.assertIn('read these answer lines carefully', text)
+        self.assertIn('Tossup 3', text)
+
+    def test_a_flagged_bonus_lists_its_parts(self):
+        self.bn.read_carefully = True
+        self.bn.save()
+        text = self._pdf_text()
+        self.assertIn('Bonus 5', text)
+        for answer in ('Alpha', 'Beta', 'Gamma'):
+            self.assertIn(answer, text)
+
+    def test_nothing_flagged_prints_no_block(self):
+        text = self._pdf_text()
+        self.assertNotIn('read these answer lines carefully', text)
+
+    def test_the_block_comes_before_the_questions(self):
+        self.tu.read_carefully = True
+        self.tu.save()
+        text = self._pdf_text()
+        self.assertLess(text.index('read these answer lines carefully'),
+                        text.index('A clue about a city'))
