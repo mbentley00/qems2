@@ -14817,3 +14817,426 @@ class CategoryCommentTests(TestCase):
     def test_an_empty_note_is_refused(self):
         self._add('   ')
         self.assertEqual(CategoryComment.objects.count(), 0)
+
+
+class PacketCreditsTests(TestCase):
+    """Credits the owner wrote, printed above the first tossup of each exported
+    packet -- a different set of them on the first packet -- plus the note that
+    belongs to one packet alone."""
+
+    def setUp(self):
+        import io as _io, zipfile as _zip
+        from docx import Document as _Doc
+        self._io, self._zip, self._Doc = _io, _zip, _Doc
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf_tu = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('cred_owner', password='pw', email='c@t.com')
+        self.ou.first_name, self.ou.last_name = 'Dana', 'Owner'
+        self.ou.save()
+        self.owner = Writer.objects.get(user=self.ou)
+        self.wu = User.objects.create_user('cred_writer', password='pw', email='w@t.com')
+        self.wu.first_name, self.wu.last_name = 'Kim', 'Scribe'
+        self.wu.save()
+        self.scribe = Writer.objects.get(user=self.wu)
+        self.dist = Distribution.objects.create(name='Cred dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='History', subcategory='World',
+            min_tossups=1, min_bonuses=0)
+        self.qset = QuestionSet.objects.create(
+            name='Cred Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=2, distribution=self.dist)
+        self.qset.editor.add(self.owner)
+        self.qset.writer.add(self.scribe)
+        self.p1 = Packet.objects.create(question_set=self.qset, packet_name='Packet 1',
+                                        created_by=self.owner)
+        self.p2 = Packet.objects.create(question_set=self.qset, packet_name='Packet 2',
+                                        created_by=self.owner)
+        for i, packet in enumerate((self.p1, self.p2), 1):
+            Tossup.objects.create(
+                author=self.scribe, question_set=self.qset, packet=packet,
+                question_type=self.acf_tu, category=self.de,
+                tossup_text='Clue number {0}. (*) End.'.format(i), tossup_answer='_Rome_',
+                created_date=datetime.now(), last_changed_date=datetime.now(),
+                question_number=1)
+        self.client.login(username='cred_owner', password='pw')
+
+    # ---- the text itself -------------------------------------------------
+
+    def test_tokens_fill_in_with_names(self):
+        self.qset.packet_credits = 'Writers: {writers}\nEditors: {editors}'
+        self.qset.save()
+        text = self.qset.credits_for_packet(self.p1)
+        self.assertIn('Writers: Kim Scribe', text)
+        self.assertIn('Editors: Dana Owner', text)
+
+    def test_a_line_with_nothing_to_fill_is_dropped(self):
+        """Nobody has proofread anything, so the line would print as a label and
+        a blank. It comes out instead, which is what lets one set of credits
+        suit a set at every stage of its life."""
+        self.qset.packet_credits = 'Writers: {writers}\nProofreaders: {proofreaders}'
+        self.qset.save()
+        text = self.qset.credits_for_packet(self.p1)
+        self.assertIn('Writers: Kim Scribe', text)
+        self.assertNotIn('Proofreaders', text)
+
+    def test_a_line_survives_while_any_of_its_lists_has_names(self):
+        self.qset.packet_credits = 'Written by {authors}, proofread by {proofreaders}'
+        self.qset.save()
+        self.assertEqual(self.qset.credits_for_packet(self.p1),
+                         'Written by Kim Scribe, proofread by')
+
+    def test_plain_text_without_tokens_is_kept_as_written(self):
+        self.qset.packet_credits = 'Edited by the committee.\nGood luck.'
+        self.qset.save()
+        self.assertEqual(self.qset.credits_for_packet(self.p1),
+                         'Edited by the committee.\nGood luck.')
+
+    def test_first_packet_falls_back_to_the_shared_credits(self):
+        self.qset.packet_credits = 'Shared line.'
+        self.qset.save()
+        self.assertEqual(self.qset.credits_for_packet(self.p1, first=True), 'Shared line.')
+
+    def test_first_packet_credits_replace_the_shared_ones(self):
+        self.qset.packet_credits = 'Shared line.'
+        self.qset.first_packet_credits = 'The whole roster.'
+        self.qset.save()
+        self.assertEqual(self.qset.credits_for_packet(self.p1, first=True), 'The whole roster.')
+        self.assertEqual(self.qset.credits_for_packet(self.p2), 'Shared line.')
+
+    def test_first_packet_only_leaves_the_others_uncredited(self):
+        self.qset.first_packet_credits = 'Only here.'
+        self.qset.save()
+        self.assertEqual(self.qset.credits_for_packet(self.p1, first=True), 'Only here.')
+        self.assertEqual(self.qset.credits_for_packet(self.p2), '')
+
+    def test_packet_authors_are_the_authors_of_that_packet(self):
+        other = User.objects.create_user('cred_other', password='pw', email='o@t.com')
+        other.first_name, other.last_name = 'Lee', 'Second'
+        other.save()
+        second = Writer.objects.get(user=other)
+        Tossup.objects.create(
+            author=second, question_set=self.qset, packet=self.p2,
+            question_type=self.acf_tu, category=self.de,
+            tossup_text='Another clue.', tossup_answer='_Paris_',
+            created_date=datetime.now(), last_changed_date=datetime.now(), question_number=2)
+        self.qset.packet_credits = 'By {packet_authors}'
+        self.qset.save()
+        self.assertEqual(self.qset.credits_for_packet(self.p1), 'By Kim Scribe')
+        self.assertEqual(self.qset.credits_for_packet(self.p2), 'By Kim Scribe, Lee Second')
+
+    # ---- what comes out of an export -------------------------------------
+
+    def _packet_docs(self, query=''):
+        resp = self.client.get('/export_question_set/{0}/docx-packetized/{1}'.format(
+            self.qset.id, query))
+        self.assertEqual(resp.status_code, 200)
+        zf = self._zip.ZipFile(self._io.BytesIO(resp.content))
+        out = {}
+        for name in zf.namelist():
+            if not name.endswith('.docx'):
+                continue
+            doc = self._Doc(self._io.BytesIO(zf.read(name)))
+            out[name] = [p.text for p in doc.paragraphs]
+        return out
+
+    def test_written_credits_print_without_being_asked_for(self):
+        """A set whose owner wrote credits means them to be printed; the
+        generated writers/editors block stays opt-in as it was."""
+        self.qset.packet_credits = 'Writers: {writers}'
+        self.qset.save()
+        docs = self._packet_docs()
+        self.assertIn('Writers: Kim Scribe', docs['Packet 1.docx'])
+
+    def test_credits_come_before_the_first_tossup(self):
+        self.qset.packet_credits = 'Writers: {writers}'
+        self.qset.save()
+        lines = self._packet_docs()['Packet 1.docx']
+        credit_at = lines.index('Writers: Kim Scribe')
+        first_question = next(i for i, t in enumerate(lines) if t.startswith('1. '))
+        self.assertLess(credit_at, first_question)
+
+    def test_each_packet_carries_its_own_version(self):
+        self.qset.first_packet_credits = 'Welcome to Cred Set.'
+        self.qset.packet_credits = 'Cred Set, packet {packet}.'
+        self.qset.save()
+        docs = self._packet_docs()
+        self.assertIn('Welcome to Cred Set.', docs['Packet 1.docx'])
+        self.assertNotIn('Welcome to Cred Set.', docs['Packet 2.docx'])
+        self.assertIn('Cred Set, packet Packet 2.', docs['Packet 2.docx'])
+
+    def test_the_options_form_can_still_turn_them_off(self):
+        self.qset.packet_credits = 'Writers: {writers}'
+        self.qset.save()
+        docs = self._packet_docs('?opts=1&credits=0')
+        self.assertNotIn('Writers: Kim Scribe', docs['Packet 1.docx'])
+
+    def test_a_packet_note_prints_on_that_packet_alone(self):
+        self.p2.header_note = 'Submitted by the Example University team.'
+        self.p2.save()
+        docs = self._packet_docs()
+        self.assertIn('Submitted by the Example University team.', docs['Packet 2.docx'])
+        self.assertNotIn('Submitted by the Example University team.', docs['Packet 1.docx'])
+
+    def test_a_packet_note_prints_with_no_credits_written(self):
+        """The note belongs to the packet, not to the credits, so it does not
+        wait on the credits option."""
+        self.p1.header_note = 'Read slowly.'
+        self.p1.save()
+        lines = self._packet_docs()['Packet 1.docx']
+        self.assertIn('Read slowly.', lines)
+        self.assertLess(lines.index('Read slowly.'),
+                        next(i for i, t in enumerate(lines) if t.startswith('1. ')))
+
+    def test_the_pdf_export_carries_them_too(self):
+        self.qset.packet_credits = 'Writers: {writers}'
+        self.qset.save()
+        self.p1.header_note = 'A note for one packet.'
+        self.p1.save()
+        resp = self.client.get('/export_question_set/{0}/pdf/'.format(self.qset.id))
+        self.assertEqual(resp.status_code, 200)
+        zf = self._zip.ZipFile(self._io.BytesIO(resp.content))
+        self.assertTrue(any(n.endswith('.pdf') for n in zf.namelist()))
+        # The bytes are a PDF, so this checks it built at all rather than what
+        # it says; what it says is covered by credits_for_packet above.
+        self.assertTrue(zf.read('Packet 1.pdf').startswith(b'%PDF'))
+
+    # ---- the pages that write them ---------------------------------------
+
+    def test_the_owner_sees_the_credits_boxes(self):
+        body = self.client.get('/edit_question_set/{0}/'.format(self.qset.id)).content.decode()
+        self.assertIn('Packet credits', body)
+        self.assertIn('name="packet_credits"', body)
+        self.assertIn('name="first_packet_credits"', body)
+        self.assertIn('name="credits_shown"', body)
+        # The buttons that put a name list in.
+        self.assertIn('{writers}', body)
+
+    def test_an_editor_who_is_not_the_owner_does_not(self):
+        eu = User.objects.create_user('cred_editor', password='pw', email='e@t.com')
+        editor = Writer.objects.get(user=eu)
+        self.qset.editor.add(editor)
+        self.client.logout()
+        self.client.login(username='cred_editor', password='pw')
+        body = self.client.get('/edit_question_set/{0}/'.format(self.qset.id)).content.decode()
+        self.assertNotIn('name="packet_credits"', body)
+        self.assertNotIn('name="credits_shown"', body)
+
+    def test_the_packet_page_offers_a_note_box(self):
+        body = self.client.get('/edit_packet/{0}/'.format(self.p1.id)).content.decode()
+        self.assertIn('name="header_note"', body)
+
+    def test_the_packet_page_saves_the_note(self):
+        resp = self.client.post('/edit_packet/{0}/'.format(self.p1.id),
+                                {'header_note': 'Read slowly.'})
+        self.assertEqual(resp.status_code, 200)
+        self.p1.refresh_from_db()
+        self.assertEqual(self.p1.header_note, 'Read slowly.')
+
+    def test_a_writer_cannot_write_the_packet_note(self):
+        self.client.logout()
+        self.client.login(username='cred_writer', password='pw')
+        self.client.post('/edit_packet/{0}/'.format(self.p1.id),
+                         {'header_note': 'Not mine to write.'})
+        self.p1.refresh_from_db()
+        self.assertEqual(self.p1.header_note, '')
+
+    # ---- who may write them ----------------------------------------------
+
+    def test_an_editor_saving_settings_does_not_wipe_the_credits(self):
+        """The boxes are only on the owner's page. An absent input looks exactly
+        like an emptied one, so the form keeps what is stored unless the marker
+        field says the boxes were really there."""
+        self.qset.packet_credits = 'Writers: {writers}'
+        self.qset.save()
+        from qems2.qsub.forms import QuestionSetForm
+        form = QuestionSetForm(
+            data={'name': 'Cred Set', 'date': '01/01/2030', 'num_packets': 2,
+                  'distribution': self.dist.id, 'max_acf_tossup_length': 725,
+                  'max_acf_bonus_length': 650},
+            instance=self.qset, writer=self.owner)
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data['packet_credits'], 'Writers: {writers}')
+
+    def test_the_owner_can_clear_them(self):
+        self.qset.packet_credits = 'Writers: {writers}'
+        self.qset.save()
+        from qems2.qsub.forms import QuestionSetForm
+        form = QuestionSetForm(
+            data={'name': 'Cred Set', 'date': '01/01/2030', 'num_packets': 2,
+                  'distribution': self.dist.id, 'max_acf_tossup_length': 725,
+                  'max_acf_bonus_length': 650, 'credits_shown': '1',
+                  'packet_credits': '', 'first_packet_credits': ''},
+            instance=self.qset, writer=self.owner)
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data['packet_credits'], '')
+
+
+class ArchivedSetAndDistributionTests(TestCase):
+    """A set or distribution put away stays exactly as it was and stops being
+    offered in the lists that would otherwise fill up with it."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf_tu = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('arch_owner', password='pw', email='a@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='Beta dist', created_by=self.owner)
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='History', subcategory='World',
+            min_tossups=1, min_bonuses=0)
+
+        def make_set(name):
+            qset = QuestionSet.objects.create(
+                name=name, date=timezone.now(), host='h', address='', owner=self.owner,
+                num_packets=1, distribution=self.dist)
+            qset.editor.add(self.owner)
+            return qset
+
+        # Deliberately out of alphabetical order, so a list that comes back
+        # sorted really was sorted.
+        self.zeta = make_set('Zeta Open')
+        self.alpha = make_set('Alpha Open')
+        self.retired = make_set('Mu Open')
+        self.tu = Tossup.objects.create(
+            author=self.owner, question_set=self.zeta, question_type=self.acf_tu,
+            category=self.de, tossup_text='A clue.', tossup_answer='_Rome_',
+            created_date=datetime.now(), last_changed_date=datetime.now(), question_number=1)
+        self.client.login(username='arch_owner', password='pw')
+
+    def _move_choices(self):
+        resp = self.client.get('/move_tossup/{0}/{1}/'.format(self.zeta.id, self.tu.id))
+        self.assertEqual(resp.status_code, 200)
+        field = resp.context['form'].fields['move_sets']
+        return [str(s) for s in field.queryset]
+
+    def test_the_move_list_is_alphabetical(self):
+        self.assertEqual(self._move_choices(), ['Alpha Open', 'Mu Open'])
+
+    def test_an_archived_set_is_not_offered_as_a_destination(self):
+        self.retired.archived = True
+        self.retired.save()
+        self.assertEqual(self._move_choices(), ['Alpha Open'])
+
+    def test_an_archived_set_still_works(self):
+        """Archiving is about the lists. Everything else is untouched."""
+        self.alpha.archived = True
+        self.alpha.save()
+        resp = self.client.get('/edit_question_set/{0}/'.format(self.alpha.id))
+        self.assertEqual(resp.status_code, 200)
+
+    def test_the_home_page_gives_archived_sets_their_own_heading(self):
+        self.alpha.archived = True
+        self.alpha.save()
+        resp = self.client.get('/question_sets/')
+        self.assertEqual(resp.status_code, 200)
+        groups = {g['header']: [q.name for q in g['qsets']]
+                  for g in resp.context['question_set_list']}
+        self.assertIn('Archived question sets', groups)
+        self.assertEqual(groups['Archived question sets'], ['Alpha Open'])
+        for header, names in groups.items():
+            if header != 'Archived question sets':
+                self.assertNotIn('Alpha Open', names)
+
+    def test_the_distribution_picker_is_alphabetical_and_skips_archived(self):
+        Distribution.objects.create(name='Alpha dist', created_by=self.owner)
+        gone = Distribution.objects.create(name='Gamma dist', created_by=self.owner,
+                                           archived=True)
+        names = [d.name for d in Distribution.selectable_by(self.owner)]
+        self.assertEqual(names, ['Alpha dist', 'Beta dist'])
+        self.assertNotIn(gone.name, names)
+
+    def test_a_set_keeps_the_archived_distribution_it_already_uses(self):
+        """Otherwise opening the set's settings and saving would move it onto
+        whichever distribution happened to be first in the list."""
+        self.dist.archived = True
+        self.dist.save()
+        names = [d.name for d in Distribution.selectable_by(self.owner, keep=self.dist.id)]
+        self.assertIn('Beta dist', names)
+
+    def test_an_editor_saving_settings_does_not_unarchive_the_set(self):
+        self.alpha.archived = True
+        self.alpha.save()
+        from qems2.qsub.forms import QuestionSetForm
+        form = QuestionSetForm(
+            data={'name': 'Alpha Open', 'date': '01/01/2030', 'num_packets': 1,
+                  'distribution': self.dist.id, 'max_acf_tossup_length': 725,
+                  'max_acf_bonus_length': 650},
+            instance=self.alpha, writer=self.owner)
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertTrue(form.cleaned_data['archived'])
+
+    def test_the_owner_can_unarchive_it(self):
+        self.alpha.archived = True
+        self.alpha.save()
+        from qems2.qsub.forms import QuestionSetForm
+        form = QuestionSetForm(
+            data={'name': 'Alpha Open', 'date': '01/01/2030', 'num_packets': 1,
+                  'distribution': self.dist.id, 'max_acf_tossup_length': 725,
+                  'max_acf_bonus_length': 650, 'archived_shown': '1'},
+            instance=self.alpha, writer=self.owner)
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertFalse(form.cleaned_data['archived'])
+
+
+class MoveConfirmAnswerTests(TestCase):
+    """The move confirmation states the answer lines. Whoever is confirming a
+    move knows the question by its answer, and on a bonus that means three of
+    them -- previously only findable by reading down the rendered question."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        self.acf_tu = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.acf_bn = QuestionType.objects.get(question_type=ACF_STYLE_BONUS)
+        self.u = User.objects.create_user('mv_owner', password='pw', email='m@t.com')
+        self.owner = Writer.objects.get(user=self.u)
+        self.dist = Distribution.objects.create(name='Mv dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='History', subcategory='World',
+            min_tossups=1, min_bonuses=1)
+
+        def make_set(name):
+            qset = QuestionSet.objects.create(
+                name=name, date=timezone.now(), host='h', address='', owner=self.owner,
+                num_packets=1, distribution=self.dist)
+            qset.editor.add(self.owner)
+            return qset
+
+        self.src = make_set('Source Open')
+        self.dest = make_set('Destination Open')
+        self.tu = Tossup.objects.create(
+            author=self.owner, question_set=self.src, question_type=self.acf_tu,
+            category=self.de, tossup_text='A clue about a city.',
+            tossup_answer='_Rome_ (accept _Roma_)',
+            created_date=datetime.now(), last_changed_date=datetime.now(), question_number=1)
+        self.bn = Bonus.objects.create(
+            author=self.owner, question_set=self.src, question_type=self.acf_bn,
+            category=self.de, leadin='Answer these.',
+            part1_text='P1', part1_answer='_Alpha_',
+            part2_text='P2', part2_answer='_Beta_',
+            part3_text='P3', part3_answer='_Gamma_',
+            created_date=datetime.now(), last_changed_date=datetime.now(), question_number=1)
+        self.client.login(username='mv_owner', password='pw')
+
+    def _confirm_page(self, url):
+        resp = self.client.post(url, {'move_sets': self.dest.id})
+        self.assertEqual(resp.status_code, 200)
+        self.assertTemplateUsed(resp, 'move_question_confirm.html')
+        return resp.content.decode()
+
+    def test_a_tossup_move_names_the_answer(self):
+        body = self._confirm_page('/move_tossup/{0}/{1}/'.format(self.src.id, self.tu.id))
+        self.assertIn('mv-answers', body)
+        head, _sep, _rest = body.partition('mv-question')
+        self.assertIn('Rome', head)
+
+    def test_a_bonus_move_names_all_three(self):
+        body = self._confirm_page('/move_bonus/{0}/{1}/'.format(self.src.id, self.bn.id))
+        head, _sep, _rest = body.partition('mv-question')
+        for answer in ('Alpha', 'Beta', 'Gamma'):
+            self.assertIn(answer, head)
+
+    def test_the_answers_come_before_the_question_panel(self):
+        """Stated up front, not left to be picked out of the stem."""
+        body = self._confirm_page('/move_tossup/{0}/{1}/'.format(self.src.id, self.tu.id))
+        self.assertLess(body.index('mv-answers'), body.index('mv-question'))

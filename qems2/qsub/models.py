@@ -182,6 +182,111 @@ class QuestionSet (models.Model):
     # join it (which emails the owner). It does not grant any access by itself.
     public = models.BooleanField(default=False)
 
+    # Front matter for the exported packets, written by the set's owner and
+    # printed above the first tossup of each one. Two of them, because the
+    # first packet is where a tournament introduces itself -- the whole list of
+    # who wrote and edited it -- while every packet after that wants a line or
+    # two. An empty first_packet_credits means the first packet is credited like
+    # the rest; an empty packet_credits means only the first one is.
+    #
+    # The text is plain, apart from the {tokens} below, which are filled in at
+    # export time so a set that gains a writer does not need its credits
+    # rewritten.
+    packet_credits = models.TextField(blank=True, default='')
+    first_packet_credits = models.TextField(blank=True, default='')
+
+    # (token, label, what it fills in with). The settings page lists these and
+    # credit_values() below is what fills them.
+    CREDIT_TOKENS = [
+        ('{writers}', 'Writers', 'Everyone with a writer role on the set.'),
+        ('{editors}', 'Editors', 'Everyone with an editor role on the set.'),
+        ('{proofreaders}', 'Proofreaders',
+         'Everyone who has marked a question in the set proofread.'),
+        ('{authors}', 'Authors',
+         'Everyone who actually wrote a question in the set, which is not always '
+         'the same list as the writers.'),
+        ('{packet_authors}', 'Authors of this packet',
+         'Everyone who wrote a question in the packet this is printed in.'),
+        ('{owner}', 'Owner', 'Whoever owns the set.'),
+        ('{set}', 'Set name', 'The name of the set.'),
+        ('{packet}', 'Packet name', 'The name of the packet this is printed in.'),
+    ]
+
+    @staticmethod
+    def _credit_names(writers):
+        """Real names, alphabetically, with the blanks and the duplicates out."""
+        seen = set()
+        for writer in writers:
+            if writer is None:
+                continue
+            try:
+                name = (writer.get_real_name() or '').strip()
+            except Exception:
+                name = str(writer).strip()
+            if name:
+                seen.add(name)
+        return sorted(seen, key=lambda n: n.lower())
+
+    def credit_values(self, packet=None):
+        """What each {token} stands for, as a plain string."""
+        questions = (list(self.tossup_set.select_related('author', 'proofreader'))
+                     + list(self.bonus_set.select_related('author', 'proofreader')))
+        names = self._credit_names
+        packet_authors = ([q.author for q in questions if q.packet_id == packet.id]
+                          if packet is not None else [])
+        return {
+            '{writers}': ', '.join(names(self.writer.all())),
+            '{editors}': ', '.join(names(self.editor.all())),
+            '{proofreaders}': ', '.join(names(
+                q.proofreader for q in questions if q.proofread and q.proofreader_id)),
+            '{authors}': ', '.join(names(q.author for q in questions)),
+            '{packet_authors}': ', '.join(names(packet_authors)),
+            '{owner}': ', '.join(names([self.owner])),
+            '{set}': self.name or '',
+            '{packet}': (packet.packet_name if packet is not None else ''),
+        }
+
+    def credits_for_packet(self, packet=None, first=False):
+        """The credits to print above this packet's first tossup, tokens filled
+        in; '' when there are none to print.
+
+        A line whose every token came back empty is dropped rather than printed
+        as a label with nothing after it -- 'Proofreaders:' on a set nobody has
+        proofread -- so one set of credits suits a set at any stage of its life.
+        A line naming several lists survives as long as one of them has names,
+        and a line with no tokens at all is always printed."""
+        if first:
+            text = self.first_packet_credits or self.packet_credits or ''
+        else:
+            text = self.packet_credits or ''
+        if not text.strip():
+            return ''
+        values = self.credit_values(packet)
+        lines = []
+        for line in text.strip().splitlines():
+            filled, had_token, filled_any = line, False, False
+            for token, value in values.items():
+                if token in filled:
+                    had_token = True
+                    filled_any = filled_any or bool(value)
+                    filled = filled.replace(token, value)
+            if had_token and not filled_any:
+                continue
+            lines.append(filled.rstrip())
+        while lines and not lines[0].strip():
+            lines.pop(0)
+        while lines and not lines[-1].strip():
+            lines.pop()
+        return '\n'.join(lines)
+
+    # An archived set is finished with, but not to be deleted: a tournament that
+    # has been played, kept for its questions. It keeps working exactly as it did
+    # -- everyone on it can still open, search and export it -- but it stops being
+    # offered in the pickers that list your sets (where to move a question to,
+    # most of all), and it is listed on the home page under its own heading
+    # instead of among the sets still being written.
+    archived = models.BooleanField(default=False)
+
     # Anti-spam review state. A set made by an account too new to create one
     # outright isn't refused — it's created 'pending' and an administrator is
     # emailed to approve it. A pending set belongs to its owner and works
@@ -417,6 +522,11 @@ class EditorTag(models.Model):
 
 class Packet (models.Model):
     packet_name = models.CharField(max_length=200)
+    # A note printed at the top of this packet's exported copy, under the set's
+    # credits and above the first tossup: what this packet is, who submitted it,
+    # anything a room needs told before it is read. One packet's, where
+    # QuestionSet.packet_credits is the whole set's.
+    header_note = models.TextField(blank=True, default='')
     date_submitted = models.DateField(auto_now_add=True)
     # authors = models.ManyToManyField(Player)
     question_set = models.ForeignKey(QuestionSet, on_delete=models.CASCADE)
@@ -746,6 +856,12 @@ class Distribution(models.Model):
     # migration that adds it leaves them public.
     public = models.BooleanField(default=False)
 
+    # Out of the pickers, still on its sets. A distribution accumulates over
+    # years -- one per tournament, most of them never used again -- and the
+    # create-a-set list is where that is felt. Archiving takes it out of that
+    # list without touching the sets already built on it.
+    archived = models.BooleanField(default=False)
+
     def __str__(self):
         return '{0!s}'.format(self.name)
 
@@ -768,6 +884,23 @@ class Distribution(models.Model):
         """Distributions `writer` may pick, preview or clone: their own plus
         every public one."""
         return cls.objects.filter(models.Q(public=True) | models.Q(id__in=cls.member_ids(writer)))
+
+    @classmethod
+    def selectable_by(cls, writer, keep=None):
+        """The distributions to offer in a picker, by name: the ones `writer`
+        may use, minus the archived ones.
+
+        Archiving is about the list, not the distribution -- an archived one
+        still runs every set built on it -- so `keep` (the distribution a set
+        already uses) is offered whatever its state, or editing that set's
+        settings would silently move it onto something else."""
+        qs = cls.visible_to(writer)
+        keep_id = getattr(keep, 'id', keep)
+        if keep_id is None:
+            qs = qs.filter(archived=False)
+        else:
+            qs = qs.filter(models.Q(archived=False) | models.Q(id=keep_id))
+        return qs.order_by('name')
 
     def entry_summary(self):
         """Per-top-level-category totals of the per-packet minimums/maximums,

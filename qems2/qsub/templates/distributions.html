@@ -39,6 +39,9 @@
                 {% else %}
                     <span class="dist-visibility"><i class="fa fa-lock"></i> Private</span>
                 {% endif %}
+                {% if dist.archived %}
+                    <span class="dist-visibility is-archived" title="Kept, but not offered when someone creates a set"><i class="fa fa-box-archive"></i> Archived</span>
+                {% endif %}
             </td>
         </tr>
         {% endfor %}
@@ -77,6 +80,9 @@
 .dist-visibility { font-size: 0.85em; color: #8a8f9c; }
 .dist-visibility .fa { margin-right: 0.3em; }
 .dist-visibility.is-public { color: #2b7a3d; }
+/* An archived distribution is still listed -- this is the page you come to to
+   bring one back -- so it is marked rather than hidden. */
+.dist-visibility.is-archived { color: #8a8f9c; margin-left: 8px; }
 .dist-public-note { font-size: 0.9em; color: #8a8f9c; margin-bottom: 0.5rem; }
 </style>
 

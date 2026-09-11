@@ -31,6 +31,29 @@ found afterwards.
 
 {% if message %}<div class="{{ message_class }}">{{ message }}</div>{% endif %}
 
+{% comment %}
+What is being moved, in one line, before the question itself.
+
+The answer was only ever inside the rendered question, which on a bonus
+means three answers spread down a panel of text. Whoever is confirming a
+move is deciding about a question they know by its answer, so the answer
+lines are stated up front rather than left to be picked out of the stem.
+{% endcomment %}
+<div class="mv-answers">
+    <span class="mv-answers-label">Answer{% if qtype == 'bonus' %}s{% endif %}</span>
+    {% autoescape off %}
+    {% if qtype == 'tossup' %}
+        <span class="mv-answer">{{ question|tossup_answer }}</span>
+    {% else %}
+        <ol class="mv-answer-list">
+            <li>{{ question.part1_answer|answer_preview|answer_html }}</li>
+            <li>{{ question.part2_answer|answer_preview|answer_html }}</li>
+            <li>{{ question.part3_answer|answer_preview|answer_html }}</li>
+        </ol>
+    {% endif %}
+    {% endautoescape %}
+</div>
+
 <div class="panel radius mv-question">
     {% autoescape off %}{% if qtype == 'tossup' %}{{ question|tossup_html }}{% else %}{{ question|bonus_html }}{% endif %}{% endautoescape %}
 </div>
@@ -156,6 +179,14 @@ the same thing.</p>
 
 <style>
 .mv-question { background: var(--qx-card, #fff); }
+/* The answer, stated before the question rather than found inside it. */
+.mv-answers { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px;
+    margin: 0 0 10px; }
+.mv-answers-label { font-weight: 600; color: var(--qx-muted, #6b7280);
+    font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.mv-answer { font-size: 1.05rem; }
+.mv-answer-list { margin: 0; padding-left: 1.3em; }
+.mv-answer-list li { margin: 0; }
 .mv-form { max-width: 900px; }
 .mv-row { display: flex; flex-wrap: wrap; gap: 8px 20px; padding: 12px 0;
     border-top: 1px solid var(--qx-border, #ececf1); }

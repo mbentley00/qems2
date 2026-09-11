@@ -31,6 +31,25 @@
         <button type="submit" class="button tiny secondary" style="margin: 0;">Rename</button>
     </span>
 </form>
+{% comment %}
+A note for this packet alone, printed in its exported copy above the first
+tossup (under the set's credits, which are on the set's own settings page).
+Plain text: it is read out or read off the page as it is written.
+{% endcomment %}
+<form method="post" action="/edit_packet/{{ packet.id }}/" class="packet-note-form">
+    {% csrf_token %}
+    <label class="home-note packet-note-label" for="packet-header-note">Note at the top of this packet</label>
+    <textarea name="header_note" id="packet-header-note" rows="3"
+              placeholder="Printed above the first tossup of this packet in Word and PDF exports. Leave empty for none.">{{ packet.header_note }}</textarea>
+    <button type="submit" class="button tiny secondary">Save note</button>
+</form>
+<style>
+.packet-rename-form { margin-bottom: 10px; }
+.packet-note-form { margin: 0 0 16px; max-width: 46rem; }
+.packet-note-label { font-size: 0.85rem; font-weight: 600; margin: 0; display: block; }
+.packet-note-form textarea { margin: 4px 0 6px; min-height: 4.5em; }
+.packet-note-form .button { margin: 0; }
+</style>
 {% endif %}
 
 <dl class="tabs" data-tab>

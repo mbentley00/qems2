@@ -358,7 +358,17 @@ def _credits(pdf, writer_names, editor_names):
     pdf.ln(GAP)
 
 
-def build_packetized_pdf(set_name, groups, opts, credits=None):
+def _text_block(pdf, text):
+    """Plain text above the questions -- the set's credits, a packet's note --
+    one line at a time, in the body face."""
+    for line in (text or '').splitlines():
+        if line.strip():
+            _write_text(pdf, line, _SERIF, '', SIZE)
+        pdf.ln(LINE_H)
+    pdf.ln(GAP)
+
+
+def build_packetized_pdf(set_name, groups, opts, credits=None, front_matter=None):
     """Build a packetized PDF.
 
     `groups` is an ordered list of (packet_name, tossups, bonuses). `opts` is a
@@ -370,6 +380,10 @@ def build_packetized_pdf(set_name, groups, opts, credits=None):
     The set export calls this once per packet with a single group, so each
     packet is its own file (and carries the credits, since it travels alone);
     passing several groups still produces one combined document.
+
+    `front_matter` is an optional list of plain-text blocks -- credits the set's
+    owner wrote, a note belonging to this packet -- printed above the first
+    tossup, in place of the generated `credits` when there are any.
     """
     pdf = FPDF(unit='pt', format='letter')
     # Curly quotes and dashes are cp1252, not latin-1, and a packet is full of
@@ -384,7 +398,10 @@ def build_packetized_pdf(set_name, groups, opts, credits=None):
         pdf.add_page()
         _heading(pdf, '{0} {1}'.format(set_name or '', packet_name).strip(),
                  TITLE_SIZE, space_after=10)
-        if gi == 0 and opts.get('credits') and credits:
+        if gi == 0 and front_matter:
+            for block in front_matter:
+                _text_block(pdf, block)
+        elif gi == 0 and opts.get('credits') and credits:
             _credits(pdf, credits[0], credits[1])
         if opts.get('interlace'):
             tus, bss = _numbered(tossups), _numbered(bonuses)

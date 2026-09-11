@@ -79,6 +79,36 @@ class QuestionSetForm(forms.ModelForm):
         keep = [k for k in known if k in wanted]
         return ','.join(keep)
 
+    def _owner_only_field(self, name):
+        """Keep the stored value for a field the page only shows the owner.
+
+        An absent input is indistinguishable from an emptied one, so the
+        owner's form carries a marker field saying the input was on the page.
+        Without it an editor saving the settings would wipe what it holds."""
+        return getattr(self.instance, name, '')
+
+    def clean_packet_credits(self):
+        if not self.data.get('credits_shown'):
+            return self._owner_only_field('packet_credits')
+        return self.cleaned_data.get('packet_credits', '')
+
+    def clean_first_packet_credits(self):
+        if not self.data.get('credits_shown'):
+            return self._owner_only_field('first_packet_credits')
+        return self.cleaned_data.get('first_packet_credits', '')
+
+    def clean_archived(self):
+        """Keep the stored value when the checkbox was not on the page.
+
+        Archiving is the owner's, so the settings page renders the checkbox
+        only for them -- and an absent checkbox is indistinguishable from an
+        unticked one, which would quietly unarchive the set the next time an
+        editor saved the settings. The owner's form carries a marker field so
+        the two can be told apart."""
+        if not self.data.get('archived_shown'):
+            return getattr(self.instance, 'archived', False)
+        return self.cleaned_data.get('archived', False)
+
     def clean_favicon_color(self):
         """Only a colour the page offers. The value ends up in markup, and a
         list of nine is easier to be sure of than any amount of escaping."""
@@ -93,7 +123,8 @@ class QuestionSetForm(forms.ModelForm):
         # their own. (A set's current distribution always qualifies — belonging
         # to the set is what makes it theirs — so editing a set never loses it.)
         if writer is not None:
-            self.fields['distribution'].queryset = Distribution.visible_to(writer)
+            self.fields['distribution'].queryset = Distribution.selectable_by(
+                writer, keep=getattr(self.instance, 'distribution_id', None))
 
         self.fields['date'].widget.attrs.update({'placeholder': 'mm/dd/yyyy'})
 
@@ -345,10 +376,23 @@ class DistributionForm(forms.ModelForm):
                    'categories, and make a copy. Editing stays with you and the '
                    'people on your sets.'))
 
+    archived = forms.BooleanField(
+        required=False, label='Archived',
+        help_text=('Keeps it working on the sets that use it, and takes it out of '
+                   'the list offered when someone creates a set.'))
+
     class Meta:
         model = Distribution
-        fields = ['name', 'public', 'acf_tossup_per_period_count',
+        fields = ['name', 'public', 'archived', 'acf_tossup_per_period_count',
                   'acf_bonus_per_period_count', 'vhsl_bonus_per_period_count']
+
+    def clean_archived(self):
+        """As QuestionSetForm.clean_archived: only whoever made the
+        distribution gets the checkbox, so an absent one means 'not asked',
+        not 'unticked'."""
+        if not self.data.get('archived_shown'):
+            return getattr(self.instance, 'archived', False)
+        return self.cleaned_data.get('archived', False)
         
 class TieBreakDistributionForm(forms.ModelForm):
 

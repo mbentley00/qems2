@@ -207,7 +207,55 @@
                 <label class="set-info-check">{{ form.public }}
                     <span>Public (listed for everyone)
                         <small>Anyone can see this set is being written and request to join (which emails you). It grants no access by itself.</small></span></label>
+                {% if qset|is_set_owner:user %}
+                {% comment %}
+                The owner's, not an editor's: putting a set away is a decision
+                about the set rather than about the questions in it. The marker
+                field tells the form that the checkbox was actually on the page,
+                so an editor saving these settings leaves the choice alone
+                instead of unarchiving the set (see QuestionSetForm.clean_archived).
+                {% endcomment %}
+                <input type="hidden" name="archived_shown" value="1">
+                <label class="set-info-check">{{ form.archived }}
+                    <span>Archived (done with, but kept)
+                        <small>Everything here keeps working. The set stops being offered when someone picks where to move a question, and moves to its own heading on the home page.</small></span></label>
+                {% endif %}
             </div>
+            {% if qset|is_set_owner:user %}
+            {% comment %}
+            What every exported packet says above its first tossup. The owner's,
+            like the archive switch: it speaks for the tournament rather than for
+            any one question. The marker field says the boxes were on the page, so
+            an editor saving these settings leaves the text alone rather than
+            clearing it (QuestionSetForm.clean_packet_credits).
+            {% endcomment %}
+            <input type="hidden" name="credits_shown" value="1">
+            <div class="set-credits">
+                <h5 class="set-credits-head">Packet credits</h5>
+                <p class="set-credits-intro">Printed at the top of each exported packet,
+                    above the first tossup. Leave both empty for none.</p>
+                <div class="set-credits-fields">
+                    <div class="set-credits-field">
+                        <label for="{{ form.first_packet_credits.id_for_label }}">First packet</label>
+                        {{ form.first_packet_credits }}{{ form.first_packet_credits.errors }}
+                        <small>Where a tournament introduces itself. Empty: the first packet is credited like the rest.</small>
+                    </div>
+                    <div class="set-credits-field">
+                        <label for="{{ form.packet_credits.id_for_label }}">Every other packet</label>
+                        {{ form.packet_credits }}{{ form.packet_credits.errors }}
+                        <small>Empty: only the first packet is credited.</small>
+                    </div>
+                </div>
+                <p class="set-credits-intro">Click to put a name list in, filled in when the
+                    packets are exported &mdash; so a set that gains a writer needs no rewrite.</p>
+                <div class="set-credits-tokens">
+                    {% for token, label, help in credit_tokens %}
+                    <button type="button" class="button tiny secondary set-credit-token"
+                            data-token="{{ token }}" title="{{ help }}">{{ label }}</button>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
             {% if role == "editor" %}
                 <button type="submit" class="button primary">Submit Changes</button>
             {% endif %}
@@ -219,6 +267,19 @@
         .set-info-card { background: #fff; border: 1px solid #e9e9ef; border-radius: 12px;
             padding: 22px 26px; margin: 1.25rem 0; box-shadow: 0 1px 2px rgba(20,20,40,.04); }
         .set-info-heading { font-family: Georgia, "Times New Roman", serif; margin: 0 0 1.1rem; font-size: 1.45rem; }
+        /* Packet credits: two boxes side by side down to phone width, with the
+           tokens that fill themselves in underneath. */
+        .set-credits { border-top: 1px solid #e9e9ef; margin: 18px 0 0; padding-top: 16px; }
+        .set-credits-head { margin: 0 0 4px; font-size: 1.05rem; font-weight: 700; }
+        .set-credits-intro { margin: 0 0 10px; font-size: 0.85rem; color: #8a8f9c; }
+        .set-credits-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 20px; }
+        .set-credits-field label { font-weight: 600; }
+        .set-credits-field textarea { min-height: 7em; margin-bottom: 2px; font-family: var(--qx-sans); }
+        .set-credits-field small { color: #8a8f9c; }
+        .set-credits-tokens { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 0; }
+        .set-credits-tokens .button { margin: 0; }
+        @media (max-width: 760px) { .set-credits-fields { grid-template-columns: 1fr; } }
+        html[data-theme="dark"] .set-credits { border-top-color: var(--qx-border); }
         .set-info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 24px; margin-bottom: 20px; }
         .set-info-field { display: flex; flex-direction: column; gap: 6px; }
         .set-info-field > label { font-weight: 600; font-size: 0.82rem; color: #565b66; margin: 0; }
@@ -292,6 +353,28 @@
         .join-link-off { color: #b45309; font-size: 0.85em; margin: 6px 0 0; }
         </style>
         <script>
+        // Put a name list into whichever credits box was last typed in, at the
+        // cursor. The token is what gets stored -- the names are filled in when
+        // the packets are exported -- so the text keeps up with the set.
+        $(function () {
+            var $boxes = $('.set-credits-field textarea');
+            if (!$boxes.length) { return; }
+            var $target = $boxes.first();
+            $boxes.on('focus', function () { $target = $(this); });
+
+            $('.set-credit-token').on('click', function (e) {
+                e.preventDefault();
+                var token = $(this).data('token');
+                var el = $target[0];
+                if (!el) { return; }
+                var start = el.selectionStart, end = el.selectionEnd, value = el.value;
+                if (typeof start !== 'number') { start = end = value.length; }
+                el.value = value.slice(0, start) + token + value.slice(end);
+                el.selectionStart = el.selectionEnd = start + token.length;
+                el.focus();
+            });
+        });
+
         $(function () {
             var $setForm = $('form.clearfix').first();
             var $tossupsOnly = $setForm.find('[name="tossups_only"]');

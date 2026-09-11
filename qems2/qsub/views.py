@@ -128,8 +128,13 @@ def question_sets (request):
     from datetime import timedelta
     cutoff = datetime.now().date() - timedelta(days=30)
 
+    # Sets put away on purpose, whatever their date.
+    archived_sets = {}
+
     for qset in (all_sets):
-        if (qset.date >= cutoff):
+        if qset.archived:
+            archived_sets[qset.id] = qset
+        elif (qset.date >= cutoff):
             upcoming_sets[qset.id] = qset
         else:
             completed_sets[qset.id] = qset
@@ -142,9 +147,15 @@ def question_sets (request):
     
     upcoming_sets = sorted(upcoming_sets, key=lambda qset: qset.date)
     completed_sets = sorted(completed_sets, key=lambda qset: qset.date)
+    # By name: an archive is looked through by what a set is called, not by
+    # when its tournament was.
+    archived_sets = sorted(archived_sets.values(), key=lambda qset: qset.name.lower())
 
     all_sets  = [{'header': 'Upcoming question sets', 'qsets': upcoming_sets, 'id': 'qsets-write'},
                  {'header': 'Completed question sets', 'qsets': completed_sets, 'id': 'qsets-complete'}]
+    if archived_sets:
+        all_sets.append({'header': 'Archived question sets', 'qsets': archived_sets,
+                         'id': 'qsets-archived'})
 
     # Public sets the user isn't already part of — they can request to join.
     my_set_ids = {qset.id for qset in all_sets[0]['qsets']} | {qset.id for qset in all_sets[1]['qsets']}
@@ -1334,6 +1345,7 @@ def edit_question_set(request, qset_id):
                                           {'form': form,
                                            'qset': qset,
                                            'favicon_colors': QuestionSet.FAVICON_COLORS,
+                                           'credit_tokens': QuestionSet.CREDIT_TOKENS,
                                            'user': user,
                                            'editors': [ed for ed in qset_editors if ed != qset.owner],
                                            'writers': qset.writer.all(),
@@ -1403,6 +1415,7 @@ def edit_question_set(request, qset_id):
                               {'form': form,
                                'user': user,
                                'favicon_colors': QuestionSet.FAVICON_COLORS,
+                               'credit_tokens': QuestionSet.CREDIT_TOKENS,
                                'editors': [ed for ed in qset_editors if ed != qset.owner],
                                'writers': [wr for wr in qset_writers if wr != qset.owner],
                                'writer_stats': writer_stats,
@@ -2438,6 +2451,21 @@ def edit_packet(request, packet_id):
                 message, message_class = 'Packet renamed to "{0}".'.format(new_name), 'alert-box success'
         else:
             message = 'Only an owner or editor can rename packets.'
+            message_class = 'alert-box alert'
+
+    if request.method == 'POST' and 'header_note' in request.POST:
+        # The note this packet's exported copy carries above its first tossup.
+        # Same hands as the name: it is printed in front of a room.
+        if can_rename:
+            note = (request.POST.get('header_note') or '').strip()
+            if note != (packet.header_note or ''):
+                packet.header_note = note
+                packet.save(update_fields=['header_note'])
+                cache.clear()
+                message = ('Packet note saved.' if note else 'Packet note removed.')
+                message_class = 'alert-box success'
+        else:
+            message = 'Only an owner or editor can write a packet note.'
             message_class = 'alert-box alert'
 
     if request.method in ('GET', 'POST'):
@@ -4446,6 +4474,15 @@ def _entry_delete_refusal(entry, writer):
     return None
 
 
+def _dist_owned_by(dist_id, writer):
+    """Whether `writer` made this distribution. Archiving it is theirs alone:
+    everyone on a set that uses it can edit its categories, and none of them
+    should be able to take it off other people's pickers."""
+    if dist_id is None:
+        return False
+    return Distribution.objects.filter(id=dist_id, created_by=writer).exists()
+
+
 def _annotate_entry_delete_rights(formset, dist, writer):
     """Tell each row of the distribution formset whether its entry can be
     deleted, and if not why, so the page can show the reason instead of a
@@ -4480,8 +4517,11 @@ def distributions (request):
     # separately below and can only be previewed and copied.
     user = request.user.writer
     mine_ids = _writer_distribution_ids(user)
-    dists = Distribution.objects.filter(id__in=mine_ids)
-    public_dists = (Distribution.objects.filter(public=True)
+    # Archived ones last, so the list reads as what you are using followed by
+    # what you are keeping; both are still here, since this is the page you
+    # come to to bring one back.
+    dists = Distribution.objects.filter(id__in=mine_ids).order_by('archived', 'name')
+    public_dists = (Distribution.objects.filter(public=True, archived=False)
                     .exclude(id__in=mine_ids)
                     .select_related('created_by__user').order_by('name'))
 
@@ -4609,8 +4649,26 @@ def edit_distribution(request, dist_id=None):
         if request.method == 'POST':
             # no dist_id supplied means new dist
             if dist_id is None:
-                formset = DistributionEntryFormset(data=request.POST, prefix='distentry')
                 dist_form = DistributionForm(data=request.POST)
+                if 'add_row' in request.POST:
+                    # The no-script fallback for the Add Category button: give
+                    # the page back with one more row. Without this the request
+                    # fell through to the save below and created the
+                    # distribution, which is not what a button called Add Row
+                    # should do.
+                    distentry_post = request.POST.copy()
+                    distentry_post['distentry-TOTAL_FORMS'] = \
+                        int(distentry_post['distentry-TOTAL_FORMS']) + 1
+                    formset = DistributionEntryFormset(data=distentry_post, prefix='distentry')
+                    _annotate_entry_delete_rights(formset, None, user)
+                    return render(request, 'edit_distribution.html',
+                                  {'form': dist_form,
+                                   'formset': formset,
+                                   'message': message,
+                                   'message_class': message_class,
+                                   'is_dist_owner': False,
+                                   'user': user})
+                formset = DistributionEntryFormset(data=request.POST, prefix='distentry')
                 if dist_form.is_valid() and formset.is_valid():
                     new_dist = Distribution()
                     new_dist.name = dist_form.cleaned_data['name']
@@ -4748,6 +4806,7 @@ def edit_distribution(request, dist_id=None):
                                       'formset': formset,
                                       'message': message,
                                       'message_class': message_class,
+                                      'is_dist_owner': _dist_owned_by(dist_id, user),
                                       'user': request.user.writer})
         else:
             if dist_id is not None:
@@ -4777,6 +4836,7 @@ def edit_distribution(request, dist_id=None):
                                       'formset': formset,
                                       'message': message,
                                       'message_class': message_class,
+                                      'is_dist_owner': _dist_owned_by(dist_id, user),
                                       'user': request.user.writer})
 
 @login_required()
@@ -5806,7 +5866,10 @@ def move_tossup(request, q_set_id, tossup_id):
         message_class = 'alert-box alert'
         tossup = None
 
-    move_sets = user.question_set_editor.exclude(id=q_set_id)
+    # By name, and without the sets that have been archived: the list is for
+    # picking a destination, and a set someone archived is not one.
+    move_sets = (user.question_set_editor
+                 .exclude(id=q_set_id).exclude(archived=True).order_by('name'))
 
     if request.method == 'GET':
         if (role == "editor"):
@@ -5916,7 +5979,10 @@ def move_bonus(request, q_set_id, bonus_id):
         message_class = 'alert-box alert'
         bonus = None
 
-    move_sets = user.question_set_editor.exclude(id=q_set_id)
+    # By name, and without the sets that have been archived: the list is for
+    # picking a destination, and a set someone archived is not one.
+    move_sets = (user.question_set_editor
+                 .exclude(id=q_set_id).exclude(archived=True).order_by('name'))
 
     if request.method == 'GET':
         if (role == 'editor'):
@@ -6490,7 +6556,12 @@ def export_question_set(request, qset_id, output_format):
                 include_writers = _export_opt('writers', True)
                 include_editors = _export_opt('editors', True)
                 include_ids = _export_opt('ids', True)
-                include_credits = _export_opt('credits', False)
+                # A set whose owner has written credits means them to be printed;
+                # the options form can still take them out of one export. A set that
+                # has written none keeps the old default, where the generated
+                # writers/editors block is opt-in.
+                include_credits = _export_opt(
+                    'credits', bool((qset.packet_credits or qset.first_packet_credits).strip()))
                 smart_quotes = _export_opt('smartq', False)
                 # Category tag names beside each question. The set says whether
                 # they belong in a packet at all; the options form can drop them
@@ -6555,9 +6626,41 @@ def export_question_set(request, qset_id, output_format):
                     return (sorted(n for n in writers.values() if n),
                             sorted(n for n in editors.values() if n))
 
+                def add_front_matter_to_doc(document, packet=None, first=False):
+                    """Whatever goes above a packet's first tossup: the set's
+                    credits, then the packet's own note.
+
+                    The credits are the owner's text when they have written any --
+                    the first packet's version on the first packet -- and the
+                    generated writers/editors block otherwise."""
+                    if include_credits:
+                        written = qset.credits_for_packet(packet, first=first)
+                        if written:
+                            add_text_block_to_doc(document, written)
+                        elif first:
+                            # The generated block says who wrote and edited the
+                            # set, which is the same on every packet, so it goes
+                            # once as it always has. Credits a set writes for
+                            # itself say what that set wants said, packet by
+                            # packet, and are printed wherever they are set.
+                            add_credits_to_doc(document)
+                    note = (packet.header_note or '').strip() if packet is not None else ''
+                    if note:
+                        add_text_block_to_doc(document, note)
+
+                def add_text_block_to_doc(document, text):
+                    """Plain text above the questions, one paragraph per line, kept
+                    on the page with what follows it."""
+                    for line in text.splitlines():
+                        para = document.add_paragraph()
+                        para.paragraph_format.space_after = Pt(2)
+                        para.paragraph_format.keep_with_next = True
+                        para.add_run(line)
+                    document.add_paragraph().paragraph_format.space_after = Pt(8)
+
                 def add_credits_to_doc(document):
-                    """Front-matter credits listing the set's writers and editors,
-                    placed before the first tossup of the first packet."""
+                    """The generated credits: who wrote and who edited the questions,
+                    for a set whose owner has not written credits of their own."""
                     writer_names, editor_names = _set_contributors()
                     if not writer_names and not editor_names:
                         return
@@ -6809,6 +6912,7 @@ def export_question_set(request, qset_id, output_format):
                         bonuses = list(Bonus.objects.filter(
                             packet=packet, question_set=qset
                         ).order_by('question_number'))
+                        add_front_matter_to_doc(document, packet, first=(pkt_i == 0))
                         add_careful_notes_to_doc(document, tossups, bonuses)
                         write_all_questions_to_doc(document, tossups, bonuses)
 
@@ -6980,9 +7084,9 @@ def export_question_set(request, qset_id, output_format):
                             document = new_docx()
                             document.add_heading(
                                 '{0} {1}'.format(qset.name, packet.packet_name), level=1)
-                            # Credits go once, before the first tossup of the first packet.
-                            if include_credits and pkt_i == 0:
-                                add_credits_to_doc(document)
+                            # Each packet travels as its own file, so each one carries
+                            # the credits -- the first packet's version on the first.
+                            add_front_matter_to_doc(document, packet, first=(pkt_i == 0))
                             add_careful_notes_to_doc(document, tus, bos)
                             write_all_questions_to_doc(document, tus, bos)
                             base = _safe_filename(packet.packet_name)
@@ -7094,8 +7198,12 @@ def export_question_set(request, qset_id, output_format):
                 def _o(name, default):
                     return (request.GET.get(name) == '1') if _explicit else default
 
+                # As in the Word export: credits a set has actually written are on
+                # by default, generated ones stay opt-in.
+                _has_written_credits = bool(
+                    (qset.packet_credits or qset.first_packet_credits).strip())
                 pdf_opts = {'writers': _o('writers', True), 'editors': _o('editors', True),
-                            'ids': _o('ids', True), 'credits': _o('credits', False),
+                            'ids': _o('ids', True), 'credits': _o('credits', _has_written_credits),
                             'interlace': _o('interlace', False)}
                 pdf_opts['tag_names'] = (
                     _tag_names_by_question(qset, for_output=True)
@@ -7107,7 +7215,9 @@ def export_question_set(request, qset_id, output_format):
                             pk.packet_name or '', pk.id)
 
                 groups = []
-                for packet in sorted(Packet.objects.filter(question_set=qset), key=_packet_sort_key):
+                packets_in_order = sorted(Packet.objects.filter(question_set=qset),
+                                          key=_packet_sort_key)
+                for packet in packets_in_order:
                     groups.append((
                         packet.packet_name,
                         list(Tossup.objects.filter(packet=packet, question_set=qset)
@@ -7120,6 +7230,7 @@ def export_question_set(request, qset_id, output_format):
                               .select_related('category', 'author', 'editor').order_by('question_number'))
                 if unp_tu or unp_bo:
                     groups.append(('Unpacketed', unp_tu, unp_bo))
+                    packets_in_order.append(None)
 
                 credits = None
                 if pdf_opts['credits']:
@@ -7143,9 +7254,16 @@ def export_question_set(request, qset_id, output_format):
                 zip_buf = io.BytesIO()
                 with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
                     used_names = set()
-                    for group in groups:
+                    for gi, group in enumerate(groups):
+                        packet = packets_in_order[gi] if gi < len(packets_in_order) else None
+                        # The owner's own credits, if they wrote any, in place of the
+                        # generated ones; then this packet's note.
+                        written = (qset.credits_for_packet(packet, first=(gi == 0))
+                                   if pdf_opts['credits'] else '')
+                        note = (packet.header_note or '').strip() if packet is not None else ''
                         pdf_bytes = pdf_export.build_packetized_pdf(
-                            qset.name, [group], pdf_opts, credits=credits)
+                            qset.name, [group], pdf_opts, credits=credits,
+                            front_matter=[t for t in (written, note) if t])
                         base = _safe_filename(group[0])
                         fname = base
                         n = 2
@@ -7730,7 +7848,9 @@ def bulk_change_set(request, qset_id):
                                               'message': message,
                                               'message_class': message_class})
                 elif (operation == 'move'):
-                    new_sets = user.question_set_editor.exclude(id=qset_id)
+                    new_sets = (user.question_set_editor
+                                .exclude(id=qset_id).exclude(archived=True)
+                                .order_by('name'))
                     cache.clear()
                     return render(request, 'bulk_move_questions.html',
                                              {'user': user,

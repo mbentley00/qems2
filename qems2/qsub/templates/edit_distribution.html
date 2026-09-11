@@ -37,6 +37,20 @@
         </label>
         <p class="dist-visibility-help">{{ form.public.help_text }}</p>
     </div>
+    {% if is_dist_owner %}
+    {% comment %}
+    Whoever made the distribution decides whether it is still on offer. The
+    marker field says the checkbox was on the page, so someone else editing
+    the categories does not unarchive it by saving (DistributionForm.clean_archived).
+    {% endcomment %}
+    <div class="dist-visibility-field">
+        <input type="hidden" name="archived_shown" value="1">
+        <label for="{{ form.archived.id_for_label }}">
+            {{ form.archived }} {{ form.archived.label }}
+        </label>
+        <p class="dist-visibility-help">{{ form.archived.help_text }}</p>
+    </div>
+    {% endif %}
     <div class="sticky-scroll">
     <table class="table-striped table-hover sticky-head" id="distribution-table">
         <thead>
@@ -78,10 +92,54 @@
     </div>
     {{ formset.management_form }}
     <div class="row">
-        <input type="submit" value="Add Row" name="add_row" class="button secondary left" />
+        <input type="submit" value="Add Category" name="add_row" id="dist-add-row"
+               class="button secondary left" />
         <input type="submit" value="Submit Changes" class="button primary right" />
     </div>
 </form>
+
+<script>
+$(function () {
+    // Adding a category used to post the whole form back so the server could
+    // re-render it with one more row -- which threw away anything typed into
+    // the rows above that had not validated yet, and on the create page went
+    // as far as saving the distribution out from under you.
+    //
+    // The row is the same markup every time, so the page can make it itself:
+    // Django always renders one blank extra form at the end of the formset, so
+    // take that as the template, renumber it to the next index, and count it in
+    // the management form. The button is still a real submit, so with scripting
+    // off the server round trip is still there.
+    var $table = $("#distribution-table");
+    var $total = $("#id_distentry-TOTAL_FORMS");
+    if (!$table.length || !$total.length) { return; }
+
+    // An unsaved row -- the extra one, in every case that matters. A saved row
+    // would bring its entry_id along, and where something depends on that entry,
+    // the locked label that stands in for the Delete checkbox.
+    var $rows = $table.find("tbody tr");
+    var $blank = $rows.filter(function () {
+        return !$(this).find("input[name$='-entry_id']").val();
+    }).last();
+    if (!$blank.length) { $blank = $rows.last(); }
+    var template = $blank.length ? $blank.prop("outerHTML") : "";
+    if (!template) { return; }
+
+    $("#dist-add-row").on("click", function (e) {
+        e.preventDefault();
+        var index = parseInt($total.val(), 10);
+        if (isNaN(index)) { return; }
+        var $row = $(template.replace(/distentry-\d+-/g, "distentry-" + index + "-"));
+        $row.find("input").each(function () {
+            if (this.type === "checkbox") { this.checked = false; }
+            else { this.value = ""; }
+        });
+        $table.find("tbody").append($row);
+        $total.val(index + 1);
+        $row.find("input[name$='-category']").focus();
+    });
+});
+</script>
 
 <style>
 /* A category can only be deleted by whoever made the distribution, and only
