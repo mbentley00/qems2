@@ -5969,7 +5969,8 @@ class IssueReportTests(TestCase):
 
     def test_the_form_warns_against_pasting_question_content(self):
         html = self.client.get('/report_issue/').content.decode()
-        self.assertIn('paste question content', html.lower())
+        self.assertIn('ri-warn', html)
+        self.assertIn('question content', html.lower())
 
     def test_a_report_is_mailed_with_the_reporter_reachable(self):
         from django.core import mail
@@ -6016,7 +6017,9 @@ class IssueReportTests(TestCase):
             resp = self.client.post('/report_issue/', self.GOOD)
         body = resp.content.decode()
         self.assertNotIn('Sent.', body)
-        self.assertIn('did not send', body)
+        # The wording of the notice is the page's to change; that a failure is
+        # reported at all, and that the report survives it, is not.
+        self.assertIn('alert-box alert ri-flash', body)
         self.assertIn('I typed an answer', body)      # still in the form
 
     def test_with_no_address_configured_it_is_neither_offered_nor_usable(self):

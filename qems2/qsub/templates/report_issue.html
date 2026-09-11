@@ -11,8 +11,7 @@
 
 {% if sent %}
 <div class="alert-box success ri-flash">
-    <strong>Sent.</strong> Thank you — it went to {{ support_email }}, with your email
-    address attached so you can be written back to. Send another below if you have more.
+    <strong>Sent.</strong> Thank you, your feedback was sent to {{ support_email }}.
 </div>
 {% elif failed %}
 {% comment %}
@@ -21,10 +20,7 @@ someone took the trouble to write is worse than the failure itself, so the form
 below still holds it and the address is here to send it by hand.
 {% endcomment %}
 <div class="alert-box alert ri-flash">
-    <strong>That did not send.</strong> The mail server refused it — nothing you did.
-    What you wrote is still in the form below; please copy it into an email to
-    <a href="mailto:{{ support_email }}">{{ support_email }}</a>, and it will be
-    looked at either way (the failure is logged on the server).
+    <strong>Send failed.</strong> The mail server refused it. Please manually send an email to bentley.michael.j@gmail.com, thanks!
 </div>
 {% endif %}
 
@@ -51,11 +47,8 @@ below still holds it and the address is here to send it by hand.
             finished typing a question in, the warning has come too late.
             {% endcomment %}
             <p class="ri-warn"><i class="fa fa-triangle-exclamation"></i>
-            <strong>Don't paste question content.</strong> This goes out as ordinary
-            email to a personal inbox, so no unreleased question should travel with it
-            — no stems, no answer lines, not even a distinctive clue. Describe what
-            went wrong instead ("the answer line lost its underlines when I saved"),
-            and you'll be asked for anything more that is needed.</p>
+            <strong>Don't send question content!</strong> Please only send the issue you're facing. If you need to
+        send something specific, please create a new, spoiler-free example.</p>
             {{ form.details }}
             {{ form.details.errors }}
         </div>
@@ -82,12 +75,9 @@ below still holds it and the address is here to send it by hand.
         <p>What you write above, and:</p>
         <ul>
             <li>your account name and the email in the form</li>
-            <li>the name of the set the sidebar was showing</li>
+            <li>the name of the current set you're working on</li>
             <li>your browser's identification string</li>
         </ul>
-        <p class="ri-aside-note">Nothing that points at a question: no question text,
-        and no link to the page you came from. It goes to {{ support_email }} and
-        nowhere else.</p>
     </aside>
 </div>
 
