@@ -5023,6 +5023,22 @@ def type_questions(request, qset_id=None):
                 # set with no category, which nothing downstream can count.
                 category_errors = _uncategorized_errors(tossups, bonuses)
 
+                # A set can ask to be taken straight to the questions when the
+                # confirmation screen would have nothing to say: the parse is
+                # clean, every question has a category, and -- for a set that
+                # asked to be warned about untagged questions -- they all carry a
+                # tag. Anything else and the screen appears as it always has,
+                # which is the point of the option: it skips the click, not the
+                # check.
+                preselected = _preselected_category_tags(request)
+                if (qset.skip_type_questions_preview and not tossup_errors
+                        and not bonus_errors and not category_errors):
+                    untagged = [q for q in list(tossups) + list(bonuses)
+                                if not _tags_for_parsed_question(qset, q, preselected)]
+                    if not (qset.warn_missing_category_tags and untagged):
+                        return _save_parsed_questions(request, qset, user, tossups,
+                                                      bonuses, preselected)
+
                 # Show how each prose answer line was read, for sets that
                 # record structure
                 _attach_structure_previews(qset, tossups, bonuses)
@@ -5030,7 +5046,6 @@ def type_questions(request, qset_id=None):
                 # ...and which category tags each question could be given, so
                 # they can be ticked now instead of on a second pass through
                 # every question's edit page.
-                preselected = _preselected_category_tags(request)
                 attach_tag_choices(qset, tossups, preselected)
                 attach_tag_choices(qset, bonuses, preselected)
 
@@ -5216,6 +5231,74 @@ def _uncategorized_errors(tossups, bonuses):
     return errors
 
 
+def _typed_questions_done(request, qset_id, new_tossups, new_bonuses):
+    """Where a batch of typed questions leaves you, however it was saved --
+    through the confirmation screen or straight past it.
+
+    A single question goes to its own edit page with the one-time style and
+    repeat checks, the same as Add a Tossup does; a batch goes back to the set
+    with a link to each question it made."""
+    cache.clear()
+    if len(new_tossups) + len(new_bonuses) == 1:
+        only = (new_tossups or new_bonuses)[0]
+        kind = 'tossup' if new_tossups else 'bonus'
+        return HttpResponseRedirect('/edit_{0}/{1}/?new=1'.format(kind, only.id))
+
+    messages.success(request, 'Your questions have been uploaded.', extra_tags='alert-box success')
+    for tossup in new_tossups:
+        messages.success(request, u'View your tossup on <a href="/edit_tossup/{0}">{1}.</a>'.format(tossup.id, get_answer_no_formatting(tossup.tossup_answer)), extra_tags='safe alert-box info')
+
+    for bonus in new_bonuses:
+        messages.success(request, u'View your bonus on <a href="/edit_bonus/{0}">{1}.</a>'.format(bonus.id, get_answer_no_formatting(bonus.part1_answer)), extra_tags='safe alert-box info')
+
+    return HttpResponseRedirect('/edit_question_set/{0}'.format(qset_id))
+
+
+def _tags_for_parsed_question(qset, question, preselected):
+    """The tags a question would arrive with when the confirmation screen is
+    skipped: what the Type Questions tag panel had ticked for the category it
+    was filed under. The ids come from a form, so they are checked against the
+    tags that actually apply rather than trusted."""
+    entry = getattr(question, 'category', None)
+    if entry is None:
+        return []
+    wanted = set(preselected.get(entry.id, ()))
+    if not wanted:
+        return []
+    return [tag for tag in get_applicable_tags(qset, entry) if tag.id in wanted]
+
+
+def _save_parsed_questions(request, qset, user, tossups, bonuses, preselected):
+    """Save what Type Questions parsed, without going through the confirmation
+    screen.
+
+    The screen exists to let the category, the tags and the text be corrected
+    before anything is written. Skipping it means taking the parse as it stands,
+    so this saves exactly the objects the parser built -- the same ones the
+    screen would have shown -- and tags them from the entry page's panel.
+    """
+    new_tossups, new_bonuses = [], []
+    for tossup in tossups:
+        tossup.author = user
+        tossup.question_set = qset
+        tossup.locked = False
+        tossup.edited = False
+        tossup.save_question(edit_type=QUESTION_CREATE, changer=user)
+        for tag in _tags_for_parsed_question(qset, tossup, preselected):
+            tag.tossups.add(tossup)
+        new_tossups.append(tossup)
+    for bonus in bonuses:
+        bonus.author = user
+        bonus.question_set = qset
+        bonus.locked = False
+        bonus.edited = False
+        bonus.save_question(edit_type=QUESTION_CREATE, changer=user)
+        for tag in _tags_for_parsed_question(qset, bonus, preselected):
+            tag.bonuses.add(bonus)
+        new_bonuses.append(bonus)
+    return _typed_questions_done(request, qset.id, new_tossups, new_bonuses)
+
+
 @login_required
 def complete_upload(request):
     user = request.user.writer
@@ -5344,22 +5427,7 @@ def complete_upload(request):
                               'bonus-tags-{0}'.format(bs_num), is_tossup=False)
             new_bonuses.append(new_bonus)
 
-        cache.clear()
-        # A single question typed in goes straight to its own edit page with the
-        # one-time style/repeat checks, same as Add a Tossup / Add a Bonus.
-        if len(new_tossups) + len(new_bonuses) == 1:
-            only = (new_tossups or new_bonuses)[0]
-            kind = 'tossup' if new_tossups else 'bonus'
-            return HttpResponseRedirect('/edit_{0}/{1}/?new=1'.format(kind, only.id))
-
-        messages.success(request, 'Your questions have been uploaded.', extra_tags='alert-box success')
-        for tossup in new_tossups:
-            messages.success(request, u'View your tossup on <a href="/edit_tossup/{0}">{1}.</a>'.format(tossup.id, get_answer_no_formatting(tossup.tossup_answer)), extra_tags='safe alert-box info')
-
-        for bonus in new_bonuses:
-            messages.success(request, u'View your bonus on <a href="/edit_bonus/{0}">{1}.</a>'.format(bonus.id, get_answer_no_formatting(bonus.part1_answer)), extra_tags='safe alert-box info')
-
-        return HttpResponseRedirect('/edit_question_set/{0}'.format(qset_id))
+        return _typed_questions_done(request, qset_id, new_tossups, new_bonuses)
 
     else:
         messages.error(request, 'Invalid request!')

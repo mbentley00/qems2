@@ -201,6 +201,9 @@
                 <label class="set-info-check">{{ form.export_category_tags }}
                     <span>Print category tags in exported packets
                         <small>Adds each question's category tags after its attribution line in Word, PDF and YAPP output. Off: exports carry no tags. A single tag can be kept out on the <a href="/category_tags/{{ qset.id }}/">Category Tags</a> page; the document view always shows them.</small></span></label>
+                <label class="set-info-check">{{ form.skip_type_questions_preview }}
+                    <span>Submit typed questions without the confirmation screen
+                        <small>On <a href="/type_questions/{{ qset.id }}/">Type Questions</a>, a batch that parsed cleanly is saved as soon as you submit it, instead of showing what was parsed and waiting for a second click. The screen still appears whenever it has something to say &mdash; a question that would not parse, or one with no category &mdash; and, if the box below is ticked, when a question carries no tag. Off: every batch is confirmed. What you give up is the last look before the questions exist, including the style and repeat checks that screen runs; those still run on each question's own page afterwards.</small></span></label>
                 <label class="set-info-check">{{ form.warn_missing_category_tags }}
                     <span>Ask before submitting questions with no category tag
                         <small>On <a href="/type_questions/{{ qset.id }}/">Type Questions</a>, submitting the preview stops to list the questions carrying no tag. Off: they go in without the dialog, for a set that doesn't use tags or tags in bulk later on the <a href="/category_tags/{{ qset.id }}/">Category Tags</a> page. A question's category is still required either way.</small></span></label>

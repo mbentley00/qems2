@@ -182,6 +182,16 @@ class QuestionSet (models.Model):
     # join it (which emails the owner). It does not grant any access by itself.
     public = models.BooleanField(default=False)
 
+    # Type Questions shows what it parsed and asks for confirmation before
+    # anything is saved. For a set whose writers type questions in one at a
+    # time, and correctly, that screen is a click between them and the next
+    # question. With this on, a batch that parsed cleanly -- no parse error, no
+    # missing category, and nothing the set asked to be warned about -- is saved
+    # straight away, and the screen still appears the moment there is something
+    # on it worth reading. Off by default: the confirmation is what makes a
+    # mis-parse recoverable, and a set should choose to give it up.
+    skip_type_questions_preview = models.BooleanField(default=False)
+
     # Front matter for the exported packets, written by the set's owner and
     # printed above the first tossup of each one. Two of them, because the
     # first packet is where a tournament introduces itself -- the whole list of

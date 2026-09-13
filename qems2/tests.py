@@ -15317,3 +15317,165 @@ class CarefulAnswerNotesInPdfTests(TestCase):
         text = self._pdf_text()
         self.assertLess(text.index('read these answer lines carefully'),
                         text.index('A clue about a city'))
+
+
+class SkipTypeQuestionsPreviewTests(TestCase):
+    """A set can ask Type Questions to save a clean batch straight away instead
+    of showing what it parsed and waiting for a second click. The screen still
+    appears whenever it has something to say."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        self.acf_tu = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.acf_bn = QuestionType.objects.get(question_type=ACF_STYLE_BONUS)
+        self.u = User.objects.create_user('skip_owner', password='pw', email='s@t.com')
+        self.owner = Writer.objects.get(user=self.u)
+        self.dist = Distribution.objects.create(name='Skip dist')
+        self.lit = DistributionEntry.objects.create(
+            distribution=self.dist, category='Literature', subcategory='World',
+            min_tossups=1, min_bonuses=1)
+        self.qset = QuestionSet.objects.create(
+            name='Skip Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.qset.editor.add(self.owner)
+        SetWideDistributionEntry.objects.create(question_set=self.qset, dist_entry=self.lit,
+                                                num_tossups=1, num_bonuses=1)
+        self.tag = CategoryTag.objects.create(
+            question_set=self.qset, category_path='Literature - World',
+            name='African Literature')
+        self.client.login(username='skip_owner', password='pw')
+
+    GOOD = ('A typed stem clue. (*) The end.\n'
+            'ANSWER: _Things Fall Apart_ {Literature - World}\n')
+    # Two of them, so the batch does not take the single-question shortcut.
+    GOOD_PAIR = ('A typed stem clue. (*) The end.\n'
+                 'ANSWER: _Things Fall Apart_ {Literature - World}\n'
+                 '\n'
+                 'Another typed stem clue. (*) The end.\n'
+                 'ANSWER: _Petals of Blood_ {Literature - World}\n')
+    # No {Category - Subcategory} tag: the parse works, the filing does not.
+    NO_CATEGORY = ('A typed stem clue. (*) The end.\n'
+                   'ANSWER: _Things Fall Apart_\n')
+    # An answer line with no underlined required portion does not parse.
+    UNPARSEABLE = ('A typed stem clue. (*) The end.\n'
+                   'ANSWER: Things Fall Apart {Literature - World}\n')
+
+    def _type(self, questions, **extra):
+        data = {'qset_id': self.qset.id, 'questions': questions}
+        data.update(extra)
+        return self.client.post('/type_questions/{0}/'.format(self.qset.id), data)
+
+    def _tossups(self):
+        return Tossup.objects.filter(question_set=self.qset)
+
+    # ---- off, which is how a set starts ----------------------------------
+
+    def test_off_by_default(self):
+        self.assertFalse(QuestionSet._meta.get_field(
+            'skip_type_questions_preview').default)
+
+    def test_off_shows_the_confirmation_and_saves_nothing_yet(self):
+        resp = self._type(self.GOOD)
+        self.assertTemplateUsed(resp, 'type_questions_preview.html')
+        self.assertEqual(self._tossups().count(), 0)
+
+    # ---- on ---------------------------------------------------------------
+
+    def _skip_on(self, warn=False):
+        """Turn the option on. The untagged-question warning is on by default
+        and lives on the screen being skipped, so a set that wants the skip
+        without tagging as it types turns it off -- which is what these tests
+        do unless they are about that interaction."""
+        self.qset.skip_type_questions_preview = True
+        self.qset.warn_missing_category_tags = warn
+        self.qset.save()
+
+    def test_a_clean_batch_is_saved_without_the_confirmation(self):
+        self._skip_on()
+        resp = self._type(self.GOOD_PAIR)
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(self._tossups().count(), 2)
+        answers = sorted(t.tossup_answer for t in self._tossups())
+        self.assertIn('_Things Fall Apart_', answers[1])
+
+    def test_what_is_saved_is_filed_and_attributed(self):
+        self._skip_on()
+        self._type(self.GOOD_PAIR)
+        tu = self._tossups().first()
+        self.assertEqual(tu.category, self.lit)
+        self.assertEqual(tu.author, self.owner)
+        self.assertEqual(tu.question_set, self.qset)
+        self.assertFalse(tu.edited)
+        self.assertFalse(tu.locked)
+
+    def test_a_single_question_still_lands_on_its_own_page(self):
+        """The same place Add a Tossup leaves you, with the one-time checks."""
+        self._skip_on()
+        resp = self._type(self.GOOD)
+        tu = self._tossups().get()
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp['Location'], '/edit_tossup/{0}/?new=1'.format(tu.id))
+
+    def test_a_bonus_comes_through_too(self):
+        self._skip_on()
+        self._type('A bonus leadin.\n'
+                   '[10] First part.\n'
+                   'ANSWER: _Alpha_ {Literature - World}\n'
+                   '[10] Second part.\n'
+                   'ANSWER: _Beta_\n'
+                   '[10] Third part.\n'
+                   'ANSWER: _Gamma_\n')
+        bonus = Bonus.objects.get(question_set=self.qset)
+        self.assertEqual(bonus.part1_answer.strip(), '_Alpha_')
+        self.assertEqual(bonus.category, self.lit)
+
+    def test_the_tags_ticked_on_the_entry_page_are_applied(self):
+        self._skip_on()
+        self._type(self.GOOD_PAIR, preselected_tags=json.dumps(
+            {str(self.lit.id): [self.tag.id]}))
+        for tu in self._tossups():
+            self.assertIn(tu, self.tag.tossups.all())
+
+    # ---- the screen still appears when it has something to say -----------
+
+    def test_a_question_that_will_not_parse_still_gets_the_screen(self):
+        self._skip_on()
+        resp = self._type(self.UNPARSEABLE)
+        self.assertTemplateUsed(resp, 'type_questions_preview.html')
+        self.assertEqual(self._tossups().count(), 0)
+
+    def test_a_question_with_no_category_still_gets_the_screen(self):
+        self._skip_on()
+        resp = self._type(self.NO_CATEGORY)
+        self.assertTemplateUsed(resp, 'type_questions_preview.html')
+        self.assertEqual(self._tossups().count(), 0)
+
+    def test_an_untagged_question_gets_the_screen_when_the_set_asks(self):
+        """The set asked to be warned about questions with no category tag, and
+        that warning lives on the confirmation screen. Skipping it would be
+        skipping the warning, so the screen comes back."""
+        self._skip_on(warn=True)
+        resp = self._type(self.GOOD_PAIR)
+        self.assertTemplateUsed(resp, 'type_questions_preview.html')
+        self.assertEqual(self._tossups().count(), 0)
+
+    def test_a_tagged_question_skips_it_even_then(self):
+        self._skip_on(warn=True)
+        resp = self._type(self.GOOD_PAIR, preselected_tags=json.dumps(
+            {str(self.lit.id): [self.tag.id]}))
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(self._tossups().count(), 2)
+
+    def test_a_set_that_does_not_ask_is_not_stopped_by_an_untagged_question(self):
+        self._skip_on(warn=False)
+        resp = self._type(self.GOOD_PAIR)
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(self._tossups().count(), 2)
+
+    # ---- the setting itself ----------------------------------------------
+
+    def test_the_settings_page_offers_it(self):
+        body = self.client.get('/edit_question_set/{0}/'.format(
+            self.qset.id)).content.decode()
+        self.assertIn('name="skip_type_questions_preview"', body)
