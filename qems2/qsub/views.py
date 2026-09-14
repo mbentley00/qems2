@@ -4520,7 +4520,14 @@ def distributions (request):
     # Archived ones last, so the list reads as what you are using followed by
     # what you are keeping; both are still here, since this is the page you
     # come to to bring one back.
-    dists = Distribution.objects.filter(id__in=mine_ids).order_by('archived', 'name')
+    dists = list(Distribution.objects.filter(id__in=mine_ids)
+                 .select_related('created_by__user').order_by('archived', 'name'))
+    # Who made it, what is built on it, and whether it could be deleted --
+    # the three things the list could not say before.
+    for dist in dists:
+        dist.is_mine = dist.created_by_id == user.id
+        dist.used_by, dist.used_by_hidden = dist.sets_visible_to(user)
+        dist.blockers = dist.deletion_blockers(user)
     public_dists = (Distribution.objects.filter(public=True, archived=False)
                     .exclude(id__in=mine_ids)
                     .select_related('created_by__user').order_by('name'))
@@ -4529,6 +4536,38 @@ def distributions (request):
                              {'dists': dists,
                               'public_dists': public_dists,
                               'user': user})
+
+@login_required
+def delete_distribution(request, dist_id):
+    """Delete a whole distribution -- categories and all -- when nothing is
+    built on it.
+
+    Whoever made it, only: a distribution is shared, and everyone who may edit
+    its categories is not everyone who may take it away from the others. What
+    counts as 'in use' is Distribution.deletion_blockers, which is checked here
+    rather than only hidden in the page."""
+    if request.method != 'POST':
+        return HttpResponseRedirect('/distributions/')
+    user = request.user.writer
+    dist = Distribution.objects.filter(id=dist_id).first()
+    if dist is None:
+        return HttpResponseRedirect('/distributions/')
+    if dist.created_by_id != user.id:
+        return render(request, 'failure.html',
+                      {'message': 'Only whoever created a distribution can delete it.',
+                       'message_class': 'alert-box alert'})
+    blockers = dist.deletion_blockers(user)
+    if blockers:
+        return render(request, 'failure.html',
+                      {'message': 'Nothing was deleted. ' + ' '.join(blockers),
+                       'message_class': 'alert-box alert'})
+    name = dist.name
+    dist.delete()
+    cache.clear()
+    messages.success(request, 'Deleted the distribution "{0}".'.format(name),
+                     extra_tags='alert-box success')
+    return HttpResponseRedirect('/distributions/')
+
 
 @login_required
 def import_distribution(request):
@@ -4667,6 +4706,9 @@ def edit_distribution(request, dist_id=None):
                                    'message': message,
                                    'message_class': message_class,
                                    'is_dist_owner': False,
+                                   'dist': None,
+                                   'used_by': [],
+                                   'used_by_hidden': 0,
                                    'user': user})
                 formset = DistributionEntryFormset(data=request.POST, prefix='distentry')
                 if dist_form.is_valid() and formset.is_valid():
@@ -4686,13 +4728,17 @@ def edit_distribution(request, dist_id=None):
                             new_entry.min_tossups = form.cleaned_data['min_tossups']
                             new_entry.max_bonuses = form.cleaned_data['max_bonuses']
                             new_entry.max_tossups = form.cleaned_data['max_tossups']
-                            if new_entry.min_bonuses > new_entry.max_bonuses:
+                            # An empty maximum is no maximum; only a real one
+                            # can be too small for the minimum beside it.
+                            if (new_entry.max_bonuses is not None
+                                    and new_entry.min_bonuses > new_entry.max_bonuses):
                                 new_entry.min_bonuses = new_entry.max_bonuses
                                 #TODO: display the message
                                 message = 'Minimum bonuses for ' + new_entry.category + ' - ' + new_entry.subcategory +\
                                           ' was higher than maximum bonuses and has been set to maximum bonuses.'
                                 message_class = 'alert-box warning'
-                            if new_entry.min_tossups > new_entry.max_tossups:
+                            if (new_entry.max_tossups is not None
+                                    and new_entry.min_tossups > new_entry.max_tossups):
                                 new_entry.min_tossups = new_entry.max_tossups
                                 #TODO: display the message
                                 message = 'Minimum tossups for ' + new_entry.category + ' - ' + new_entry.subcategory +\
@@ -4744,12 +4790,14 @@ def edit_distribution(request, dist_id=None):
                                         entry.min_tossups = form.cleaned_data['min_tossups']
                                         entry.max_bonuses = form.cleaned_data['max_bonuses']
                                         entry.max_tossups = form.cleaned_data['max_tossups']
-                                        if entry.min_bonuses > entry.max_bonuses:
+                                        if (entry.max_bonuses is not None
+                                                and entry.min_bonuses > entry.max_bonuses):
                                             entry.min_bonuses = entry.max_bonuses
                                             message = 'Minimum bonuses for ' + entry.category + ' - ' + entry.subcategory +\
                                                       ' was higher than maximum bonuses and has been set to maximum bonuses.'
                                             message_class = 'alert-box warning'
-                                        if entry.min_tossups > entry.max_tossups:
+                                        if (entry.max_tossups is not None
+                                                and entry.min_tossups > entry.max_tossups):
                                             entry.min_tossups = entry.max_tossups
                                             message = 'Minimum tossups for ' + entry.category + ' - ' + entry.subcategory +\
                                                       ' was higher than maximum tossups and has been set to maximum tossups.'
@@ -4786,8 +4834,8 @@ def edit_distribution(request, dist_id=None):
                             initial_data.append({'entry_id': entry.id,
                                                  'category': entry.category,
                                                  'subcategory': entry.subcategory,
-                                                 'min_tossups': entry.min_tossups,
-                                                 'min_bonuses': entry.min_bonuses,
+                                                 'min_tossups': entry.min_tossups or 0,
+                                                 'min_bonuses': entry.min_bonuses or 0,
                                                  'max_tossups': entry.max_tossups,
                                                  'max_bonuses': entry.max_bonuses})
                         formset = DistributionEntryFormset(initial=initial_data, prefix='distentry')
@@ -4797,16 +4845,19 @@ def edit_distribution(request, dist_id=None):
                         dist_form = DistributionForm(instance=dist)
                         formset = DistributionEntryFormset(data=request.POST, prefix='distentry')
 
-            _annotate_entry_delete_rights(
-                formset,
-                Distribution.objects.filter(id=dist_id).first() if dist_id else None,
-                user)
+            dist_shown = Distribution.objects.filter(id=dist_id).first() if dist_id else None
+            dist_used_by, dist_used_by_hidden = (
+                dist_shown.sets_visible_to(user) if dist_shown is not None else ([], 0))
+            _annotate_entry_delete_rights(formset, dist_shown, user)
             return render(request, 'edit_distribution.html',
                                      {'form': dist_form,
                                       'formset': formset,
                                       'message': message,
                                       'message_class': message_class,
                                       'is_dist_owner': _dist_owned_by(dist_id, user),
+                                      'dist': dist_shown,
+                                      'used_by': dist_used_by,
+                                      'used_by_hidden': dist_used_by_hidden,
                                       'user': request.user.writer})
         else:
             if dist_id is not None:
@@ -4814,11 +4865,16 @@ def edit_distribution(request, dist_id=None):
                 entries = dist.distributionentry_set.order_by('id')
                 initial_data = []
                 for entry in entries:
+                    # A distribution an importer built has no quotas in it: the
+                    # categories came from the questions, and a packet file says
+                    # nothing about how many of each a packet should hold. Show
+                    # the missing minimums as the 0 they mean, and leave the
+                    # maximums empty, which means no cap rather than a cap of 0.
                     initial_data.append({'entry_id': entry.id,
                                          'category': entry.category,
                                          'subcategory': entry.subcategory,
-                                         'min_tossups': entry.min_tossups,
-                                         'min_bonuses': entry.min_bonuses,
+                                         'min_tossups': entry.min_tossups or 0,
+                                         'min_bonuses': entry.min_bonuses or 0,
                                          'max_tossups': entry.max_tossups,
                                          'max_bonuses': entry.max_bonuses})
                 dist_form = DistributionForm(instance=dist)
@@ -4827,16 +4883,19 @@ def edit_distribution(request, dist_id=None):
                 dist_form = DistributionForm()
                 formset = DistributionEntryFormset(prefix='distentry')
 
-            _annotate_entry_delete_rights(
-                formset,
-                Distribution.objects.filter(id=dist_id).first() if dist_id else None,
-                user)
+            dist_shown = Distribution.objects.filter(id=dist_id).first() if dist_id else None
+            dist_used_by, dist_used_by_hidden = (
+                dist_shown.sets_visible_to(user) if dist_shown is not None else ([], 0))
+            _annotate_entry_delete_rights(formset, dist_shown, user)
             return render(request, 'edit_distribution.html',
                                      {'form': dist_form,
                                       'formset': formset,
                                       'message': message,
                                       'message_class': message_class,
                                       'is_dist_owner': _dist_owned_by(dist_id, user),
+                                      'dist': dist_shown,
+                                      'used_by': dist_used_by,
+                                      'used_by_hidden': dist_used_by_hidden,
                                       'user': request.user.writer})
 
 @login_required()

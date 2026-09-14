@@ -404,8 +404,10 @@ def _prepare_yapp_categories(qset, json_payloads, lookup, is_new):
                 # uncategorized for a person to place.
                 unmatched.add((cat, sub))
                 return
+            # Minimums of 0 rather than nulls -- see set_importer._build_distribution.
             entry = DistributionEntry.objects.create(
-                distribution=qset.distribution, category=cat, subcategory=sub)
+                distribution=qset.distribution, category=cat, subcategory=sub,
+                min_tossups=0, min_bonuses=0)
             SetWideDistributionEntry.objects.create(
                 question_set=qset, dist_entry=entry, num_tossups=0, num_bonuses=0)
             lookup[(cat, sub)] = entry

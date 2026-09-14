@@ -74,6 +74,15 @@
     </div>
     <a class="app-nav-item{% if '/question_sets/' in request.path %} active{% endif %}" href="/question_sets/">
         <i class="fa fa-table-cells-large"></i> My Sets</a>
+    {% comment %}
+    The pages that belong to no set in particular. Editing a distribution or a
+    role group leaves the sidebar with nothing but My Sets on it, so the way
+    back to the list you came from was the browser's back button.
+    {% endcomment %}
+    <a class="app-nav-item{% if 'distribution' in request.path %} active{% endif %}" href="/distributions/">
+        <i class="fa fa-sliders"></i> Distribution Entry</a>
+    <a class="app-nav-item{% if 'role_group' in request.path %} active{% endif %}" href="/role_groups/">
+        <i class="fa fa-users"></i> Role Groups</a>
     {% endif %}
 
     {% comment %}

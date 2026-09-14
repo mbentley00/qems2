@@ -171,6 +171,37 @@ def set_activity_version(qset_id):
     return cache.get('activityver:{0}'.format(qset_id)) or '-'
 
 
+def split_visible_sets(sets, writer):
+    """(the sets `writer` may be told the names of, how many more there are).
+
+    A distribution is shared, so who is building on it is worth knowing before
+    changing it -- but a set's name is the set's to publish. Someone on the set,
+    or a set that has published itself, is fair to name; anything else is
+    counted."""
+    if writer is None:
+        return [], sets.count()
+    visible = sets.filter(
+        models.Q(owner=writer) | models.Q(co_owners=writer)
+        | models.Q(editor=writer) | models.Q(writer=writer)
+        | models.Q(public=True, approval_status='approved')
+    ).distinct()
+    return list(visible.order_by('name')), sets.count() - visible.count()
+
+
+def describe_sets(sets, writer, limit=3):
+    """The same, as a phrase to put in a sentence: a few names and a count of
+    whatever `writer` has no business seeing."""
+    visible, hidden = split_visible_sets(sets, writer)
+    names = sorted((qs.name or 'Untitled') for qs in visible)
+    shown, extra = names[:limit], len(names) - limit
+    parts = list(shown)
+    if extra > 0:
+        parts.append('{0} more'.format(extra))
+    if hidden:
+        parts.append("{0} you can't see".format(hidden))
+    return ', '.join(parts) if parts else 'none'
+
+
 class QuestionSet (models.Model):
     name = models.CharField(max_length=200)
     date = models.DateField()
@@ -895,6 +926,37 @@ class Distribution(models.Model):
         every public one."""
         return cls.objects.filter(models.Q(public=True) | models.Q(id__in=cls.member_ids(writer)))
 
+    def sets_using(self):
+        """Every set built on this distribution."""
+        return self.questionset_set.all()
+
+    def sets_visible_to(self, writer):
+        """(sets `writer` may know about, how many more there are)."""
+        return split_visible_sets(self.sets_using(), writer)
+
+    def deletion_blockers(self, writer=None):
+        """Why this distribution cannot be deleted, as sentences for whoever is
+        trying. An empty list means it can go.
+
+        The delete cascades a long way: to the distribution's categories, and
+        from each of those to every question filed under it and every set's
+        quota rows. So a distribution any set is built on is not deletable at
+        all -- not by whoever made it, and not even when the sets are theirs.
+        Emptying it first is the way through, and that is a decision per set
+        rather than one click here."""
+        blockers = []
+        sets = self.sets_using()
+        count = sets.count()
+        if count:
+            blockers.append('{0} set{1} built on this distribution ({2}).'.format(
+                count, ' is' if count == 1 else 's are', describe_sets(sets, writer)))
+        questions = (Tossup.objects.filter(category__distribution=self).count()
+                     + Bonus.objects.filter(category__distribution=self).count())
+        if questions:
+            blockers.append('{0} question{1} filed in its categories.'.format(
+                questions, ' is' if questions == 1 else 's are'))
+        return blockers
+
     @classmethod
     def selectable_by(cls, writer, keep=None):
         """The distributions to offer in a picker, by name: the ones `writer`
@@ -1192,11 +1254,9 @@ class DistributionEntry(models.Model):
         others = others.distinct()
         count = others.count()
         if count:
-            names = ', '.join(sorted(qs.name or 'Untitled' for qs in others[:3]))
-            if count > 3:
-                names += ', and {0} more'.format(count - 3)
             blockers.append('{0} other set{1} use{2} this distribution ({3}).'.format(
-                count, '' if count == 1 else 's', 's' if count == 1 else '', names))
+                count, '' if count == 1 else 's', 's' if count == 1 else '',
+                describe_sets(others, writer)))
         questions = self.tossup_set.count() + self.bonus_set.count()
         if questions:
             blockers.append('{0} question{1} {2} filed in {3}; move them first.'.format(

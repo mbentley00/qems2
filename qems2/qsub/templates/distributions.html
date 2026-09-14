@@ -13,14 +13,21 @@
     <li><a href="/edit_distribution/" class="button primary"><i class="fa fa-plus-circle"></i> Add Distribution</a></li>
     <li><a href="/import_distribution/" class="button secondary"><i class="fa fa-file-import"></i> Import from Spreadsheet</a></li>
 </ul>
+{% comment %}
+Who made each one, and what is built on it. A distribution is shared -- the
+categories on it belong to every set using it -- so both are worth knowing
+before changing anything, and the owner is who may archive or delete it.
+{% endcomment %}
 <table class="tablesorter table-striped table-hover" id="distributions-table">
     <thead>
         <th>Distribution Name</th>
+        <th>Created by</th>
+        <th>Used by</th>
         <th>Visibility</th>
     </thead>
     <tbody>
         {% if not dists %}
-            <tr><td colspan="2">No distributions available. Create one!</td></tr>
+            <tr><td colspan="4">No distributions available. Create one!</td></tr>
         {% else %}
         {% for dist in dists %}
         <tr>
@@ -32,6 +39,26 @@
                     {% csrf_token %}
                     <button type="submit" class="button tiny secondary">Clone</button>
                 </form>
+                {% if dist.is_mine %}
+                    {% if dist.blockers %}
+                    <span class="dist-nodelete" title="{{ dist.blockers|join:' ' }}">Can't delete</span>
+                    {% else %}
+                    <form method="post" action="/delete_distribution/{{ dist.id }}/" style="display:inline;"
+                          onsubmit="return confirm('Delete the distribution \'{{ dist.name|escapejs }}\' and all of its categories? Nothing is built on it, so nothing else goes with it. This cannot be undone.');">
+                        {% csrf_token %}
+                        <button type="submit" class="button tiny alert">Delete</button>
+                    </form>
+                    {% endif %}
+                {% endif %}
+            </td>
+            <td class="dist-owner">
+                {% if dist.is_mine %}You{% elif dist.created_by %}{{ dist.created_by|escape }}{% else %}<span class="dist-unknown">Unknown</span>{% endif %}
+            </td>
+            <td class="dist-usedby">
+                {% for qs in dist.used_by %}<a href="/edit_question_set/{{ qs.id }}/">{{ qs.name }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}
+                {% if dist.used_by and dist.used_by_hidden %}, {% endif %}
+                {% if dist.used_by_hidden %}<span class="dist-unknown">{{ dist.used_by_hidden }} set{{ dist.used_by_hidden|pluralize }} you can't see</span>{% endif %}
+                {% if not dist.used_by and not dist.used_by_hidden %}<span class="dist-unknown">No sets yet</span>{% endif %}
             </td>
             <td>
                 {% if dist.public %}
@@ -83,6 +110,14 @@
 /* An archived distribution is still listed -- this is the page you come to to
    bring one back -- so it is marked rather than hidden. */
 .dist-visibility.is-archived { color: #8a8f9c; margin-left: 8px; }
+.dist-owner, .dist-usedby { font-size: 0.9em; }
+.dist-unknown { color: #8a8f9c; font-style: italic; }
+/* A distribution with a set on it cannot be deleted at all -- the cascade
+   would take the questions with it -- so the page says so rather than
+   offering a button that would refuse. */
+.dist-nodelete { font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.04em;
+    color: #8a8f9c; border: 1px dashed #d5d9e0; border-radius: 3px; padding: 1px 5px;
+    cursor: help; margin-left: 6px; }
 .dist-public-note { font-size: 0.9em; color: #8a8f9c; margin-bottom: 0.5rem; }
 </style>
 

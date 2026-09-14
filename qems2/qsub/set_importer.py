@@ -359,8 +359,13 @@ def _build_distribution(dist_rows, qset, merge=False):
         key = '{0} - {1}'.format(category, subcategory)
         if merge and key in lookup:
             continue
+        # Minimums of 0, not nulls: the file says nothing about quotas, and a
+        # row of empty boxes is what made an imported distribution refuse to save
+        # until every one of them had been filled in. The maximums stay empty,
+        # which means no cap rather than a cap of nothing.
         entry = DistributionEntry.objects.create(
-            distribution=distribution, category=category, subcategory=subcategory)
+            distribution=distribution, category=category, subcategory=subcategory,
+            min_tossups=0, min_bonuses=0)
         SetWideDistributionEntry.objects.create(
             question_set=qset, dist_entry=entry,
             num_tossups=_to_int(row[2] if len(row) > 2 else 0),

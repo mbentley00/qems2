@@ -8376,7 +8376,20 @@ class DistributionEntryDeleteTests(TestCase):
         self.assertTrue(DistributionEntry.objects.filter(id=self.doomed.id).exists())
         body = resp.content.decode()
         self.assertIn('1 other set uses this distribution', body)
-        self.assertIn('ded theirs', body)
+
+    def test_a_set_you_are_not_on_is_counted_rather_than_named(self):
+        """Why the delete was refused, without telling you what someone else
+        has called the set they are writing."""
+        self._set_for(self.other, name='ded theirs')
+        body = self._post(delete_ids={self.doomed.id}).content.decode()
+        self.assertNotIn('ded theirs', body)
+        self.assertIn("1 you can&#x27;t see", body)
+
+    def test_a_set_you_are_on_is_named(self):
+        qset = self._set_for(self.other, name='ded shared')
+        qset.editor.add(self.mine)
+        body = self._post(delete_ids={self.doomed.id}).content.decode()
+        self.assertIn('ded shared', body)
 
     def test_questions_in_the_category_stop_the_delete(self):
         qset = self._set_for(self.mine)
@@ -8461,12 +8474,23 @@ class DistributionEntryDeleteTests(TestCase):
 
     def test_deletion_blockers_names_up_to_three_sets_then_counts(self):
         for n in range(5):
+            qset = QuestionSet.objects.create(
+                name='ded set {0}'.format(n), date=timezone.now(), host='h', address='',
+                owner=self.other, num_packets=1, distribution=self.dist)
+            qset.editor.add(self.mine)   # on all five, so all five may be named
+        blockers = self.doomed.deletion_blockers(self.mine)
+        self.assertIn('5 other sets use this distribution', blockers[0])
+        self.assertIn('2 more', blockers[0])
+
+    def test_deletion_blockers_count_the_sets_that_are_not_yours_to_see(self):
+        for n in range(5):
             QuestionSet.objects.create(
                 name='ded set {0}'.format(n), date=timezone.now(), host='h', address='',
                 owner=self.other, num_packets=1, distribution=self.dist)
         blockers = self.doomed.deletion_blockers(self.mine)
         self.assertIn('5 other sets use this distribution', blockers[0])
-        self.assertIn('and 2 more', blockers[0])
+        self.assertIn("5 you can't see", blockers[0])
+        self.assertNotIn('ded set 0', blockers[0])
 
     def test_a_distribution_with_no_creator_is_nobodys_to_delete_from(self):
         """Distributions predating created_by are null; nobody owns them."""
@@ -15479,3 +15503,196 @@ class SkipTypeQuestionsPreviewTests(TestCase):
         body = self.client.get('/edit_question_set/{0}/'.format(
             self.qset.id)).content.decode()
         self.assertIn('name="skip_type_questions_preview"', body)
+
+
+class ImportedDistributionEditingTests(TestCase):
+    """A distribution an importer built has categories and no quotas. Every
+    quota box being required meant none of it could be changed without filling
+    in all of them first."""
+
+    def setUp(self):
+        self.u = User.objects.create_user('impd_owner', password='pw', email='i@t.com')
+        self.owner = Writer.objects.get(user=self.u)
+        self.dist = Distribution.objects.create(name='Imported dist', created_by=self.owner,
+                                                created_date=timezone.now())
+        # As an importer leaves them: no numbers at all.
+        self.entry = DistributionEntry.objects.create(
+            distribution=self.dist, category='Science', subcategory='Biology')
+        self.client.login(username='impd_owner', password='pw')
+
+    def _post(self, **overrides):
+        data = {
+            'name': 'Imported dist',
+            'distentry-TOTAL_FORMS': '1', 'distentry-INITIAL_FORMS': '1',
+            'distentry-MIN_NUM_FORMS': '0', 'distentry-MAX_NUM_FORMS': '1000',
+            'distentry-0-entry_id': str(self.entry.id),
+            'distentry-0-category': 'Science', 'distentry-0-subcategory': 'Physics',
+            'distentry-0-min_tossups': '', 'distentry-0-min_bonuses': '',
+            'distentry-0-max_tossups': '', 'distentry-0-max_bonuses': '',
+        }
+        data.update(overrides)
+        return self.client.post('/edit_distribution/{0}/'.format(self.dist.id), data)
+
+    def test_a_row_with_no_numbers_saves(self):
+        self._post()
+        self.entry.refresh_from_db()
+        self.assertEqual(self.entry.subcategory, 'Physics')
+
+    def test_an_empty_minimum_is_no_minimum(self):
+        self._post()
+        self.entry.refresh_from_db()
+        self.assertEqual(self.entry.min_tossups, 0)
+        self.assertEqual(self.entry.min_bonuses, 0)
+
+    def test_an_empty_maximum_is_no_maximum_not_a_maximum_of_zero(self):
+        """Packetization reads an empty cap as 'as many as fit' and a cap of 0
+        as 'none of this category at all'. Filling a blank in with 0 would quietly
+        bar the category from every packet."""
+        self._post()
+        self.entry.refresh_from_db()
+        self.assertIsNone(self.entry.max_tossups)
+        self.assertIsNone(self.entry.max_bonuses)
+
+    def test_numbers_that_are_given_are_kept(self):
+        self._post(**{'distentry-0-min_tossups': '2', 'distentry-0-max_tossups': '3'})
+        self.entry.refresh_from_db()
+        self.assertEqual(self.entry.min_tossups, 2)
+        self.assertEqual(self.entry.max_tossups, 3)
+
+    def test_a_minimum_over_a_real_maximum_is_still_clamped(self):
+        self._post(**{'distentry-0-min_tossups': '5', 'distentry-0-max_tossups': '2'})
+        self.entry.refresh_from_db()
+        self.assertEqual(self.entry.min_tossups, 2)
+
+    def test_the_page_shows_a_missing_minimum_as_zero(self):
+        body = self.client.get('/edit_distribution/{0}/'.format(self.dist.id)).content.decode()
+        self.assertIn('name="distentry-0-min_tossups" value="0"', body)
+
+    def test_the_importer_gives_new_entries_real_minimums(self):
+        from qems2.qsub import set_importer
+        qset = QuestionSet.objects.create(
+            name='Imp Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=Distribution.objects.create(name='Fresh'))
+        set_importer._build_distribution([['History', 'World', '2', '2']], qset)
+        entry = DistributionEntry.objects.get(distribution=qset.distribution,
+                                              category='History')
+        self.assertEqual(entry.min_tossups, 0)
+        self.assertEqual(entry.min_bonuses, 0)
+        self.assertIsNone(entry.max_tossups)
+
+
+class DistributionOwnershipTests(TestCase):
+    """Who made a distribution, what is built on it, and whether it can go."""
+
+    def setUp(self):
+        self.u = User.objects.create_user('dso_owner', password='pw', email='o@t.com')
+        self.owner = Writer.objects.get(user=self.u)
+        self.ou = User.objects.create_user('dso_other', password='pw', email='x@t.com')
+        self.ou.first_name, self.ou.last_name = 'Sam', 'Stranger'
+        self.ou.save()
+        self.other = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='Owned dist', created_by=self.owner,
+                                                created_date=timezone.now())
+        self.entry = DistributionEntry.objects.create(
+            distribution=self.dist, category='Science', subcategory='Biology',
+            min_tossups=1, min_bonuses=1)
+        self.client.login(username='dso_owner', password='pw')
+
+    def _set_on_it(self, name, owner, public=False):
+        return QuestionSet.objects.create(
+            name=name, date=timezone.now(), host='h', address='', owner=owner,
+            num_packets=1, distribution=self.dist, public=public)
+
+    # ---- saying who owns it ----------------------------------------------
+
+    def test_the_edit_page_says_it_is_yours(self):
+        body = self.client.get('/edit_distribution/{0}/'.format(self.dist.id)).content.decode()
+        self.assertIn('Yours', body)
+
+    def test_the_edit_page_names_someone_elses_owner(self):
+        mine = self._set_on_it('Shared Set', self.other)
+        mine.editor.add(self.owner)          # I may edit the distribution, not own it
+        self.dist.created_by = self.other
+        self.dist.save()
+        body = self.client.get('/edit_distribution/{0}/'.format(self.dist.id)).content.decode()
+        self.assertIn('Sam Stranger', body)
+        self.assertIn('stays with whoever made it', body)
+
+    def test_the_list_says_who_made_each_one(self):
+        body = self.client.get('/distributions/').content.decode()
+        self.assertIn('Created by', body)
+
+    # ---- what is built on it ---------------------------------------------
+
+    def test_it_names_the_sets_you_can_see(self):
+        self._set_on_it('My Own Set', self.owner)
+        body = self.client.get('/edit_distribution/{0}/'.format(self.dist.id)).content.decode()
+        self.assertIn('My Own Set', body)
+
+    def test_it_counts_the_sets_you_cannot_see_without_naming_them(self):
+        """A set's name is the set's to publish."""
+        self._set_on_it('Secret Set', self.other)
+        body = self.client.get('/edit_distribution/{0}/'.format(self.dist.id)).content.decode()
+        self.assertNotIn('Secret Set', body)
+        self.assertIn("1 set you can't see", body)
+
+    def test_a_public_set_counts_as_one_you_can_see(self):
+        public = self._set_on_it('Public Set', self.other, public=True)
+        public.approval_status = QuestionSet.APPROVAL_APPROVED
+        public.save()
+        visible, hidden = self.dist.sets_visible_to(self.owner)
+        self.assertEqual([q.name for q in visible], ['Public Set'])
+        self.assertEqual(hidden, 0)
+
+    # ---- deleting it ------------------------------------------------------
+
+    def test_an_unused_distribution_can_be_deleted(self):
+        resp = self.client.post('/delete_distribution/{0}/'.format(self.dist.id))
+        self.assertEqual(resp.status_code, 302)
+        self.assertFalse(Distribution.objects.filter(id=self.dist.id).exists())
+        self.assertFalse(DistributionEntry.objects.filter(id=self.entry.id).exists())
+
+    def test_a_distribution_a_set_is_built_on_is_not_deleted(self):
+        """Even your own set: the cascade would take its questions with it."""
+        self._set_on_it('My Own Set', self.owner)
+        self.client.post('/delete_distribution/{0}/'.format(self.dist.id))
+        self.assertTrue(Distribution.objects.filter(id=self.dist.id).exists())
+
+    def test_someone_elses_distribution_is_not_deleted(self):
+        self.dist.created_by = self.other
+        self.dist.save()
+        self.client.post('/delete_distribution/{0}/'.format(self.dist.id))
+        self.assertTrue(Distribution.objects.filter(id=self.dist.id).exists())
+
+    def test_a_get_deletes_nothing(self):
+        self.client.get('/delete_distribution/{0}/'.format(self.dist.id))
+        self.assertTrue(Distribution.objects.filter(id=self.dist.id).exists())
+
+    def test_the_list_offers_delete_only_when_it_is_safe(self):
+        body = self.client.get('/distributions/').content.decode()
+        self.assertIn('/delete_distribution/{0}/'.format(self.dist.id), body)
+        self._set_on_it('My Own Set', self.owner)
+        body = self.client.get('/distributions/').content.decode()
+        self.assertNotIn('/delete_distribution/{0}/'.format(self.dist.id), body)
+        self.assertIn("Can't delete", body)
+
+
+class SidebarOutsideASetTests(TestCase):
+    """Editing a distribution or a role group leaves the sidebar with nothing on
+    it but My Sets, so the way back was the browser's back button."""
+
+    def setUp(self):
+        self.u = User.objects.create_user('side_user', password='pw', email='s@t.com')
+        self.owner = Writer.objects.get(user=self.u)
+        self.dist = Distribution.objects.create(name='Side dist', created_by=self.owner)
+        self.client.login(username='side_user', password='pw')
+
+    def test_the_distributions_page_links_on(self):
+        body = self.client.get('/distributions/').content.decode()
+        self.assertIn('href="/distributions/"', body)
+        self.assertIn('href="/role_groups/"', body)
+
+    def test_so_does_the_distribution_editor(self):
+        body = self.client.get('/edit_distribution/{0}/'.format(self.dist.id)).content.decode()
+        self.assertIn('href="/distributions/"', body)
+        self.assertIn('href="/role_groups/"', body)

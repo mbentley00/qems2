@@ -407,16 +407,37 @@ class DistributionEntryForm(forms.ModelForm):
     entry_id = forms.IntegerField(widget=forms.HiddenInput, required=False)
     category = forms.CharField(max_length=100, widget=forms.TextInput(attrs={}))
     subcategory = forms.CharField(max_length=100, widget=forms.TextInput(attrs={}), required=False)
-    min_tossups = forms.FloatField(widget=forms.NumberInput(attrs={}), min_value=0)
-    min_bonuses = forms.FloatField(widget=forms.NumberInput(attrs={}), min_value=0)
-    max_tossups = forms.FloatField(widget=forms.NumberInput(attrs={}), min_value=0)
-    max_bonuses = forms.FloatField(widget=forms.NumberInput(attrs={}), min_value=0)
+    # Blank means none, not 'you forgot'. A distribution built by an importer
+    # arrives with its categories and no quotas -- there are none in a packet
+    # file to read -- and when all four of these were required, every row of it
+    # had to be filled in before any single change to it could be saved.
+    # See clean() for what a blank one becomes.
+    min_tossups = forms.FloatField(widget=forms.NumberInput(attrs={}), min_value=0, required=False)
+    min_bonuses = forms.FloatField(widget=forms.NumberInput(attrs={}), min_value=0, required=False)
+    max_tossups = forms.FloatField(widget=forms.NumberInput(attrs={}), min_value=0, required=False)
+    max_bonuses = forms.FloatField(widget=forms.NumberInput(attrs={}), min_value=0, required=False)
 
     delete = forms.BooleanField(widget=forms.CheckboxInput, required=False)
 
     class Meta:
         model = DistributionEntry
         exclude = ['distribution']
+
+    def clean(self):
+        """An empty quota box is not a refusal to answer.
+
+        A blank minimum is no minimum, which is zero. A blank maximum is no
+        maximum, which is *not* zero: packetization reads an empty cap as 'as
+        many as fit' and a cap of 0 as 'none of this category', so it is left
+        empty rather than helpfully filled in.
+
+        The row still has to say which category it is; only the numbers may be
+        left out."""
+        cleaned = super(DistributionEntryForm, self).clean()
+        for field in ('min_tossups', 'min_bonuses'):
+            if cleaned.get(field) is None:
+                cleaned[field] = 0
+        return cleaned
 
 class TieBreakDistributionEntryForm(forms.Form):
 

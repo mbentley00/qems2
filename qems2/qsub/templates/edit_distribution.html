@@ -13,10 +13,17 @@
 {% if message %}
     <div class="{{ message_class }}">{{ message }}</div>
 {% endif %}
+{% comment %}
+The numbers are per packet, and they may be left out: a blank minimum is no
+minimum, and a blank maximum is no maximum (which is not a maximum of zero).
+A distribution an importer built arrives with no numbers at all, and when all
+four were required, every row had to be filled in before one change could be
+saved.
+{% endcomment %}
 {% if formset.total_error_count > 0 %}
-    <div class="alert-box alert">All question numbers are required and are per packet.</div>
+    <div class="alert-box alert">Some of these rows could not be saved &mdash; see the boxes below. Question numbers are per packet.</div>
 {% else %}
-    <div class="alert-box info">All question numbers are required and are per packet.</div>
+    <div class="alert-box info">Question numbers are per packet. Leave a minimum empty for none, and a maximum empty for no limit.</div>
 {% endif %}
 <form action="" method="post">
     {% csrf_token %}
@@ -31,6 +38,26 @@
             {{ form.name.errors }}
         {% endif %}
     </div>
+    {% if dist %}
+    {% comment %}
+    Whose distribution this is, and what is built on it. Both were invisible
+    here, which made the missing Archive checkbox and a refused category
+    delete look arbitrary -- they are the owner's, and the sets are why.
+    {% endcomment %}
+    <p class="dist-owner-line">
+        <i class="fa fa-user"></i>
+        {% if is_dist_owner %}Yours{% elif dist.created_by %}Created by <strong>{{ dist.created_by|escape }}</strong>{% else %}Created by someone this system no longer records{% endif %}
+        {% if dist.created_date %}on {{ dist.created_date|date:"M j, Y" }}{% endif %}
+        {% if not is_dist_owner %}&mdash; you can change its categories; archiving it, and deleting one of them, stays with whoever made it.{% endif %}
+    </p>
+    <p class="dist-owner-line">
+        <i class="fa fa-layer-group"></i> Used by
+        {% for qs in used_by %}<a href="/edit_question_set/{{ qs.id }}/">{{ qs.name }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}
+        {% if used_by and used_by_hidden %}, {% endif %}
+        {% if used_by_hidden %}{{ used_by_hidden }} set{{ used_by_hidden|pluralize }} you can't see{% endif %}
+        {% if not used_by and not used_by_hidden %}no sets yet{% endif %}
+    </p>
+    {% endif %}
     <div class="dist-visibility-field">
         <label for="{{ form.public.id_for_label }}">
             {{ form.public }} {{ form.public.label }}
@@ -153,6 +180,8 @@ $(function () {
 .dist-visibility-field label { font-weight: bold; display: inline-block; margin: 0; }
 .dist-visibility-field input[type="checkbox"] { margin: 0 0.35em 0 0; vertical-align: baseline; }
 .dist-visibility-help { margin: 0.15rem 0 0 1.6em; font-size: 0.85em; color: #8a8f9c; }
+.dist-owner-line { margin: 0 0 0.25rem; font-size: 0.88rem; color: #6b7280; }
+.dist-owner-line .fa { margin-right: 0.35em; color: #8a8f9c; }
 </style>
 
 {% endblock %}
