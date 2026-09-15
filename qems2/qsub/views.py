@@ -3288,6 +3288,9 @@ def edit_tossup(request, tossup_id):
         new_checks = None
         if request.GET.get('new') and tossup is not None:
             new_checks = _new_question_checks(qset, tossup, 'tossup')
+        elif tossup is not None:
+            # Repeats are worth knowing about on any visit, not just after a save.
+            dup_matches = _post_submit_dup_matches(qset, tossup, 'tossup')
 
         if request.GET.get('suggested') is not None and tossup is not None:
             if request.GET.get('suggested') != '0':
@@ -3312,6 +3315,7 @@ def edit_tossup(request, tossup_id):
              'playtest': _question_buzz_data(tossup, 'tossup'),
              'discord_threads': tossup.discord_threads.order_by('created_date'),
              'new_checks': new_checks,
+             'dup_matches': dup_matches,
              'constraint_qtype': 'tossup',
              'constraint_qid': tossup.id if tossup else None,
              'constraint_rows': (_constraint_rows(qset, 'tossup', tossup.id)
@@ -3477,6 +3481,9 @@ def edit_bonus(request, bonus_id):
         new_checks = None
         if request.GET.get('new') and bonus is not None:
             new_checks = _new_question_checks(qset, bonus, 'bonus')
+        elif bonus is not None:
+            # Repeats are worth knowing about on any visit, not just after a save.
+            dup_matches = _post_submit_dup_matches(qset, bonus, 'bonus')
 
         if request.GET.get('suggested') is not None and bonus is not None:
             if request.GET.get('suggested') != '0':
@@ -3490,6 +3497,7 @@ def edit_bonus(request, bonus_id):
             {'bonus': bonus,
              'packet_nav': _packet_neighbors(bonus, 'bonus'),
              'new_checks': new_checks,
+             'dup_matches': dup_matches,
              'constraint_qtype': 'bonus',
              'constraint_qid': bonus.id if bonus else None,
              'constraint_rows': (_constraint_rows(qset, 'bonus', bonus.id)

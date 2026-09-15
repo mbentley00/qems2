@@ -7763,6 +7763,16 @@ class PostSubmitFlowTests(TestCase):
         body = self.client.get('/edit_tossup/{0}/?new=1'.format(newest.id)).content.decode()
         self.assertIn('Repeat check', body)
 
+    def test_edit_page_lists_repeats_without_a_save(self):
+        self._add_tossup(answer='_Napoleon_')
+        self._add_tossup(answer='_Napoleon_')
+        newest = Tossup.objects.filter(question_set=self.qset).order_by('-id').first()
+        plain = self.client.get('/edit_tossup/{0}/'.format(newest.id)).content.decode()
+        self.assertIn('Possible duplicate', plain)
+        # The one-time report already lists them; don't say it twice.
+        fresh = self.client.get('/edit_tossup/{0}/?new=1'.format(newest.id)).content.decode()
+        self.assertNotIn('Possible duplicate', fresh)
+
     def test_add_bonus_lands_on_the_new_question(self):
         resp = self.client.post('/add_bonuses/{0}/{1}/'.format(self.qset.id, ACF_STYLE_BONUS), {
             'leadin': 'For 10 points each, name these things:',

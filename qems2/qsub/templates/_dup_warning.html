@@ -2,7 +2,6 @@
 <div class="alert-box warning radius" data-alert>
     <strong>Possible duplicate{{ dup_matches|length|pluralize }} detected.</strong>
     This question's answer also appears on {{ dup_matches|length }} other question{{ dup_matches|length|pluralize }} in this set.
-    You can revise the question above and re-submit, or proceed anyway &mdash; it's already saved.
     <ul style="margin-top: 0.5rem;">
     {% autoescape off %}
     {% for m in dup_matches %}
@@ -18,6 +17,6 @@
     {% endfor %}
     {% endautoescape %}
     </ul>
-    <a href="#" onclick="this.closest('.alert-box').style.display='none'; return false;" class="button tiny secondary" style="margin-bottom:0;">Proceed anyway (dismiss)</a>
+    <a href="#" onclick="this.closest('.alert-box').style.display='none'; return false;" class="button tiny secondary" style="margin-bottom:0;">Dismiss</a>
 </div>
 {% endif %}
