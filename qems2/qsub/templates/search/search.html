@@ -48,10 +48,8 @@
                 <div class="small-9 columns">
                     <select class="form-control" id="id_category" name="category">
                         <option value="All" {% if search_category == "All" %} selected {% endif %}>All Categories</option>
-                        {% for category in categories %}
-                        {% with category.0|add:" - "|add:category.1 as cat %}
+                        {% for cat in categories %}
                         <option value="{{ cat }}" {% if search_category == cat %} selected {% endif %}>{{ cat }}</option>
-                        {% endwith %}
                         {% endfor %}
                     </select>
                 </div>
@@ -81,10 +79,47 @@
                 <input id="id_models_1" name="models" type="checkbox" value="qsub.bonus" />
             {% endif%}
             <label for="id_models_1">Bonuses</label>
+            {% comment %}
+            Searching the answer lines alone: the question is what has this set
+            already asked about, where a match inside somebody's clue is noise.
+            {% endcomment %}
+            {% if answers_only %}
+                <input checked="checked" id="id_answers_only" name="answers_only" type="checkbox" value="1" />
+            {% else %}
+                <input id="id_answers_only" name="answers_only" type="checkbox" value="1" />
+            {% endif %}
+            <label for="id_answers_only">Answer lines only</label>
         </div>
     </div>
-    <input type="submit" value="Search" class="button primary right" />
+    <div class="search-actions">
+        <input type="submit" value="Search" class="button primary" />
+    </div>
 </form>
+
+{% comment %}
+The categories offered are the ones the chosen set can actually file a question
+under, so they change with the Tournament dropdown without a round trip. The
+whole-union list is what a search across every set gets.
+{% endcomment %}
+{{ categories_by_set|json_script:"search-categories-by-set" }}
+{{ all_categories|json_script:"search-categories-all" }}
+<script>
+$(function () {
+    var bySet = JSON.parse(document.getElementById('search-categories-by-set').textContent);
+    var every = JSON.parse(document.getElementById('search-categories-all').textContent);
+    var $qset = $('#id_qset'), $all = $('#id_models_2'), $cat = $('#id_category');
+    function repopulate() {
+        var list = $all.is(':checked') ? every : (bySet[$qset.val()] || []);
+        var chosen = $cat.val();
+        $cat.empty().append($('<option>').val('All').text('All Categories'));
+        $.each(list, function (_, c) { $cat.append($('<option>').val(c).text(c)); });
+        // Keep the chosen category when the new set also has it.
+        $cat.val($.inArray(chosen, list) >= 0 ? chosen : 'All');
+    }
+    $qset.on('change', repopulate);
+    $all.on('change', repopulate);
+});
+</script>
 
 {% if search_term and result %}
 <div class="panel callout radius text-center"><strong>Results</strong></div>
@@ -100,7 +135,7 @@ only when the results can come from more than one set.
 <table class="tablesorter table-striped table-hover" id="search-results">
     <thead>
     <tr>
-        {% for col in table_columns %}<th>{{ col.label }}</th>{% endfor %}
+        {% for col in table_columns %}<th class="qtable-col-{{ col.key }}">{{ col.label }}</th>{% endfor %}
         {% if show_tournament %}<th>Tournament</th>{% endif %}
     </tr>
     </thead>

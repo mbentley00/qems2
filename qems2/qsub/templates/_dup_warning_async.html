@@ -1,0 +1,25 @@
+{% comment %}
+The repeat warning on an edit page, fetched after the page has rendered.
+
+Include with: {% include "_dup_warning_async.html" with question_type="tossup" q_id=tossup.id %}
+
+Scanning a set's answers costs time in proportion to the size of the set, so
+the edit page does not wait for it. /question_repeats/ returns the same
+_dup_warning.html markup the add pages and the post-save render use, so there
+is one template for this warning rather than a second one written in JS.
+
+Leave it out when the page is already showing the matches (a post-save render,
+or the one-time ?new=1 report) or the writer sees the same list twice.
+{% endcomment %}
+<div class="dup-warning-async" data-qtype="{{ question_type }}" data-qid="{{ q_id }}"></div>
+<script>
+$(function () {
+    var $slot = $('.dup-warning-async');
+    if (!$slot.length || !$slot.data('qid')) { return; }
+    $.getJSON('/question_repeats/', { question_type: $slot.data('qtype'),
+                                      question_id: $slot.data('qid') })
+        .done(function (resp) {
+            if (resp && resp.ok && resp.html) { $slot.html(resp.html); }
+        });
+});
+</script>

@@ -58,18 +58,49 @@ from django.utils import timezone
 from django.core.cache import cache
 
 
-def fulltext_filter(queryset, query):
+def fulltext_filter(queryset, query, answers_only=False):
     """Full-text match against the maintained search_question_content /
     search_question_answers fields. Uses Postgres full-text search in
-    production and falls back to icontains on SQLite (local dev)."""
+    production and falls back to icontains on SQLite (local dev).
+
+    `answers_only` searches the answer lines alone -- looking for what a set has
+    already asked about, where a match in the middle of somebody's clue is
+    noise.
+    """
     if not query:
         return queryset.none()
     if connection.vendor == 'postgresql':
         from django.contrib.postgres.search import SearchVector, SearchQuery
-        vector = SearchVector('search_question_content', 'search_question_answers')
+        fields = (('search_question_answers',) if answers_only
+                  else ('search_question_content', 'search_question_answers'))
+        vector = SearchVector(*fields)
         return queryset.annotate(qsearch=vector).filter(qsearch=SearchQuery(query, search_type='websearch'))
+    if answers_only:
+        return queryset.filter(search_question_answers__icontains=query)
     return queryset.filter(
         Q(search_question_content__icontains=query) | Q(search_question_answers__icontains=query))
+
+
+def _search_category_choices(question_sets):
+    """The category choices for the search page, per set and overall.
+
+    Returns (by_set, every): `by_set` maps a set's id to its own categories,
+    `every` is the union for a search that spans sets. Categories come from the
+    distribution the set is built on, so the list offered is the list that set
+    can actually file a question under -- the page used to offer every category
+    of every distribution in the database, most of which match nothing in the
+    set being searched. Both lists are alphabetical.
+    """
+    dist_of_set = {qs.id: qs.distribution_id for qs in question_sets}
+    by_dist = {}
+    for dist_id, category, subcategory in DistributionEntry.objects.filter(
+            distribution_id__in=set(dist_of_set.values())).values_list(
+            'distribution_id', 'category', 'subcategory'):
+        by_dist.setdefault(dist_id, set()).add('{0} - {1}'.format(category, subcategory))
+    by_set = {set_id: sorted(by_dist.get(dist_id, ()))
+              for set_id, dist_id in dist_of_set.items()}
+    every = sorted(set().union(*by_dist.values())) if by_dist else []
+    return by_set, every
 
 from django.contrib.contenttypes.models import ContentType
 
@@ -3288,9 +3319,6 @@ def edit_tossup(request, tossup_id):
         new_checks = None
         if request.GET.get('new') and tossup is not None:
             new_checks = _new_question_checks(qset, tossup, 'tossup')
-        elif tossup is not None:
-            # Repeats are worth knowing about on any visit, not just after a save.
-            dup_matches = _post_submit_dup_matches(qset, tossup, 'tossup')
 
         if request.GET.get('suggested') is not None and tossup is not None:
             if request.GET.get('suggested') != '0':
@@ -3481,9 +3509,6 @@ def edit_bonus(request, bonus_id):
         new_checks = None
         if request.GET.get('new') and bonus is not None:
             new_checks = _new_question_checks(qset, bonus, 'bonus')
-        elif bonus is not None:
-            # Repeats are worth knowing about on any visit, not just after a save.
-            dup_matches = _post_submit_dup_matches(qset, bonus, 'bonus')
 
         if request.GET.get('suggested') is not None and bonus is not None:
             if request.GET.get('suggested') != '0':
@@ -5557,11 +5582,7 @@ def search(request, passed_qset_id=None):
     question_sets = QuestionSet.objects.filter(Q(writer=user) | Q(editor=user) | Q(owner=user)).distinct()
 
     if request.method == 'GET':
-        all_categories = [(cat.category, cat.subcategory) for cat in DistributionEntry.objects.all()]
-        categories = []
-        for cat in all_categories:
-            if cat not in categories:
-                categories.append(cat)
+        categories_by_set, all_categories = _search_category_choices(question_sets)
 
         if request.GET.dict() == {}:
 
@@ -5569,7 +5590,10 @@ def search(request, passed_qset_id=None):
 
             return render(request, 'search/search.html',
                                       {'user': user,
-                                       'categories': categories,
+                                       'categories': (categories_by_set.get(q_set.id, [])
+                                                      if q_set else all_categories),
+                                       'categories_by_set': categories_by_set,
+                                       'all_categories': all_categories,
                                        'q_sets': question_sets,
                                        'selected_qset': q_set,
                                        'tossups_selected': 'checked',
@@ -5583,6 +5607,7 @@ def search(request, passed_qset_id=None):
             qset_id = int(request.GET.get('qset'))
             qset = QuestionSet.objects.get(id=qset_id)
             search_category = request.GET.get('category')
+            answers_only = request.GET.get('answers_only') == '1'
             tossups_selected = "unchecked"
             bonuses_selected = "unchecked"
             search_all_selected = "unchecked"
@@ -5606,12 +5631,12 @@ def search(request, passed_qset_id=None):
                     tu_qs = (Tossup.objects.filter(question_set_id__in=set_ids)
                              .select_related(*QUESTION_LIST_RELATED)
                              .prefetch_related('category_tags'))
-                    questions += list(fulltext_filter(tu_qs, query))
+                    questions += list(fulltext_filter(tu_qs, query, answers_only))
                 if 'qsub.bonus' in search_models:
                     bs_qs = (Bonus.objects.filter(question_set_id__in=set_ids)
                              .select_related(*QUESTION_LIST_RELATED)
                              .prefetch_related('category_tags'))
-                    questions += list(fulltext_filter(bs_qs, query))
+                    questions += list(fulltext_filter(bs_qs, query, answers_only))
 
                 if search_category and search_category != 'All':
                     questions = [q for q in questions if str(q.category) == search_category]
@@ -5635,11 +5660,15 @@ def search(request, passed_qset_id=None):
 
             return render(request, 'search/search.html',
                                       {'user': user,
-                                       'categories': categories,
+                                       'categories': (all_categories if search_all_selected == 'checked'
+                                                      else categories_by_set.get(qset.id, [])),
+                                       'categories_by_set': categories_by_set,
+                                       'all_categories': all_categories,
                                        'q_sets': question_sets,
                                        'result': result,
                                        'search_term': query,
                                        'search_category': search_category,
+                                       'answers_only': answers_only,
                                        'selected_qset': qset,
                                        'tossups_selected': tossups_selected,
                                        'bonuses_selected': bonuses_selected,
@@ -11427,6 +11456,34 @@ def style_ignored(request, qset_id):
                    'extra_crumb': 'Ignored',
                    'extra_crumb_url': '/style_ignored/{0}/'.format(qset.id),
                    'read_only': not (qset.is_owner(user) or user in qset.editor.all())})
+
+
+@login_required
+def question_repeats(request):
+    """JSON: the repeated-answer warning for one question, already rendered.
+
+    The edit pages ask for this after they have loaded rather than computing it
+    in their own request: the scan is proportional to the size of the set, so on
+    a few thousand questions it is felt as a slow page. Returning the rendered
+    partial keeps one template for the warning wherever it appears.
+    """
+    from django.template.loader import render_to_string
+    user = request.user.writer
+    qtype = request.GET.get('question_type', '')
+    qid = request.GET.get('question_id', '')
+    if not qid.isdigit():
+        return HttpResponse(json.dumps({'ok': False, 'error': 'No such question'}), status=404)
+    question = _style_question(qtype, qid)
+    if question is None:
+        return HttpResponse(json.dumps({'ok': False, 'error': 'No such question'}), status=404)
+    qset = question.question_set
+    if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+        return HttpResponse(json.dumps({'ok': False, 'error': 'Not authorized'}), status=403)
+
+    matches = _post_submit_dup_matches(qset, question, qtype)
+    html = render_to_string('_dup_warning.html', {'dup_matches': matches}) if matches else ''
+    return HttpResponse(json.dumps({'ok': True, 'count': len(matches), 'html': html}),
+                        content_type='application/json')
 
 
 @login_required

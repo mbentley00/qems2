@@ -35,6 +35,9 @@
 {% endautoescape %}
 {# One-time style/repeat report when arriving straight from creating the question. #}
 {% include "_new_question_checks.html" %}
+{% if tossup and not dup_matches and not new_checks %}
+{% include "_dup_warning_async.html" with question_type="tossup" q_id=tossup.id %}
+{% endif %}
 
 {% if tossup %}{% get_threaded_comments tossup as thread_data %}{% endif %}
 {% comment %}

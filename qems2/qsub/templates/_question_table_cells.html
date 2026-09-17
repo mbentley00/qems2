@@ -34,9 +34,9 @@ markup, so anything here that is a writer's own words escapes explicitly.
     {% elif col.key == 'packet' %}
     <td>{% if q.packet %}<a href="/view_packet/{{ q.packet.id }}/" title="Open this packet">{{ q.packet|escape }}</a>{% else %}Not in packet{% endif %}</td>
     {% elif col.key == 'created' %}
-    <td>{{ q.created_date|to_short_datetime }}</td>
+    <td class="qtable-date">{{ q.created_date|to_short_datetime }}</td>
     {% elif col.key == 'modified' %}
-    <td>{{ q.last_changed_date|to_short_datetime }}</td>
+    <td class="qtable-date">{{ q.last_changed_date|to_short_datetime }}</td>
     {% elif col.key == 'edited' %}
     <td>{% if q.edited_date %}{{ q.edited_date|to_short_datetime }}{% endif %}</td>
     {% elif col.key == 'proofread' %}

@@ -301,14 +301,56 @@ def lookup_answer_matches(index, norms, exclude=None):
 
 def find_answer_matches(qset, question, qtype):
     """Find other questions in `qset` whose normalized answer matches any answer
-    of `question` (a Tossup or Bonus). Used for the post-submit "you may have
-    created a duplicate" check. Returns a list of lightweight entry dicts."""
+    of `question` (a Tossup or Bonus). Used for the "you may have created a
+    duplicate" check. Returns a list of lightweight entry dicts.
+
+    One question against one set, so this does NOT go through
+    `build_answer_index`: that builds a model instance per question in the set
+    (plus its category, author and packet), which on a few thousand questions
+    costs most of a second and swamped the edit page. Answers are scanned as
+    raw column values, and only the handful that match are loaded properly.
+    """
+    from .models import Tossup, Bonus
+
     norms = answer_norms(question, qtype)
     if not norms:
         return []
     qid = getattr(question, 'id', None)
     exclude = (qtype, qid) if qid is not None else None
-    return lookup_answer_matches(build_answer_index(qset), norms, exclude)
+
+    hits = []  # (seq, type, id, answer_raw, part_label), in set order
+    seq = 0
+    for tu_id, answer in Tossup.objects.filter(question_set=qset).values_list('id', 'tossup_answer'):
+        if normalize_answer(answer) in norms and exclude != ('tossup', tu_id):
+            hits.append((seq, 'tossup', tu_id, answer, None))
+        seq += 1
+    for b_id, a1, a2, a3 in Bonus.objects.filter(question_set=qset).values_list(
+            'id', 'part1_answer', 'part2_answer', 'part3_answer'):
+        for label, answer in (('Part 1', a1), ('Part 2', a2), ('Part 3', a3)):
+            if normalize_answer(answer) in norms and exclude != ('bonus', b_id):
+                hits.append((seq, 'bonus', b_id, answer, label))
+            seq += 1
+    if not hits:
+        return []
+
+    found = {}
+    for tu in Tossup.objects.filter(
+            id__in=[h[2] for h in hits if h[1] == 'tossup']).select_related(
+            'category', 'author__user', 'packet'):
+        found[('tossup', tu.id)] = tu
+    for bonus in Bonus.objects.filter(
+            id__in=[h[2] for h in hits if h[1] == 'bonus']).select_related(
+            'category', 'author__user', 'packet'):
+        found[('bonus', bonus.id)] = bonus
+
+    entries = []
+    for seq, qt, q_id, answer, label in hits:
+        obj = found[(qt, q_id)]
+        entries.append({'type': qt, 'id': q_id, 'answer_raw': answer,
+                        'category_str': _get_category_str(obj), 'author': str(obj.author),
+                        'part_label': label, 'seq': seq,
+                        'packet': obj.packet.packet_name if obj.packet else ''})
+    return entries
 
 
 SENTENCE_SPLIT = re.compile(r'[.;!?]+')

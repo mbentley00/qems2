@@ -3515,7 +3515,9 @@ class SearchResultColumnTests(TestCase):
         body = self.client.get(url).content.decode()
         table = body[body.find('id="search-results"'):]
         head = table[:table.find('</thead>')]
-        return re.findall(r'<th>(.*?)</th>', head)
+        # The search table labels each header with its column key, so the
+        # stylesheet can align a numeric column's heading over its numbers.
+        return re.findall(r'<th[^>]*>(.*?)</th>', head)
 
     def test_the_results_use_the_set_s_columns(self):
         self.qset.question_table_columns = 'preview,answer,category,packet'
@@ -7763,15 +7765,38 @@ class PostSubmitFlowTests(TestCase):
         body = self.client.get('/edit_tossup/{0}/?new=1'.format(newest.id)).content.decode()
         self.assertIn('Repeat check', body)
 
-    def test_edit_page_lists_repeats_without_a_save(self):
+    def test_edit_page_asks_for_repeats_without_a_save(self):
+        # The page itself does not scan the set -- that is proportional to the
+        # size of the set -- it asks for the warning once it has loaded.
         self._add_tossup(answer='_Napoleon_')
         self._add_tossup(answer='_Napoleon_')
         newest = Tossup.objects.filter(question_set=self.qset).order_by('-id').first()
         plain = self.client.get('/edit_tossup/{0}/'.format(newest.id)).content.decode()
-        self.assertIn('Possible duplicate', plain)
-        # The one-time report already lists them; don't say it twice.
+        self.assertIn('dup-warning-async', plain)
+        self.assertNotIn('Possible duplicate', plain)
+        # The one-time report already lists them; don't ask for them again.
         fresh = self.client.get('/edit_tossup/{0}/?new=1'.format(newest.id)).content.decode()
-        self.assertNotIn('Possible duplicate', fresh)
+        self.assertNotIn('dup-warning-async', fresh)
+
+    def test_question_repeats_endpoint_renders_the_warning(self):
+        self._add_tossup(answer='_Napoleon_')
+        self._add_tossup(answer='_Napoleon_')
+        newest = Tossup.objects.filter(question_set=self.qset).order_by('-id').first()
+        resp = self.client.get('/question_repeats/',
+                               {'question_type': 'tossup', 'question_id': newest.id})
+        payload = json.loads(resp.content.decode())
+        self.assertTrue(payload['ok'])
+        self.assertEqual(payload['count'], 1)
+        self.assertIn('Possible duplicate', payload['html'])
+
+    def test_question_repeats_is_quiet_when_the_answer_is_unique(self):
+        self._add_tossup(answer='_a lonely answer_')
+        only = Tossup.objects.filter(question_set=self.qset).order_by('-id').first()
+        resp = self.client.get('/question_repeats/',
+                               {'question_type': 'tossup', 'question_id': only.id})
+        payload = json.loads(resp.content.decode())
+        self.assertEqual(payload['count'], 0)
+        self.assertEqual(payload['html'], '')
 
     def test_add_bonus_lands_on_the_new_question(self):
         resp = self.client.post('/add_bonuses/{0}/{1}/'.format(self.qset.id, ACF_STYLE_BONUS), {

@@ -277,7 +277,11 @@
         .set-credits-intro { margin: 0 0 10px; font-size: 0.85rem; color: #8a8f9c; }
         .set-credits-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 20px; }
         .set-credits-field label { font-weight: 600; }
-        .set-credits-field textarea { min-height: 7em; margin-bottom: 2px; font-family: var(--qx-sans); }
+        {# A credit line is a line or three, not an essay: the boxes were taller
+           than everything else on the page put together, and they grow if the
+           text does. #}
+        .set-credits-field textarea { min-height: 3.4em; height: 3.4em; margin-bottom: 2px;
+            font-family: var(--qx-sans); resize: vertical; }
         .set-credits-field small { color: #8a8f9c; }
         .set-credits-tokens { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 0; }
         .set-credits-tokens .button { margin: 0; }

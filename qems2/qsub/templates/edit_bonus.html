@@ -35,6 +35,9 @@
 {% endautoescape %}
 {# One-time style/repeat report when arriving straight from creating the question. #}
 {% include "_new_question_checks.html" %}
+{% if bonus and not dup_matches and not new_checks %}
+{% include "_dup_warning_async.html" with question_type="bonus" q_id=bonus.id %}
+{% endif %}
 
 {% if bonus %}{% get_threaded_comments bonus as thread_data %}{% endif %}
 {% comment %}

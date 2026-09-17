@@ -261,6 +261,17 @@ html[data-theme="dark"] .qtable-tag { background: var(--qx-elevate); color: var(
    1,400px tall. The table scrolls sideways instead. */
 .search-results-wrap { overflow-x: auto; }
 #search-results .qtable-preview { min-width: 26rem; }
+/* The question column runs to many lines, so everything beside it belongs at
+   its first line rather than floating halfway down the row. */
+#search-results td { vertical-align: top; }
+#search-results th { vertical-align: bottom; }
+/* A right-aligned count under a left-aligned heading read as a stray column. */
+#search-results th.qtable-col-length { text-align: right; }
+/* Dates and counts are single values; wrapping them made two ragged lines. */
+#search-results .qtable-length, #search-results .qtable-date { white-space: nowrap; }
+/* Search sat on its own line, floated, and the results panel rode up under it. */
+.search-actions { display: flex; justify-content: flex-end; margin: 0 0 1rem; }
+.search-actions .button { margin: 0; }
 
 /* Unsaved changes on an edit page: a bar that stays under the top bar for the
    length of the page, so Save is in reach from wherever you are in a long
@@ -1147,6 +1158,11 @@ a.app-crumb-muted:hover { color: var(--qx-ink); }
 .app-search-item:hover { background: #f3edfd; text-decoration: none; }
 .app-search-item .ass-ans { font-weight: 600; color: var(--qx-ink); }
 .app-search-item .ass-loc { font-size: .74rem; color: var(--qx-muted); }
+/* Category tags on a result, as chips rather than more of the grey meta line. */
+.app-search-item .ass-tags { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; }
+.app-search-item .ass-tag { padding: 0 6px; border-radius: 8px; background: #efe6fb;
+    color: #5b21b6; font-size: .68rem; line-height: 1.6; white-space: nowrap; }
+.app-search-item .ass-tag-more { align-self: center; font-size: .68rem; color: var(--qx-muted); }
 .app-search-empty { padding: 9px 10px; color: var(--qx-muted); font-size: .82rem; }
 
 /* Long editable tables (distribution entries, tiebreaks) keep their column
@@ -1391,6 +1407,7 @@ html[data-theme="dark"] .app-search input::placeholder { color: var(--qx-muted);
 html[data-theme="dark"] .app-search-kbd { background: var(--qx-elevate); }
 html[data-theme="dark"] .app-search-results { background: var(--qx-card); border-color: var(--qx-border); }
 html[data-theme="dark"] .app-search-item:hover { background: var(--qx-hover); }
+html[data-theme="dark"] .app-search-item .ass-tag { background: var(--qx-elevate); color: var(--qx-text); }
 
 /* Content: headings, cards, panels */
 html[data-theme="dark"] .app-content,

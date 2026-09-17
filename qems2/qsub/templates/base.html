@@ -10,7 +10,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
 
     <link rel="stylesheet" href="{% static 'css/app.min.css' %}">
-    <link rel="stylesheet" href="{% static 'css/base.css' %}?v=74">
+    <link rel="stylesheet" href="{% static 'css/base.css' %}?v=75">
     <link rel="stylesheet" href="{% static 'fontawesome/css/all.min.css' %}">
 
     {# Apply saved sidebar-collapsed + theme preferences before first paint (shared across tabs via localStorage). #}
@@ -185,9 +185,21 @@
                     // on the same answer are told apart by the category. Same
                     // order as the Quick Search page's own result lines.
                     var loc = [r.location, r.category].filter(Boolean).join(' · ');
+                    // What a question is tagged with is most of what an archive
+                    // search is narrowing towards. The payload already carries
+                    // them (the Quick Search page shows the lot), so this is a
+                    // few chips, not another request; three keeps the row one
+                    // line deep, with a count for the rest.
+                    var tags = (r.tags || []).slice(0, 3), extra = (r.tags || []).length - tags.length;
+                    var chips = tags.length
+                        ? '<span class="ass-tags">' + tags.map(function (t) {
+                              return '<span class="ass-tag">' + sEsc(t) + '</span>';
+                          }).join('') + (extra > 0 ? '<span class="ass-tag-more">+' + extra + '</span>' : '')
+                          + '</span>'
+                        : '';
                     return '<a class="app-search-item" href="' + r.edit_url + '" target="_blank" rel="noopener">'
                         + '<span class="ass-ans">' + sEsc(r.answer) + '</span>'
-                        + '<span class="ass-loc">' + sEsc(loc) + '</span></a>';
+                        + '<span class="ass-loc">' + sEsc(loc) + '</span>' + chips + '</a>';
                 }).join('');
                 sRes.style.display = 'block';
             }
