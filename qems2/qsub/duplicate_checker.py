@@ -49,6 +49,7 @@ STOPWORDS = frozenset({
 
 LEADING_ARTICLES = re.compile(r'^(the|a|an)\s+', re.IGNORECASE)
 PUNCTUATION_TABLE = str.maketrans('', '', string.punctuation)
+PLACEHOLDER_ANSWERS = frozenset({'incomplete'})
 
 
 def normalize_answer(raw_answer):
@@ -65,6 +66,11 @@ def normalize_answer(raw_answer):
     text = LEADING_ARTICLES.sub('', text)
     text = text.translate(PUNCTUATION_TABLE)
     text = ' '.join(text.split())
+    # A bonus written with placeholder parts carries "INCOMPLETE" as the answer
+    # (thousands of them in some sets). That isn't an answer, so it can't be a
+    # repeat of anything; every caller already skips an empty answer.
+    if text in PLACEHOLDER_ANSWERS:
+        return ''
     return text
 
 

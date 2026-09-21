@@ -7798,6 +7798,27 @@ class PostSubmitFlowTests(TestCase):
         self.assertEqual(payload['count'], 0)
         self.assertEqual(payload['html'], '')
 
+    def _placeholder_bonus(self, part1_answer, part3_answer):
+        return Bonus.objects.create(
+            author=self.owner, question_set=self.qset, category=self.de,
+            leadin='For 10 points each:', part1_text='P1', part1_answer=part1_answer,
+            part2_text='P2', part2_answer='INCOMPLETE',
+            part3_text='P3', part3_answer=part3_answer,
+            created_date=datetime.now(), last_changed_date=datetime.now())
+
+    def test_incomplete_placeholder_parts_are_not_repeats(self):
+        # Bonuses written with placeholder parts use "INCOMPLETE" as the answer;
+        # only the real answer they share should be reported.
+        self._placeholder_bonus('_Napoleon_', '_INCOMPLETE_')
+        newest = self._placeholder_bonus('_Napoleon_', 'INCOMPLETE.')
+        resp = self.client.get('/question_repeats/',
+                               {'question_type': 'bonus', 'question_id': newest.id})
+        payload = json.loads(resp.content.decode())
+        self.assertEqual(payload['count'], 1)
+        from qems2.qsub.duplicate_checker import find_duplicates, find_internal_issues
+        self.assertEqual([g['answer'] for g in find_duplicates(self.qset)], ['napoleon'])
+        self.assertEqual(find_internal_issues(self.qset), [])
+
     def test_add_bonus_lands_on_the_new_question(self):
         resp = self.client.post('/add_bonuses/{0}/{1}/'.format(self.qset.id, ACF_STYLE_BONUS), {
             'leadin': 'For 10 points each, name these things:',
