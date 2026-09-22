@@ -13,6 +13,13 @@
 
 <style>
 .cat-editors { white-space: normal; }
+/* A super-group names what it covers, quietly, under its own name */
+.sg-cats { display: block; font-size: 0.8em; color: var(--qx-muted, #8a8f9c); font-weight: normal; }
+.sg-missing { display: block; font-size: 0.8em; color: #a94442; font-weight: normal; }
+.sg-delete { display: inline; margin: 0; }
+.sg-delete button { border: none; background: none; cursor: pointer; margin: 0; padding: 0 4px;
+    color: var(--qx-muted, #8a8f9c); font-size: 1.1em; line-height: 1; }
+.sg-delete button:hover { color: #c0392b; background: none; }
 .cat-editor-tag { display: inline-block; margin: 0 3px 3px 0; padding: 1px 7px; border-radius: 10px;
     font-size: 0.8em; background: #e3f0e4; color: #1b5e20; white-space: nowrap; }
 </style>
@@ -41,8 +48,12 @@
     </thead>
     <tbody>
         {% for row in overview_rows %}
-        <tr{% if row.is_group %} class="cat-group-row"{% endif %}
-           {% if row.depth == 0 %} data-toplevel="{{ row.short_name }}" data-tu-req="{{ row.tu_req }}" data-tu-written="{{ row.tu_in_cat }}" data-bs-req="{{ row.bs_req }}" data-bs-written="{{ row.bs_in_cat }}"{% endif %}>
+        {% comment %}
+        The data-* attributes the super-group builder used to read off these
+        rows are gone with it: the totals are added up on the server now, from
+        the same rows this table is drawn from.
+        {% endcomment %}
+        <tr{% if row.is_group %} class="cat-group-row"{% endif %}>
             <td style="padding-left: {{ row.padding }}px;">
                 {% if row.is_group %}
                     {{ row.short_name }}
@@ -134,26 +145,14 @@
     </tbody>
 </table>
 
-<div class="panel" id="supergroup-panel" style="margin-top: 20px;">
-    <h5>Create Super-Group</h5>
-    <div class="row">
-        <div class="small-4 columns">
-            <label>Group Name
-                <input type="text" id="supergroup-name" placeholder="e.g. Visual Arts">
-            </label>
-        </div>
-        <div class="small-6 columns">
-            <label>Categories</label>
-            <div id="supergroup-checkboxes" style="max-height: 200px; overflow-y: auto;"></div>
-        </div>
-        <div class="small-2 columns">
-            <label>&nbsp;</label>
-            <button class="button small" id="add-supergroup-btn">Add Group</button>
-        </div>
-    </div>
-</div>
-
-<div id="supergroup-results" style="display: none; margin-top: 20px;">
+{% comment %}
+Super-groups are stored on the set, so they are still here on the next visit
+and everybody editing the set sees the same ones. They read through the same
+filters as the category rows above, so the two tables say the same thing the
+same way.
+{% endcomment %}
+{% if super_groups %}
+<div id="supergroup-results" style="margin-top: 20px;">
     <h5>Super-Groups</h5>
     <table class="tablesorter table-striped table-hover" id="supergroup-table">
         <thead>
@@ -164,152 +163,71 @@
                 <th>Tossup Completion</th>
                 <th>Bonuses Remaining</th>
                 <th>Bonus Completion</th>
-                <th></th>
+                {% if can_edit_tags %}<th></th>{% endif %}
             </tr>
         </thead>
-        <tbody></tbody>
+        <tbody>
+            {% for sg in super_groups %}
+            <tr class="cat-added-row">
+                <td><strong>{{ sg.group.name }}</strong>
+                    <span class="sg-cats">{{ sg.names|join:", " }}</span>
+                    {% if sg.missing %}<span class="sg-missing" title="No longer in this set's distribution">{{ sg.missing|join:", " }} not found</span>{% endif %}
+                </td>
+                <td>{{ sg|overall_percent }}</td>
+                <td>{{ sg|tossups_remaining }}</td>
+                <td>{{ sg.tu_in_cat|check_mark_if_100_pct:sg.tu_req }} {{ sg.tu_in_cat|percent:sg.tu_req }}</td>
+                <td>{{ sg|bonuses_remaining }}</td>
+                <td>{{ sg.bs_in_cat|check_mark_if_100_pct:sg.bs_req }} {{ sg.bs_in_cat|percent:sg.bs_req }}</td>
+                {% if can_edit_tags %}
+                <td>
+                    <form action="" method="post" class="sg-delete"
+                          onsubmit="return confirm('Remove the super-group &#39;{{ sg.group.name }}&#39;?');">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="delete_super_group">
+                        <input type="hidden" name="group_id" value="{{ sg.group.id }}">
+                        <button type="submit" title="Remove this super-group">&times;</button>
+                    </form>
+                </td>
+                {% endif %}
+            </tr>
+            {% endfor %}
+        </tbody>
     </table>
 </div>
+{% endif %}
 
-<script>
-(function() {
-    // Extract top-level category data from the table
-    var topLevelCategories = [];
-    $('#set-status-table tbody tr[data-toplevel]').each(function() {
-        var $row = $(this);
-        topLevelCategories.push({
-            name: $row.data('toplevel'),
-            tu_req: parseInt($row.data('tu-req'), 10) || 0,
-            tu_written: parseInt($row.data('tu-written'), 10) || 0,
-            bs_req: parseInt($row.data('bs-req'), 10) || 0,
-            bs_written: parseInt($row.data('bs-written'), 10) || 0
-        });
-    });
+{% if can_edit_tags %}
+<div class="panel" id="supergroup-panel" style="margin-top: 20px;">
+    <h5>Create Super-Group</h5>
+    <p class="home-note">A few categories looked at as one line &mdash; "Visual Arts" across painting,
+        sculpture and architecture. It changes no quota; it adds up the categories you pick.</p>
+    <form action="" method="post">
+        {% csrf_token %}
+        <div class="row">
+            <div class="small-4 columns">
+                <label>Group Name
+                    <input type="text" name="name" id="supergroup-name" placeholder="e.g. Visual Arts" maxlength="100" required>
+                </label>
+            </div>
+            <div class="small-6 columns">
+                <label>Categories</label>
+                <div id="supergroup-checkboxes" style="max-height: 200px; overflow-y: auto;">
+                    {% for name in top_level_choices %}
+                    <label style="display: block; margin-bottom: 4px;">
+                        <input type="checkbox" class="sg-cat-check" name="categories" value="{{ name }}"> {{ name }}
+                    </label>
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="small-2 columns">
+                <label>&nbsp;</label>
+                <button type="submit" class="button small" id="add-supergroup-btn">Add Group</button>
+            </div>
+        </div>
+    </form>
+</div>
+{% endif %}
 
-    // Build checkboxes
-    var $checkboxes = $('#supergroup-checkboxes');
-    $.each(topLevelCategories, function(i, cat) {
-        $checkboxes.append(
-            '<label style="display: block; margin-bottom: 4px;">' +
-            '<input type="checkbox" class="sg-cat-check" value="' + i + '"> ' +
-            cat.name +
-            '</label>'
-        );
-    });
-
-    var superGroups = [];
-
-    function formatPercent(x, y) {
-        if (y === 0) return null;
-        var val = 100 * x / y;
-        if (val > 100) val = 100;
-        return val;
-    }
-
-    function percentStr(x, y) {
-        var pct = formatPercent(x, y);
-        if (pct === null) return '';
-        return pct.toFixed(1) + '%';
-    }
-
-    function checkIcon(x, y) {
-        var pct = formatPercent(x, y);
-        if (pct === null || pct >= 100) {
-            return '<i class="fa fa-check"></i>';
-        }
-        return '<i class="fa fa-times"></i>';
-    }
-
-    function overallPercentStr(tu_in, tu_req, bs_in, bs_req) {
-        var tu = Math.min(tu_in, tu_req);
-        var bs = Math.min(bs_in, bs_req);
-        var total = tu_req + bs_req;
-        if (total === 0) return '<i class="fa fa-check"></i> null';
-        var pct = 100 * (tu + bs) / total;
-        var icon = pct >= 100 ? '<i class="fa fa-check"></i>' : '<i class="fa fa-times"></i>';
-        return icon + ' ' + pct.toFixed(2) + '%';
-    }
-
-    function remainingStr(written, req) {
-        var val = req - written;
-        if (val < 0) {
-            return '0 (' + (-val) + ' extra)';
-        }
-        return '' + val;
-    }
-
-    function renderGroups() {
-        var $tbody = $('#supergroup-table tbody');
-        $tbody.empty();
-        $.each(superGroups, function(idx, group) {
-            var row = '<tr class="cat-added-row">' +
-                '<td><strong>' + $('<span>').text(group.name).html() + '</strong></td>' +
-                '<td>' + overallPercentStr(group.tu_written, group.tu_req, group.bs_written, group.bs_req) + '</td>' +
-                '<td>' + remainingStr(group.tu_written, group.tu_req) + '</td>' +
-                '<td>' + checkIcon(group.tu_written, group.tu_req) + ' ' + percentStr(group.tu_written, group.tu_req) + '</td>' +
-                '<td>' + remainingStr(group.bs_written, group.bs_req) + '</td>' +
-                '<td>' + checkIcon(group.bs_written, group.bs_req) + ' ' + percentStr(group.bs_written, group.bs_req) + '</td>' +
-                '<td><a href="#" class="remove-sg" data-idx="' + idx + '" title="Remove group">&times;</a></td>' +
-                '</tr>';
-            $tbody.append(row);
-        });
-
-        if (superGroups.length > 0) {
-            $('#supergroup-results').show();
-        } else {
-            $('#supergroup-results').hide();
-        }
-    }
-
-    $('#add-supergroup-btn').on('click', function() {
-        var name = $.trim($('#supergroup-name').val());
-        if (!name) {
-            alert('Please enter a group name.');
-            return;
-        }
-
-        var selected = [];
-        $('.sg-cat-check:checked').each(function() {
-            selected.push(parseInt($(this).val(), 10));
-        });
-
-        if (selected.length === 0) {
-            alert('Please select at least one category.');
-            return;
-        }
-
-        var tu_req = 0, tu_written = 0, bs_req = 0, bs_written = 0;
-        $.each(selected, function(_, i) {
-            var cat = topLevelCategories[i];
-            tu_req += cat.tu_req;
-            tu_written += cat.tu_written;
-            bs_req += cat.bs_req;
-            bs_written += cat.bs_written;
-        });
-
-        superGroups.push({
-            name: name,
-            tu_req: tu_req,
-            tu_written: tu_written,
-            bs_req: bs_req,
-            bs_written: bs_written
-        });
-
-        // Reset form
-        $('#supergroup-name').val('');
-        $('.sg-cat-check').prop('checked', false);
-
-        renderGroups();
-    });
-
-    $(document).on('click', '.remove-sg', function(e) {
-        e.preventDefault();
-        var idx = parseInt($(this).data('idx'), 10);
-        superGroups.splice(idx, 1);
-        renderGroups();
-    });
-})();
-</script>
 
 <datalist id="cat-tag-groups">
     {% for g in group_choices %}<option value="{{ g }}">{% endfor %}

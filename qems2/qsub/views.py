@@ -7768,6 +7768,9 @@ def category_overview(request, qset_id):
         messages.error(request, 'You are not authorized to view information about this tournament!')
         return HttpResponseRedirect('/failure.html/')
 
+    if request.method == 'POST':
+        return _super_group_post(request, qset, user)
+
     set_status, total_tu_req, total_bs_req, tu_needed, bs_needed, set_pct_complete = get_questions_remaining(qset)
     overview_rows = get_category_overview(qset)
 
@@ -7810,6 +7813,9 @@ def category_overview(request, qset_id):
         CategoryTag.objects.filter(question_set=qset)
         .exclude(group_name='').values_list('group_name', flat=True)))
 
+    top_level = [r for r in overview_rows if r['depth'] == 0]
+    super_groups = _super_group_rows(qset, top_level)
+
     return render(request, 'category_overview.html',
                              {'user': user,
                               'overview_rows': overview_rows,
@@ -7819,7 +7825,71 @@ def category_overview(request, qset_id):
                               'bs_needed': bs_needed,
                               'can_edit_tags': can_edit_tags,
                               'group_choices': group_choices,
+                              'super_groups': super_groups,
+                              'top_level_choices': [r['short_name'] for r in top_level],
                               'qset': qset})
+
+
+def _super_group_rows(qset, top_level):
+    """The set's super-groups with their categories' numbers added up.
+
+    Each row carries the same keys a category row does, so the table can put
+    them through the same filters and a super-group reads exactly like the
+    categories above it. A name that no longer matches a category in the
+    distribution is reported rather than silently contributing nothing.
+    """
+    by_name = {r['short_name']: r for r in top_level}
+    rows = []
+    for group in qset.super_groups.all():
+        names = group.category_list()
+        row = {'group': group, 'names': names, 'missing': [n for n in names if n not in by_name],
+               'tu_req': 0, 'tu_in_cat': 0, 'bs_req': 0, 'bs_in_cat': 0}
+        for name in names:
+            cat = by_name.get(name)
+            if cat is None:
+                continue
+            for key in ('tu_req', 'tu_in_cat', 'bs_req', 'bs_in_cat'):
+                row[key] += cat[key] or 0
+        rows.append(row)
+    return rows
+
+
+def _super_group_post(request, qset, user):
+    """Add or remove a super-group on the category overview.
+
+    Post-redirect-get: the page is a long table people come back to, and a
+    reload prompting to re-send the form is how a set ends up with the same
+    group three times.
+    """
+    back = '/category_overview/{0}/'.format(qset.id)
+    if not (qset.is_owner(user) or user in qset.editor.all()):
+        messages.error(request, 'Only editors can change super-groups.')
+        return HttpResponseRedirect(back)
+
+    action = request.POST.get('action', '')
+    if action == 'delete_super_group':
+        group_id = (request.POST.get('group_id', '') or '').strip()
+        if group_id.isdigit():
+            CategorySuperGroup.objects.filter(question_set=qset, id=int(group_id)).delete()
+            messages.success(request, 'Super-group removed')
+        return HttpResponseRedirect(back)
+
+    name = (request.POST.get('name', '') or '').strip()[:100]
+    categories = [c for c in request.POST.getlist('categories') if c.strip()]
+    if not name:
+        messages.error(request, 'A super-group needs a name.')
+    elif not categories:
+        messages.error(request, 'Pick at least one category for the super-group.')
+    elif CategorySuperGroup.objects.filter(question_set=qset, name=name).exists():
+        messages.error(request, 'There is already a super-group called "{0}".'.format(name))
+    else:
+        group = CategorySuperGroup(
+            question_set=qset, name=name, created_by=user,
+            sort_order=CategorySuperGroup.objects.filter(question_set=qset).count())
+        group.set_category_list(categories)
+        group.save()
+        messages.success(request, 'Super-group "{0}" saved'.format(name))
+    return HttpResponseRedirect(back)
 
 @login_required
 def bulk_change_set(request, qset_id):

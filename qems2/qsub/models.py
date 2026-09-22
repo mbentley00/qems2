@@ -1306,6 +1306,45 @@ class PacketizationEntry(models.Model):
 # An editor-defined tag under a category path of a set, e.g. "Asian
 # Literature" under "Literature - World", with optional required tossup and
 # bonus counts that writers fulfill by tagging their questions.
+class CategorySuperGroup(models.Model):
+    """Several top-level categories read as one line on the category overview.
+
+    A set's distribution is the unit questions are written against, but the
+    thing an editor wants to see finished is often a handful of them together
+    -- "Visual Arts" spanning painting, sculpture and architecture. A
+    super-group is that view and nothing more: it changes no quota and owns no
+    questions, it adds up the categories it names. It belongs to the set
+    rather than to whoever made it, so everybody editing the set sees the same
+    ones.
+    """
+
+    question_set = models.ForeignKey(QuestionSet, on_delete=models.CASCADE,
+                                     related_name='super_groups')
+    name = models.CharField(max_length=100)
+    # The top-level categories it covers, one per line, held by the name the
+    # overview shows them under. A category that later leaves the
+    # distribution simply stops being found, which is why this is stored by
+    # name rather than as a relation: a super-group outliving a category it
+    # named is not worth a broken page.
+    categories = models.TextField(blank=True, default='')
+    sort_order = models.IntegerField(default=0)
+    created_by = models.ForeignKey(Writer, null=True, blank=True,
+                                   on_delete=models.SET_NULL)
+
+    class Meta:
+        ordering = ['sort_order', 'name']
+        unique_together = ('question_set', 'name')
+
+    def __str__(self):
+        return '{0!s}: {1!s}'.format(self.question_set, self.name)
+
+    def category_list(self):
+        return [c.strip() for c in (self.categories or '').splitlines() if c.strip()]
+
+    def set_category_list(self, names):
+        self.categories = '\n'.join(n.strip() for n in names if n and n.strip())
+
+
 class CategoryTag(models.Model):
 
     question_set = models.ForeignKey(QuestionSet, on_delete=models.CASCADE)

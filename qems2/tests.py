@@ -14433,6 +14433,91 @@ class TagAnswerPreviewTests(TestCase):
         self.assertIn('the <u><b>Black Death</b></u>', body)
 
 
+class SuperGroupTests(TestCase):
+    """A super-group reads a few categories as one line, and belongs to the
+    set: it is still there on the next visit, for everyone working on it."""
+
+    def setUp(self):
+        self.ou = User.objects.create_user('sg_owner', password='pw', email='sg@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.wu = User.objects.create_user('sg_writer', password='pw', email='sgw@t.com')
+        self.writer = Writer.objects.get(user=self.wu)
+        self.dist = Distribution.objects.create(name='SG dist')
+        self.qset = QuestionSet.objects.create(
+            name='SG Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.qset.editor.add(self.owner)
+        self.qset.writer.add(self.writer)
+        self.entries = {}
+        for cat, sub, tu, bs in (('Fine Arts', 'Visual', 4, 4),
+                                 ('Fine Arts', 'Audio', 2, 2),
+                                 ('History', 'American', 6, 6)):
+            de = DistributionEntry.objects.create(distribution=self.dist, category=cat,
+                                                  subcategory=sub, min_tossups=1, min_bonuses=1)
+            SetWideDistributionEntry.objects.create(question_set=self.qset, dist_entry=de,
+                                                    num_tossups=tu, num_bonuses=bs)
+            self.entries[(cat, sub)] = de
+        self.url = '/category_overview/{0}/'.format(self.qset.id)
+        self.client.login(username='sg_owner', password='pw')
+
+    def _add(self, name='Arts and History', categories=('Fine Arts', 'History')):
+        return self.client.post(self.url, {'name': name, 'categories': list(categories)})
+
+    def _tossup(self, entry):
+        return Tossup.objects.create(
+            author=self.owner, question_set=self.qset, tossup_text='t', tossup_answer='_a_',
+            category=entry, created_date=datetime.now(), last_changed_date=datetime.now())
+
+    def test_a_super_group_survives_leaving_the_page(self):
+        resp = self._add()
+        self.assertRedirects(resp, self.url)
+        body = self.client.get(self.url).content.decode()
+        self.assertIn('Arts and History', body)
+        # And on a fresh visit by somebody else on the set.
+        self.client.logout()
+        self.client.login(username='sg_writer', password='pw')
+        self.assertIn('Arts and History', self.client.get(self.url).content.decode())
+
+    def test_it_adds_up_the_categories_it_names(self):
+        self._add('Just the arts', ('Fine Arts',))
+        self._tossup(self.entries[('Fine Arts', 'Visual')])
+        row = self.client.get(self.url).context['super_groups'][0]
+        self.assertEqual(row['tu_req'], 6)     # 4 visual + 2 audio
+        self.assertEqual(row['bs_req'], 6)
+        self.assertEqual(row['tu_in_cat'], 1)
+
+    def test_a_group_can_be_removed(self):
+        self._add()
+        group = CategorySuperGroup.objects.get(question_set=self.qset)
+        self.client.post(self.url, {'action': 'delete_super_group', 'group_id': group.id})
+        self.assertFalse(CategorySuperGroup.objects.filter(id=group.id).exists())
+
+    def test_a_writer_cannot_change_them(self):
+        self.client.logout()
+        self.client.login(username='sg_writer', password='pw')
+        self._add()
+        self.assertFalse(CategorySuperGroup.objects.filter(question_set=self.qset).exists())
+        # And the form isn't offered to them.
+        self.assertNotIn('add-supergroup-btn', self.client.get(self.url).content.decode())
+
+    def test_a_group_needs_a_name_and_a_category(self):
+        self.client.post(self.url, {'name': '', 'categories': ['Fine Arts']})
+        self.client.post(self.url, {'name': 'Nothing in it', 'categories': []})
+        self.assertFalse(CategorySuperGroup.objects.filter(question_set=self.qset).exists())
+
+    def test_the_same_name_is_not_taken_twice(self):
+        self._add()
+        self._add()
+        self.assertEqual(CategorySuperGroup.objects.filter(question_set=self.qset).count(), 1)
+
+    def test_a_category_that_left_the_distribution_is_reported(self):
+        self._add('Stale', ('Fine Arts', 'Geography'))
+        row = self.client.get(self.url).context['super_groups'][0]
+        self.assertEqual(row['missing'], ['Geography'])
+        self.assertEqual(row['tu_req'], 6)   # the Fine Arts half still counts
+        self.assertIn('not found', self.client.get(self.url).content.decode())
+
+
 class CategoryOverviewCollapsedGroupTests(TestCase):
     """A category with a single subcategory collapses to one row -- which has
     to sit at the top level under its own name, not indented under the
