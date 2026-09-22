@@ -675,6 +675,25 @@ class PacketParserTests(TestCase):
         # Markup-wrapped directives are also excluded
         self.assertEqual(get_character_count("~Description acceptable.~ " + base, True), base_count)
 
+    def test_marking_a_note_never_changes_the_count(self):
+        # Whether an instruction is recognised on its own, marked as a note by
+        # hand, or never written at all, the question is the same length: the
+        # space between the sentences either side of it belongs to them.
+        plain = "Alpha beta gamma. Delta epsilon."
+        auto = "Alpha beta gamma. Description acceptable. Delta epsilon."
+        noted = "Alpha beta gamma. \\NDescription acceptable.\\N Delta epsilon."
+        self.assertEqual(get_character_count(auto, True), len(plain))
+        self.assertEqual(get_character_count(noted, True), len(plain))
+        # The same holds at either end of the question.
+        self.assertEqual(get_character_count("\\NDescription acceptable.\\N " + plain, True),
+                         len(plain))
+        self.assertEqual(get_character_count(plain + " \\NDescription acceptable.\\N", True),
+                         len(plain))
+        # And for an inline directive between two words.
+        self.assertEqual(
+            get_character_count("Alpha beta [emphasize] gamma. Delta epsilon.", True),
+            len(plain))
+
     def test_category_entry_get_requirements_methods(self):
         self.create_generic_period(cefd_fraction=2.2)
                 

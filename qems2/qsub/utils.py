@@ -515,6 +515,14 @@ INLINE_DIRECTIVE_RE = re.compile(r'\[(?:emphasi[sz]e|pause|read slowly)\]\s*', r
 #: is the way to say so outright, and it always wins.
 NOTE_RE = re.compile(r'\\N(.*?)\\N', re.S)
 
+def _tidy_after_removal(line):
+    """The spacing left behind when something is cut out of a question: what
+    was on either side ends up separated by a single space, and nothing hangs
+    off the ends — the text reads as it would have had the removed part never
+    been written."""
+    return re.sub(r'\s{2,}', ' ', line).strip()
+
+
 def strip_notes(line):
     """Remove ``\\Ntext\\N`` notes, and any spacing they leave behind."""
     if not line:
@@ -523,7 +531,7 @@ def strip_notes(line):
     # An unclosed \N (mid-edit, or a typo) would otherwise leave the marker in
     # the counted text; drop the marker without eating the rest of the question.
     line = line.replace('\\N', '')
-    return re.sub(r'\s{2,}', ' ', line).strip()
+    return _tidy_after_removal(line)
 
 def strip_moderator_instructions(line):
     """Remove moderator/player instruction sentences and inline directive
@@ -533,9 +541,14 @@ def strip_moderator_instructions(line):
     if not line:
         return line
     line = strip_notes(line)
-    line = MODERATOR_INSTRUCTION_RE.sub('', line)
-    line = INLINE_DIRECTIVE_RE.sub('', line)
-    return line
+    # A space, not nothing. Both patterns eat the whitespace on either side of
+    # what they match, and the space between the two sentences left behind
+    # belongs to those sentences: dropping it made an instruction QEMS
+    # recognised on its own count one character less than the same sentence
+    # marked as a note, so marking a note pushed the count *up*.
+    line = MODERATOR_INSTRUCTION_RE.sub(' ', line)
+    line = INLINE_DIRECTIVE_RE.sub(' ', line)
+    return _tidy_after_removal(line)
 
 
 def get_char_count_exclusions(line, ignore_pronunciation, guides_require_quotes=False):
