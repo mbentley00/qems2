@@ -1527,6 +1527,13 @@ def categories(request, qset_id, category_id):
                                .prefetch_related('category_tags'))
         attach_question_comments({t.id: t for t in tossups}, {b.id: b for b in bonuses})
 
+    # The category's tags live on the category-tags page, which is where they
+    # are defined and where questions get tagged; this page links to it rather
+    # than growing a second copy of that view. The count is what makes the link
+    # worth following (or tells you the category has none yet).
+    tag_count = CategoryTag.objects.filter(
+        question_set=qset, category_path=str(category_object)).count()
+
     return render(request, 'categories.html',
         dict({
         'table_columns': qset.question_table_headers(),
@@ -1536,6 +1543,7 @@ def categories(request, qset_id, category_id):
         'category_status': category_status,
         'qset': qset,
         'message': message,
+        'tag_count': tag_count,
         'category': category_object},
         **_category_comment_context(request, qset, str(category_object) if category_object else '')))
 
@@ -8567,6 +8575,70 @@ def _grid_answer_preview(text, limit=45):
         answer = answer[:limit].rstrip() + '...'
     return answer
 
+_PREVIEW_CONSUMED = ('\\B', '\\D', '\\S', '\\s', '\\P', '\\N')
+_PREVIEW_ESCAPED = ('\\_', '\\~', '\\\\')
+
+
+def _formatted_answer_preview(text, limit=45):
+    """Like `_grid_answer_preview`, but keeping the required portion underlined.
+
+    A preview that throws the markup away makes every answer look alike, and
+    what an editor is scanning for is usually the part that has to be said.
+    Rendering goes through the same reading of the markup as
+    `get_formatted_question_html` -- ``_x_`` is the required answer (bold
+    underline), ``__x__`` a prompt, ``~x~`` italics -- but truncation counts
+    only the characters that show, and any span still open at the cut is
+    closed, so a clipped answer can't leave a tag hanging over the rest of the
+    page. Returns escaped, safe HTML.
+    """
+    from django.utils.html import escape
+    raw = strip_parentheticals(
+        html.unescape(get_primary_answer(text or '')).strip())
+    out = []
+    open_tags = []
+    shown = 0
+    i, n = 0, len(raw)
+    truncated = False
+    while i < n:
+        pair = raw[i:i + 2]
+        if pair in _PREVIEW_CONSUMED:
+            i += 2
+            continue
+        if pair in _PREVIEW_ESCAPED:
+            char, i = raw[i + 1], i + 2
+        elif raw[i] == '_':
+            # A doubled underscore is a prompt, underlined but not bold.
+            prompt = pair == '__'
+            close, opening = ('</u>', '<u>') if prompt else ('</b></u>', '<u><b>')
+            if open_tags and open_tags[-1] == close:
+                out.append(open_tags.pop())
+            else:
+                open_tags.append(close)
+                out.append(opening)
+            i += 2 if prompt else 1
+            continue
+        elif raw[i] == '~':
+            if open_tags and open_tags[-1] == '</i>':
+                out.append(open_tags.pop())
+            else:
+                open_tags.append('</i>')
+                out.append('<i>')
+            i += 1
+            continue
+        else:
+            char, i = raw[i], i + 1
+        if shown >= limit:
+            truncated = True
+            break
+        out.append(escape(char))
+        shown += 1
+    while open_tags:
+        out.append(open_tags.pop())
+    if truncated:
+        out.append('...')
+    return mark_safe(''.join(out))
+
+
 def _packet_neighbors(question, qtype):
     """The question before and after this one in its packet, so you can walk a
     packet without opening a tab per question.
@@ -12005,10 +12077,13 @@ def _category_question_rows(qset, path, tag_rows, only_tag=None):
                 'qtype': qtype,
                 'id': q.id,
                 'edit_url': '{0}{1}/'.format(edit_url, q.id),
-                'answer': (_grid_answer_preview(q.tossup_answer) if model is Tossup else
-                           ' / '.join(filter(None, [_grid_answer_preview(q.part1_answer, 20),
-                                                    _grid_answer_preview(q.part2_answer, 20),
-                                                    _grid_answer_preview(q.part3_answer, 20)]))),
+                # Formatted like the tag table's previews: the required part of
+                # the answer is what the eye is looking for in a long list.
+                'answer': (_formatted_answer_preview(q.tossup_answer) if model is Tossup else
+                           mark_safe(' / '.join(filter(None, [
+                               _formatted_answer_preview(q.part1_answer, 20),
+                               _formatted_answer_preview(q.part2_answer, 20),
+                               _formatted_answer_preview(q.part3_answer, 20)])))),
                 'location': '{0} #{1}'.format(q.packet.packet_name, q.question_number) if q.packet_id else '',
                 'packet_key': (0, q.packet.packet_name, q.question_number or 0) if q.packet_id else (1, '', q.id),
                 'author': str(q.author) if q.author_id else '',
@@ -12635,6 +12710,38 @@ def _tag_maxima(post, minima):
     return out
 
 
+def _category_tag_totals(tag_groups):
+    """A category's tag totals for the summary line, counting each question once.
+
+    The axes ("Time period", "Region") are each a pass over the *same*
+    questions, so adding their quotas up says a 24-tossup category wants 47 and
+    adding their counts up reports a question once per axis it carries. Both
+    numbers are taken in question units instead: the requirement is the biggest
+    single axis (the axes are alternative carvings of one category, so the
+    largest is what the category asks for), and what is done is how many
+    distinct questions carry a tag here.
+    """
+    def axis_max(field):
+        return max((sum(getattr(r['tag'], field) for r in g['rows'])
+                    for g in tag_groups), default=0)
+
+    tu_ids, bs_ids, q_tu_ids, q_bs_ids = set(), set(), set(), set()
+    for group in tag_groups:
+        for row in group['rows']:
+            tu_ids.update(t['id'] for t in row['tossups'])
+            bs_ids.update(b['id'] for b in row['bonuses'])
+            # "Of any type" counts only against tags that ask for a number of
+            # questions, the way the per-tag rows do.
+            if row['tag'].num_questions:
+                q_tu_ids.update(t['id'] for t in row['tossups'])
+                q_bs_ids.update(b['id'] for b in row['bonuses'])
+    return {
+        'tu_required': axis_max('num_tossups'), 'tu_done': len(tu_ids),
+        'bs_required': axis_max('num_bonuses'), 'bs_done': len(bs_ids),
+        'q_required': axis_max('num_questions'), 'q_done': len(q_tu_ids) + len(q_bs_ids),
+    }
+
+
 @login_required
 def category_tags(request, qset_id):
     user = request.user.writer
@@ -12836,14 +12943,14 @@ def category_tags(request, qset_id):
         rows = []
         for tag in tags_by_path[path]:
             tossups = [{'id': t.id,
-                        'answer': _grid_answer_preview(t.tossup_answer),
+                        'answer': _formatted_answer_preview(t.tossup_answer),
                         'location': '{0} #{1}'.format(t.packet.packet_name, t.question_number) if t.packet else 'Unassigned'}
                        for t in tag.tossups.all()]
             bonuses = [{'id': b.id,
-                        'answer': ' / '.join(filter(None, [
-                            _grid_answer_preview(b.part1_answer, 20),
-                            _grid_answer_preview(b.part2_answer, 20),
-                            _grid_answer_preview(b.part3_answer, 20)])),
+                        'answer': mark_safe(' / '.join(filter(None, [
+                            _formatted_answer_preview(b.part1_answer, 20),
+                            _formatted_answer_preview(b.part2_answer, 20),
+                            _formatted_answer_preview(b.part3_answer, 20)]))),
                         'location': '{0} #{1}'.format(b.packet.packet_name, b.question_number) if b.packet else 'Unassigned'}
                        for b in tag.bonuses.all()]
             row = tag.progress(len(tossups), len(bonuses))
@@ -12861,7 +12968,7 @@ def category_tags(request, qset_id):
         order.sort(key=lambda k: (k == '', k.lower()))
         tag_groups = [{'name': k, 'label': k or 'Ungrouped', 'rows': by_group[k]}
                       for k in order]
-        groups.append({
+        groups.append(dict({
             'path': path,
             'token': scope_token(path),
             'label': scope_label(path),
@@ -12869,14 +12976,8 @@ def category_tags(request, qset_id):
             'rows': rows,
             'tag_groups': tag_groups,
             'tag_count': len(rows),
-            'tu_required': sum(r['tag'].num_tossups for r in rows),
-            'tu_done': sum(r['tu_done'] for r in rows),
-            'bs_required': sum(r['tag'].num_bonuses for r in rows),
-            'bs_done': sum(r['bs_done'] for r in rows),
-            'q_required': sum(r['tag'].num_questions for r in rows),
-            'q_done': sum(r['q_done'] for r in rows if r['tag'].num_questions),
             'incomplete': sum(1 for r in rows if not r['complete']),
-        })
+        }, **_category_tag_totals(tag_groups)))
 
     group_choices = sorted(set(
         CategoryTag.objects.filter(question_set=qset)

@@ -93,10 +93,11 @@ its one category, since that is the whole page then.
 <details class="tag-cat{% if group.set_wide %} tag-cat-setwide{% endif %}" {% if focused or groups|length == 1 %}open{% endif %}>
     <summary class="tag-cat-summary">
         <span class="tag-cat-name">{{ group.label }}</span>
-        <span class="tag-cat-counts">
+        <span class="tag-cat-counts"
+              title="How many of this category's questions carry a tag, against what its biggest axis of tags asks for. Each axis covers the same questions, so they are not added together.">
             {{ group.tag_count }} tag{{ group.tag_count|pluralize }}
-            {% if group.tu_required %}&middot; {{ group.tu_done }}/{{ group.tu_required }} tossups{% endif %}
-            {% if group.bs_required %}&middot; {{ group.bs_done }}/{{ group.bs_required }} bonuses{% endif %}
+            {% if group.tu_required %}&middot; {{ group.tu_done }}/{{ group.tu_required }} tossups tagged{% endif %}
+            {% if group.bs_required %}&middot; {{ group.bs_done }}/{{ group.bs_required }} bonuses tagged{% endif %}
             {% if group.q_required %}&middot; {{ group.q_done }}/{{ group.q_required }} of any type{% endif %}
             {% if group.incomplete %}<span class="tag-cat-open">{{ group.incomplete }} outstanding</span>{% endif %}
         </span>
@@ -127,9 +128,14 @@ its one category, since that is the whole page then.
                     <td class="{% if row.tu_over %}tag-over{% elif row.tu_complete %}tag-complete{% else %}tag-incomplete{% endif %}">
                         {{ row.tu_done }}{% if row.tag.num_tossups %}/{{ row.tag.num_tossups }}{% endif %}{% if row.tag.max_tossups != None and row.tag.max_tossups != row.tag.num_tossups %}<span class="tag-max" title="At most {{ row.tag.max_tossups }}">&le;{{ row.tag.max_tossups }}</span>{% endif %}
                     </td>
+                    {% comment %}
+                    A line each, labelled: a long answer wraps, and without a
+                    mark at the start of the line you cannot tell a continuation
+                    from the next question.
+                    {% endcomment %}
                     <td>
                         {% for q in row.tossups %}
-                            <a href="/edit_tossup/{{ q.id }}/" title="{{ q.location }}">{{ q.answer }}</a>{% if not forloop.last %}<br>{% endif %}
+                        <div class="tag-a-line"><span class="tag-a-kind">T:</span><a href="/edit_tossup/{{ q.id }}/" title="{{ q.location }}">{{ q.answer }}</a></div>
                         {% endfor %}
                     </td>
                     <td class="{% if row.bs_over %}tag-over{% elif row.bs_complete %}tag-complete{% else %}tag-incomplete{% endif %}">
@@ -137,7 +143,7 @@ its one category, since that is the whole page then.
                     </td>
                     <td>
                         {% for q in row.bonuses %}
-                            <a href="/edit_bonus/{{ q.id }}/" title="{{ q.location }}">{{ q.answer }}</a>{% if not forloop.last %}<br>{% endif %}
+                        <div class="tag-a-line"><span class="tag-a-kind">B:</span><a href="/edit_bonus/{{ q.id }}/" title="{{ q.location }}">{{ q.answer }}</a></div>
                         {% endfor %}
                     </td>
                     <td class="{% if row.q_over %}tag-over{% elif row.q_complete %}tag-complete{% else %}tag-incomplete{% endif %}">
@@ -825,6 +831,16 @@ $(function () {
 .tag-out-check { white-space: nowrap; }
 .tag-no-out { font-size: 0.72em; text-transform: uppercase; letter-spacing: 0.04em;
     color: #8a8f9c; background: #f0f0f3; border-radius: 3px; padding: 1px 4px; margin-left: 6px; }
+/* One answer line per row, with its kind hanging at the left so a wrapped
+   answer reads as one entry: the continuation is indented past the label. */
+.tag-a-line { display: flex; gap: 5px; align-items: baseline; margin-bottom: 3px; }
+.tag-a-line:last-child { margin-bottom: 0; }
+.tag-a-kind { flex: none; font-size: 0.72rem; font-weight: bold; letter-spacing: 0.03em;
+    color: var(--qx-muted, #8a8f9c); }
+/* The required part keeps its underline; it shouldn't also pick up the link's */
+.tag-a-line a { text-decoration: none; }
+.tag-a-line a:hover { text-decoration: underline; }
+.tag-a-line u { text-underline-offset: 2px; }
 .tag-questions { margin-top: 18px; }
 .tag-clear-filter { font-size: 0.8rem; margin-left: 6px; white-space: nowrap; }
 .tag-questions-head { display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline; margin-bottom: 6px; }
@@ -842,8 +858,20 @@ $(function () {
    only suggested. A medium-confidence one is fainter than a high one. */
 .tag-chip-ai { background: transparent; border: 1px dashed #7c5cd6; color: #5b3fbf; }
 .tag-chip-ai.tag-conf-medium { border-style: dotted; opacity: 0.85; }
-.tag-chip-ai button { border: none; background: none; cursor: pointer; padding: 0 0 0 3px;
-    font-size: 0.95em; line-height: 1; color: inherit; }
+/* Every button inside a chip, not just the AI ones: without this Foundation
+   styles them as full buttons -- a padded blue box taller than the chip
+   holding it. */
+.tag-chip button { border: none; background: none; cursor: pointer; padding: 0 0 0 3px;
+    margin: 0; height: auto; font-size: 0.95em; line-height: 1; color: inherit;
+    border-radius: 0; }
+.tag-chip button:hover { background: none; }
+.tag-unassign { color: var(--qx-muted, #8a8f9c) !important; font-size: 1.05em !important; }
+.tag-unassign:hover { color: #c0392b !important; }
+/* The assign control is a bare select in the cell; left alone it lays out as a
+   block and takes the width of the column. */
+.tag-q-tags select.tag-assign { display: inline-block; width: auto; max-width: 12em;
+    margin: 0; height: 22px; padding: 0 1.4em 0 5px; font-size: 0.8em;
+    vertical-align: middle; }
 /* The tick is a Font Awesome icon, not a U+2713: the page's font stack has no
    glyph for that character and drew a tofu box in its place. */
 .tag-sugg-accept { color: #2b6a3f !important; }

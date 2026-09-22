@@ -32,6 +32,14 @@ page that looked stale.
     <p class="cat-actions">
         {% include "_add_question_links.html" with add_qset_id=qset.id add_category_id=category.id %}
         <a href="/category_doc/{{ qset.id }}/{{ category.id }}/" class="button small secondary"><i class="fa fa-file-lines"></i> Document view</a>
+        {% comment %}
+        Tags are not shown or edited here: the category-tags page already does
+        that -- the quotas, what each tag has against what it wants, and every
+        question in the category with a way to tag it -- and a second copy of it
+        would be one more thing to keep in step.
+        {% endcomment %}
+        <a href="/category_tags/{{ qset.id }}/?category={{ category|urlencode }}" class="button small secondary"
+           title="Tag quotas for this category, and tag its questions"><i class="fa fa-tags"></i> Category tags{% if tag_count %} <span class="cat-tag-pill">{{ tag_count }}</span>{% endif %}</a>
     </p>
     {% endif %}
     <p>Overall Percent: {{ category_status|overall_percent}}<br />
@@ -91,5 +99,8 @@ using the same cells; only this page's own note style is left here.
 {% endcomment %}
 <style>
 .qtable-note { margin-bottom: 0.4rem; }
+/* The tag count rides inside the button that leads to them */
+.cat-tag-pill { display: inline-block; margin-left: 3px; padding: 0 5px; border-radius: 8px;
+    background: rgba(255, 255, 255, 0.25); font-size: 0.85em; }
 </style>
     {% endblock %}

@@ -13375,6 +13375,31 @@ class CategoryTagGroupingTests(TestCase):
         labels = [g['label'] for g in resp.context['groups'][0]['tag_groups']]
         self.assertEqual(labels[-1], 'Ungrouped')
 
+    def test_the_totals_count_each_question_once_across_axes(self):
+        # Two axes over the same four tossups: the category wants 4, not 8, and
+        # a tossup tagged on both axes has been tagged once.
+        self._add('19th Century', 'Time', num_tossups=2, num_bonuses=0)
+        self._add('20th Century', 'Time', num_tossups=2, num_bonuses=0)
+        self._add('Iberia', 'Location', num_tossups=2, num_bonuses=0)
+        self._add('Nordic', 'Location', num_tossups=2, num_bonuses=0)
+        tu = self._tossup()
+        CategoryTag.objects.get(name='19th Century').tossups.add(tu)
+        CategoryTag.objects.get(name='Iberia').tossups.add(tu)
+        group = self.client.get(
+            '/category_tags/{0}/'.format(self.qset.id)).context['groups'][0]
+        self.assertEqual(group['tu_required'], 4)
+        self.assertEqual(group['tu_done'], 1)
+
+    def test_one_axis_still_totals_the_way_it_reads(self):
+        self._add('19th Century', 'Time', num_tossups=2, num_bonuses=1)
+        self._add('20th Century', 'Time', num_tossups=1, num_bonuses=1)
+        CategoryTag.objects.get(name='19th Century').tossups.add(self._tossup())
+        CategoryTag.objects.get(name='20th Century').bonuses.add(self._bonus())
+        group = self.client.get(
+            '/category_tags/{0}/'.format(self.qset.id)).context['groups'][0]
+        self.assertEqual((group['tu_done'], group['tu_required']), (1, 3))
+        self.assertEqual((group['bs_done'], group['bs_required']), (1, 2))
+
     def test_the_existing_groups_are_offered_for_reuse(self):
         self._add('19th Century', 'Time')
         resp = self.client.get('/category_tags/{0}/'.format(self.qset.id))
@@ -14319,6 +14344,74 @@ class CategoryTagTreeTests(TestCase):
         body = self.client.get(
             '/category_tags/{0}/?category=Science - Biology'.format(self.qset.id)).content.decode()
         self.assertIn('All categories', body)
+
+    def test_a_category_page_sends_you_to_that_category_s_tags(self):
+        # The category page does not carry its own copy of the tag view; it
+        # points at the one page that has it, already opened on the category.
+        de = self.dist.distributionentry_set.get(category='History')
+        body = self.client.get('/categories/{0}/{1}/'.format(
+            self.qset.id, de.id)).content.decode()
+        self.assertIn('/category_tags/{0}/?category=History%20-%20European'.format(self.qset.id),
+                      body)
+        self.assertIn('Category tags', body)
+
+    def test_the_category_page_says_how_many_tags_there_are(self):
+        de = self.dist.distributionentry_set.get(category='Science')
+        resp = self.client.get('/categories/{0}/{1}/'.format(self.qset.id, de.id))
+        self.assertEqual(resp.context['tag_count'], 1)
+
+
+class TagAnswerPreviewTests(TestCase):
+    """The answer lines listed against a tag keep the required part's
+    formatting, and each one is labelled so a wrapped line reads as one entry."""
+
+    def _preview(self, *args):
+        from qems2.qsub.views import _formatted_answer_preview
+        return str(_formatted_answer_preview(*args))
+
+    def test_the_required_part_stays_underlined(self):
+        self.assertEqual(self._preview('the _Battle of Hastings_ [accept more]'),
+                         'the <u><b>Battle of Hastings</b></u>')
+
+    def test_a_prompt_underlines_without_the_bold(self):
+        self.assertEqual(self._preview('__prompt__ _answer_'),
+                         '<u>prompt</u> <u><b>answer</b></u>')
+
+    def test_italics_and_escapes_survive(self):
+        self.assertEqual(self._preview('~Moby-Dick~ and A\\_B'), '<i>Moby-Dick</i> and A_B')
+
+    def test_a_pronunciation_guide_is_still_dropped(self):
+        self.assertEqual(self._preview('_Goethe_ (GUR-tuh)'), '<u><b>Goethe</b></u>')
+
+    def test_cutting_a_long_answer_closes_what_it_opened(self):
+        out = self._preview('_a long underlined answer line that runs past it_', 12)
+        self.assertEqual(out, '<u><b>a long under</b></u>...')
+
+    def test_markup_does_not_count_toward_the_limit(self):
+        # Twelve characters of answer, however much markup surrounds them.
+        self.assertEqual(self._preview('_abcdefghijkl_', 12), '<u><b>abcdefghijkl</b></u>')
+
+    def test_the_tag_table_labels_each_answer_line(self):
+        ou = User.objects.create_user('tap_owner', password='pw', email='tap@t.com')
+        owner = Writer.objects.get(user=ou)
+        dist = Distribution.objects.create(name='TAP dist')
+        de = DistributionEntry.objects.create(distribution=dist, category='History',
+                                              subcategory='European', min_tossups=1)
+        qset = QuestionSet.objects.create(
+            name='TAP Set', date=timezone.now(), host='h', address='', owner=owner,
+            num_packets=1, distribution=dist)
+        qset.editor.add(owner)
+        SetWideDistributionEntry.objects.create(question_set=qset, dist_entry=de,
+                                                num_tossups=1, num_bonuses=1)
+        tag = CategoryTag.objects.create(question_set=qset, category_path='History - European',
+                                         name='Medieval', num_tossups=1)
+        tag.tossups.add(Tossup.objects.create(
+            author=owner, question_set=qset, tossup_text='t', tossup_answer='the _Black Death_',
+            category=de, created_date=datetime.now(), last_changed_date=datetime.now()))
+        self.client.login(username='tap_owner', password='pw')
+        body = self.client.get('/category_tags/{0}/'.format(qset.id)).content.decode()
+        self.assertIn('<span class="tag-a-kind">T:</span>', body)
+        self.assertIn('the <u><b>Black Death</b></u>', body)
 
 
 class CategoryOverviewCollapsedGroupTests(TestCase):
