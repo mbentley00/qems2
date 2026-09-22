@@ -1,0 +1,11 @@
+{% comment %}
+The set's "Copy for Discord" settings, handed to paste_convert.js. Included by
+every page with a copy button, which is why it is a partial: three globals
+spelled out on five pages drift apart, and a page that missed one would copy
+questions a different way from the page beside it.
+{% endcomment %}
+<script>
+window.qemsDiscordShowFirst = {% if qset.discord_show_first_clue %}true{% else %}false{% endif %};
+window.qemsDiscordSpoilerMax = {{ qset.discord_spoiler_chunk_max|default:160 }};
+window.qemsDiscordBoldPowerRun = {% if qset.discord_bold_power_run %}true{% else %}false{% endif %};
+</script>

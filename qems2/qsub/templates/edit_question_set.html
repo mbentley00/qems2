@@ -151,6 +151,20 @@
                 <label class="set-info-check">{{ form.discord_show_first_clue }}
                     <span>Discord copy leaves a question's opening readable
                         <small>A tossup's first sentence, and a bonus's leadin and first part, are shown unspoilered &mdash; never an answer &mdash; so a playtest channel can see what a question is about without opening it.</small></span></label>
+                <label class="set-info-num">{{ form.discord_spoiler_chunk_max }}
+                    <span>Longest Discord spoiler, in characters
+                        <small>How much a reader opens at once. A long sentence is cut at its clause
+                            breaks until each piece fits, so a shorter figure gives more, finer
+                            spoilers and the playtest bot more places to record a buzz; a longer one
+                            keeps whole clues together. 160 is the standing default; 40 to 600.</small></span></label>
+                <label class="set-info-check">{{ form.discord_bold_power_run }}
+                    <span>Bold the power region as one run
+                        <small>On: the power region is one <code>**&hellip;**</code> wrapped around all of its
+                            spoilers, which is easier to cut into separate messages by hand. Off (the
+                            default): each spoiler carries its own bold. Discord treats a spoiler as a
+                            node of its own, and a bold spanning several of them has mis-paired before
+                            now &mdash; running past the power mark and corrupting the answer line &mdash; so
+                            check how a copied question renders in your channel before leaving this on.</small></span></label>
                 {% comment %}
                 Swatches rather than a colour input: the point is telling two
                 tabs apart at sixteen pixels, which a free colour picker makes
@@ -297,6 +311,12 @@
             font-weight: 600; color: #2b2f3a; cursor: pointer; }
         .set-info-check input { margin: 2px 0 0; flex: 0 0 auto; }
         .set-info-check small { display: block; font-weight: 400; color: #8a8f9c; margin-top: 3px; }
+        /* A number beside its label, laid out like the checkboxes around it */
+        .set-info-num { display: flex; align-items: flex-start; gap: 10px;
+            font-weight: 600; color: #2b2f3a; }
+        .set-info-num input { flex: 0 0 5.5em; width: 5.5em; margin: 0; height: 2rem;
+            padding: 0 6px; }
+        .set-info-num small { display: block; font-weight: 400; color: #8a8f9c; margin-top: 3px; }
         @media (max-width: 760px) { .set-info-grid { grid-template-columns: 1fr; } }
         .set-favicon { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px 16px; }
         .set-favicon-label { font-weight: 600; color: #2b2f3a; flex: 0 0 100%; }

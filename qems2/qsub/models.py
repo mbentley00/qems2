@@ -387,6 +387,26 @@ class QuestionSet (models.Model):
     # inflated the buzz percentages, which are computed over the clues it did
     # see. Tossups are fully spoilered until the bot handles it.
     discord_show_first_clue = models.BooleanField(default=False)
+    # How long a ||spoiler|| may run before "Copy for Discord" cuts a sentence
+    # at its next clause break, in characters. A channel that wants finer buzz
+    # data sets it shorter; one that would rather open whole clues sets it
+    # longer. The floor below which a piece is kept with its neighbour instead
+    # of standing alone as a fragment follows it down.
+    # blank=True, and the form fills the default in: a required number on a
+    # settings form is a trap. The set form is posted from more than the one
+    # page that renders this input, and a field those posts don't carry fails
+    # validation and silently saves nothing -- which is what happened to
+    # max_vhsl_bonus_length and the packetization counts (see forms.py).
+    discord_spoiler_chunk_max = models.PositiveIntegerField(default=160, blank=True)
+    # Bold the power region as ONE **...** run spanning its spoilers, rather
+    # than bolding each spoiler's own text. Off by default, and deliberately:
+    # Discord parses a spoiler as a node of its own, and when the copy was
+    # built this way a ** spanning several of them mis-paired -- the bold ran
+    # past the power mark and swallowed a ** from the answer line, rendering
+    # "Keith Haring [or Keith Allen Haring**]" in a real playtest (fixed in
+    # 30ecb48). It is here so a channel can try it against Discord as it
+    # renders today; if it behaves, this can become the default.
+    discord_bold_power_run = models.BooleanField(default=False)
     # The duplicate and repeat reports read every question in the set and
     # compare them with each other, so what they cost grows with the set. An
     # archive of thousands of questions can afford them; it may also not want

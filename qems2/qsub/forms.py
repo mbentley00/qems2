@@ -79,6 +79,19 @@ class QuestionSetForm(forms.ModelForm):
         keep = [k for k in known if k in wanted]
         return ','.join(keep)
 
+    def clean_discord_spoiler_chunk_max(self):
+        """Keep the spoiler length somewhere it means something.
+
+        Below about forty characters every clause is its own reveal and the
+        question arrives as confetti; past six hundred nothing is ever cut and
+        the setting may as well be off. An empty box means the default rather
+        than zero, which would cut at every clause break.
+        """
+        value = self.cleaned_data.get('discord_spoiler_chunk_max')
+        if not value:
+            return QuestionSet._meta.get_field('discord_spoiler_chunk_max').default
+        return max(40, min(600, value))
+
     def _owner_only_field(self, name):
         """Keep the stored value for a field the page only shows the owner.
 

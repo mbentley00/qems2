@@ -706,11 +706,30 @@ $(function () {
 
     // A spoiler a reader has to open is worth roughly a clue. Past this a
     // single reveal is a paragraph, which is what the sentence-only split gave
-    // for the long ones.
+    // for the long ones. The set can say where its own line is
+    // (discord_spoiler_chunk_max); this is what it is when it hasn't.
     var SPOILER_CHUNK_MAX = 160;
     // Below this a piece reads as a fragment rather than a clue, so it is kept
     // with its neighbour instead of standing alone.
     var SPOILER_CHUNK_MIN = 45;
+
+    // The set's spoiler length, clamped the way the form clamps it -- the
+    // globals are written by a template, but a page that forgot the include
+    // should copy questions the ordinary way rather than cut at every clause.
+    function spoilerChunkMax() {
+        var n = parseInt(window.qemsDiscordSpoilerMax, 10);
+        if (!n || n < 40) { return SPOILER_CHUNK_MAX; }
+        return Math.min(n, 600);
+    }
+
+    // The fragment floor follows the ceiling down: with chunks cut at 60
+    // characters, a 45-character minimum leaves almost nothing to decide, and
+    // pieces that should have been split are handed back whole. A third of the
+    // ceiling, and never more than the standing 45, so the default is exactly
+    // what it was.
+    function spoilerChunkMin() {
+        return Math.min(SPOILER_CHUNK_MIN, Math.round(spoilerChunkMax() / 3));
+    }
 
     /**
      * Whether Discord's inline markup is closed in this piece of text.
@@ -737,7 +756,8 @@ $(function () {
      * whole -- hard-wrapping prose mid-clause reads worse than a long reveal.
      */
     function splitLongSentence(sentence) {
-        if (sentence.length <= SPOILER_CHUNK_MAX) { return [sentence]; }
+        var chunkMax = spoilerChunkMax(), chunkMin = spoilerChunkMin();
+        if (sentence.length <= chunkMax) { return [sentence]; }
         // After a comma, semicolon or colon; before a dash, which introduces
         // what follows it rather than ending what precedes it.
         var re = /[;:,]\s+|\s+(?=[\u2014-]{1,2}\s)/g;
@@ -752,8 +772,8 @@ $(function () {
             var here = points[i];
             var next = (i + 1 < points.length) ? points[i + 1] : sentence.length;
             var piece = sentence.substring(start, here);
-            if (next - start > SPOILER_CHUNK_MAX &&
-                    piece.trim().length >= SPOILER_CHUNK_MIN &&
+            if (next - start > chunkMax &&
+                    piece.trim().length >= chunkMin &&
                     markupBalanced(piece)) {
                 chunks.push(piece.trim());
                 start = here;
@@ -761,7 +781,7 @@ $(function () {
         }
         var tail = sentence.substring(start).trim();
         if (tail) {
-            if (chunks.length && tail.length < SPOILER_CHUNK_MIN) {
+            if (chunks.length && tail.length < chunkMin) {
                 chunks[chunks.length - 1] += ' ' + tail;
             } else {
                 chunks.push(tail);
@@ -852,7 +872,21 @@ $(function () {
     // bolded region both are redundant -- the text is bold either way -- so the
     // inner pair is dropped and the underline, which is not redundant, stays.
     function boldPowerText(text) {
-        return '**' + text.replace(/\*\*/g, '') + '**';
+        return '**' + stripBold(text) + '**';
+    }
+
+    // Bold markers already in the text. Inside a bolded region they are
+    // redundant -- it is bold either way -- and Discord cannot nest ** in **.
+    // The underline, which is not redundant, stays.
+    function stripBold(text) {
+        return text.replace(/\*\*/g, '');
+    }
+
+    // Whether this set bolds the power region as one run across its spoilers.
+    // See the model field: off by default because a ** spanning spoilers
+    // mis-paired against Discord and corrupted the answer line.
+    function boldPowerAsOneRun() {
+        return !!window.qemsDiscordBoldPowerRun;
     }
 
     // How many sentences at the front of the question are only a note to the
@@ -917,13 +951,25 @@ $(function () {
             // clue -- any note in front of it comes along, since it is not a
             // clue and hiding it would tell a reader nothing. The bold run is
             // unaffected either way: power is about scoring, not hiding.
-            // Bold each chunk inside its own spoiler rather than wrapping the
-            // whole run: Discord parses ||...|| as a node of its own, and a **
-            // spanning several of them mis-pairs -- the bold escaped past the
-            // power mark and swallowed a ** from the answer line.
-            result = beforeChunks.map(function (c) {
-                return spoil(boldPowerText(c.text), c.sentence <= noteLead);
-            }).join(' ');
+            //
+            // Where the bold goes is the set's to choose. By default each
+            // chunk is bolded inside its own spoiler, so no marker crosses a
+            // spoiler boundary: Discord parses ||...|| as a node of its own,
+            // and a ** spanning several of them mis-paired -- the bold escaped
+            // past the power mark and swallowed a ** from the answer line. A
+            // set that wants the power region as one visible block, easier to
+            // cut into separate messages by hand, can ask for the one run
+            // instead (discord_bold_power_run); the inner ** still go, so the
+            // run carries a single pair.
+            if (boldPowerAsOneRun()) {
+                result = '**' + beforeChunks.map(function (c) {
+                    return spoil(stripBold(c.text), c.sentence <= noteLead);
+                }).join(' ') + '**';
+            } else {
+                result = beforeChunks.map(function (c) {
+                    return spoil(boldPowerText(c.text), c.sentence <= noteLead);
+                }).join(' ');
+            }
 
             // Post-power: spoiler only, and never the opening.
             if (afterChunks.length > 0) {

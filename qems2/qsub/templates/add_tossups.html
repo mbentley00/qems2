@@ -8,7 +8,7 @@
 {% endblock %}
 
 {% block content %}
-<script>window.qemsDiscordShowFirst = {% if qset.discord_show_first_clue %}true{% else %}false{% endif %};</script>
+{% include "_discord_settings.html" %}
 
 <h3 class="page-header">Add a Tossup</h3>
 <ul class="button-group even">

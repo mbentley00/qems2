@@ -1532,8 +1532,8 @@ html[data-theme="dark"] .set-info-card {
 html[data-theme="dark"] .set-info-heading { color: var(--qx-ink); }
 html[data-theme="dark"] .set-info-field > label { color: var(--qx-muted); }
 html[data-theme="dark"] .set-info-checks { border-top-color: var(--qx-border); }
-html[data-theme="dark"] .set-info-check { color: var(--qx-ink); }
-html[data-theme="dark"] .set-info-check small { color: var(--qx-muted); }
+html[data-theme="dark"] .set-info-check, html[data-theme="dark"] .set-info-num { color: var(--qx-ink); }
+html[data-theme="dark"] .set-info-check small, html[data-theme="dark"] .set-info-num small { color: var(--qx-muted); }
 /* Same stylesheet, same problem: the Writers-and-Editors tag chips and the
    join-link box. */
 html[data-theme="dark"] .editor-tag { background: #2f323c; color: var(--qx-ink); }

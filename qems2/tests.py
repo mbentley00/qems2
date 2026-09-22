@@ -4191,6 +4191,46 @@ class DiscordFirstClueSettingTests(TestCase):
         self.qset.refresh_from_db()
         self.assertFalse(self.qset.discord_show_first_clue)
 
+    # --- Spoiler length and where the power bold goes ---------------------
+
+    def test_the_spoiler_length_defaults_and_reaches_the_pages(self):
+        self.assertEqual(self.qset.discord_spoiler_chunk_max, 160)
+        self.assertContains(self.client.get('/edit_tossup/{0}/'.format(self.tu.id)),
+                            'window.qemsDiscordSpoilerMax = 160;')
+
+    def test_the_spoiler_length_can_be_set(self):
+        self._save(discord_spoiler_chunk_max=70)
+        self.qset.refresh_from_db()
+        self.assertEqual(self.qset.discord_spoiler_chunk_max, 70)
+        self.assertContains(self.client.get('/edit_tossup/{0}/'.format(self.tu.id)),
+                            'window.qemsDiscordSpoilerMax = 70;')
+
+    def test_an_unusable_spoiler_length_is_brought_back_into_range(self):
+        # Every clause its own reveal, or never cutting at all, are both ways
+        # of having no setting; an empty box is the default, not zero.
+        for sent, stored in ((5, 40), (5000, 600), ('', 160)):
+            self._save(discord_spoiler_chunk_max=sent)
+            self.qset.refresh_from_db()
+            self.assertEqual(self.qset.discord_spoiler_chunk_max, stored, msg=repr(sent))
+
+    def test_the_power_bold_is_per_spoiler_unless_asked_otherwise(self):
+        self.assertFalse(self.qset.discord_bold_power_run)
+        self.assertContains(self.client.get('/edit_tossup/{0}/'.format(self.tu.id)),
+                            'window.qemsDiscordBoldPowerRun = false;')
+        self._save(discord_bold_power_run='on')
+        self.qset.refresh_from_db()
+        self.assertTrue(self.qset.discord_bold_power_run)
+        for url in ('/edit_tossup/{0}/'.format(self.tu.id),
+                    '/add_tossups/{0}/'.format(self.qset.id),
+                    '/add_bonuses/{0}/{1}/'.format(self.qset.id, ACF_STYLE_BONUS)):
+            self.assertContains(self.client.get(url),
+                                'window.qemsDiscordBoldPowerRun = true;', msg_prefix=url)
+
+    def test_the_settings_page_offers_both(self):
+        body = self.client.get('/edit_question_set/{0}/'.format(self.qset.id)).content.decode()
+        self.assertIn('discord_spoiler_chunk_max', body)
+        self.assertIn('discord_bold_power_run', body)
+
 
 class BonusDifficultyOrderTests(TestCase):
     """The style check page counts bonuses by the order of their part
