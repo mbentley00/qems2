@@ -160,19 +160,44 @@
     padding: 0.2em 0.5em;
 }
 
+/* Every button is the same height and centres its label, whatever the label
+   is: a glyph, x-with-a-subscript, or a word. Sizes are in rem so a smaller
+   word label doesn't make a shorter button. */
 .rich-editor-toolbar a.rich-editor-btn {
-    display: inline-block;
-    min-width: 2em;
-    text-align: center;
-    padding: 0.15em 0.45em;
-    margin-right: 0.3em;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    vertical-align: middle;
+    box-sizing: border-box;
+    height: 1.9rem;
+    min-width: 2.1rem;
+    padding: 0 0.5rem;
+    margin: 0.1rem 0.3rem 0.1rem 0;
     border: 1px solid #bbb;
     border-radius: 3px;
     background-color: #fff;
     box-shadow: 0 1px 1px rgba(0, 0, 0, 0.08);
     color: #333;
-    font-size: 1em;
-    line-height: 1.4;
+    font-size: 0.95rem;
+    line-height: 1;
+    white-space: nowrap;
+}
+/* Sub/superscript would otherwise push their button's baseline around. */
+.rich-editor-toolbar a.rich-editor-btn sub,
+.rich-editor-toolbar a.rich-editor-btn sup {
+    font-size: 0.7em;
+    line-height: 0;
+}
+/* The named tools (PG, Note, DB, Raw, Bonus skeleton) share one label size and
+   weight; each keeps its own tint or face to say what it makes. */
+.rich-editor-toolbar a.rich-editor-btn.rich-editor-pg,
+.rich-editor-toolbar a.rich-editor-btn.rich-editor-note,
+.rich-editor-toolbar a.rich-editor-btn.rich-editor-qb,
+.rich-editor-toolbar a.rich-editor-btn.rich-editor-plain,
+.rich-editor-toolbar a.rich-editor-btn.rich-editor-skel {
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
 }
 
 .rich-editor-toolbar a.rich-editor-btn:hover {
@@ -188,16 +213,11 @@
 /* The pronunciation-guide buttons, tinted to match the amber .pg-target spans. */
 .rich-editor-toolbar a.rich-editor-btn.rich-editor-pg {
     color: #a1490b;
-    font-weight: bold;
-    font-size: 0.85em;
-    letter-spacing: 0.02em;
 }
 /* The note button, tinted to match the grey .q-note spans it produces. */
 .rich-editor-toolbar a.rich-editor-btn.rich-editor-note {
     color: #555;
     font-style: italic;
-    font-size: 0.85em;
-    letter-spacing: 0.02em;
 }
 html[data-theme="dark"] .rich-editor-toolbar a.rich-editor-btn.rich-editor-note {
     color: var(--qx-muted, #9aa0ad);
@@ -303,12 +323,10 @@ html[data-theme="dark"] .q-savebar {
 }
 html[data-theme="dark"] .q-savebar-label { color: #f0c98a; }
 
-/* The Type Questions box's "start a bonus for me" button: a long label, so it
-   is set at the same reduced size as the other named tools on that toolbar. */
+/* The Type Questions box's "start a bonus for me" button (sized with the other
+   named tools above). */
 .rich-editor-toolbar a.rich-editor-btn.rich-editor-skel {
     color: #2b6a3f;
-    font-size: 0.85em;
-    letter-spacing: 0.02em;
 }
 html[data-theme="dark"] .rich-editor-toolbar a.rich-editor-btn.rich-editor-skel {
     color: #7fc79a;
@@ -317,8 +335,7 @@ html[data-theme="dark"] .rich-editor-toolbar a.rich-editor-btn.rich-editor-skel 
 /* The special-characters panel: hangs under the toolbar (JS sets `top` to the
    toolbar's height) so opening it never pushes the question field down. */
 .rich-editor-toolbar a.rich-editor-btn.rich-editor-sym {
-    font-size: 1.05em;
-    line-height: 1.3;
+    font-size: 1rem;
 }
 .rich-editor-symbols {
     display: none;
@@ -456,7 +473,7 @@ html[data-theme="dark"] .rich-editor i, html[data-theme="dark"] .rich-editor em 
 #individual-fields-container > label:first-child { margin-top: 0; }
 #individual-fields-container .rich-editor-wrapper { margin-bottom: 0; }
 #individual-fields-container .rich-editor-toolbar { padding: 0.1em 0.4em; }
-#individual-fields-container .rich-editor-toolbar a.rich-editor-btn { padding: 0.05em 0.4em; font-size: 0.85em; }
+#individual-fields-container .rich-editor-toolbar a.rich-editor-btn { height: 1.6rem; min-width: 1.8rem; padding: 0 0.4rem; }
 #individual-fields-container .rich-editor-hint { font-size: 0.7em; padding-top: 0.25em; }
 #individual-fields-container .rich-editor { padding: 0.35em 0.5em; }
 #individual-fields-container .rich-editor.rich-editor-tall { min-height: 2.6em; }
@@ -1192,7 +1209,7 @@ a.app-crumb-muted:hover { color: var(--qx-ink); }
 .app-topbar .app-btn { height: 38px; padding-top: 0; padding-bottom: 0; }
 .app-topbar .app-crumbs { flex: 0 1 auto; }
 
-.app-content { padding: 26px 32px 60px; max-width: 1500px; width: 100%; }
+.app-content { padding: 18px 32px 60px; max-width: 1500px; width: 100%; }
 /* The packet grid uses the full width beside the sidebar. */
 body.grid-page .app-content { max-width: none; }
 .app-messages { margin-bottom: 14px; }
@@ -1201,7 +1218,9 @@ body.grid-page .app-content { max-width: none; }
 .app-content .page-header,
 .app-content h1, .app-content h2 { font-family: var(--qx-serif); color: var(--qx-ink); }
 .app-content h1 { font-size: 2.4rem; font-weight: 700; margin: 0 0 .35rem; }
-.app-content .page-header { font-weight: 700; }
+/* The page title ("Edit Tossup" etc.) sits close under the top bar: the
+   content padding alone is enough, without a heading margin on top of it. */
+.app-content .page-header { font-weight: 700; margin-top: 0; margin-bottom: 0.6rem; padding-bottom: 0.3rem; }
 .app-content h3.page-header { font-size: 1.8rem; }
 
 .app-content .panel { background: var(--qx-card); border: 1px solid var(--qx-border); border-radius: 12px;
@@ -2103,4 +2122,3 @@ html[data-theme="dark"] .sa-read-problems { color: #f0a868; }
 .qbr-inline-close { margin-left: auto; order: 99; border: none; background: none;
     color: var(--qx-muted, #8a8f9c); cursor: pointer; font-size: 1.1rem; line-height: 1; padding: 0 2px; }
 .qbr-inline-close:hover { color: #c0392b; }
-.rich-editor-btn.rich-editor-qb { font-weight: 700; letter-spacing: 0.02em; }
