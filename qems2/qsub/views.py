@@ -81,6 +81,30 @@ def fulltext_filter(queryset, query, answers_only=False):
         Q(search_question_content__icontains=query) | Q(search_question_answers__icontains=query))
 
 
+# Search operators, not words to look for in an answer line.
+_SEARCH_OPERATORS = {'or', 'and', 'not'}
+
+
+def answer_matches_first(questions, query):
+    """Put the questions whose answer line matches ahead of the ones that only
+    mention the words in a clue.
+
+    Searching a set is nearly always asking "have we asked about this?", and
+    the answer to that is the answer lines; a clue that happens to contain the
+    word is the lesser hit. A question counts as an answer match when every
+    word of the query is in its answer lines. The sort is stable, so within
+    each group the order is what it was (tossups, then bonuses)."""
+    terms = [t for t in re.findall(r'\w+', (query or '').lower())
+             if t not in _SEARCH_OPERATORS]
+    if not terms:
+        return list(questions)
+
+    def in_answer(q):
+        answers = (q.search_question_answers or '').lower()
+        return all(t in answers for t in terms)
+    return sorted(questions, key=lambda q: 0 if in_answer(q) else 1)
+
+
 def _search_category_choices(question_sets):
     """The category choices for the search page, per set and overall.
 
@@ -5648,6 +5672,7 @@ def search(request, passed_qset_id=None):
 
                 if search_category and search_category != 'All':
                     questions = [q for q in questions if str(q.category) == search_category]
+                questions = answer_matches_first(questions, query)
 
                 # The results table is the set's own question table, so the
                 # columns it can show are the ones the category pages show --
@@ -11937,6 +11962,26 @@ def _tag_matches_path(tag_path, question_path):
             question_path.startswith(tag_path + ' - ') or
             tag_path.startswith(question_path + ' - '))
 
+def drop_inapplicable_tags(question, dist_entry):
+    """Take off the tags that don't apply to the question's category.
+
+    A question moved to another category keeps nothing of the old one's: a
+    'Literature - British' tag left on a question now in History would count
+    it toward a quota it no longer fills, export with it, and -- since the edit
+    page only offers the new category's tags -- be impossible to untick.
+
+    A question with no category keeps its tags. Unfiling is a step on the way
+    to refiling, not a statement about what the question is about, and the
+    tags are what a person refiling it would want to see."""
+    if dist_entry is None:
+        return
+    path = str(dist_entry)
+    stale = [tag for tag in question.category_tags.all()
+             if not _tag_matches_path(tag.category_path, path)]
+    if stale:
+        question.category_tags.remove(*stale)
+
+
 def get_applicable_tags(qset, dist_entry):
     """Tags of the set that apply to a question in the given category.
 
@@ -12389,6 +12434,9 @@ def save_tag_selection(request, qset, question, dist_entry, is_tossup):
             relation.add(question)
         else:
             relation.remove(question)
+    # The boxes are only the new category's tags, so a change of category
+    # would otherwise leave the old one's on the question, unticked by no one.
+    drop_inapplicable_tags(question, dist_entry)
 
 def _restore_authors_from_files(qset, uploads, owner):
     """Credit the people the original packets named, for questions already here.
@@ -12515,6 +12563,11 @@ def tidy_categories(request, qset_id):
                         '{0} - {1}'.format(entry.category, entry.subcategory).strip(' -'))
                     target = category_mapper.best_entry(cat, sub, keep)
                 if target is not None:
+                    # Refiled questions lose the tags the new category doesn't
+                    # have, as they would moving one at a time.
+                    for q in list(qset.tossup_set.filter(category=entry)) + \
+                            list(qset.bonus_set.filter(category=entry)):
+                        drop_inapplicable_tags(q, target)
                     moved += qset.tossup_set.filter(category=entry).update(category=target)
                     moved += qset.bonus_set.filter(category=entry).update(category=target)
                 elif raw == 'none':
@@ -12623,6 +12676,7 @@ def category_problems(request, qset_id):
                         continue
                     q.category = entry
                     q.save()
+                    drop_inapplicable_tags(q, entry)
                     changed += 1
                 message = 'Assigned {0} question(s) to {1}.'.format(changed, html.unescape(str(entry)))
                 message_class = 'alert-box success'

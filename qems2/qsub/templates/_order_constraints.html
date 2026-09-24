@@ -9,44 +9,57 @@ here lets the packet grid and the style check say when the set breaks it.
 Context: qset, constraint_qtype, constraint_qid, constraint_rows, read_only.
 {% endcomment %}
 {% if constraint_qid %}
+{% comment %}
+Laid out like the style check card beside it: a header, then one row per
+rule -- a chip for whether the set keeps it, what the rule says, the question
+it is about, and what you can do.
+{% endcomment %}
 <div class="oc-panel" id="order-constraints"
      data-qtype="{{ constraint_qtype }}" data-qid="{{ constraint_qid }}"
      data-qset="{{ qset.id }}">
-    <div class="oc-head">Placement rules
-        <small>Where this question has to sit relative to another. Checked on the
-        packet grid and in the style check.</small></div>
-
-    <div class="oc-list">
-        {% for row in constraint_rows %}
-        <div class="oc-row{% if row.missing %} oc-gone{% endif %}" data-id="{{ row.constraint.id }}">
-            {% if row.violated %}<span class="oc-bad" title="The set breaks this rule right now">&#9888; broken</span>{% endif %}
-            <span class="oc-phrase">Must be <strong>{{ row.phrase }}</strong></span>
-            {% if row.missing %}
-            <span class="oc-other oc-muted">a question that no longer exists</span>
-            {% else %}
-            <a class="oc-other" href="{{ row.other_edit_url }}">{{ row.other_answer }}</a>
-            <span class="oc-muted">{% if row.other_packet %}{{ row.other_packet }}{% else %}not in a packet &mdash; nothing to check yet{% endif %}</span>
-            {% endif %}
-            {% if row.constraint.note %}<span class="oc-note">{{ row.constraint.note }}</span>{% endif %}
-            {% if not read_only %}<button type="button" class="oc-del" title="Remove this rule">&times;</button>{% endif %}
-        </div>
-        {% empty %}
-        <p class="oc-muted oc-empty">No placement rules on this question.</p>
-        {% endfor %}
+    <div class="oc-head">
+        <span class="oc-title">Placement rules</span>
+        {% if constraint_rows %}<span class="oc-count">{{ constraint_rows|length }}</span>{% endif %}
+        <span class="oc-sub">Where this question has to sit relative to another. Checked on the packet grid and in the style check.</span>
     </div>
+
+    <ul class="oc-list">
+        {% for row in constraint_rows %}
+        <li class="oc-row{% if row.missing %} oc-gone{% endif %}" data-id="{{ row.constraint.id }}">
+            {% if row.violated %}<span class="oc-chip oc-chip-bad" title="The set breaks this rule right now">Broken</span>
+            {% elif row.missing or not row.other_packet %}<span class="oc-chip" title="Nothing to check until both questions are in packets">Waiting</span>
+            {% else %}<span class="oc-chip oc-chip-ok" title="The set keeps this rule">Kept</span>{% endif %}
+            <div class="oc-main">
+                <div class="oc-phrase">Must be {{ row.phrase }}</div>
+                <div class="oc-detail">
+                {% if row.missing %}
+                    <span class="oc-muted">a question that no longer exists</span>
+                {% else %}
+                    <a class="oc-other" href="{{ row.other_edit_url }}">{{ row.other_answer }}</a>
+                    <span class="oc-muted">&middot; {% if row.other_packet %}{{ row.other_packet }}{% else %}not in a packet{% endif %}</span>
+                {% endif %}
+                {% if row.constraint.note %}<span class="oc-note">&ldquo;{{ row.constraint.note }}&rdquo;</span>{% endif %}
+                </div>
+            </div>
+            {% if not read_only %}<a href="#" class="oc-del" title="Remove this rule">Remove</a>{% endif %}
+        </li>
+        {% empty %}
+        <li class="oc-empty">No placement rules on this question.</li>
+        {% endfor %}
+    </ul>
 
     {% if not read_only %}
     <div class="oc-add">
         <select class="oc-kind">
-            <option value="apart">must be at least</option>
-            <option value="before">must come before</option>
-            <option value="after">must come after</option>
+            <option value="apart">Must be at least</option>
+            <option value="before">Must come before</option>
+            <option value="after">Must come after</option>
         </select>
         <input type="number" class="oc-packets" min="1" value="1" title="How many packets apart">
         <span class="oc-packets-unit">packet(s) away from</span>
-        <button type="button" class="button tiny secondary oc-pick">Choose a question&hellip;</button>
+        <button type="button" class="oc-pick">Choose a question&hellip;</button>
         <input type="text" class="oc-note" placeholder="Why (optional)" maxlength="200">
-        <button type="button" class="button tiny primary oc-save" disabled>Add rule</button>
+        <button type="button" class="oc-save" disabled>Add rule</button>
         <span class="oc-chosen"></span>
     </div>
     <div class="oc-flash"></div>
@@ -65,34 +78,65 @@ Context: qset, constraint_qtype, constraint_qid, constraint_rows, read_only.
 </div>
 
 <style>
-.oc-panel { border: 1px solid var(--qx-border, #e9e9ef); border-radius: 8px;
-    background: var(--qx-card, #fff); padding: 10px 14px; margin: 14px 0; }
-.oc-head { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;
-    color: var(--qx-muted, #8a8f9c); margin-bottom: 6px; }
-.oc-head small { display: block; text-transform: none; letter-spacing: 0; margin-top: 3px; }
-.oc-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px;
-    padding: 4px 0; border-top: 1px solid var(--qx-border, #f0f0f3); font-size: 0.9rem; }
+.oc-panel { margin: 16px 0; border: 1px solid var(--qx-border, #e9e9ef); border-radius: 14px;
+    background: var(--qx-card, #fff); box-shadow: 0 1px 2px rgba(20, 20, 40, .04); }
+.oc-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 14px 20px;
+    border-bottom: 1px solid var(--qx-border, #e9e9ef); }
+.oc-title { color: var(--qx-ink, #20232e); font-size: 1rem; }
+.oc-count { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px;
+    padding: 0 6px; border-radius: 11px; background: #efeff4; color: #565b66; font-size: .8rem; font-weight: 600; }
+.oc-sub { margin-left: auto; color: var(--qx-muted, #8a8f9c); font-size: .85rem; }
+.oc-list { list-style: none; margin: 0; }
+.oc-row { display: flex; align-items: center; gap: 16px; margin: 0; padding: 14px 20px;
+    border-top: 1px solid var(--qx-border, #e9e9ef); }
 .oc-row:first-child { border-top: none; }
 .oc-gone { opacity: 0.6; }
-.oc-bad { color: #c0392b; font-weight: 600; font-size: 0.85em; white-space: nowrap; }
-html[data-theme="dark"] .oc-bad, html[data-theme="dark"] .oc-del:hover { color: #f08c8c; }
-.oc-muted { color: var(--qx-muted, #8a8f9c); font-size: 0.85em; }
-.oc-note { font-style: italic; color: var(--qx-muted, #8a8f9c); }
-.oc-del { margin-left: auto; border: none; background: none; cursor: pointer;
-    color: var(--qx-muted, #8a8f9c); font-size: 1.1rem; line-height: 1; }
-.oc-del:hover { color: #c0392b; }
-.oc-empty { margin: 0; }
-.oc-add { display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
-    margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--qx-border, #f0f0f3); }
-.oc-add select, .oc-add input { margin: 0; height: auto; padding: 4px 6px; font-size: 0.85rem; width: auto; }
+.oc-chip { flex: 0 0 auto; align-self: flex-start; margin-top: 2px; min-width: 76px; box-sizing: border-box;
+    padding: 3px 10px; border-radius: 7px; background: #efeff4; color: #565b66; font-size: .8rem;
+    text-align: center; white-space: nowrap; }
+.oc-chip-bad { background: #fbe3e1; color: #a32b1f; }
+.oc-chip-ok { background: #dff3e6; color: #1c7c3e; }
+.oc-main { flex: 1 1 auto; min-width: 0; }
+.oc-phrase { color: var(--qx-ink, #20232e); font-weight: 600; font-size: .95rem; }
+.oc-detail { margin-top: 2px; font-family: var(--qx-serif); font-size: 1.05rem; line-height: 1.55; color: #5c6270; }
+.oc-muted { color: var(--qx-muted, #8a8f9c); }
+.oc-note { margin-left: 6px; font-style: italic; color: var(--qx-muted, #8a8f9c); }
+body.app-authed a.oc-del { flex: 0 0 auto; color: var(--qx-muted, #8a8f9c); font-size: .9rem; }
+body.app-authed a.oc-del:hover { color: #c0392b; }
+.oc-empty { margin: 0; padding: 14px 20px; color: var(--qx-muted, #8a8f9c); font-size: .9rem; }
+.oc-add { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 14px 20px;
+    border-top: 1px solid var(--qx-border, #e9e9ef); }
+.oc-add select, .oc-add input { box-sizing: border-box; height: 40px; margin: 0; padding: 0 10px; width: auto;
+    border: 1px solid var(--qx-border, #e9e9ef); border-radius: 9px; background-color: var(--qx-card, #fff);
+    font-size: .9rem; box-shadow: none; }
+.oc-add select { padding-right: 26px; }
 .oc-add .oc-packets { width: 4.5em; }
-.oc-add .oc-note { flex: 1 1 12em; min-width: 8em; }
-.oc-add .button { margin: 0; }
-.oc-chosen { font-size: 0.85rem; font-weight: 600; flex-basis: 100%; }
-.oc-flash { font-size: 0.85rem; margin-top: 6px; }
+.oc-add .oc-note { flex: 1 1 12em; min-width: 8em; margin: 0; font-style: normal; color: inherit; }
+.oc-packets-unit { color: var(--qx-muted, #8a8f9c); font-size: .9rem; }
+.oc-add button { box-sizing: border-box; height: 40px; margin: 0; padding: 0 16px; border-radius: 9px;
+    font-family: var(--qx-sans); font-size: .9rem; font-weight: 500; line-height: 1; cursor: pointer; }
+.oc-add .oc-pick { border: 1px solid var(--qx-border, #e9e9ef); background: var(--qx-card, #fff);
+    color: var(--qx-ink, #20232e); }
+.oc-add .oc-pick:hover, .oc-add .oc-pick:focus { background: #faf8ff; border-color: #cfc6e6; color: var(--qx-ink, #20232e); }
+.oc-add .oc-save { border: 1px solid #bfe3cb; background: #eef8f1; color: #1c7c3e; }
+.oc-add .oc-save:hover, .oc-add .oc-save:focus { background: #dff3e6; color: #1c7c3e; }
+.oc-add .oc-save[disabled] { opacity: .5; cursor: default; }
+.oc-chosen { flex-basis: 100%; font-size: .85rem; font-weight: 600; }
+.oc-chosen:empty { display: none; }
+.oc-flash { padding: 0 20px; font-size: .85rem; }
+.oc-flash:empty { display: none; }
+.oc-flash:not(:empty) { padding-bottom: 12px; }
 .oc-pick-result { padding: 6px 8px; border-bottom: 1px solid var(--qx-border, #eee); cursor: pointer; font-size: 0.9em; }
 .oc-pick-result:hover { background: var(--qx-hover, #d9edf7); }
 #oc-pick-results { max-height: 320px; overflow-y: auto; }
+html[data-theme="dark"] .oc-chip, html[data-theme="dark"] .oc-count { background: var(--qx-elevate); color: var(--qx-muted); }
+html[data-theme="dark"] .oc-chip-bad { background: #3a1d1d; color: #f0a8a0; }
+html[data-theme="dark"] .oc-chip-ok { background: #16301f; color: #8fd4a8; }
+html[data-theme="dark"] .oc-detail { color: var(--qx-muted); }
+html[data-theme="dark"] .oc-add select, html[data-theme="dark"] .oc-add input,
+html[data-theme="dark"] .oc-add .oc-pick { background-color: var(--qx-elevate); border-color: var(--qx-border); color: var(--qx-ink); }
+html[data-theme="dark"] .oc-add .oc-save { background: #16301f; border-color: #2c5a3b; color: #8fd4a8; }
+html[data-theme="dark"] body.app-authed a.oc-del:hover { color: #f08c8c; }
 </style>
 
 <script>
@@ -177,11 +221,14 @@ $(function () {
         }, function (resp) {
             var j = (typeof resp === 'string') ? JSON.parse(resp) : resp;
             if (!j.ok) { flash(j.error, true); $b.prop('disabled', false); return; }
-            window.location.reload();
+            // A fresh GET, not reload(): after a save this page is a POST
+            // result, and reloading would submit the question again.
+            window.location.replace(window.location.pathname + window.location.search);
         }).fail(function () { flash('Could not save that rule.', true); $b.prop('disabled', false); });
     });
 
-    $panel.on('click', '.oc-del', function () {
+    $panel.on('click', '.oc-del', function (e) {
+        e.preventDefault();
         var $row = $(this).closest('.oc-row');
         $.post('/question_constraint/', {
             action: 'delete', csrfmiddlewaretoken: csrf(), id: $row.data('id')
@@ -190,8 +237,10 @@ $(function () {
             if (!j.ok) { flash(j.error, true); return; }
             $row.remove();
             if (!$panel.find('.oc-row').length) {
-                $panel.find('.oc-list').html('<p class="oc-muted oc-empty">No placement rules on this question.</p>');
+                $panel.find('.oc-list').html('<li class="oc-empty">No placement rules on this question.</li>');
             }
+            var n = $panel.find('.oc-row').length;
+            $panel.find('.oc-count').text(n).toggle(n > 0);
         }).fail(function () { flash('Could not remove that rule.', true); });
     });
 });

@@ -447,7 +447,7 @@ $(function () {
             $unifiedTextarea.val(fieldsToUnified());
             $individualContainer.hide();
             $unifiedContainer.show();
-            $toggleBtn.text('Switch to Individual Fields');
+            $toggleBtn.text('Individual fields');
         }
     }
 
@@ -536,7 +536,7 @@ $(function () {
         $unifiedTextarea.val(fieldsToUnified());
         $individualContainer.hide();
         $unifiedContainer.show();
-        $toggleBtn.text('Switch to Individual Fields');
+        $toggleBtn.text('Individual fields');
         $unifiedTextarea.focus();
     }
 
@@ -545,7 +545,7 @@ $(function () {
         unifiedMode = false;
         $unifiedContainer.hide();
         $individualContainer.show();
-        $toggleBtn.text('Switch to Unified Editor');
+        $toggleBtn.text('Unified editor');
     }
 
     // ========================================================================
@@ -1465,7 +1465,8 @@ $(function () {
         var $btn = $('.q-copy-tools .ec-open');
         if (!$btn.length) { return; }
         var n = $.trim($panel.find('.ec-count').first().text());
-        $btn.text(n ? 'Comments (' + n + ')' : 'Comments');
+        $btn.text('Comments');
+        if (n) { $btn.append(' ', $('<span class="qhead-count"></span>').text(n)); }
     }
     function qemsRefreshComments(done) {
         // The edit pages keep comments in a sidebar; the doc view has the same
@@ -1618,6 +1619,13 @@ $(function () {
 
     $(document).on('click', '.ec-open', function (e) {
         e.preventDefault();
+        // The button is always in the row, so it is also how the column is
+        // put away again.
+        if (!$('.edit-layout').hasClass('edit-layout-solo')) {
+            $('.edit-layout').addClass('edit-layout-solo');
+            rememberComments(true);
+            return;
+        }
         $('.edit-layout').removeClass('edit-layout-solo');
         rememberComments(false);
         var $box = $('.edit-comments .new-comment-text').first();

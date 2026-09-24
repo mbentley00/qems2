@@ -1,0 +1,70 @@
+{% comment %}
+Who, where and what state, under the question on the edit pages -- a byline
+that reads as a sentence ("History - World by Kim Lee - credit none - in Round
+15, #3"), and one row of what you can do to the question. The category, author
+and credit are the form's own fields, dressed to read as words; the flags sit
+in the Status menu, which says in its button what is set.
+
+Include with `q` (the tossup or bonus) and `qtype`; uses the page's `form`,
+`qset`, `role` and `question_type`. Everything in here posts with the form.
+{% endcomment %}
+{{ form.packet.as_hidden }}
+<div class="qmeta-card">
+    <div class="qmeta-byline">
+        {% if form.category %}<span class="qmeta-inline qmeta-cat" title="Category">{{ form.category }}</span>{% endif %}
+        {% if form.author %}<span class="qmeta-word">by</span>
+        <span class="qmeta-inline" title="Author: the account that owns the question, which decides who may edit it">{{ form.author }}</span>{% endif %}
+        {% if form.author_text %}<span class="qmeta-word">&middot; credit</span>
+        {% comment %}
+        Credit for someone with no QEMS account -- a guest writer, or a
+        question carried in from another set. When it is filled in it is the
+        name shown and exported; the author still says which account owns the
+        question, which is what decides who may edit it.
+        {% endcomment %}
+        <span class="qmeta-inline qmeta-credit" title="Credit someone with no QEMS account (a guest writer, a question from another set). When filled in, it is the name shown and exported.">{{ form.author_text }}</span>{% endif %}
+        <span class="qmeta-word">&middot; in</span>
+        <a href="/packet_grid/{{ qset.id }}/" class="qmeta-packet-link" title="Open the packet grid">{% if q.packet %}{{ q.packet.packet_name }}{% if q.question_number %}, #{{ q.question_number }}{% endif %}{% else %}no packet{% endif %}&nbsp;&#8599;</a>
+    </div>
+    {% if form.category.errors or form.author.errors or form.author_text.errors %}
+    <div class="qmeta-errors">{{ form.category.errors }}{{ form.author.errors }}{{ form.author_text.errors }}</div>
+    {% endif %}
+
+    <div class="qmeta-bar">
+        <div class="qmenu qmeta-status">
+            <button type="button" class="qmenu-toggle qmeta-btn qmeta-btn-boxed" aria-haspopup="true" aria-expanded="false">
+                Status <span class="qmeta-status-summary"></span> <span class="qmenu-caret">&#9662;</span></button>
+            <div class="qmenu-panel" hidden>
+                {% if role == "editor" %}
+                <label class="qmenu-check">{{ form.locked }} <span>Locked</span></label>
+                <label class="qmenu-check">{{ form.edited }} <span>Edited</span></label>
+                {% endif %}
+                <label class="qmenu-check">{{ form.proofread }} <span>Proofread</span></label>
+                <label class="qmenu-check">{{ form.read_carefully }} <span>Read answer carefully</span></label>
+                {% if qtype == "tossup" %}
+                <label class="qmenu-check" title="Bold the whole stem and score every correct buzz as a power. Auto-checks when the stem says &quot;for 15 points&quot; and has no (*)/(+) mark."><input type="checkbox" name="all_power" id="id_all_power" {% if q.is_all_power %}checked{% endif %}> <span>All power</span></label>
+                {% endif %}
+            </div>
+        </div>
+        {% if q %}
+        {% if qtype == "tossup" %}
+        <a href="/convert_tossup/{{ q.id }}" class="qmeta-btn convert_tossup" value="{{ q.id }}" qset-id="{{ qset.id }}" target-type="ACF-style bonus" title="Convert this tossup into an ACF-style bonus">Bonusify</a>
+        {% else %}
+        <a href="/convert_bonus/{{ q.id }}" class="qmeta-btn convert_bonus" value="{{ q.id }}" qset-id="{{ qset.id }}" target-type="ACF-style tossup" title="Convert this bonus into an ACF-style tossup">Tossupify</a>
+        {% endif %}
+        {% if role == "editor" %}<a href="#" class="qmeta-btn edit-swap-btn" data-qtype="{{ qtype }}" data-qid="{{ q.id }}" data-packet="{{ q.packet.id }}" data-num="{{ q.question_number }}">Swap packets</a>{% endif %}
+        <div class="qmenu">
+            <button type="button" class="qmenu-toggle qmeta-btn" aria-haspopup="true" aria-expanded="false">More <span class="qmenu-caret">&#9662;</span></button>
+            <div class="qmenu-panel" hidden>
+                <a href="/move_{{ qtype }}/{{ qset.id }}/{{ q.id }}" class="qmenu-item">Move set</a>
+                {% if qtype == "bonus" and question_type == "VHSL bonus" %}
+                <a href="/convert_bonus/{{ q.id }}" class="qmenu-item convert_bonus" value="{{ q.id }}" qset-id="{{ qset.id }}" target-type="ACF-style bonus">Convert to ACF bonus</a>
+                {% endif %}
+                <a href="/export_question/{{ qtype }}/{{ q.id }}/yapp-json/" class="qmenu-item" title="Download just this {{ qtype }} as a one-question YAPP JSON packet, readable by MODAQ">YAPP</a>
+                <a href="/export_question/{{ qtype }}/{{ q.id }}/yapp2-json/" class="qmenu-item" title="Download just this {{ qtype }} as YAPP2 JSON — the same packet, plus pronunciation-guide anchoring">YAPP2</a>
+                <hr class="qmenu-sep">
+                <a href="/delete_{{ qtype }}/{{ q.id }}" class="qmenu-item qmenu-danger delete_{{ qtype }}" value="{{ q.id }}" qset-id="{{ qset.id }}">Delete {{ qtype }}</a>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>

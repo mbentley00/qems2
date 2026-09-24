@@ -40,7 +40,7 @@ inserts itself after it), .reply-form#reply-form-<id>, .add-comment-form.
     {% include "_comment_discord.html" %}
 
     {% autoescape off %}
-    {% for comment in thread_data.top_level %}
+    {% for comment in thread_data.active_first %}
         {% with anchor=thread_data.anchors|get_anchor:comment.id %}
         <article class="comment-item ec-card{% if comment.id in thread_data.resolved %} comment-resolved{% endif %}{% if comment.is_discord %} comment-discord{% endif %}"
                  data-comment-id="{{ comment.id }}"{% if anchor %} data-anchor-text="{{ anchor.selected_text|force_escape }}" data-anchor-prefix="{{ anchor.prefix|force_escape }}" data-anchor-suffix="{{ anchor.suffix|force_escape }}"{% endif %}>

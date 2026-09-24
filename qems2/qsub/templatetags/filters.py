@@ -265,6 +265,14 @@ def answer_no_formatting(line):
     return get_answer_no_formatting(line)
 
 
+@register.filter(name='without_alternates')
+def without_alternates(line):
+    """An answer line without its [accept ...; prompt on ...] brackets -- the
+    answer itself, which is what a browser tab needs to say. A bracket left
+    unclosed runs to the end of the line, so it goes too."""
+    return ' '.join(re.sub(r'\[[^\]]*\]?', ' ', line or '').split())
+
+
 @register.filter(name='track_changes_diff')
 def track_changes_diff(old, new):
     """Word-level track-changes HTML between two strings: removed text in <del>,
@@ -558,7 +566,13 @@ def _threaded_comments(obj, include_removed=False):
     # Only ever non-empty for the history view; the live view filters these out.
     removed = set(c.id for c in all_comments if c.is_removed)
 
-    return {'top_level': top_level, 'replies': replies, 'anchors': anchors,
+    # The edit pages' column lists what still needs doing first; a resolved
+    # comment is settled, so it goes to the bottom (in its own order).
+    active_first = ([c for c in top_level if c.id not in resolved]
+                    + [c for c in top_level if c.id in resolved])
+
+    return {'top_level': top_level, 'active_first': active_first,
+            'replies': replies, 'anchors': anchors,
             'resolved': resolved, 'removed': removed, 'count': len(all_comments)}
 
 

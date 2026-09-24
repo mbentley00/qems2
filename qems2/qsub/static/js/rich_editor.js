@@ -153,6 +153,17 @@ $(function () {
 
     var enhanceCount = 0;
 
+    // What an empty field says. The edit pages have no field labels, so this
+    // is how an empty one says what it is for.
+    var FIELD_PLACEHOLDERS = {
+        id_tossup_text: 'Question text', id_tossup_answer: 'Answer line',
+        id_leadin: 'Leadin',
+        id_part1_text: 'Part 1', id_part1_answer: 'Part 1 answer line',
+        id_part2_text: 'Part 2', id_part2_answer: 'Part 2 answer line',
+        id_part3_text: 'Part 3', id_part3_answer: 'Part 3 answer line',
+        'unified-tossup-text': 'The question, then a line starting ANSWER:'
+    };
+
     // `opts.compact` drops the toolbar and sizes the editor like an ordinary
     // one-line input: the structured answer rows are four fields wide, and a
     // toolbar apiece would bury the fields under their own chrome. Ctrl+B/U/I
@@ -174,6 +185,7 @@ $(function () {
             '  <a href="#" class="rich-editor-btn" data-cmd="bold" title="Bold (Ctrl+B)"><b>B</b></a>' +
             '  <a href="#" class="rich-editor-btn" data-cmd="underline" title="Underline (Ctrl+U)"><u>U</u></a>' +
             '  <a href="#" class="rich-editor-btn" data-cmd="italic" title="Italic (Ctrl+I)"><i>I</i></a>' +
+            '  <span class="rich-editor-sep"></span>' +
             '  <a href="#" class="rich-editor-btn" data-cmd="subscript" title="Subscript">x<sub>2</sub></a>' +
             '  <a href="#" class="rich-editor-btn" data-cmd="superscript" title="Superscript">x<sup>2</sup></a>' +
             // Characters no keyboard here has: the accents European names need,
@@ -182,6 +194,7 @@ $(function () {
             // where it was, so a click drops the character into the sentence.
             '  <a href="#" class="rich-editor-btn rich-editor-sym" data-cmd="symbols" ' +
             'title="Special characters: accents, currency, dashes and proofreading marks">Ω</a>' +
+            '  <span class="rich-editor-sep"></span>' +
             // Pronunciation-guide target: select the word(s) together with the
             // following ("...") guide, and this wraps just the word(s) in \P...\P.
             // With the caret inside an existing mark it removes that mark, so PG
@@ -192,7 +205,7 @@ $(function () {
             '  <a href="#" class="rich-editor-btn rich-editor-pg" data-cmd="pgauto" title="Mark the target of every pronunciation guide in this field, guessing the word(s) each one covers from its respelling">PG auto</a>' +
             // A note to the moderator/players (\N...\N): read aloud, but never
             // counted toward the question length. A toggle, like PG.
-            '  <a href="#" class="rich-editor-btn rich-editor-note" data-cmd="note" title="Mark a note to the moderator or players (e.g. &quot;Description acceptable.&quot;). It is read aloud but never counts toward the question length. Click with the caret inside a note to remove the mark.">Note</a>' +
+            '  <a href="#" class="rich-editor-btn rich-editor-note" data-cmd="note" title="Mark a note to the moderator or players, such as &quot;Note to players: description acceptable.&quot; It is read aloud but never counts toward the question length. Click with the caret inside a note to remove the mark.">Note</a>' +
             // Switch to editing the raw QEMS markup (e.g. ~foo~ for italics) in
             // the underlying textarea, to hand-fix anything the rich view got
             // wrong; the label flips to "Rich" to switch back.
@@ -217,6 +230,7 @@ $(function () {
         // Only the big bulk "type questions" box gets the extra-tall sizing.
         // (Edit-page fields are also multiline so Enter works, but size by role.)
         if (textarea.id === 'id_questions' || textarea.id === 'unified-bonus-text') { $editor.addClass('rich-editor-multiline'); }
+        if (textarea.id === 'unified-tossup-text') { $editor.addClass('rich-editor-tall'); }
         // Long stem/leadin/part-text fields start taller; answer lines stay short.
         var TALL_FIELDS = ['id_tossup_text', 'id_leadin',
                            'id_part1_text', 'id_part2_text', 'id_part3_text'];
@@ -232,7 +246,8 @@ $(function () {
 
         // A contenteditable has no placeholder of its own, so carry the
         // field's across and show it while the editor is empty.
-        var placeholder = opts.placeholder || $ta.attr('placeholder') || '';
+        var placeholder = opts.placeholder || $ta.attr('placeholder') ||
+            FIELD_PLACEHOLDERS[textarea.id] || '';
         if (placeholder) { $editor.attr('data-placeholder', placeholder); }
         function updatePlaceholder() {
             $editor.toggleClass('rich-editor-empty', !$editor.text().trim());
@@ -253,6 +268,12 @@ $(function () {
         // occupies its place in the row.
         if (opts.wrapperClass) { $wrapper.addClass(opts.wrapperClass); }
         $anchorEl.after($wrapper).hide();
+        // The edit card gathers every field's toolbar into one slot (see
+        // shareToolbars below), so it needs to find them from the wrapper.
+        if (!opts.compact) {
+            $wrapper.data('reToolbar', $toolbar).data('reAnchor', $anchorEl)
+                .data('reSetPlain', setPlainMode);
+        }
 
         // When true, the raw textarea is showing and is the source of truth, so
         // the rich editor must not push its (frozen) content back over it.
@@ -261,12 +282,13 @@ $(function () {
         function syncDown() {
             if (plainMode) { return; }
             $ta.val(htmlToQems($editor[0].innerHTML, multiline));
+            if (opts.onSync) { opts.onSync(); }
         }
 
         // Swap between the rich editor and the underlying textarea (the raw
         // QEMS markup) so a writer can hand-fix something the rich view parsed
         // wrong. Each side is converted into the other on switch.
-        function setPlainMode(on) {
+        function setPlainMode(on, keepFocus) {
             if (on === plainMode) { return; }
             // The panel inserts into the rich editor, which is about to be
             // hidden; leaving it open would float it over the raw textarea.
@@ -276,14 +298,18 @@ $(function () {
                 plainMode = true;
                 $editor.hide();
                 $anchorEl.show();
-                $ta.trigger('focus');
+                if (!keepFocus) { $ta.trigger('focus'); }
             } else {
                 plainMode = false;
                 $editor.html(qemsToHtml($ta.val(), multiline));
                 $anchorEl.hide();
                 $editor.show();
+                paintPower();
             }
             $wrapper.toggleClass('rich-editor-plainmode', plainMode);
+            // The toolbar may be living in the edit card's slot rather than
+            // in the wrapper, so it carries the state itself as well.
+            $toolbar.toggleClass('rich-editor-toolbar-plain', plainMode);
             $toolbar.find('.rich-editor-plain')
                 .text(plainMode ? 'Rich' : 'Raw')
                 .attr('title', plainMode
@@ -324,6 +350,19 @@ $(function () {
         }
 
         function currentPgTarget() { return currentSpan('pg-target'); }
+
+        // Whether the caret is inside actual bold markup, as opposed to the
+        // display-only bold of a power run.
+        function inRealBold() {
+            var sel = window.getSelection();
+            if (!sel || !sel.rangeCount) { return false; }
+            var node = sel.getRangeAt(0).commonAncestorContainer;
+            while (node && node !== $editor[0]) {
+                if (node.nodeType === 1 && /^(B|STRONG)$/.test(node.tagName)) { return true; }
+                node = node.parentNode;
+            }
+            return false;
+        }
         function currentNote() { return currentSpan('q-note'); }
 
         // Wrap the selection in a note (\N...\N), or, with the caret inside one
@@ -413,6 +452,7 @@ $(function () {
             if (!result.changed) { return; }
             $ta.val(result.text);
             resyncUp();
+            if (opts.onSync) { opts.onSync(); }
         }
 
         // Wrap the selected word(s) in a pronunciation-guide target span
@@ -457,6 +497,109 @@ $(function () {
 
         function resyncUp() {
             $editor.html(qemsToHtml($ta.val(), multiline));
+            paintPower();
+        }
+
+        /* A tossup stem shows its power run in bold while it is being
+           written, as it will print: everything up to and including the last
+           (*) or (+). Power comes from the mark, not from bold markup, so the
+           bold is display only -- <span class="q-power">, which the markup
+           conversion reads as plain text. */
+        var showsPower = textarea.id === 'id_tossup_text' ||
+                         textarea.id === 'unified-tossup-text';
+        var POWER_MARK = /\((?:\*|\+)\)/g;
+
+        function powerEnd(text) {
+            var end = -1, m;
+            POWER_MARK.lastIndex = 0;
+            while ((m = POWER_MARK.exec(text))) { end = m.index + m[0].length; }
+            return end;
+        }
+
+        function textNodes() {
+            var walker = document.createTreeWalker($editor[0], NodeFilter.SHOW_TEXT, null, false);
+            var nodes = [];
+            while (walker.nextNode()) { nodes.push(walker.currentNode); }
+            return nodes;
+        }
+
+        // The caret as character offsets into the editor's text, which
+        // survive the text nodes being split and rewrapped.
+        function caretOffsets() {
+            var sel = window.getSelection();
+            if (!sel || !sel.rangeCount) { return null; }
+            var r = sel.getRangeAt(0);
+            if (!$editor[0].contains(r.startContainer)) { return null; }
+            function at(node, offset) {
+                var pre = document.createRange();
+                pre.selectNodeContents($editor[0]);
+                pre.setEnd(node, offset);
+                return pre.toString().length;
+            }
+            return {start: at(r.startContainer, r.startOffset), end: at(r.endContainer, r.endOffset)};
+        }
+
+        function restoreCaret(offsets) {
+            if (!offsets) { return; }
+            var nodes = textNodes();
+            function point(target) {
+                var pos = 0;
+                for (var i = 0; i < nodes.length; i++) {
+                    if (target <= pos + nodes[i].length) { return [nodes[i], target - pos]; }
+                    pos += nodes[i].length;
+                }
+                return [$editor[0], $editor[0].childNodes.length];
+            }
+            var a = point(offsets.start), b = point(offsets.end);
+            var r = document.createRange();
+            r.setStart(a[0], a[1]);
+            r.setEnd(b[0], b[1]);
+            var sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(r);
+        }
+
+        function paintPower() {
+            if (!showsPower) { return; }
+            var root = $editor[0];
+            var end = powerEnd(root.textContent);
+            var wanted = end > 0 ? root.textContent.slice(0, end) : '';
+            var spans = root.querySelectorAll('span.q-power');
+            var have = Array.prototype.map.call(spans, function (el) { return el.textContent; }).join('');
+            // Most keystrokes land inside or after the run and leave it
+            // right; only rebuild when the run itself moved.
+            if (have === wanted && (!spans.length || root.textContent.indexOf(have) === 0)) { return; }
+            var caret = document.activeElement === root ? caretOffsets() : null;
+            Array.prototype.forEach.call(spans, function (el) {
+                while (el.firstChild) { el.parentNode.insertBefore(el.firstChild, el); }
+                el.parentNode.removeChild(el);
+            });
+            root.normalize();
+            if (end > 0) {
+                var pos = 0;
+                textNodes().forEach(function (node) {
+                    if (pos >= end) { return; }
+                    var len = node.length, start = pos;
+                    pos += len;
+                    var target = node;
+                    if (start + len > end) { target.splitText(end - start); }
+                    var span = document.createElement('span');
+                    span.className = 'q-power';
+                    target.parentNode.insertBefore(span, target);
+                    span.appendChild(target);
+                });
+            }
+            if (caret) { restoreCaret(caret); }
+        }
+
+        if (showsPower) {
+            paintPower();
+            $editor.on('input', function (e) {
+                // Mid-composition (an IME) the text isn't settled yet.
+                if (e.originalEvent && e.originalEvent.isComposing) { return; }
+                paintPower();
+            });
+            $editor.on('compositionend', paintPower);
         }
 
         $editor.on('input blur', syncDown);
@@ -522,7 +665,14 @@ $(function () {
                 e.preventDefault();
                 showSymbolPanel(false);
             });
-            $wrapper.append($symPanel);
+            symbolHost().append($symPanel);
+        }
+
+        // The panel hangs under the toolbar: in the wrapper normally, or in
+        // the edit card's shared slot when the toolbar has been moved there.
+        function symbolHost() {
+            var $parent = $toolbar.parent();
+            return ($parent.length && $parent[0] !== $wrapper[0]) ? $parent : $wrapper;
         }
 
         function showSymbolPanel(on) {
@@ -532,7 +682,8 @@ $(function () {
             $toolbar.find('.rich-editor-sym').toggleClass('active', !!on);
             if (on) {
                 // Sits directly under the toolbar, whatever height it wrapped to.
-                $symPanel.css('top', $toolbar.outerHeight() + 'px');
+                if ($symPanel.parent()[0] !== symbolHost()[0]) { symbolHost().append($symPanel); }
+                $symPanel.css('top', ($toolbar.position().top + $toolbar.outerHeight()) + 'px');
                 $(document).on('mousedown.qsym' + editorSeq, function (e) {
                     if (!$symPanel[0].contains(e.target) &&
                         !$toolbar.find('.rich-editor-sym')[0].contains(e.target)) {
@@ -646,9 +797,12 @@ $(function () {
                     active = inNote;
                     $(this).attr('title', inNote
                         ? 'This is a note to the moderator/players — click to unmark it and count it toward the length again'
-                        : 'Mark the selection as a note to the moderator or players. It is read aloud but never counts toward the question length.');
+                        : 'Mark a note to the moderator or players, such as "Note to players: description acceptable." It is read aloud but never counts toward the question length.');
                 } else {
                     try { active = document.queryCommandState(cmd); } catch (e) { active = false; }
+                    if (cmd === 'bold' && active && currentSpan('q-power') && !inRealBold()) {
+                        active = false;
+                    }
                 }
                 $(this).toggleClass('active', active);
             });
@@ -719,7 +873,21 @@ $(function () {
         $toolbar.on('click', 'a', function (e) {
             e.preventDefault();
             var cmd = $(this).attr('data-cmd');
-            if (cmd === 'plaintext') { setPlainMode(!plainMode); return; }
+            if (cmd === 'plaintext') {
+                // In the edit card, Raw is the whole question's raw markup:
+                // the answer line flips with the stem, rather than the
+                // switch acting only on whichever field had the toolbar.
+                var on = !plainMode;
+                if ($wrapper.hasClass('rich-editor-shared')) {
+                    $wrapper.closest('.qedit-card').find('.rich-editor-wrapper.rich-editor-shared')
+                        .not($wrapper).each(function () {
+                            var set = $(this).data('reSetPlain');
+                            if (set) { set(on, true); }
+                        });
+                }
+                setPlainMode(on);
+                return;
+            }
             if (cmd === 'qbfreq') {
                 if (window.QemsQbreader && window.QemsQbreader.lookupInto) {
                     window.QemsQbreader.lookupInto($wrapper);
@@ -911,8 +1079,68 @@ $(function () {
         return true;
     }
 
+    /* ---------- One toolbar for the edit card ---------- */
+
+    // The edit pages put every field of a question in one card with one
+    // toolbar across its top. Each field still has its own toolbar -- its
+    // buttons act on that field, its Raw switch flips that field -- so the
+    // card moves them all into its slot and shows the one for the field the
+    // writer is in; that field carries a rule down its left edge.
+    var shareToolbarFns = [];
+
+    function shareToolbars() {
+        $('.qedit-card').each(function () {
+            var $card = $(this);
+            var $slot = $card.find('.qedit-toolbar-slot').first();
+            if (!$slot.length) { return; }
+            var $wrappers = $card.find('.rich-editor-wrapper').filter(function () {
+                return !!$(this).data('reToolbar');
+            });
+            if (!$wrappers.length) { return; }
+
+            function activate($w) {
+                $slot.children('.rich-editor-toolbar').hide();
+                $w.data('reToolbar').css('display', '');
+                $wrappers.removeClass('is-active');
+                $w.addClass('is-active');
+            }
+
+            $wrappers.each(function () {
+                var $w = $(this);
+                $slot.append($w.data('reToolbar'));
+                $w.addClass('rich-editor-shared');
+                $w.on('focusin', function () { activate($w); });
+                // In Raw mode the field being typed in is the textarea, which
+                // sits beside the wrapper rather than in it.
+                $w.data('reAnchor').on('focusin', function () { activate($w); });
+            });
+
+            // Keep the toolbar on a field that can be seen: the one in use if
+            // it still is, otherwise the first showing (the unified bonus box
+            // and the per-part fields take turns).
+            function pickVisible() {
+                var $cur = $wrappers.filter('.is-active');
+                if (!$cur.length || !$cur.is(':visible')) {
+                    $cur = $wrappers.filter(':visible').first();
+                }
+                if (!$cur.length) { $cur = $wrappers.first(); }
+                activate($cur);
+                // With one field showing (the one-box tossup, the unified
+                // bonus) there is nothing to tell apart, so no edge rule.
+                $card.toggleClass('qedit-several', $wrappers.filter(':visible').length > 1);
+            }
+            pickVisible();
+            shareToolbarFns.push(pickVisible);
+        });
+    }
+
     window.QemsRichEditor = {
         get: function (textareaId) { return registry[textareaId] || null; },
+        // Re-point the edit card's toolbar after something changed which
+        // fields are showing (the Edit tab, the unified-bonus toggle).
+        refreshSharedToolbars: function () {
+            shareToolbarFns.forEach(function (fn) { fn(); });
+        },
         // Write every editor through to the field behind it. What "unchanged"
         // means on an edit page is what the page would save right now, and
         // that is only knowable once every editor has had its say.
@@ -944,7 +1172,66 @@ $(function () {
     // job as reflowing one -- you paste a draft, you break a clue apart to look
     // at it -- so Enter works the same way on both.
     var $qForm = $('#add-tossups, #add-bonuses, #edit-tossup, #edit-bonus').first();
+
+    /* The edit-tossup page's one box: the question and its ANSWER: line
+       together, as the bonus page's unified editor has them. The two real
+       fields stay in the form -- they are what posts, and what the character
+       count and the All Power check read -- hidden, and kept in step with the
+       box on every change rather than only on submit. Anything that writes to
+       a field (a style-check Fix, the paste dialog) fires change on it, and the
+       box is rebuilt from the fields. */
+    var $unifyTossup = $qForm.find('[data-unify-tossup]').first();
+    if ($unifyTossup.length) {
+        var $tuText = $('#id_tossup_text'), $tuAnswer = $('#id_tossup_answer');
+        var ANSWER_LINE_RE = /^\s*answer:\s*/i;
+
+        var joinTossup = function () {
+            var text = String($tuText.val() || '').trim();
+            var answer = String($tuAnswer.val() || '').trim();
+            return text + '\nANSWER: ' + answer;
+        };
+        // The last line that starts ANSWER: is the answer; everything above it
+        // is the question. With no such line the whole box is the question and
+        // the answer is empty, which the save then reports.
+        var splitTossup = function () {
+            var lines = String($unified.val() || '').split('\n');
+            var at = -1;
+            for (var i = lines.length - 1; i >= 0; i--) {
+                if (ANSWER_LINE_RE.test(lines[i])) { at = i; break; }
+            }
+            var text = at < 0 ? lines : lines.slice(0, at);
+            var answer = at < 0 ? '' : [lines[at].replace(ANSWER_LINE_RE, '')]
+                .concat(lines.slice(at + 1)).join(' ');
+            $tuText.val(text.join('\n').trim());
+            $tuAnswer.val(answer.trim());
+        };
+
+        var $unified = $('<textarea id="unified-tossup-text" rows="6" class="unified-editor-textarea"></textarea>')
+            .val(joinTossup());
+        $unifyTossup.before($('<div class="qedit-field"></div>').append($unified)).hide();
+        // Hidden and required would stop the form submitting without a word.
+        $tuText.add($tuAnswer).removeAttr('required');
+
+        enhance($unified[0], true, {onSync: splitTossup});
+        // Raw mode types straight into the box's textarea.
+        $unified.on('input', splitTossup);
+        $tuText.add($tuAnswer).on('change', function () {
+            $unified.val(joinTossup()).trigger('change');
+        });
+        $qForm.on('submit', function () {
+            var reg = registry['unified-tossup-text'];
+            if (reg) { reg.syncDown(); }
+            splitTossup();
+        });
+        window.qemsRefreshTossupUnified = function () {
+            $unified.val(joinTossup()).trigger('change');
+            return $unified;
+        };
+    }
+
     $qForm.find(FIELD_SELECTOR).each(function () {
+        // Fields folded into the one-box tossup are edited through it.
+        if ($unifyTossup.length && $unifyTossup[0].contains(this)) { return; }
         enhance(this, true);
     });
 
@@ -978,6 +1265,9 @@ $(function () {
     $('#toggle-unified-editor').on('click', function () {
         setTimeout(function () {
             resyncFns.forEach(function (fn) { fn(); });
+            window.QemsRichEditor.refreshSharedToolbars();
         }, 0);
     });
+
+    shareToolbars();
 });

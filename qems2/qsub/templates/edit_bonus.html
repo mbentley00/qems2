@@ -8,7 +8,7 @@
 {% load comments %}
 {% load filters %}
 
-{% block title %}{% if bonus %}{{ bonus.part1_answer|answer_no_formatting|short_preview }}{% else %}Edit Bonus{% endif %} - QEMS3{% endblock %}
+{% block title %}{% if bonus %}{{ bonus.part1_answer|answer_no_formatting|without_alternates|short_preview }}{% else %}Edit Bonus{% endif %} - QEMS3{% endblock %}
 {% block body_class %}edit-page-wide{% endblock %}
 
 {% block content %}
@@ -16,17 +16,12 @@
 {% if qset %}<script>window.QEMS_QSET_ID = {{ qset.id }};</script>{% endif %}
 {% if role == "editor" %}<script>window.QEMS_CAN_STRIKE = true;</script>{% endif %}
 
+{% if bonus %}{% get_threaded_comments bonus as thread_data %}{% endif %}
+{% if bonus %}
+{% include "_question_head.html" with q=bonus qtype="bonus" %}
+{% else %}
 <h3 class="page-header">Edit Bonus</h3>
-{% if bonus and bonus.category %}
-<ul class="breadcrumbs">
-    <li><a href="/edit_question_set/{{ qset.id }}/">{{ qset.name }}</a></li>
-    <li><a href="/category_overview/{{ qset.id }}/">Category Overview</a></li>
-    <li><a href="/top_category/{{ qset.id }}/{{ bonus.category.category }}/">{{ bonus.category.category }}</a></li>
-    <li><a href="/categories/{{ qset.id }}/{{ bonus.category.id }}/">{{ bonus.category.subcategory }}</a></li>
-    <li class="current"><a href="/edit_bonus/{{ bonus.id }}/">Bonus</a></li>
-</ul>
 {% endif %}
-{% include "_packet_nav.html" with nav_class="packet-nav-top" %}
 {% autoescape off %}
     {% if message %}
         <div class="{{ message_class }}">{{ message }}</div>
@@ -39,7 +34,6 @@
 {% include "_dup_warning_async.html" with question_type="bonus" q_id=bonus.id %}
 {% endif %}
 
-{% if bonus %}{% get_threaded_comments bonus as thread_data %}{% endif %}
 {% comment %}
 A question with no comments gets the whole width: the column is worth
 330px of the question only once there is something in it. The Comment
@@ -47,8 +41,15 @@ button in the question panel brings it back.
 {% endcomment %}
 <div class="edit-layout{% if not thread_data.count %} edit-layout-solo{% endif %}">
 <div class="edit-main">
-{% autoescape off %}
-    {% if bonus %}
+{% if bonus %}
+    {% comment %}
+    The Read tab: the bonus as it was last saved, which is also where
+    anchored comments are made and shown. Someone who can only look at the
+    question gets this and no tabs.
+    {% endcomment %}
+    <div class="qpane" data-pane="read"{% if form %} hidden{% endif %}>
+    {% autoescape off %}
+        <p class="qpane-note" hidden>This is the last saved version. Save to see your changes here.</p>
         <div class="panel question radius">
         <div class="anchor-region" data-question-type="bonus" data-question-id="{{ bonus.id }}">
         {{ bonus|bonus_html_verbose }}
@@ -60,115 +61,101 @@ button in the question panel brings it back.
             {% if bonus.proofread and bonus.proofreader %}
                 <p><strong>Proofread by:</strong> {{ bonus.proofreader|escape }} on {{ bonus.proofread_date }}</p>
             {% endif %}
-            <div class="qmeta-lastrow">
-                <p class="qmeta-lastmod"><strong>Last modified:</strong> {{ bonus.last_changed_date }}</p>
-                <div class="q-copy-tools">
-                    <a href="#" class="q-copy-btn ec-open" title="Show the comments column">Comments{% if thread_data.count %} ({{ thread_data.count }}){% endif %}</a>
-                </div>
-            </div>
+            <p class="qmeta-lastmod"><strong>Last modified:</strong> {{ bonus.last_changed_date }}</p>
         </div>
-    {% endif %}
-{% endautoescape %}
+    {% endautoescape %}
+    </div>
+{% endif %}
 <form action="" method="post" class="clearfix" id="edit-bonus">
     {% csrf_token %}
     {{ form.non_field_errors }}
 
     {% if form %}
+    <div class="qpane" data-pane="edit">
         {% if read_only and can_suggest %}
         <div class="alert-box info" style="margin-bottom:8px;">You can't edit this question directly, but you can
         edit the text below and <strong>Save as Suggested Changes</strong> for the author or an editor to review.</div>
         {% endif %}
+        {% comment %}
+        One card, one toolbar: rich_editor.js moves each field's toolbar into
+        the slot and shows the one for the field you are in. The unified box
+        and the per-part fields both live in it; the toggle in the row above
+        swaps which is showing.
+        {% endcomment %}
+        <div class="qedit-card">
+        <div class="qedit-toolbar-slot"></div>
         {% if question_type == "ACF-style bonus" %}
-            <a href="#" id="toggle-unified-editor" class="button small secondary">Switch to Unified Editor</a>
-            <a href="#" id="copy-full-bonus" class="button small secondary" title="Copy the full bonus to the clipboard (formatted)">Copy</a>
-            <a href="#" id="copy-for-discord-bonus" class="button small secondary">Copy for Discord</a>
-            <a href="#" id="copy-for-discord-plain-bonus" class="button small secondary">Copy for Discord (no spoilers)</a>
             <div id="unified-editor-container" style="display:none;">
                 <textarea id="unified-bonus-text" rows="16" class="unified-editor-textarea expanding" style="width:100%;"></textarea>
             </div>
         {% endif %}
         <div id="individual-fields-container">
         {% if question_type == "ACF-style bonus" %}
-            <label>
-                Leadin
-                {{ form.leadin }}
-            </label>
-            {% if form.leadin.errors %}{{ form.leadin.errors }}{% endif %}
+            <div class="qedit-field">{{ form.leadin }}</div>
+            {% if form.leadin.errors %}<div class="qedit-errors">{{ form.leadin.errors }}</div>{% endif %}
         {% endif %}
         <div class="bonus-part">
-            <label class="bonus-part-dif">
-                Dif
+            <div class="bonus-part-dif">
+                {% if question_type == "ACF-style bonus" %}<span class="bonus-part-value">[10]</span>{% endif %}
                 {{ form.part1_difficulty }}
-            </label>
+            </div>
             <div class="bonus-part-main">
-                <label>
-                    Part 1 Text
-                    {{ form.part1_text }}
-                    {% if form.part1_text.errors %}{{ form.part1_text.errors }}{% endif %}
-                </label>
+                <div class="qedit-field">{{ form.part1_text }}</div>
+                {% if form.part1_text.errors %}<div class="qedit-errors">{{ form.part1_text.errors }}</div>{% endif %}
+                <div class="qedit-field qedit-answer">
                 {% if structured_answers_on %}
                     {% for block in structured_parts %}{% if block.part == 1 %}
-                    {% include "_structured_answer.html" with prefix=block.prefix structure=block.structure label="Part 1 Answer" is_tossup=False line=block.line %}
+                    {% include "_structured_answer.html" with prefix=block.prefix structure=block.structure label="" is_tossup=False line=block.line %}
                     {% endif %}{% endfor %}
                 {% else %}
-                <label>
-                    Part 1 Answer
                     {{ form.part1_answer }}
-                </label>
                 {% endif %}
-                {% if form.part1_answer.errors %}{{ form.part1_answer.errors }}{% endif %}
+                </div>
+                {% if form.part1_answer.errors %}<div class="qedit-errors">{{ form.part1_answer.errors }}</div>{% endif %}
             </div>
         </div>
 
         {% if question_type == "ACF-style bonus" %}
-            <div class="bonus-part">
-                <label class="bonus-part-dif">
-                    Dif
-                    {{ form.part2_difficulty }}
-                </label>
-                <div class="bonus-part-main">
-                    <label>
-                        Part 2 Text
-                        {{ form.part2_text }}
-                        {% if form.part2_text.errors %}{{ form.part2_text.errors }}{% endif %}
-                    </label>
-                    {% if structured_answers_on %}
-                        {% for block in structured_parts %}{% if block.part == 2 %}
-                        {% include "_structured_answer.html" with prefix=block.prefix structure=block.structure label="Part 2 Answer" is_tossup=False line=block.line %}
-                        {% endif %}{% endfor %}
-                    {% else %}
-                    <label>
-                        Part 2 Answer
-                        {{ form.part2_answer }}
-                    </label>
-                    {% endif %}
-                    {% if form.part2_answer.errors %}{{ form.part2_answer.errors }}{% endif %}
-                </div>
+        <div class="bonus-part">
+            <div class="bonus-part-dif">
+                {% if question_type == "ACF-style bonus" %}<span class="bonus-part-value">[10]</span>{% endif %}
+                {{ form.part2_difficulty }}
             </div>
-            <div class="bonus-part">
-                <label class="bonus-part-dif">
-                    Dif
-                    {{ form.part3_difficulty }}
-                </label>
-                <div class="bonus-part-main">
-                    <label>
-                        Part 3 Text
-                        {{ form.part3_text }}
-                        {% if form.part3_text.errors %}{{ form.part3_text.errors }}{% endif %}
-                    </label>
-                    {% if structured_answers_on %}
-                        {% for block in structured_parts %}{% if block.part == 3 %}
-                        {% include "_structured_answer.html" with prefix=block.prefix structure=block.structure label="Part 3 Answer" is_tossup=False line=block.line %}
-                        {% endif %}{% endfor %}
-                    {% else %}
-                    <label>
-                        Part 3 Answer
-                        {{ form.part3_answer }}
-                    </label>
-                    {% endif %}
-                    {% if form.part3_answer.errors %}{{ form.part3_answer.errors }}{% endif %}
+            <div class="bonus-part-main">
+                <div class="qedit-field">{{ form.part2_text }}</div>
+                {% if form.part2_text.errors %}<div class="qedit-errors">{{ form.part2_text.errors }}</div>{% endif %}
+                <div class="qedit-field qedit-answer">
+                {% if structured_answers_on %}
+                    {% for block in structured_parts %}{% if block.part == 2 %}
+                    {% include "_structured_answer.html" with prefix=block.prefix structure=block.structure label="" is_tossup=False line=block.line %}
+                    {% endif %}{% endfor %}
+                {% else %}
+                    {{ form.part2_answer }}
+                {% endif %}
                 </div>
+                {% if form.part2_answer.errors %}<div class="qedit-errors">{{ form.part2_answer.errors }}</div>{% endif %}
             </div>
+        </div>
+        <div class="bonus-part">
+            <div class="bonus-part-dif">
+                {% if question_type == "ACF-style bonus" %}<span class="bonus-part-value">[10]</span>{% endif %}
+                {{ form.part3_difficulty }}
+            </div>
+            <div class="bonus-part-main">
+                <div class="qedit-field">{{ form.part3_text }}</div>
+                {% if form.part3_text.errors %}<div class="qedit-errors">{{ form.part3_text.errors }}</div>{% endif %}
+                <div class="qedit-field qedit-answer">
+                {% if structured_answers_on %}
+                    {% for block in structured_parts %}{% if block.part == 3 %}
+                    {% include "_structured_answer.html" with prefix=block.prefix structure=block.structure label="" is_tossup=False line=block.line %}
+                    {% endif %}{% endfor %}
+                {% else %}
+                    {{ form.part3_answer }}
+                {% endif %}
+                </div>
+                {% if form.part3_answer.errors %}<div class="qedit-errors">{{ form.part3_answer.errors }}</div>{% endif %}
+            </div>
+        </div>
         {% endif %}
         </div>
         {% if structured_answer_problems %}
@@ -177,61 +164,23 @@ button in the question panel brings it back.
         </div>
         {% endif %}
         {% if bonus %}
-        <p class="char-count-note">
-            Live character count: <strong id="live-char-count" data-qset-id="{{ qset.id }}" data-max="{{ qset.max_acf_bonus_length }}" data-fields="id_leadin,id_part1_text,id_part2_text,id_part3_text">{{ bonus.character_count }}</strong> / {{ qset.max_acf_bonus_length }}
-            <small style="color:#888;">(updates as you type; saved count shown with the question above)</small>
-        </p>
+        <div class="qedit-foot">Character count: <strong id="live-char-count" data-qset-id="{{ qset.id }}" data-max="{{ qset.max_acf_bonus_length }}" data-fields="id_leadin,id_part1_text,id_part2_text,id_part3_text">{{ bonus.character_count }}</strong> / {{ qset.max_acf_bonus_length }}</div>
         {% endif %}
+        </div>{# .qedit-card #}
+    </div>
+    {% comment %}
+    Save sits under the question, where the writing is -- outside the Edit
+    pane, so it is still there on Proof for a change to the flags or tags.
+    {% endcomment %}
+    <div class="qedit-save">
+        {% if not read_only %}
+        <input type="submit" id="submit-bonus" value="Save" class="button primary qmeta-save" />
+        {% endif %}
+        {% if can_suggest %}<button type="submit" name="save_as_suggestion" value="1" class="button secondary" title="Save your edits as proposed changes for the author or an editor to review — the question itself isn't changed yet.">Save as Suggested Changes</button>{% endif %}
+    </div>
     {% endif %}
     {% if not read_only %}
-        <div class="qmeta-fields">
-        {% for field in form %}
-            {% if field.html_name == "category" %}
-            <div class="qmeta-field"><label for="{{ field.id_for_label }}">Category</label>{{ field }}{{ field.errors }}</div>
-            {% elif field.html_name == "author" %}
-            <div class="qmeta-field"><label for="{{ field.id_for_label }}">Author</label>{{ field }}{{ field.errors }}</div>
-            {% elif field.html_name == "author_text" %}
-            {% comment %}
-            Credit for someone with no QEMS account -- a guest writer, or a
-            question carried in from another set. When it is filled in it is the
-            name shown and exported; the Author select above still says which
-            account owns the question, which is what decides who may edit it.
-            {% endcomment %}
-            <div class="qmeta-field"><label for="{{ field.id_for_label }}">Credit to (no account)</label>{{ field }}{{ field.errors }}</div>
-            {% endif %}
-        {% endfor %}
-        </div>
-        {{ form.packet.as_hidden }}
-        <div class="qmeta-row">
-            <div class="qmeta-packet">
-                <span class="qmeta-label">Packet</span>
-                {% if bonus.packet %}<strong>{{ bonus.packet.packet_name }}</strong>{% if bonus.question_number %} &mdash; #{{ bonus.question_number }}{% endif %}{% else %}<em>Unpacketized</em>{% endif %}
-                <a href="/packet_grid/{{ qset.id }}/" class="qmeta-gridlink">Packet grid</a>
-            </div>
-            <ul class="qmeta-flags">
-                {% if role == "editor" %}
-                <li><label>{{ form.locked }} Locked</label></li>
-                <li><label>{{ form.edited }} Edited</label></li>
-                {% endif %}
-                <li><label>{{ form.proofread }} Proofread</label></li>
-                <li><label>{{ form.read_carefully }} Read Answer Carefully</label></li>
-            </ul>
-        </div>
-
-        <div class="qmeta-actions">
-            {% if bonus %}
-            <a href="/move_bonus/{{ qset.id }}/{{ bonus.id }}" class="button small secondary">Move Set</a>
-            {% if role == "editor" %}<a href="#" class="button small secondary edit-swap-btn" data-qtype="bonus" data-qid="{{ bonus.id }}" data-packet="{{ bonus.packet.id }}" data-num="{{ bonus.question_number }}">Swap Packets</a>{% endif %}
-            <a href="/bonus_history/{{ bonus.id }}" class="button small secondary">History</a>
-            <a href="/convert_bonus/{{ bonus.id }}" class="button small secondary convert_bonus" value="{{ bonus.id }}" qset-id="{{ qset.id }}" target-type="ACF-style tossup" title="Convert this bonus into an ACF-style tossup">Tossupify</a>
-            {% if question_type == "VHSL bonus" %}<a href="/convert_bonus/{{ bonus.id }}" class="button small secondary convert_bonus" value="{{ bonus.id }}" qset-id="{{ qset.id }}" target-type="ACF-style bonus">Convert to ACF bonus</a>{% endif %}
-            <a href="/export_question/bonus/{{ bonus.id }}/yapp-json/" class="button small secondary" title="Download just this bonus as a one-question YAPP JSON packet, readable by MODAQ">YAPP</a>
-            <a href="/export_question/bonus/{{ bonus.id }}/yapp2-json/" class="button small secondary" title="Download just this bonus as YAPP2 JSON — the same packet, plus pronunciation-guide anchoring">YAPP2</a>
-            <a href="/delete_bonus/{{ bonus.id }}" class="button small alert delete_bonus" value="{{ bonus.id }}" qset-id="{{ qset.id }}">Delete</a>
-            {% endif %}
-            <input type="submit" id="submit-bonus" value="Save" class="button primary qmeta-save" />
-            {% if can_suggest %}<button type="submit" name="save_as_suggestion" value="1" class="button small secondary" title="Save your edits as proposed changes for the author or an editor to review — the question itself isn't changed yet.">Save as Suggested Changes</button>{% endif %}
-        </div>
+        {% include "_question_meta.html" with q=bonus qtype="bonus" %}
 
         {% include "question_tags.html" %}
 
@@ -241,11 +190,6 @@ button in the question panel brings it back.
         </div>
 
         <div id="difficulty-warning" class="alert-box warning" style="display:none;"></div>
-    {% endif %}
-    {% if form and read_only and can_suggest %}
-        <div class="save-actions">
-            <button type="submit" name="save_as_suggestion" value="1" class="button secondary" title="Save your edits as proposed changes for the author or an editor to review — the question itself isn't changed yet.">Save as Suggested Changes</button>
-        </div>
     {% endif %}
 </form>
 {% if bonus and pending_suggestions %}{% include "_suggested_changes.html" with question_type="bonus" q_id=bonus.id %}{% endif %}
@@ -312,5 +256,6 @@ $(function () {
 <script src="{% static 'js/anchored_comments.js' %}?v=4"></script>
 {% if structured_answers_on %}<script src="{% static 'js/structured_answer.js' %}?v=3"></script>{% endif %}
 <script src="{% static 'js/live_char_count.js' %}?v=1"></script>
+<script src="{% static 'js/question_tabs.js' %}?v=2"></script>
 
 {% endblock %}

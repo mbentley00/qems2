@@ -1,8 +1,8 @@
 {% if dup_matches %}
-<div class="alert-box warning radius" data-alert>
-    <strong>Possible duplicate{{ dup_matches|length|pluralize }} detected.</strong>
-    This question's answer also appears on {{ dup_matches|length }} other question{{ dup_matches|length|pluralize }} in this set.
-    <ul style="margin-top: 0.5rem;">
+<div class="alert-box warning radius dup-warning" data-alert>
+    <a href="#" onclick="this.closest('.alert-box').style.display='none'; return false;" class="dup-warning-close" title="Dismiss" aria-label="Dismiss">&times;</a>
+    <strong class="dup-warning-head">Possible duplicate{{ dup_matches|length|pluralize }}</strong>
+    <ul class="dup-warning-list">
     {% autoescape off %}
     {% for m in dup_matches %}
         <li>
@@ -17,6 +17,5 @@
     {% endfor %}
     {% endautoescape %}
     </ul>
-    <a href="#" onclick="this.closest('.alert-box').style.display='none'; return false;" class="button tiny secondary" style="margin-bottom:0;">Dismiss</a>
 </div>
 {% endif %}

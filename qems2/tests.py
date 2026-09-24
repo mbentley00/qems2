@@ -2904,6 +2904,25 @@ class CommenterNameAndLayoutTests(TestCase):
         self.assertIn('edit-comments', html)
         self.assertIn('Will Alston ("cn_owner")', html)
 
+    def test_the_page_title_is_the_answer_without_its_alternates(self):
+        self.tu.tossup_answer = '_Boeing 747_ [accept specific types; prompt on _jet_]'
+        self.tu.save()
+        html = self.client.get('/edit_tossup/{0}/'.format(self.tu.id)).content.decode()
+        title = html[html.index('<title>') + 7:html.index('</title>')]
+        self.assertEqual(title.strip(), 'Boeing 747 - QEMS3')
+
+    def test_resolved_comments_come_after_the_open_ones(self):
+        """What still needs doing is read first; a resolved comment is settled,
+        so the column lists it at the bottom however early it was made."""
+        from qems2.qsub.models import CommentResolution
+        first = self.Comment.objects.create(content_type=self.ct, object_pk=str(self.tu.id),
+            site=self.site, user=self.ou, comment='settled already', is_public=True, is_removed=False)
+        self.Comment.objects.create(content_type=self.ct, object_pk=str(self.tu.id),
+            site=self.site, user=self.ou, comment='still open', is_public=True, is_removed=False)
+        CommentResolution.objects.create(comment=first, resolved=True, resolved_by=self.owner)
+        html = self.client.get('/edit_tossup/{0}/'.format(self.tu.id)).content.decode()
+        self.assertLess(html.index('still open'), html.index('settled already'))
+
     def _bonus(self):
         QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
         return Bonus.objects.create(
@@ -3437,6 +3456,80 @@ class CompactQuestionTagsTests(TestCase):
                          ['China', 'Korea'])
 
 
+class CategoryChangeDropsTagsTests(TestCase):
+    """A question that changes category keeps only the tags its new category
+    has. The edit page offers only the new category's boxes, so an old tag
+    left behind could never be unticked -- and it went on counting the
+    question and exporting with it."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('cct_owner', password='pw', email='cct@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='CCT dist')
+        self.world = DistributionEntry.objects.create(
+            distribution=self.dist, category='History', subcategory='World',
+            min_tossups=1, min_bonuses=1)
+        self.brit = DistributionEntry.objects.create(
+            distribution=self.dist, category='Literature', subcategory='British',
+            min_tossups=1, min_bonuses=1)
+        self.qset = QuestionSet.objects.create(
+            name='CCT Set', date=timezone.now(), host='', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.qset.editor.add(self.owner)
+        for de in (self.world, self.brit):
+            SetWideDistributionEntry.objects.create(question_set=self.qset, dist_entry=de,
+                                                    num_tossups=1, num_bonuses=1)
+        self.china = CategoryTag.objects.create(
+            question_set=self.qset, category_path='History - World', name='China', num_tossups=1)
+        self.poetry = CategoryTag.objects.create(
+            question_set=self.qset, category_path='Literature - British', name='Poetry', num_tossups=1)
+        self.recent = CategoryTag.objects.create(
+            question_set=self.qset, category_path='', name='Post-1900', num_tossups=1)
+        self.tu = Tossup.objects.create(
+            question_set=self.qset, question_type=self.acf, category=self.world, author=self.owner,
+            tossup_text='This person. (*) end.', tossup_answer='_someone_',
+            created_date=timezone.now(), last_changed_date=timezone.now())
+        self.china.tossups.add(self.tu)
+        self.recent.tossups.add(self.tu)
+        self.client.login(username='cct_owner', password='pw')
+
+    def _tags(self):
+        return sorted(t.name for t in self.tu.category_tags.all())
+
+    def test_changing_category_on_the_edit_page_drops_the_old_category_s_tags(self):
+        # The browser posts only the boxes it shows: the new category's.
+        self.client.post('/edit_tossup/{0}/'.format(self.tu.id), {
+            'tossup_text': 'This person. (*) end.', 'tossup_answer': '_someone_',
+            'category': self.brit.id, 'question_type': self.acf.id, 'author': self.owner.id,
+            'category_tags': [self.poetry.id, self.recent.id]})
+        # China is History's; the set-wide tag applies anywhere, so it stays.
+        self.assertEqual(self._tags(), ['Poetry', 'Post-1900'])
+
+    def test_saving_in_the_same_category_keeps_its_tags(self):
+        self.client.post('/edit_tossup/{0}/'.format(self.tu.id), {
+            'tossup_text': 'This person. (*) end.', 'tossup_answer': '_someone_',
+            'category': self.world.id, 'question_type': self.acf.id, 'author': self.owner.id,
+            'category_tags': [self.china.id, self.recent.id]})
+        self.assertEqual(self._tags(), ['China', 'Post-1900'])
+
+    def test_unfiling_a_question_keeps_its_tags(self):
+        """No category is a stop on the way to another one; the tags are what
+        whoever refiles it will want to see."""
+        from qems2.qsub.views import drop_inapplicable_tags
+        drop_inapplicable_tags(self.tu, None)
+        self.assertEqual(self._tags(), ['China', 'Post-1900'])
+
+    def test_the_helper_keeps_tags_on_a_parent_or_child_path(self):
+        from qems2.qsub.views import drop_inapplicable_tags
+        broad = CategoryTag.objects.create(
+            question_set=self.qset, category_path='History', name='Broad', num_tossups=1)
+        broad.tossups.add(self.tu)
+        drop_inapplicable_tags(self.tu, self.world)
+        self.assertEqual(self._tags(), ['Broad', 'China', 'Post-1900'])
+
+
 class SidebarActiveSetTests(TestCase):
     """The sidebar names the set the page is actually working in."""
 
@@ -3527,6 +3620,25 @@ class SearchResultColumnTests(TestCase):
             tossup_answer='_Julius Caesar_', category=self.entry, question_type=self.acf,
             created_date=timezone.now(), last_changed_date=timezone.now())
         self.client.login(username='src_owner', password='pw')
+
+    def test_answer_line_matches_come_before_clue_matches(self):
+        """'Have we asked about this?' is answered by the answer lines; a clue
+        that happens to use the word is the lesser hit, so it comes after --
+        even when it was written first."""
+        clue = Tossup.objects.create(
+            author=self.owner, question_set=self.qset, question_number=2,
+            tossup_text='Children left orphaned by this disease were schooled in Bilston.',
+            tossup_answer='_cholera_', category=self.entry, question_type=self.acf,
+            created_date=timezone.now(), last_changed_date=timezone.now())
+        answer = Tossup.objects.create(
+            author=self.owner, question_set=self.qset, question_number=3,
+            tossup_text='In China, these people had stigmatized surnames.',
+            tossup_answer='_orphans_', category=self.entry, question_type=self.acf,
+            created_date=timezone.now(), last_changed_date=timezone.now())
+        resp = self.client.get('/search/?q=orphan&qset={0}&category=All&models=qsub.tossup'
+                               .format(self.qset.id))
+        ids = [q.id for q in resp.context['result']]
+        self.assertEqual(ids, [answer.id, clue.id])
 
     def _headers(self, all_sets=False):
         url = ('/search/?q=Rubicon&qset={0}&category=All&models=qsub.tossup'.format(self.qset.id)

@@ -2,63 +2,93 @@
 {# {% include "_style_check_panel.html" with question_type="tossup" q_id=tossup.id qset_id=qset.id %} #}
 {# Leave q_id out on the add pages: there is no saved question yet, so the     #}
 {# panel only checks the draft in the editor.                                   #}
-<div class="panel header radius text-center" style="margin-top:1rem;"><strong>Style Check</strong></div>
-<div id="style-panel" data-qtype="{{ question_type }}" data-qid="{{ q_id|default:'' }}" data-qset="{{ qset_id|default:'' }}">
-    <div class="style-panel-top">
-        <span id="style-panel-status" class="style-panel-note">{% if q_id %}Checking&hellip;{% else %}Check the question you're writing before you submit it.{% endif %}</span>
-        <span class="style-panel-links">
-            <a href="#" id="style-panel-draft" class="style-panel-button" title="Run the style check on the text in the editor, saved or not">Style check</a>
-            {% if q_id %}<a href="#" id="style-panel-refresh" title="Rerun the style check on the saved question">saved version</a>{% endif %}
-            <a href="{% if qset_id %}/style_check/{{ qset_id }}/{% else %}#{% endif %}" id="style-panel-full-link" target="_blank" rel="noopener" title="Style check for the whole set">whole set &#8599;</a>
+{% comment %}
+One card, two tabs: the style check and the grammar check, each a list of
+rows -- which field, what the rule says, the words it is pointing at, and what
+you can do about it.
+{% endcomment %}
+<div id="style-panel" class="sc-card" data-qtype="{{ question_type }}" data-qid="{{ q_id|default:'' }}" data-qset="{{ qset_id|default:'' }}">
+    <div class="sc-head">
+        <div class="sc-tabs" role="tablist">
+            <button type="button" class="sc-tab is-active" role="tab" data-sc-tab="style" aria-selected="true">Style check <span class="sc-count" id="style-panel-count"></span></button>
+            <button type="button" class="sc-tab" role="tab" data-sc-tab="grammar" aria-selected="false">Grammar <span class="sc-count" id="grammar-panel-count"></span></button>
+        </div>
+        <span class="sc-links" data-sc-links="style">
+            <a href="#" id="style-panel-draft" title="Run the style check on the text in the editor, saved or not">Check draft</a>
+            <a href="{% if qset_id %}/style_check/{{ qset_id }}/{% else %}#{% endif %}" id="style-panel-full-link" target="_blank" rel="noopener" title="Style check for the whole set">Whole set &#8599;</a>
+        </span>
+        <span class="sc-links" data-sc-links="grammar" hidden>
+            <label class="grammar-spelling-toggle" title="Also report possible misspellings (noisy on proper nouns)"><input type="checkbox" id="grammar-spelling"> Spelling</label>
+            <a href="#" id="grammar-panel-run" title="Check the text you're editing for grammar issues — runs in your browser via Harper">Check grammar</a>
         </span>
     </div>
-    <ul id="style-panel-list" class="style-panel-issues"></ul>
-
-    <div class="style-panel-top grammar-panel-top">
-        <span class="style-panel-note"><strong>Grammar</strong> <span id="grammar-panel-status"></span></span>
-        <span class="style-panel-links">
-            <label class="grammar-spelling-toggle" title="Also report possible misspellings (noisy on proper nouns)"><input type="checkbox" id="grammar-spelling"> spelling</label>
-            <a href="#" id="grammar-panel-run" title="Check the text you're editing for grammar issues — runs in your browser via Harper">check grammar</a>
-        </span>
+    <div class="sc-pane" data-sc-pane="style">
+        <p id="style-panel-status" class="sc-status">{% if q_id %}Checking&hellip;{% else %}Check the question you're writing before you submit it.{% endif %}</p>
+        <ul id="style-panel-list" class="sc-rows"></ul>
     </div>
-    <ul id="grammar-panel-list" class="style-panel-issues"></ul>
+    <div class="sc-pane" data-sc-pane="grammar" hidden>
+        <p id="grammar-panel-status" class="sc-status">Check the text in the editor for grammar. The first run downloads the checker.</p>
+        <ul id="grammar-panel-list" class="sc-rows"></ul>
+    </div>
 </div>
 
 <style>
-.style-panel-top { display: flex; align-items: baseline; gap: 0.75em; margin: 0.4rem 0 0.3rem; }
-.style-panel-note { color: #777; font-size: 0.9em; }
-.style-panel-links { margin-left: auto; font-size: 0.8rem; white-space: nowrap; }
-.style-panel-links a { color: #8a8f94; margin-left: 0.8em; }
-.style-panel-links a:hover { color: #008CBA; }
-.style-panel-links a.style-panel-button { display: inline-block; padding: 0.1rem 0.6rem; border-radius: 3px;
-    background: #e6f2f8; color: #008CBA; font-weight: bold; }
-.style-panel-links a.style-panel-button:hover { background: #d3e9f3; }
-.style-panel-issues .sc-nofix { color: #bdc1c5; font-size: 0.78rem; }
-.style-panel-issues { list-style: none; margin: 0 0 0.75rem; }
-.style-panel-issues .style-issue { display: flex; align-items: baseline; gap: 0.45em;
-    padding: 0.15rem 0 0.15rem 0.55em; margin: 0; border-left: 3px solid transparent; font-size: 0.9rem; }
-.style-panel-issues .sev-error { border-left-color: #c0392b; }
-.style-panel-issues .sev-warning { border-left-color: #d4870c; }
-.style-panel-issues .sev-info { border-left-color: #d3d6d9; }
-.style-panel-issues .style-issue-msg { flex: 1 1 auto; }
-.style-panel-issues .style-issue-actions { flex: 0 0 auto; white-space: nowrap; }
-.style-panel-issues .style-action { cursor: pointer; }
-.style-panel-issues .sc-fix { display: inline-block; font-size: 0.78rem; font-weight: bold;
-    line-height: 1.4; padding: 0 0.4rem; border-radius: 3px; background: #dff3e6; color: #1c7c3e; }
-.style-panel-issues .sc-fix:hover { background: #cdebd8; }
-.style-panel-issues .sc-dismiss { color: #bdc1c5; font-size: 0.78rem; margin-left: 0.55em; }
-.style-panel-issues .style-issue:hover .sc-dismiss { color: #8a8f94; }
-.style-panel-issues .pg-context { color: #777; font-style: italic; }
-.style-panel-issues .pg-context strong { color: #333; font-style: normal; }
-.style-panel-issues .sc-dismiss:hover { color: #c0392b; text-decoration: underline; }
+.sc-card { margin: 16px 0; border: 1px solid var(--qx-border, #e9e9ef); border-radius: 14px;
+    background: var(--qx-card, #fff); box-shadow: 0 1px 2px rgba(20, 20, 40, .04); }
+.sc-card [hidden] { display: none !important; }
+.sc-head { display: flex; align-items: center; gap: 12px; padding: 0 20px;
+    border-bottom: 1px solid var(--qx-border, #e9e9ef); }
+.sc-tabs { display: flex; gap: 8px; }
+.sc-tab { margin: 0 0 -1px; padding: 14px 16px 12px; border: none; border-bottom: 2px solid transparent;
+    border-radius: 0; background: none; color: var(--qx-muted, #8a8f9c); font-family: var(--qx-sans);
+    font-size: 1rem; line-height: 1.2; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
+.sc-tab:hover, .sc-tab:focus { background: none; color: var(--qx-ink, #20232e); outline: none; }
+.sc-tab.is-active { color: var(--qx-ink, #20232e); border-bottom-color: var(--qx-primary, #6d28d9); }
+.sc-count { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px;
+    padding: 0 6px; border-radius: 11px; font-size: .8rem; font-weight: 600; }
+.sc-count:empty { display: none; }
+.sc-count.has-issues { background: #fdecd3; color: #9a5a0b; }
+.sc-count.is-clean { background: #dff3e6; color: #1c7c3e; }
+.sc-links { margin-left: auto; display: flex; align-items: center; gap: 18px; font-size: .9rem; white-space: nowrap; }
+.sc-links a { color: var(--qx-primary, #6d28d9); }
+.grammar-spelling-toggle { display: inline-flex; align-items: center; gap: 6px; margin: 0; font-size: .9rem;
+    font-weight: normal; color: var(--qx-muted, #8a8f9c); cursor: pointer; }
+.grammar-spelling-toggle input { margin: 0; }
+.sc-status { margin: 0; padding: 14px 20px; color: var(--qx-muted, #8a8f9c); font-size: .9rem; }
+.sc-status:empty { display: none; }
+.sc-rows { list-style: none; margin: 0; }
+.sc-row { display: flex; align-items: center; gap: 16px; margin: 0; padding: 14px 20px;
+    border-top: 1px solid var(--qx-border, #e9e9ef); }
+.sc-rows .sc-row:first-child { border-top: none; }
+.sc-status:not(:empty) + .sc-rows .sc-row:first-child { border-top: 1px solid var(--qx-border, #e9e9ef); }
+.sc-chip { flex: 0 0 auto; align-self: flex-start; margin-top: 2px; padding: 3px 10px; border-radius: 7px;
+    background: #efeff4; color: #565b66; font-size: .8rem; white-space: nowrap;
+    min-width: 76px; box-sizing: border-box; text-align: center; }
+.sc-row.sev-error .sc-chip { background: #fbe3e1; color: #a32b1f; }
+.sc-main { flex: 1 1 auto; min-width: 0; }
+.sc-title { color: var(--qx-ink, #20232e); font-weight: 600; font-size: .95rem; }
+.sc-title .sc-guide { font-family: monospace; font-weight: normal; color: #9a5a0b; }
+.sc-detail { margin-top: 2px; color: #5c6270; font-family: var(--qx-serif); font-size: 1.05rem; line-height: 1.55; }
+.sc-detail strong, .sc-detail mark { padding: 0 3px; border-radius: 3px; background: #fdecd3;
+    color: var(--qx-ink, #20232e); font-weight: normal; }
+.sc-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 22px; }
+body.app-authed .sc-actions a.sc-dismiss { color: var(--qx-muted, #8a8f9c); font-size: .9rem; cursor: pointer; }
+body.app-authed .sc-actions a.sc-dismiss:hover { color: #c0392b; }
+body.app-authed .sc-actions a.sc-fix { display: inline-flex; align-items: center; height: 40px; padding: 0 20px;
+    border: 1px solid #bfe3cb; border-radius: 9px; background: #eef8f1; color: #1c7c3e; font-size: .95rem;
+    font-weight: 500; cursor: pointer; white-space: nowrap; }
+body.app-authed .sc-actions a.sc-fix:hover { background: #dff3e6; }
+.sc-nofix { color: var(--qx-muted, #8a8f9c); font-size: .8rem; }
 /* Brief highlight on the field a style fix just landed in. */
 .sc-just-fixed { background-color: #dff3e6 !important; transition: background-color 0.7s ease; }
-.grammar-panel-top { border-top: 1px solid #e8eaec; padding-top: 0.5rem; }
-.grammar-spelling-toggle { display: inline; font-weight: normal; font-size: 0.8rem; color: #8a8f94; margin-right: 0.4em; }
-.grammar-spelling-toggle input { margin: 0 0.25em 0 0; }
-.style-panel-issues .grammar-problem { font-weight: bold; }
-.style-panel-issues .grammar-fix { color: #1c7c3e; }
-.style-panel-issues .grammar-field { color: #8a8f94; }
+html[data-theme="dark"] .sc-chip { background: var(--qx-elevate); color: var(--qx-muted); }
+html[data-theme="dark"] .sc-row.sev-error .sc-chip { background: #3a1d1d; color: #f0a8a0; }
+html[data-theme="dark"] .sc-count.has-issues,
+html[data-theme="dark"] .sc-detail strong, html[data-theme="dark"] .sc-detail mark { background: #3a2e12; color: #f0c98a; }
+html[data-theme="dark"] .sc-count.is-clean { background: #16301f; color: #8fd4a8; }
+html[data-theme="dark"] .sc-detail { color: var(--qx-muted); }
+html[data-theme="dark"] body.app-authed .sc-actions a.sc-fix { background: #16301f; border-color: #2c5a3b; color: #8fd4a8; }
+html[data-theme="dark"] .sc-tab.is-active { color: var(--qx-ink); }
 </style>
 
 <script src="/static/js/harper_check.js?v=1"></script>
@@ -69,7 +99,70 @@ $(function () {
     var qtype = $panel.data('qtype'), qid = $panel.data('qid'), qsetId = $panel.data('qset'), guide = '';
     function esc(s) { return $('<div>').text(s == null ? '' : s).html(); }
 
-    function setStatus(text) { $('#style-panel-status').text(text).show(); }
+    function setStatus(text) { $('#style-panel-status').text(text); }
+
+    // The tabs: Style check and Grammar share the card; each has its own links.
+    $panel.on('click', '.sc-tab', function () {
+        var tab = $(this).attr('data-sc-tab');
+        $panel.find('.sc-tab').each(function () {
+            var on = $(this).attr('data-sc-tab') === tab;
+            $(this).toggleClass('is-active', on).attr('aria-selected', on ? 'true' : 'false');
+        });
+        $panel.find('[data-sc-pane]').each(function () { this.hidden = $(this).attr('data-sc-pane') !== tab; });
+        $panel.find('[data-sc-links]').each(function () { this.hidden = $(this).attr('data-sc-links') !== tab; });
+    });
+
+    function setCount($el, n) {
+        $el.text(n == null ? '' : n).toggleClass('has-issues', !!n).toggleClass('is-clean', n === 0);
+    }
+
+    // A rule's message reads "Field: what it says", and the checks that point
+    // at text add " — <span class="pg-context">…<strong>match</strong>…</span>".
+    // The row shows those three things apart: a chip, a title, the words.
+    var FIELD_RE = /^(Question|Leadin|Answer(?: \d)?|Part \d|Text)\s*:\s*/;
+
+    function issueRow(chip, titleHtml, detailHtml, severity) {
+        var $li = $('<li class="sc-row">').addClass('sev-' + (severity || 'info'));
+        if (chip) { $li.append($('<span class="sc-chip">').text(chip)); }
+        var $main = $('<div class="sc-main">').appendTo($li);
+        $('<div class="sc-title">').html(titleHtml).appendTo($main);
+        if (detailHtml) { $('<div class="sc-detail">').html(detailHtml).appendTo($main); }
+        return $li;
+    }
+
+    // The words a rule points at are cut from the question's markup, so an
+    // answer line arrives as _Boeing_ and __plane__. Show them as they print.
+    // A pair the excerpt or the highlight cuts through is left as it is.
+    function markupToHtml(html) {
+        return (html || '')
+            .replace(/__([^_<>]+)__/g, '<u>$1</u>')
+            .replace(/_([^_<>]+)_/g, '<u><b>$1</b></u>')
+            .replace(/~([^~<>]+)~/g, '<i>$1</i>');
+    }
+
+    function capitalize(html) {
+        return html.replace(/^((?:<[^>]+>)*)([a-z])/, function (all, tags, ch) { return tags + ch.toUpperCase(); });
+    }
+
+    function splitIssue(i) {
+        var html = i.message_html || esc(i.message);
+        var chip = '';
+        var m = FIELD_RE.exec(html);
+        if (m) { chip = m[1] === 'Text' ? 'Question' : m[1]; html = html.slice(m[0].length); }
+        var detail = '';
+        var at = html.indexOf('<span class="pg-context">');
+        if (at >= 0) {
+            detail = html.slice(at).replace(/^<span class="pg-context">/, '').replace(/<\/span>\s*$/, '');
+            html = html.slice(0, at).replace(/\s*—\s*$/, '');
+        }
+        // A pronunciation guide's respelling reads as one, set in type. Only
+        // for the PG rules: other messages end in a quoted phrase too ("say
+        // what the moderator should ask ("by asking ...")").
+        if (/^PG for /.test(html)) {
+            html = html.replace(/\((&quot;|“|")([^()]*?)(&quot;|”|")\)\s*$/, '<span class="sc-guide">(“$2”)</span>');
+        }
+        return {chip: chip, title: capitalize(html), detail: markupToHtml(detail)};
+    }
 
     // Show an applied fix without reloading. The page may have been rendered
     // from a POST (after a save), and location.reload() would resubmit that
@@ -102,7 +195,8 @@ $(function () {
         }
         $field.val(r.text || '').trigger('change').trigger('input');
         // ...and back up into the unified bonus editor, which is what shows.
-        var $unified = window.qemsRefreshBonusUnified ? window.qemsRefreshBonusUnified() : null;
+        var refreshUnified = window.qemsRefreshBonusUnified || window.qemsRefreshTossupUnified;
+        var $unified = refreshUnified ? refreshUnified() : null;
 
         // Flash whichever of the two is actually on screen (the rich editor
         // replaces the textarea when it's enhanced).
@@ -125,19 +219,32 @@ $(function () {
         guide = resp.guide;
         $('#style-panel-full-link').attr('href', '/style_check/' + resp.qset_id + '/');
         var what = draft ? ' for the text in the editor' : '';
+        setCount($('#style-panel-count'), resp.issues.length);
         if (!resp.issues.length) { setStatus('No style issues found' + what + '.'); return; }
-        setStatus(resp.issues.length + ' style suggestion' + (resp.issues.length === 1 ? '' : 's') + what + ':');
+        setStatus(draft ? 'Checked the text in the editor.' : '');
         $.each(resp.issues, function (_, i) {
-                var $li = $('<li>').addClass('style-issue sev-' + i.severity);
                 // message_html (when present) is escaped server-side and carries
                 // answer-line formatting (underline/bold/italics).
-                $li.append($('<span class="style-issue-msg">').html(i.message_html || esc(i.message)));
-                var $actions = $('<span class="style-issue-actions">');
+                var parts = splitIssue(i);
+                var $li = issueRow(parts.chip, parts.title, parts.detail, i.severity);
+                var $actions = $('<div class="sc-actions">');
                 if (draft && i.fixable) {
-                    $actions.append($('<span class="sc-nofix" title="Fix buttons work on the saved question — save first">save to fix</span>'));
+                    $actions.append($('<span class="sc-nofix" title="Fix buttons work on the saved question — save first">Save to fix</span>'));
+                }
+                if (qid) {  // a dismissal hangs off the saved question
+                    $('<a class="sc-dismiss" title="Hide this suggestion for this question">Dismiss</a>')
+                        .on('click', function () {
+                            $.post('/dismiss_style_issue/', { question_type: qtype, question_id: qid,
+                                code: i.code, token: i.token, action: '', scope: '' }, function () {
+                                $li.remove();
+                                var left = $('#style-panel-list li').length;
+                                setCount($('#style-panel-count'), left);
+                                if (!left) { setStatus('No style issues found.'); }
+                            });
+                        }).appendTo($actions);
                 }
                 if (i.fixable && !draft) {
-                    $('<a class="style-action sc-fix" title="Apply this fix to the saved question">Fix</a>')
+                    $('<a class="sc-fix" title="Apply this fix to the saved question">Apply fix</a>')
                         .on('click', function () {
                             $.post('/apply_style_fix/', { question_type: qtype, question_id: qid,
                                 code: i.code, token: i.token, guide: guide }, function (r) {
@@ -148,16 +255,6 @@ $(function () {
                                 var msg = '';
                                 try { msg = JSON.parse(xhr.responseText).error; } catch (e) {}
                                 alert(msg || 'Could not apply the fix.');
-                            });
-                        }).appendTo($actions);
-                }
-                if (qid) {  // a dismissal hangs off the saved question
-                    $('<a class="style-action sc-dismiss" title="Hide this suggestion for this question">dismiss</a>')
-                        .on('click', function () {
-                            $.post('/dismiss_style_issue/', { question_type: qtype, question_id: qid,
-                                code: i.code, token: i.token, action: '', scope: '' }, function () {
-                                $li.remove();
-                                if (!$('#style-panel-list li').length) { setStatus('No style issues found.'); }
                             });
                         }).appendTo($actions);
                 }
@@ -196,7 +293,6 @@ $(function () {
             });
     }
 
-    $('#style-panel-refresh').on('click', function (e) { e.preventDefault(); load(); });
     $('#style-panel-draft').on('click', function (e) { e.preventDefault(); checkDraft(); });
     load();
 
@@ -211,7 +307,7 @@ $(function () {
             if ($el.length) { fields.push({ name: name, text: $el.val() || '' }); }
         }
         if (qtype === 'tossup') {
-            add('Text', '#id_tossup_text');
+            add('Question', '#id_tossup_text');
         } else {
             add('Leadin', '#id_leadin');
             add('Part 1', '#id_part1_text');
@@ -223,20 +319,19 @@ $(function () {
 
     function renderGrammar(findings) {
         var $list = $('#grammar-panel-list').empty();
+        setCount($('#grammar-panel-count'), findings.length);
         if (!findings.length) {
-            $('#grammar-panel-status').text('— no issues found.');
+            $('#grammar-panel-status').text('No grammar issues found.');
             return;
         }
-        $('#grammar-panel-status').text('— ' + findings.length + ' suggestion' + (findings.length === 1 ? '' : 's') + ':');
+        $('#grammar-panel-status').text('');
         $.each(findings, function (_, f) {
-            var $msg = $('<span class="style-issue-msg">');
-            if (qtype === 'bonus' && f.field) { $msg.append($('<span class="grammar-field">').text(f.field + ': ')); }
-            if (f.problem) { $msg.append($('<span class="grammar-problem">').text('“' + f.problem + '”')).append(' — '); }
-            $msg.append(document.createTextNode(f.message));
+            var detail = '';
+            if (f.problem) { detail = '<mark>' + esc(f.problem) + '</mark>'; }
             if (f.replacements.length) {
-                $msg.append(' ').append($('<span class="grammar-fix">').text('→ ' + f.replacements.join(' / ')));
+                detail += (detail ? ' &rarr; ' : '') + esc(f.replacements.join(' / '));
             }
-            $list.append($('<li class="style-issue sev-info">').append($msg));
+            $list.append(issueRow(f.field || 'Question', capitalize(esc(f.message)), detail, 'info'));
         });
     }
 
@@ -245,15 +340,16 @@ $(function () {
         if (grammarRunning || !window.QemsHarper) { return; }
         grammarRunning = true;
         $('#grammar-panel-list').empty();
-        $('#grammar-panel-status').text('— checking… (first run downloads the checker)');
+        $('#grammar-panel-status').text('Checking… (the first run downloads the checker)');
         window.QemsHarper.lintFields(grammarFields(), $('#grammar-spelling').is(':checked'))
             .then(function (findings) { renderGrammar(findings); })
-            .catch(function () { $('#grammar-panel-status').text('— the grammar checker failed to load.'); })
+            .catch(function () { $('#grammar-panel-status').text('The grammar checker failed to load.'); })
             .then(function () { grammarRunning = false; });
     }
     $('#grammar-panel-run').on('click', function (e) { e.preventDefault(); runGrammar(); });
     $('#grammar-spelling').on('change', function () {
-        if ($('#grammar-panel-list li').length || $('#grammar-panel-status').text()) { runGrammar(); }
+        // Rerun only once there is a result to redo.
+        if ($('#grammar-panel-count').text() !== '') { runGrammar(); }
     });
 });
 </script>

@@ -1,0 +1,57 @@
+{% comment %}
+The top of the edit-tossup / edit-bonus page: where the question lives, what it
+is, and the row of things you do to it. Edit and Read are tabs over the same
+spot, so the rendered question and the editor no longer stack one above the
+other.
+
+Include with `q` (the tossup or bonus), `qtype` ("tossup" or "bonus") and
+`thread_data` (its threaded comments). The Edit tab, and the copy buttons, need
+the page's `form`: someone who may only look at the question gets it read.
+{% endcomment %}
+{% if q.category %}
+<nav class="qhead-crumbs" aria-label="Where this question is">
+    <a href="/edit_question_set/{{ qset.id }}/">{{ qset.name }}</a>
+    <span class="qhead-crumb-sep">/</span>
+    <a href="/top_category/{{ qset.id }}/{{ q.category.category }}/">{{ q.category.category }}</a>
+    <span class="qhead-crumb-sep">/</span>
+    <a href="/categories/{{ qset.id }}/{{ q.category.id }}/">{{ q.category.subcategory }}</a>
+</nav>
+{% endif %}
+<div class="qhead-title-row">
+    <h1 class="qhead-title">{{ qtype|capfirst }}</h1>
+    {% if q.packet %}
+    <span class="qhead-pill" title="Packet {{ q.packet.packet_name }}{% if q.question_number %}, question {{ q.question_number }}{% endif %}">{{ q.packet.packet_name }}{% if q.question_number %} &middot; #{{ q.question_number }}{% endif %}</span>
+    {% else %}
+    <span class="qhead-pill qhead-pill-muted">Unpacketized</span>
+    {% endif %}
+    {% include "_packet_nav.html" with nav_class="packet-nav-title" %}
+</div>
+<div class="qhead-actions q-copy-tools">
+    {% if form %}
+    <div class="qtabs" role="tablist" aria-label="Edit or proof the question">
+        <button type="button" class="qtab is-active" role="tab" data-tab="edit" aria-selected="true">Edit</button>
+        <button type="button" class="qtab" role="tab" data-tab="read" aria-selected="false">Proof</button>
+        {# Its own page, so a link rather than a pane -- but the same kind of view of the question. #}
+        <a href="/{{ qtype }}_history/{{ q.id }}" class="qtab qtab-link" title="Every saved version of this {{ qtype }}">History</a>
+    </div>
+    {% else %}
+    <div class="qtabs">
+        <a href="/{{ qtype }}_history/{{ q.id }}" class="qtab qtab-link" title="Every saved version of this {{ qtype }}">History</a>
+    </div>
+    {% endif %}
+    {% if form %}{% if qtype == "tossup" or question_type == "ACF-style bonus" %}
+        {% if qtype == "tossup" %}
+        <a href="#" id="copy-full-tossup" class="qhead-btn" title="Copy the full tossup to the clipboard (formatted)">Copy</a>
+        <a href="#" id="copy-for-discord-plain-tossup" class="qhead-btn" title="Copy for Discord (standard, no spoiler tags)">Discord</a>
+        <a href="#" id="copy-for-discord-tossup" class="qhead-btn" title="Copy for Discord with the answer hidden behind spoiler tags">Spoiler</a>
+        {% else %}
+        <a href="#" id="copy-full-bonus" class="qhead-btn" title="Copy the full bonus to the clipboard (formatted)">Copy</a>
+        <a href="#" id="copy-for-discord-plain-bonus" class="qhead-btn" title="Copy for Discord (standard, no spoiler tags)">Discord</a>
+        <a href="#" id="copy-for-discord-bonus" class="qhead-btn" title="Copy for Discord with the answers hidden behind spoiler tags">Spoiler</a>
+        {% endif %}
+    {% endif %}{% endif %}
+    <a href="#" class="qhead-btn ec-open" title="Show or hide the comments column">Comments{% if thread_data.count %} <span class="qhead-count">{{ thread_data.count }}</span>{% endif %}</a>
+    {% if qtype == "bonus" and form and question_type == "ACF-style bonus" %}
+    <a href="#" id="toggle-unified-editor" class="qhead-btn qhead-btn-end" title="Switch between editing the whole bonus as one box and editing each part in its own field">Individual fields</a>
+    {% endif %}
+</div>

@@ -293,23 +293,25 @@ html[data-theme="dark"] .qtable-tag { background: var(--qx-elevate); color: var(
 .search-actions { display: flex; justify-content: flex-end; margin: 0 0 1rem; }
 .search-actions .button { margin: 0; }
 
-/* Unsaved changes on an edit page: a bar that stays under the top bar for the
-   length of the page, so Save is in reach from wherever you are in a long
-   question. Sticky rather than fixed, so it needs no arithmetic against the
-   sidebar; 45 keeps it under the top bar (50) rather than over the search. */
+/* Unsaved changes on an edit page: a bar floating at the bottom right of the
+   window, so Save is in reach from wherever you are in a long question.
+   Fixed, not in the page's flow: it used to be a sticky bar at the top of the
+   content, and appearing on the first keystroke pushed the whole page down
+   under the caret. Floating over the corner, it moves nothing. */
 .q-savebar {
-    position: sticky;
-    top: 60px;
+    position: fixed;
+    right: 24px;
+    bottom: 20px;
     z-index: 45;
     display: flex;
     align-items: center;
     gap: 12px;
-    margin: -10px 0 16px;
+    margin: 0;
     padding: 8px 14px;
     border: 1px solid #f0c98a;
     border-radius: 8px;
     background: #fdf6e7;
-    box-shadow: 0 2px 6px rgba(20, 20, 40, 0.08);
+    box-shadow: 0 6px 20px rgba(20, 20, 40, 0.16);
 }
 /* An author `display` beats the UA stylesheet's [hidden] rule, so the bar has
    to hide itself explicitly or it is on the page from the moment it loads. */
@@ -438,6 +440,10 @@ html[data-theme="dark"] .rich-editor-toolbar a.rich-editor-btn.rich-editor-skel 
        and it's closer to the Times New Roman the exported packets use. */
     font-family: Georgia, 'Times New Roman', serif;
     font-size: 1em;
+    /* Its own weight, not its container's: on the add-bonus page the part
+       editors sit inside <label>s, which are semibold, and every part came
+       out bold. */
+    font-weight: normal;
     line-height: 1.5;
     box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.1);
     /* The editor sits inside a <label> (cursor: pointer in Foundation); force
@@ -495,12 +501,17 @@ html[data-theme="dark"] .rich-editor i, html[data-theme="dark"] .rich-editor em 
 /* width:100% forces the main column (and its panel/form) to fill the grid track
    even if a child would otherwise shrink-wrap to its content. */
 .edit-main { min-width: 0; width: 100%; overflow-wrap: anywhere; }
-.edit-main > .panel.question, .edit-main > form { width: 100%; box-sizing: border-box; }
+.edit-main > .panel.question, .edit-main > .qpane > .panel.question, .edit-main > form { width: 100%; box-sizing: border-box; }
 .edit-comments {
     max-width: 330px;
     position: sticky; top: 8px;
     max-height: calc(100vh - 24px); overflow-y: auto;
     padding-left: 14px;
+    /* Room for the scrollbar: an overlay scrollbar (Firefox, macOS) draws
+       over the content, and covered the hide button and the cards' right
+       edge. */
+    padding-right: 12px;
+    scrollbar-gutter: stable;
 }
 /* A question nobody has commented on gives its column back to the question --
    330px is a lot of width to hold open for an empty panel -- and so does one
@@ -511,6 +522,7 @@ html[data-theme="dark"] .rich-editor i, html[data-theme="dark"] .rich-editor em 
 /* The button lives in the question's own action row and only shows itself when
    there is a column to bring back. */
 .q-copy-tools .ec-open { display: none; }
+body.app-authed .qhead-actions.q-copy-tools .ec-open { display: inline-flex; }
 /* inline-flex, not inline-block: the button is a .q-copy-btn, and a fixed
    26px box that is not a flex container leaves its label sitting at the top
    of it, a few pixels above the Copy/Discord pills it shares the row with. */
@@ -2122,3 +2134,193 @@ html[data-theme="dark"] .sa-read-problems { color: #f0a868; }
 .qbr-inline-close { margin-left: auto; order: 99; border: none; background: none;
     color: var(--qx-muted, #8a8f9c); cursor: pointer; font-size: 1.1rem; line-height: 1; padding: 0 2px; }
 .qbr-inline-close:hover { color: #c0392b; }
+
+/* ---- Edit tossup / edit bonus: head, Edit|Read tabs, one editor card ----
+   (_question_head.html, and the .qpane / .qedit-card markup in
+   edit_tossup.html and edit_bonus.html.) */
+.qhead-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px;
+    font-size: .95rem; margin: 0 0 4px; }
+.qhead-crumb-sep { color: var(--qx-muted); }
+.qhead-title-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 0 0 12px; }
+.app-content h1.qhead-title { margin: 0; font-size: 2.2rem; line-height: 1.15; }
+.qhead-id { color: var(--qx-muted); font-size: .95rem; font-variant-numeric: tabular-nums; }
+.qhead-pill { display: inline-flex; align-items: center; height: 28px; padding: 0 12px; border-radius: 14px;
+    background: #efe6fb; color: #5b21b6; font-size: .85rem; font-weight: 500; white-space: nowrap; }
+.qhead-pill-muted { background: #ececf2; color: #565b66; }
+/* Previous/next in the packet ride at the end of the title row. */
+.packet-nav.packet-nav-title { margin-left: auto; }
+
+.qhead-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 14px; }
+.qtabs { display: inline-flex; padding: 3px; gap: 2px; border-radius: 10px; background: #ececf2; }
+.qtab { margin: 0; height: 36px; padding: 0 16px; border: none; border-radius: 8px; background: none;
+    color: var(--qx-muted); font-family: var(--qx-sans); font-size: .95rem; line-height: 1; cursor: pointer; }
+.qtab:hover, .qtab:focus { background: none; color: var(--qx-ink); outline: none; }
+.qtab.is-active, .qtab.is-active:hover { background: var(--qx-card); color: var(--qx-ink);
+    box-shadow: 0 1px 2px rgba(20, 20, 40, .12); }
+body.app-authed a.qhead-btn, .qhead-btn { display: inline-flex; align-items: center; gap: 8px; box-sizing: border-box;
+    height: 42px; padding: 0 16px; border: 1px solid var(--qx-border); border-radius: 10px;
+    background: var(--qx-card); color: var(--qx-ink); font-size: .95rem; line-height: 1; white-space: nowrap; }
+body.app-authed a.qhead-btn:hover { border-color: #cfc6e6; background: #faf8ff; color: var(--qx-ink); }
+.qhead-btn-end { margin-left: auto; }
+.qhead-count { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px;
+    padding: 0 6px; border-radius: 11px; background: #ececf2; color: #565b66; font-size: .8rem; }
+/* The Comments button is always in the row: it opens the column, and puts
+   it away again. */
+body.app-authed .qhead-actions .ec-open { display: inline-flex; }
+
+.qpane[hidden], .qpane-note[hidden] { display: none; }
+.qpane-note { margin: 0 0 8px; color: var(--qx-muted); font-size: .85rem; }
+.qpane .panel.question .qmeta-lastmod { margin: 0; }
+/* The Written / Edited / Proofread / Last modified lines read as one block
+   with the Category and Character Count lines above them: same face, no
+   paragraph gaps between them. */
+.qpane .panel.question .anchor-region > p:last-child { margin-bottom: 0; }
+.qpane .panel.question > p { margin: 0; font-family: inherit; }
+
+.qedit-card { position: relative; margin: 0 0 16px; border: 1px solid var(--qx-border); border-radius: 14px;
+    background: var(--qx-card); box-shadow: 0 1px 2px rgba(20, 20, 40, .04); }
+.qedit-toolbar-slot { position: relative; border-bottom: 1px solid var(--qx-border); border-radius: 14px 14px 0 0; }
+/* The card's toolbar: quiet buttons on the card, grouped by rules, with the
+   field being edited and the Raw switch pushed to the right. */
+.qedit-toolbar-slot .rich-editor-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 2px;
+    padding: 8px 12px; border: none; border-radius: 14px 14px 0 0; background: none; }
+.qedit-toolbar-slot .rich-editor-toolbar a.rich-editor-btn { margin: 0; border-color: transparent;
+    background: none; box-shadow: none; min-width: 2.3rem; height: 2.1rem; }
+.qedit-toolbar-slot .rich-editor-toolbar a.rich-editor-btn:hover { background: #f1f1f5; border-color: transparent; }
+.qedit-toolbar-slot .rich-editor-toolbar a.rich-editor-btn.active { background: #efe6fb; border-color: transparent;
+    color: #5b21b6; box-shadow: none; }
+.qedit-toolbar-slot .rich-editor-toolbar a.rich-editor-btn.rich-editor-plain { border-color: var(--qx-border); margin-left: auto; }
+.rich-editor-sep { display: inline-block; width: 1px; height: 1.3rem; margin: 0 6px; vertical-align: middle;
+    background: #d6d8de; }
+/* Raw mode greys the formatting buttons, wherever the toolbar is living. */
+.rich-editor-toolbar.rich-editor-toolbar-plain a.rich-editor-btn:not(.rich-editor-plain) { opacity: 0.4; pointer-events: none; }
+
+/* The fields themselves: no boxes, just the question on the card. */
+.qedit-card .rich-editor-wrapper { margin: 0; }
+.qedit-card .rich-editor, .qedit-card .rich-editor:focus { border: none; border-radius: 0; box-shadow: none;
+    background: none; padding: 14px 22px; font-size: 1.05rem; line-height: 1.6; }
+.qedit-card .rich-editor.rich-editor-tall { min-height: 4.5em; }
+.qedit-card .rich-editor.rich-editor-short { min-height: 0; }
+.qedit-card .rich-editor.rich-editor-multiline { min-height: 12em; }
+/* The field you are in gets a thin rule down its left edge -- with one
+   toolbar for several fields, which one it acts on should be visible. */
+.qedit-card.qedit-several .rich-editor-wrapper.is-active .rich-editor { box-shadow: inset 3px 0 0 #d9c9f5; }
+.qedit-card.qedit-several .rich-editor-wrapper.is-active .rich-editor:focus { box-shadow: inset 3px 0 0 var(--qx-primary); }
+.qedit-card textarea { margin: 0; border: none; border-radius: 0; box-shadow: none; padding: 14px 22px;
+    font-family: monospace; font-size: .95rem; }
+.qedit-answer { border-top: 1px solid var(--qx-border); }
+.qedit-errors { padding: 0 22px; }
+.qedit-card .structured-answer { padding: 10px 22px 12px; }
+.qedit-card .structured-answer .rich-editor { padding: 6px 10px; font-size: 1.05rem; }
+.qedit-card .structured-answer .sa-primary .sa-required { display: none; }
+.qedit-foot { padding: 8px 22px; border-top: 1px solid var(--qx-border); color: var(--qx-muted); font-size: .85rem; }
+.qedit-foot strong { color: var(--qx-ink); }
+
+/* Bonus parts in the card: a narrow gutter with the value and difficulty,
+   the part and its answer line beside it. */
+.qedit-card .bonus-part { display: flex; align-items: stretch; margin: 0; border-top: 1px solid var(--qx-border); }
+.qedit-card .bonus-part-dif { flex: 0 0 64px; display: flex; flex-direction: column; align-items: center;
+    gap: 6px; padding: 16px 0 0 12px; }
+.qedit-card .bonus-part-value { font-family: var(--qx-serif); font-size: 1.05rem; color: var(--qx-muted); }
+.qedit-card .bonus-part-dif select { width: 52px; height: 30px; margin: 0; padding: 0 4px; font-size: .85rem;
+    text-align: center; }
+.qedit-card .bonus-part-main { flex: 1 1 auto; min-width: 0; }
+.qedit-card .bonus-part-main .rich-editor { padding-left: 10px; }
+
+/* The duplicate-answer notice: a header and the list, nothing else. */
+.app-content .alert-box.dup-warning { position: relative; padding: 10px 40px 10px 14px; margin-bottom: 12px; }
+.dup-warning-head { display: block; margin-bottom: 2px; }
+.dup-warning-list { margin: 0 0 0 1.1rem; }
+.dup-warning-list li { margin: 0; line-height: 1.5; }
+body.app-authed .dup-warning-list a, body.app-authed .dup-warning-list a:visited { color: inherit; text-decoration: underline; }
+body.app-authed .dup-warning a.dup-warning-close { position: absolute; top: 6px; right: 12px; color: inherit;
+    font-size: 1.3rem; line-height: 1; text-decoration: none; opacity: .8; }
+body.app-authed .dup-warning a.dup-warning-close:hover { opacity: 1; }
+
+html[data-theme="dark"] .qhead-pill { background: #2e2447; color: #cbb5f5; }
+html[data-theme="dark"] .qhead-pill-muted,
+html[data-theme="dark"] .qtabs,
+html[data-theme="dark"] .qhead-count { background: var(--qx-elevate); color: var(--qx-muted); }
+html[data-theme="dark"] .qtab.is-active { background: var(--qx-hover); color: var(--qx-ink); }
+html[data-theme="dark"] body.app-authed a.qhead-btn:hover { background: var(--qx-hover); border-color: #4a4f5c; }
+html[data-theme="dark"] .qedit-toolbar-slot .rich-editor-toolbar { background: none; }
+html[data-theme="dark"] .qedit-toolbar-slot .rich-editor-toolbar a.rich-editor-btn { background: none; border-color: transparent; }
+html[data-theme="dark"] .qedit-toolbar-slot .rich-editor-toolbar a.rich-editor-btn:hover { background: var(--qx-hover); }
+html[data-theme="dark"] .qedit-toolbar-slot .rich-editor-toolbar a.rich-editor-btn.active { background: #2e2447; color: #cbb5f5; }
+html[data-theme="dark"] .qedit-toolbar-slot .rich-editor-toolbar a.rich-editor-btn.rich-editor-plain { border-color: var(--qx-border); }
+html[data-theme="dark"] .qedit-card .rich-editor { background: none; }
+html[data-theme="dark"] .qedit-card textarea { background: none; color: var(--qx-ink); }
+html[data-theme="dark"] .rich-editor-sep { background: var(--qx-border); }
+/* A bonus part is a sentence or two; it needn't open as tall as a stem. */
+.qedit-card .bonus-part .rich-editor.rich-editor-tall { min-height: 2.6em; }
+html[data-theme="dark"] .qtabs .qtab { background: none; color: var(--qx-muted); }
+html[data-theme="dark"] .qtabs .qtab.is-active { background: var(--qx-hover); color: var(--qx-ink); }
+html[data-theme="dark"] body.app-authed a.qhead-btn { color: var(--qx-ink); }
+/* The power run of a tossup stem, bolded in the editor as it will print.
+   Display only: rich_editor.js adds these spans and the markup conversion
+   ignores them, since power is applied from the (*) mark, not from bold. */
+.rich-editor .q-power { font-weight: bold; }
+/* History sits in the tab row but is its own page, so it is a link. */
+body.app-authed a.qtab-link { display: inline-flex; align-items: center; color: var(--qx-muted); text-decoration: none; }
+body.app-authed a.qtab-link:hover { color: var(--qx-ink); }
+/* Save, under the question card on the edit pages. */
+.qedit-save { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin: -4px 0 16px; }
+.qedit-save .button { margin: 0; }
+
+/* ---- Byline + action row under the question (_question_meta.html) ---- */
+.qmeta-card { margin: 0 0 16px; border: 1px solid var(--qx-border); border-radius: 14px;
+    background: var(--qx-card); box-shadow: 0 1px 2px rgba(20, 20, 40, .04); }
+.qmeta-byline { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 14px 22px; }
+.qmeta-word { color: var(--qx-muted); font-size: .95rem; }
+/* The category, author and credit fields, dressed as the words of the line:
+   no box until you point at one, and then only a faint one. */
+/* input[type] as well: Foundation's own text-input rule is that specific. */
+.qmeta-inline select, .qmeta-inline input, .qmeta-inline input[type="text"] {
+    height: 32px; margin: 0; padding: 0 8px; border: 1px solid transparent; border-radius: 7px;
+    background-color: transparent; box-shadow: none; color: var(--qx-ink); font-size: .95rem;
+    font-family: var(--qx-sans); cursor: pointer; }
+.qmeta-inline select { padding-right: 20px; background-position: right 4px center; }
+.qmeta-inline select:hover, .qmeta-inline input:hover, .qmeta-inline input[type="text"]:hover { border-color: var(--qx-border); background-color: #fafafc; }
+.qmeta-inline select:focus, .qmeta-inline input:focus, .qmeta-inline input[type="text"]:focus { border-color: #cfc6e6; background-color: var(--qx-card);
+    outline: none; box-shadow: none; }
+.qmeta-cat select { font-weight: 600; }
+.qmeta-credit input { width: 9em; cursor: text; }
+.qmeta-credit input::placeholder { color: var(--qx-muted); }
+body.app-authed a.qmeta-packet-link { color: var(--qx-ink); font-size: .95rem; padding: 0 4px; }
+body.app-authed a.qmeta-packet-link:hover { color: var(--qx-primary); }
+.qmeta-errors { padding: 0 22px 10px; }
+.qmeta-measure { position: absolute; visibility: hidden; white-space: pre; font-family: var(--qx-sans);
+    font-size: .95rem; font-weight: 600; padding: 0 8px; }
+
+.qmeta-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 10px 14px;
+    border-top: 1px solid var(--qx-border); border-radius: 0 0 14px 14px; background: #fafafc; }
+body.app-authed a.qmeta-btn, .qmeta-btn { display: inline-flex; align-items: center; gap: 8px; box-sizing: border-box;
+    height: 40px; margin: 0; padding: 0 12px; border: 1px solid transparent; border-radius: 9px;
+    background: none; color: #565b66; font-family: var(--qx-sans); font-size: .95rem; line-height: 1;
+    white-space: nowrap; cursor: pointer; }
+body.app-authed a.qmeta-btn:hover, .qmeta-btn:hover, .qmeta-btn:focus { background: #f0f0f5; color: var(--qx-ink); outline: none; }
+.qmeta-btn.qmeta-btn-boxed, .qmeta-btn.qmeta-btn-boxed:hover, .qmeta-btn.qmeta-btn-boxed:focus {
+    border-color: var(--qx-border); background: var(--qx-card); color: var(--qx-ink); }
+.qmeta-status-summary { color: var(--qx-muted); font-size: .9rem; }
+.qmenu-caret { font-size: .7rem; color: var(--qx-muted); }
+
+.qmenu { position: relative; }
+.qmenu-panel { position: absolute; top: calc(100% + 6px); left: 0; z-index: 60; min-width: 220px; padding: 6px;
+    border: 1px solid var(--qx-border); border-radius: 12px; background: var(--qx-card);
+    box-shadow: 0 10px 30px rgba(20, 20, 40, .14); }
+.qmenu-panel[hidden] { display: none; }
+body.app-authed a.qmenu-item, .qmenu-check { display: flex; align-items: center; gap: 10px; margin: 0;
+    padding: 9px 12px; border-radius: 8px; color: var(--qx-ink); font-size: .95rem; font-weight: normal;
+    cursor: pointer; white-space: nowrap; }
+body.app-authed a.qmenu-item:hover, .qmenu-check:hover { background: #f3f3f7; }
+.qmenu-check input { margin: 0; }
+body.app-authed a.qmenu-danger { color: #b3261e; }
+.qmenu-sep { margin: 6px 4px; border: none; border-top: 1px solid var(--qx-border); }
+
+html[data-theme="dark"] .qmeta-bar { background: var(--qx-elevate); }
+html[data-theme="dark"] .qmeta-inline select:hover, html[data-theme="dark"] .qmeta-inline input:hover,
+html[data-theme="dark"] body.app-authed a.qmeta-btn:hover, html[data-theme="dark"] .qmeta-btn:hover,
+html[data-theme="dark"] body.app-authed a.qmenu-item:hover, html[data-theme="dark"] .qmenu-check:hover { background: var(--qx-hover); }
+html[data-theme="dark"] .qmeta-inline select, html[data-theme="dark"] .qmeta-inline input { color: var(--qx-ink); background-color: transparent; }
+html[data-theme="dark"] body.app-authed a.qmeta-btn, html[data-theme="dark"] .qmeta-btn { color: var(--qx-muted); }
+html[data-theme="dark"] body.app-authed a.qmenu-danger { color: #f08c8c; }

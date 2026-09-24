@@ -35,8 +35,7 @@
             </div>
         {% endif %}
         <p class="char-count-note">
-            Live character count: <strong id="live-char-count" data-qset-id="{{ qset.id }}" data-max="{{ qset.max_acf_bonus_length }}" data-fields="id_leadin,id_part1_text,id_part2_text,id_part3_text">0</strong> / {{ qset.max_acf_bonus_length }}
-            <small style="color:#888;">(leadin and parts together, updating as you type)</small>
+            Character count: <strong id="live-char-count" data-qset-id="{{ qset.id }}" data-max="{{ qset.max_acf_bonus_length }}" data-fields="id_leadin,id_part1_text,id_part2_text,id_part3_text">0</strong> / {{ qset.max_acf_bonus_length }}
         </p>
         <div id="individual-fields-container">
         {% if question_type == "ACF-style bonus" %}

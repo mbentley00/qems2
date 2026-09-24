@@ -30,7 +30,7 @@
         <a href="#" id="copy-for-discord-tossup" class="button small secondary">Copy for Discord</a>
         <a href="#" id="copy-for-discord-plain-tossup" class="button small secondary">Copy for Discord (no spoilers)</a>
         <label>
-            Tossup Text<span class="char-count-inline" title="Live character count (updates as you type)"><strong id="live-char-count" data-qset-id="{{ qset.id }}" data-max="{{ qset.max_acf_tossup_length }}" data-fields="id_tossup_text">0</strong> / {{ qset.max_acf_tossup_length }}</span>
+            Tossup Text<span class="char-count-inline">Character count: <strong id="live-char-count" data-qset-id="{{ qset.id }}" data-max="{{ qset.max_acf_tossup_length }}" data-fields="id_tossup_text">0</strong> / {{ qset.max_acf_tossup_length }}</span>
             {{ form.tossup_text }}
         </label>
         {% if form.tossup_text.errors %}
