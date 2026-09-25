@@ -444,7 +444,9 @@ def bonus_html(bonus):
 
 @register.filter(name='bonus_leadin')
 def bonus_leadin(bonus):
-    return preview(bonus.leadin_to_html())
+    # The leadin is HTML by now, so cut it as HTML: a plain cut could land in
+    # the middle of a tag and break the table cell it is shown in.
+    return preview_html(bonus.leadin_to_html())
 
 @register.filter(name='bonus_html_verbose')
 def bonus_html_verbose(bonus):

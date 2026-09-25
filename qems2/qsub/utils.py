@@ -177,6 +177,50 @@ def preview(text):
     else:
         return mark_safe(text)    
 
+_HTML_TOKEN_RE = re.compile(r'(<[^>]*>)|(&#?\w+;)|([^<&]+|&)')
+_VOID_TAGS = {'br', 'hr', 'img', 'input', 'wbr'}
+
+
+def preview_html(html, limit=81):
+    """`preview` for text that is already HTML: the first `limit` characters a
+    reader sees, then "...".
+
+    Cutting the string itself can land inside a tag -- a pronunciation guide's
+    <strong class="pronunciation-guide"> is long enough that it usually did --
+    and a half tag in a table cell swallows the cell's closing </td>, so every
+    column after it moved one to the left. Here only visible text counts
+    toward the limit, a tag or an &entity; is never split, and whatever is
+    open at the cut is closed."""
+    if html is None:
+        return html
+    out, open_tags, seen = [], [], 0
+    for m in _HTML_TOKEN_RE.finditer(html):
+        tag, entity, text = m.groups()
+        if tag:
+            name = re.match(r'</?\s*([a-zA-Z0-9]+)', tag)
+            name = name.group(1).lower() if name else ''
+            if tag.startswith('</'):
+                if name in open_tags:
+                    # Close back to the matching tag, as a browser would.
+                    while open_tags and open_tags.pop() != name:
+                        pass
+            elif name and name not in _VOID_TAGS and not tag.endswith('/>'):
+                open_tags.append(name)
+            out.append(tag)
+            continue
+        piece = entity or text
+        width = 1 if entity else len(piece)
+        if seen + width > limit:
+            if not entity:
+                out.append(piece[:limit - seen])
+            out.append('...')
+            out.extend('</{0}>'.format(t) for t in reversed(open_tags))
+            return mark_safe(''.join(out))
+        out.append(piece)
+        seen += width
+    return mark_safe(html)
+
+
 def get_formatted_question_html_for_bonus_answers(bonus):
     return get_formatted_question_html(bonus.part1_answer[0:80], True, True, False, False) + '<br />' + get_formatted_question_html(bonus.part2_answer[0:80], True, True, False, False) + '<br />' + get_formatted_question_html(bonus.part3_answer[0:80], True, True, False, False) + '<br />'
 

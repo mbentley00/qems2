@@ -3592,6 +3592,27 @@ class SidebarActiveSetTests(TestCase):
             'SAS Notes')
 
 
+class PreviewHtmlTests(TestCase):
+    """Cutting HTML short without cutting a tag in half."""
+
+    def test_short_html_comes_back_as_it_was(self):
+        from qems2.qsub.utils import preview_html
+        self.assertEqual(preview_html('A <i>short</i> leadin.'), 'A <i>short</i> leadin.')
+
+    def test_only_what_is_read_counts_toward_the_limit(self):
+        from qems2.qsub.utils import preview_html
+        out = preview_html('<strong class="pronunciation-guide">abc</strong>def', limit=4)
+        self.assertEqual(out, '<strong class="pronunciation-guide">abc</strong>d...')
+
+    def test_a_cut_inside_a_tag_closes_it(self):
+        from qems2.qsub.utils import preview_html
+        self.assertEqual(preview_html('ab <i>cdefgh</i> ij', limit=5), 'ab <i>cd...</i>')
+
+    def test_an_entity_is_one_character_and_never_split(self):
+        from qems2.qsub.utils import preview_html
+        self.assertEqual(preview_html('a&amp;bcdef', limit=3), 'a&amp;b...')
+
+
 class SearchResultColumnTests(TestCase):
     """The full-text search results are laid out as the set's own question
     table: a search is nearly always run from the set you are working in, so it
@@ -3669,6 +3690,31 @@ class SearchResultColumnTests(TestCase):
         for label in ('Answer', 'Category', 'Created'):
             self.assertIn('<th>{0}</th>'.format(label), page)
         self.assertNotIn('<th>Proofread</th>', page)
+
+    def test_a_pronunciation_guide_in_a_leadin_keeps_the_bonus_row_whole(self):
+        """The leadin preview was cut at 81 characters of HTML, and a
+        pronunciation guide's tags are long enough that the cut landed inside
+        one; the half tag ate the cell's </td> and every column after the
+        preview moved one to the left."""
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        Bonus.objects.create(
+            author=self.owner, question_set=self.qset, category=self.entry,
+            question_type=QuestionType.objects.get(question_type=ACF_STYLE_BONUS),
+            leadin='Anthony van \\PDyck\\P ("dike") painted several portraits of this '
+                   'faction, including one of its leader. For 10 points each:',
+            part1_text='Name this faction.', part1_answer='_Cavaliers_',
+            part2_text='p2', part2_answer='_Charles I_', part3_text='p3', part3_answer='_Stuart_',
+            created_date=timezone.now(), last_changed_date=timezone.now())
+        self.qset.question_table_columns = 'preview,answer,category'
+        self.qset.save()
+        page = self.client.get('/categories/{0}/{1}/'.format(
+            self.qset.id, self.entry.id)).content.decode()
+        row = page[page.index('Anthony van'):]
+        row = row[:row.index('</tr>')]
+        # Preview, then the answers, then the category -- each in its own cell.
+        self.assertEqual(row.count('</td>'), 3)
+        self.assertLess(row.index('Cavaliers'), row.index('History - European'))
+        self.assertNotIn('pronunciation-guid...', page)
 
     def test_which_set_a_result_came_from_is_named_only_across_sets(self):
         self.assertNotIn('Tournament', self._headers())

@@ -174,15 +174,19 @@ $(function () {
         e.preventDefault();
         var result = confirm("You are about to delete this packet! If you do so, you will not be able to recover it! 99% of the time this is a terrible idea and you should not do it! Are you ABSOLUTELY SURE you want to do that?!");
         if (result == true) {
-            var qset_id = $(this).attr('qset-id');
+            var $row = $(this).closest('tr');
             $.post('/delete_packet/', {packet_id: $(this).attr('value')}, function (response) {
                 var json_response = $.parseJSON(response);
-                var dialog = $('#info-dialog').dialog({
+                // Stay on the Packets tab and take the row out, rather than
+                // going back to the set's front page (which is where this
+                // used to land you). No reload: the page may be the result of
+                // a POST, and reloading it would submit that again.
+                if (/success/.test(json_response['message_class'] || '')) { $row.remove(); }
+                var dialog = $('#info-dialog').empty().dialog({
                     modal: true,
                     buttons: {
                         Ok: function() {
                             $(this).dialog('close');
-                            window.location.replace('/edit_question_set/' + qset_id);
                         }
                     }
                 })
