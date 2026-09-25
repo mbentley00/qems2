@@ -138,9 +138,8 @@ button in the question panel brings it back.
 {% if tossup and pending_suggestions %}{% include "_suggested_changes.html" with question_type="tossup" q_id=tossup.id %}{% endif %}
 
 {% if tossup %}{% include "_style_check_panel.html" with question_type="tossup" q_id=tossup.id qset_id=qset.id %}{% endif %}
-{% include "_discord_threads.html" %}
 {% include "_order_constraints.html" %}
-{% include "_playtest_results.html" %}
+{% include "_playtest.html" %}
 </div>{# .edit-main #}
 <div class="edit-comments">
 {% if tossup %}{% include "_edit_comments.html" with question=tossup qtype="tossup" %}{% endif %}
@@ -155,7 +154,7 @@ button in the question panel brings it back.
 <script src="{% static 'js/anchored_comments.js' %}?v=4"></script>
 {% if structured_answers_on %}<script src="{% static 'js/structured_answer.js' %}?v=3"></script>{% endif %}
 <script src="{% static 'js/live_char_count.js' %}?v=1"></script>
-<script src="{% static 'js/question_tabs.js' %}?v=2"></script>
+<script src="{% static 'js/question_tabs.js' %}?v=3"></script>
 <script>
 // Writers sometimes bold the power section by hand. Power is applied
 // automatically from the (*) and (+) marks, so a long bold run at the start of

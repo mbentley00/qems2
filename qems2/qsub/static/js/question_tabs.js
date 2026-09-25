@@ -120,5 +120,42 @@ $(function () {
     $card.find('.qmeta-inline select').each(function () { fit(this); })
         .on('change', function () { fit(this); });
 
-    $card.find('.qmeta-credit input').attr('placeholder', 'none');
+    // Author and credit are one control. The dropdown's last option credits
+    // someone with no account: it swaps the dropdown for a name field, and
+    // the author account underneath is left as it was -- it still owns the
+    // question. Clearing the name (the x, or leaving it empty) swaps back.
+    var $author = $card.find('.qmeta-author select');
+    var $creditBox = $card.find('.qmeta-author .qmeta-credit');
+    var $credit = $creditBox.find('input');
+    if ($author.length && $credit.length) {
+        var CREDIT = '__credit__';
+        $author.append($('<option></option>').val(CREDIT).text('Someone without an account…'));
+        var account = $author.val();
+        var showCredit = function (on) {
+            $author.toggle(!on);
+            $creditBox.toggle(on);
+            $credit.attr('title', 'Credited by this name. The question still belongs to ' +
+                         $author.find('option:selected').text() + '.');
+        };
+        $credit.attr('placeholder', 'Name to credit');
+        showCredit(!!$.trim($credit.val()));
+        $author.on('change', function () {
+            if ($author.val() !== CREDIT) { account = $author.val(); return; }
+            // Never post the placeholder option: put the account back.
+            $author.val(account);
+            fit($author[0]);
+            showCredit(true);
+            $credit.trigger('focus');
+        });
+        $creditBox.on('click', '.qmeta-credit-clear', function (e) {
+            e.preventDefault();
+            $credit.val('').trigger('input').trigger('change');
+            showCredit(false);
+        });
+        $credit.on('blur', function () {
+            if (!$.trim($credit.val())) { showCredit(false); }
+        });
+    } else {
+        $card.find('.qmeta-credit input').attr('placeholder', 'none');
+    }
 });

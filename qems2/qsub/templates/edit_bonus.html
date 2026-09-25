@@ -241,9 +241,8 @@ $(function () {
 </script>
 {% endif %}
 {% if bonus %}{% include "_style_check_panel.html" with question_type="bonus" q_id=bonus.id qset_id=qset.id %}{% endif %}
-{% include "_discord_threads.html" %}
 {% include "_order_constraints.html" %}
-{% include "_playtest_results.html" %}
+{% include "_playtest.html" %}
 </div>{# .edit-main #}
 <div class="edit-comments">
 {% if bonus %}{% include "_edit_comments.html" with question=bonus qtype="bonus" %}{% endif %}
@@ -256,6 +255,6 @@ $(function () {
 <script src="{% static 'js/anchored_comments.js' %}?v=4"></script>
 {% if structured_answers_on %}<script src="{% static 'js/structured_answer.js' %}?v=3"></script>{% endif %}
 <script src="{% static 'js/live_char_count.js' %}?v=1"></script>
-<script src="{% static 'js/question_tabs.js' %}?v=2"></script>
+<script src="{% static 'js/question_tabs.js' %}?v=3"></script>
 
 {% endblock %}

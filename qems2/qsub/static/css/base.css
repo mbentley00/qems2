@@ -2285,6 +2285,13 @@ body.app-authed a.qtab-link:hover { color: var(--qx-ink); }
     outline: none; box-shadow: none; }
 .qmeta-cat select { font-weight: 600; }
 .qmeta-credit input { width: 9em; cursor: text; }
+/* The credited name, standing in for the author dropdown. */
+.qmeta-author { display: inline-flex; align-items: center; }
+.qmeta-author .qmeta-credit { display: inline-flex; align-items: center; gap: 2px; }
+.qmeta-author .qmeta-credit input { width: 12em; font-weight: 500; }
+.qmeta-credit-clear { margin: 0; padding: 0 6px; border: none; background: none; color: var(--qx-muted);
+    font-size: 1.1rem; line-height: 1; cursor: pointer; }
+.qmeta-credit-clear:hover, .qmeta-credit-clear:focus { background: none; color: #c0392b; }
 .qmeta-credit input::placeholder { color: var(--qx-muted); }
 body.app-authed a.qmeta-packet-link { color: var(--qx-ink); font-size: .95rem; padding: 0 4px; }
 body.app-authed a.qmeta-packet-link:hover { color: var(--qx-primary); }

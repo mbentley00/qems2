@@ -1,0 +1,26 @@
+{% comment %}
+Everything playtesting has to say about the question, in one card: the
+Discord threads it was played in, then what the plays came to.
+{% endcomment %}
+{% if discord_threads or playtest %}
+<div class="pt-card">
+    <div class="pt-head">
+        <span class="pt-title">Playtest</span>
+        {% if playtest %}<span class="pt-count" title="Plays recorded">{{ playtest.plays }}</span>{% endif %}
+    </div>
+    {% include "_discord_threads.html" %}
+    {% include "_playtest_results.html" %}
+</div>
+<style>
+.pt-card { margin: 16px 0; border: 1px solid var(--qx-border, #e9e9ef); border-radius: 14px;
+    background: var(--qx-card, #fff); box-shadow: 0 1px 2px rgba(20, 20, 40, .04); }
+.pt-head { display: flex; align-items: center; gap: 10px; padding: 14px 20px; }
+.pt-title { color: var(--qx-ink, #20232e); font-size: 1rem; }
+.pt-count { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px;
+    padding: 0 6px; border-radius: 11px; background: #efeff4; color: #565b66; font-size: .8rem; font-weight: 600; }
+.discord-threads { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; padding: 14px 22px;
+    border-top: 1px solid var(--qx-border, #e9e9ef); }
+.pt-label { color: var(--qx-muted, #8a8f9c); font-size: .9rem; }
+html[data-theme="dark"] .pt-count { background: var(--qx-elevate); color: var(--qx-muted); }
+</style>
+{% endif %}

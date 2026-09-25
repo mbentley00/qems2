@@ -1,6 +1,5 @@
 {% load filters %}
 {% if playtest %}
-<div class="panel header radius text-center"><strong>Playtest Results</strong></div>
 {% if playtest.qtype == 'tossup' %}
 <div class="playtest-summary">
     <span class="pt-stat"><strong>{{ playtest.plays }}</strong> play{{ playtest.plays|pluralize }}</span>
@@ -56,8 +55,10 @@
 </div>
 {% endif %}
 <style>
-.playtest-summary { margin: 0.5rem 0 0.75rem; }
-.pt-stat { display: inline-block; margin-right: 1.5rem; }
+.playtest-summary { display: flex; flex-wrap: wrap; gap: 6px 24px; margin: 0; padding: 14px 22px;
+    border-top: 1px solid var(--qx-border, #e9e9ef); }
+.pt-stat { display: inline-block; }
+.playtest-scroll { padding: 0 12px 12px; }
 /* Scroll the table sideways instead of squishing it on narrow screens. */
 .playtest-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .playtest-table { width: 100%; font-size: 0.9rem; }

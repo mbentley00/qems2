@@ -12,16 +12,16 @@ Include with `q` (the tossup or bonus) and `qtype`; uses the page's `form`,
 <div class="qmeta-card">
     <div class="qmeta-byline">
         {% if form.category %}<span class="qmeta-inline qmeta-cat" title="Category">{{ form.category }}</span>{% endif %}
-        {% if form.author %}<span class="qmeta-word">by</span>
-        <span class="qmeta-inline" title="Author: the account that owns the question, which decides who may edit it">{{ form.author }}</span>{% endif %}
-        {% if form.author_text %}<span class="qmeta-word">&middot; credit</span>
         {% comment %}
-        Credit for someone with no QEMS account -- a guest writer, or a
-        question carried in from another set. When it is filled in it is the
-        name shown and exported; the author still says which account owns the
-        question, which is what decides who may edit it.
+        Who wrote it, as one control: the author dropdown, whose last option
+        credits someone with no QEMS account instead (a guest writer, a question
+        carried in from another set). That name is what is shown and exported;
+        the author account stays as it was and still decides who may edit.
         {% endcomment %}
-        <span class="qmeta-inline qmeta-credit" title="Credit someone with no QEMS account (a guest writer, a question from another set). When filled in, it is the name shown and exported.">{{ form.author_text }}</span>{% endif %}
+        {% if form.author %}<span class="qmeta-word">by</span>
+        <span class="qmeta-inline qmeta-author" title="Author: the account that owns the question, which decides who may edit it">{{ form.author }}{% if form.author_text %}<span class="qmeta-credit">{{ form.author_text }}<button type="button" class="qmeta-credit-clear" title="Stop crediting this name and show the author account again">&times;</button></span>{% endif %}</span>
+        {% elif form.author_text %}<span class="qmeta-word">&middot; credit</span>
+        <span class="qmeta-inline qmeta-credit" title="Credit someone with no QEMS account. When filled in, it is the name shown and exported.">{{ form.author_text }}</span>{% endif %}
         <span class="qmeta-word">&middot; in</span>
         <a href="/packet_grid/{{ qset.id }}/" class="qmeta-packet-link" title="Open the packet grid">{% if q.packet %}{{ q.packet.packet_name }}{% if q.question_number %}, #{{ q.question_number }}{% endif %}{% else %}no packet{% endif %}&nbsp;&#8599;</a>
     </div>
