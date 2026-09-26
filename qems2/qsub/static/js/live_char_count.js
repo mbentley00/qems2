@@ -63,27 +63,52 @@
             timer = setTimeout(update, 350);
         });
 
-        // Selected-text count: highlight part of the question (an editor or the
-        // saved preview) to see what that stretch counts for, same rules.
+    });
+
+    /* Selected-text count: highlight part of a question -- in an editor, the
+     * Type Questions box, or the saved question on Proof -- to see what that
+     * stretch counts for, by the same rules as the whole.
+     *
+     * What is sent is the selection's QEMS markup, not the words on screen: a
+     * note to the moderator or players (\N...\N) is read aloud but never
+     * counted, and it is the markers that say so. Sending the plain text
+     * counted a selected note like any other sentence. */
+    $(function () {
+        var $out = $('#live-char-count');
+        // Where the "N selected" readout goes: beside the question's own count,
+        // or in the Type Questions count panel's header.
+        var $host = $out.length ? $out.parent() : $('#tq-counts-summary').parent();
+        var qsetId = $out.length ? $out.data('qset-id') : $('#tq-counts').data('qset-id');
+        if (!$host.length || !qsetId) { return; }
+
         var $sel = $('<span id="sel-char-count" style="color:#888; font-weight:normal;"></span>')
-            .appendTo($out.parent());
+            .appendTo($host);
         var selTimer = null, selSeq = 0;
 
-        function selectedText() {
+        function selectedMarkup() {
             var el = document.activeElement;
+            // A raw textarea already holds markup.
             if (el && el.tagName === 'TEXTAREA' && el.selectionStart !== el.selectionEnd) {
                 return el.value.substring(el.selectionStart, el.selectionEnd);
             }
             var s = window.getSelection();
             if (!s || s.isCollapsed || !s.rangeCount) { return ''; }
-            var node = s.getRangeAt(0).commonAncestorContainer;
+            var range = s.getRangeAt(0);
+            var node = range.commonAncestorContainer;
             if (node.nodeType === 3) { node = node.parentNode; }
             if (!$(node).closest('.rich-editor, .anchor-region').length) { return ''; }
+            var box = document.createElement('div');
+            box.appendChild(range.cloneContents());
+            // A selection that starts or ends inside a note carries the note's
+            // span with it, so the markers survive the conversion.
+            if (window.QemsMarkup && window.QemsMarkup.htmlToQems) {
+                return window.QemsMarkup.htmlToQems(box.innerHTML).replace(/\u00a0/g, ' ');
+            }
             return s.toString();
         }
 
         function updateSelection() {
-            var text = selectedText();
+            var text = selectedMarkup();
             var seq = ++selSeq;
             if (!text) { $sel.text(''); return; }
             $.post('/live_char_count/', { qset_id: qsetId, text: text }, function (resp) {

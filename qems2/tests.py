@@ -2741,6 +2741,23 @@ class AccountAgeAndDistributionPermissionTests(TestCase):
         body = self.client.get('/edit_question_set/{0}/?created=1'.format(qset.id)).content.decode()
         self.assertIn('successfully created', body)
 
+    def test_the_set_page_says_a_question_was_deleted(self):
+        """Deleting from an edit page goes straight back to the set, which
+        carries the message the old dialog used to show."""
+        self.client.login(username='old_u', password='pw')
+        self.client.post('/create_question_set/', {
+            'name': 'Delete Note', 'date': '2026-08-01',
+            'distribution': self.my_dist.id, 'num_packets': 1,
+            'max_acf_tossup_length': 750, 'max_acf_bonus_length': 400,
+        })
+        qset = QuestionSet.objects.get(name='Delete Note')
+        for qtype, said in (('tossup', 'Tossup deleted.'), ('bonus', 'Bonus deleted.')):
+            body = self.client.get('/edit_question_set/{0}/?deleted={1}'.format(qset.id, qtype)).content.decode()
+            self.assertIn(said, body)
+        # Only those two words mean anything; nothing else is echoed back.
+        body = self.client.get('/edit_question_set/{0}/?deleted=<b>x</b>'.format(qset.id)).content.decode()
+        self.assertNotIn('<b>x</b>', body)
+
     def test_create_set_page_offers_superpower_and_public(self):
         self.client.login(username='old_u', password='pw')
         body = self.client.get('/create_question_set/').content.decode()
@@ -3520,6 +3537,43 @@ class CategoryChangeDropsTagsTests(TestCase):
         from qems2.qsub.views import drop_inapplicable_tags
         drop_inapplicable_tags(self.tu, None)
         self.assertEqual(self._tags(), ['China', 'Post-1900'])
+
+    def test_the_tags_page_opens_with_a_tree_of_the_whole_set_tags(self):
+        body = self.client.get('/category_tags/{0}/'.format(self.qset.id)).content.decode()
+        tree = body[body.index('id="setwide-tree"'):body.index('id="tag-groups-region"')]
+        self.assertIn('/category_tags/{0}/tag/{1}/'.format(self.qset.id, self.recent.id), tree)
+        self.assertIn('Post-1900', tree)
+        # Only the whole-set tags: a category's own tags are not in it.
+        self.assertNotIn('China', tree)
+
+    def test_a_set_without_whole_set_tags_has_no_tree(self):
+        self.recent.delete()
+        body = self.client.get('/category_tags/{0}/'.format(self.qset.id)).content.decode()
+        self.assertNotIn('id="setwide-tree"', body)
+
+    def test_a_tag_has_a_page_of_its_own_questions(self):
+        other = Tossup.objects.create(
+            question_set=self.qset, question_type=self.acf, category=self.world, author=self.owner,
+            tossup_text='Untagged. (*) end.', tossup_answer='_nobody_',
+            created_date=timezone.now(), last_changed_date=timezone.now())
+        resp = self.client.get('/category_tags/{0}/tag/{1}/'.format(self.qset.id, self.recent.id))
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual([t.id for t in resp.context['tossups']], [self.tu.id])
+        self.assertNotIn('nobody', resp.content.decode())
+        self.assertEqual(resp.context['progress']['tu_done'], 1)
+
+    def test_a_tag_page_is_only_for_its_own_set(self):
+        other_set = QuestionSet.objects.create(
+            name='Elsewhere', date=timezone.now(), host='', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        resp = self.client.get('/category_tags/{0}/tag/{1}/'.format(other_set.id, self.recent.id))
+        self.assertEqual(resp.status_code, 404)
+        stranger = User.objects.create_user('cct_stranger', password='pw', email='s@t.com')
+        self.client.logout()
+        self.client.login(username='cct_stranger', password='pw')
+        body = self.client.get('/category_tags/{0}/tag/{1}/'.format(self.qset.id, self.recent.id)).content.decode()
+        self.assertIn('not authorized', body)
+        self.assertNotIn('someone', body)
 
     def test_the_helper_keeps_tags_on_a_parent_or_child_path(self):
         from qems2.qsub.views import drop_inapplicable_tags

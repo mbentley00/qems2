@@ -22,7 +22,7 @@ from openpyxl.styles import Font, Alignment
 
 from django.shortcuts import render, get_object_or_404
 from django.forms.formsets import formset_factory
-from django.http import HttpResponse, HttpResponseRedirect, JsonResponse
+from django.http import Http404, HttpResponse, HttpResponseRedirect, JsonResponse
 
 from django.contrib.auth import logout
 from django.contrib.auth.decorators import login_required
@@ -1447,6 +1447,12 @@ def edit_question_set(request, qset_id):
         # create_question_set redirects here after a successful create.
         if request.GET.get('created'):
             message = 'Your question set has been successfully created!'
+            message_class = 'alert-box success'
+        # Deleting a question from its edit page lands here and says so here,
+        # rather than in a dialog on a page about to go away.
+        deleted = request.GET.get('deleted')
+        if deleted in ('tossup', 'bonus'):
+            message = '{0} deleted.'.format(deleted.capitalize())
             message_class = 'alert-box success'
 
         if user not in qset_editors and not qset.is_owner(user):
@@ -11996,6 +12002,38 @@ def get_applicable_tags(qset, dist_entry):
             if _tag_matches_path(tag.category_path, path)]
 
 @login_required
+def category_tag_questions(request, qset_id, tag_id):
+    """Every question carrying one tag, in the set's own question table.
+
+    Where the category-tags page's tree of whole-set tags leads: those tags cut
+    across the distribution, so their questions are too many to list under each
+    tag on the page that defines them."""
+    user = request.user.writer
+    qset = QuestionSet.objects.get(id=qset_id)
+    if not _is_set_member(user, qset):
+        return render(request, 'failure.html',
+                      {'message': 'You are not authorized to view this set!',
+                       'message_class': 'alert-box alert'})
+    tag = CategoryTag.objects.filter(question_set=qset, id=tag_id).first()
+    if tag is None:
+        raise Http404('No such tag in this set')
+    tossups = _table_order(qset, tag.tossups.filter(question_set=qset)
+                           .select_related(*QUESTION_LIST_RELATED)
+                           .prefetch_related('category_tags'))
+    bonuses = _table_order(qset, tag.bonuses.filter(question_set=qset)
+                           .select_related(*QUESTION_LIST_RELATED)
+                           .prefetch_related('category_tags'))
+    attach_question_comments({t.id: t for t in tossups}, {b.id: b for b in bonuses})
+    return render(request, 'category_tag.html', {
+        'user': user, 'qset': qset, 'tag': tag,
+        'scope_label': scope_label(tag.category_path),
+        'scope_token': scope_token(tag.category_path),
+        'progress': tag.progress(len(tossups), len(bonuses)),
+        'table_columns': qset.question_table_headers(),
+        'tossups': tossups, 'bonuses': bonuses})
+
+
+@login_required
 def tags_for_category(request, qset_id):
     """The tag checkboxes for one category, as the HTML the edit pages use.
 
@@ -13139,9 +13177,17 @@ def category_tags(request, qset_id):
     only_tag_obj = (CategoryTag.objects.filter(question_set=qset, id=only_tag).first()
                     if only_tag else None)
 
+    # A set's whole-set tags cut across every category, so a list of the
+    # questions under each runs to hundreds of lines. The page opens with the
+    # tags alone -- by axis, with how each stands -- and each tag has a page of
+    # its own for its questions.
+    setwide = next((g for g in groups if g['set_wide']), None)
+    setwide_tree = setwide['tag_groups'] if setwide else []
+
     context = {'qset': qset,
                'user': user,
                'groups': groups,
+               'setwide_tree': setwide_tree,
                'focused': focused,
                'focus_set_wide': focus_set_wide,
                'focus_label': scope_label(focus_path) if focused else '',

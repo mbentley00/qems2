@@ -79,6 +79,62 @@ every visit, and you stop needing it after the first.
 </div>
 {% endif %}
 
+{% if setwide_tree %}
+{% comment %}
+The whole-set tags as a tree -- by axis, then tag, with how each stands --
+before any list of questions. They cut across every category, so the table
+below would list hundreds of answer lines under each; a tag opens a page of
+its own questions instead.
+{% endcomment %}
+<div class="stree" id="setwide-tree">
+    <div class="stree-head">
+        <span class="stree-title">{{ set_wide_label }}</span>
+        <span class="stree-sub">Open a tag to see every question that carries it.</span>
+    </div>
+    {% for tg in setwide_tree %}
+    <details class="stree-group" open>
+        <summary><span class="stree-group-name">{{ tg.label }}</span>
+            <span class="stree-group-count">{{ tg.rows|length }} tag{{ tg.rows|length|pluralize }}</span></summary>
+        <ul class="stree-tags">
+            {% for row in tg.rows %}
+            <li class="stree-tag">
+                <a href="/category_tags/{{ qset.id }}/tag/{{ row.tag.id }}/">{{ row.tag.name }}</a>
+                <span class="stree-counts {% if row.over %}stree-over{% elif row.complete %}stree-done{% else %}stree-open{% endif %}"
+                      title="{{ row.tag.quota_summary }}">
+                    {{ row.tu_done }}{% if row.tag.num_tossups %}/{{ row.tag.num_tossups }}{% endif %} TU
+                    &middot; {{ row.bs_done }}{% if row.tag.num_bonuses %}/{{ row.tag.num_bonuses }}{% endif %} B
+                    {% if row.tag.num_questions %}&middot; {{ row.q_done }}/{{ row.tag.num_questions }} any{% endif %}
+                </span>
+            </li>
+            {% endfor %}
+        </ul>
+    </details>
+    {% endfor %}
+</div>
+<style>
+.stree { margin: 0 0 16px; border: 1px solid var(--qx-border, #e9e9ef); border-radius: 14px;
+    background: var(--qx-card, #fff); box-shadow: 0 1px 2px rgba(20, 20, 40, .04); }
+.stree-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 14px 20px;
+    border-bottom: 1px solid var(--qx-border, #e9e9ef); }
+.stree-title { font-size: 1rem; color: var(--qx-ink, #20232e); }
+.stree-sub { color: var(--qx-muted, #8a8f9c); font-size: .85rem; }
+.stree-group { padding: 10px 20px; border-top: 1px solid var(--qx-border, #e9e9ef); }
+.stree-group:first-of-type { border-top: none; }
+.stree-group > summary { display: flex; align-items: baseline; gap: 10px; cursor: pointer; }
+.stree-group-name { font-weight: 600; color: var(--qx-ink, #20232e); }
+.stree-group-count { color: var(--qx-muted, #8a8f9c); font-size: .85rem; }
+.stree-tags { list-style: none; margin: 6px 0 2px 18px; padding-left: 12px;
+    border-left: 2px solid var(--qx-border, #e9e9ef); }
+.stree-tag { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin: 0; padding: 4px 0; }
+.stree-counts { font-size: .82rem; font-variant-numeric: tabular-nums; }
+.stree-done { color: #1c7c3e; }
+.stree-open { color: var(--qx-muted, #8a8f9c); }
+.stree-over { color: #c0392b; }
+html[data-theme="dark"] .stree-done { color: #8fd4a8; }
+html[data-theme="dark"] .stree-over { color: #f08c8c; }
+</style>
+{% endif %}
+
 <div id="tag-groups-region">
 {% if not groups %}
 <div class="panel callout"><p>{% if focused %}No tags in {{ focus_label }} yet.{% else %}No tags defined yet.{% endif %}</p></div>

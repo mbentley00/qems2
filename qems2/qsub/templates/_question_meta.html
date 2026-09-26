@@ -52,10 +52,10 @@ Include with `q` (the tossup or bonus) and `qtype`; uses the page's `form`,
         <a href="/convert_bonus/{{ q.id }}" class="qmeta-btn convert_bonus" value="{{ q.id }}" qset-id="{{ qset.id }}" target-type="ACF-style tossup" title="Convert this bonus into an ACF-style tossup">Tossupify</a>
         {% endif %}
         {% if role == "editor" %}<a href="#" class="qmeta-btn edit-swap-btn" data-qtype="{{ qtype }}" data-qid="{{ q.id }}" data-packet="{{ q.packet.id }}" data-num="{{ q.question_number }}">Swap packets</a>{% endif %}
+        <a href="/move_{{ qtype }}/{{ qset.id }}/{{ q.id }}" class="qmeta-btn" title="Move this {{ qtype }} to another question set">Move set</a>
         <div class="qmenu">
             <button type="button" class="qmenu-toggle qmeta-btn" aria-haspopup="true" aria-expanded="false">More <span class="qmenu-caret">&#9662;</span></button>
             <div class="qmenu-panel" hidden>
-                <a href="/move_{{ qtype }}/{{ qset.id }}/{{ q.id }}" class="qmenu-item">Move set</a>
                 {% if qtype == "bonus" and question_type == "VHSL bonus" %}
                 <a href="/convert_bonus/{{ q.id }}" class="qmenu-item convert_bonus" value="{{ q.id }}" qset-id="{{ qset.id }}" target-type="ACF-style bonus">Convert to ACF bonus</a>
                 {% endif %}

@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+{% load filters %}
+{% block title %}{{ tag.name }} - Category Tags - QEMS3{% endblock %}
+{% comment %}
+One tag's questions, in the set's own question table -- the page the tree of
+whole-set tags on the category-tags page leads to. Those tags cut across the
+distribution, so their questions are too many to list on the page that
+defines them.
+{% endcomment %}
+{% block content %}
+<nav class="qhead-crumbs" aria-label="Where this tag is">
+    <a href="/edit_question_set/{{ qset.id }}/">{{ qset.name }}</a>
+    <span class="qhead-crumb-sep">/</span>
+    <a href="/category_tags/{{ qset.id }}/">Category tags</a>
+    <span class="qhead-crumb-sep">/</span>
+    <a href="/category_tags/{{ qset.id }}/?category={{ scope_token|urlencode }}">{{ scope_label }}</a>
+</nav>
+<div class="qhead-title-row">
+    <h1 class="qhead-title">{% if tag.group_name %}<span class="ctag-group">{{ tag.group_name }}:</span> {% endif %}{{ tag.name }}</h1>
+    <span class="qhead-pill{% if not progress.complete %} qhead-pill-muted{% endif %}" title="{{ tag.quota_summary }}">
+        {% if progress.over %}Over its limit{% elif progress.complete %}Requirement met{% else %}Still needed{% endif %}</span>
+</div>
+<p class="ctag-summary">
+    {{ progress.tu_done }}{% if tag.num_tossups %}/{{ tag.num_tossups }}{% endif %} tossup{{ progress.tu_done|pluralize }}
+    &middot; {{ progress.bs_done }}{% if tag.num_bonuses %}/{{ tag.num_bonuses }}{% endif %} bonus{{ progress.bs_done|pluralize:"es" }}
+    {% if tag.num_questions %}&middot; {{ progress.q_done }}/{{ tag.num_questions }} of any type{% endif %}
+    <span class="ctag-quota">&mdash; wants {{ tag.quota_summary }}</span>
+</p>
+
+<div class="ctag-section">
+    <h2 class="ctag-h">Tossups <span class="oc-count">{{ tossups|length }}</span></h2>
+    {% if tossups %}
+    <table class="tablesorter table-striped table-hover" id="tag-tossup-table">
+        <thead><tr>{% for col in table_columns %}<th>{{ col.label }}</th>{% endfor %}</tr></thead>
+        <tbody>
+        {% autoescape off %}
+        {% for tossup in tossups %}
+        <tr>{% include "_question_table_cells.html" with q=tossup qtype="tossup" columns=table_columns %}</tr>
+        {% endfor %}
+        {% endautoescape %}
+        </tbody>
+    </table>
+    {% else %}<p class="home-note">No tossup carries this tag yet.</p>{% endif %}
+</div>
+
+<div class="ctag-section">
+    <h2 class="ctag-h">Bonuses <span class="oc-count">{{ bonuses|length }}</span></h2>
+    {% if bonuses %}
+    <table class="tablesorter table-striped table-hover" id="tag-bonus-table">
+        <thead><tr>{% for col in table_columns %}<th>{{ col.label }}</th>{% endfor %}</tr></thead>
+        <tbody>
+        {% autoescape off %}
+        {% for bonus in bonuses %}
+        <tr>{% include "_question_table_cells.html" with q=bonus qtype="bonus" columns=table_columns %}</tr>
+        {% endfor %}
+        {% endautoescape %}
+        </tbody>
+    </table>
+    {% else %}<p class="home-note">No bonus carries this tag yet.</p>{% endif %}
+</div>
+
+<style>
+.ctag-group { color: var(--qx-muted, #8a8f9c); font-weight: 400; }
+.ctag-summary { margin: 0 0 18px; color: var(--qx-ink, #20232e); }
+.ctag-quota { color: var(--qx-muted, #8a8f9c); }
+.ctag-section { margin: 0 0 24px; }
+.app-content h2.ctag-h { display: flex; align-items: center; gap: 10px; margin: 0 0 8px;
+    font-family: var(--qx-sans); font-size: 1.1rem; font-weight: 600; }
+.oc-count { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px;
+    padding: 0 6px; border-radius: 11px; background: #efeff4; color: #565b66; font-size: .8rem; font-weight: 600; }
+html[data-theme="dark"] .oc-count { background: var(--qx-elevate); color: var(--qx-muted); }
+</style>
+{% endblock %}

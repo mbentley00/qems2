@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}Type Questions - QEMS3{% endblock %}
 
@@ -294,6 +295,8 @@ html[data-theme="dark"] .tq-counts .tq-over { color: #f08c8c; }
 .tq-counts-note { font-size: 0.75rem; color: var(--qx-muted, #8a8f9c); margin: 6px 0 0; }
 </style>
 
+{# The "N selected" count, as the edit pages have it. #}
+<script src="{% static 'js/live_char_count.js' %}?v=2"></script>
 {% endblock %}
 
 <style>

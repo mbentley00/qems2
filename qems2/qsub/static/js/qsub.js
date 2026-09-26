@@ -133,13 +133,16 @@ $(function () {
             var qset_id = $(this).attr('qset-id');
             $.post('/delete_tossup/', {tossup_id: $(this).attr('value')}, function (response) {
                 var json_response = $.parseJSON(response);
-                var dialog = $('#info-dialog').dialog({
+                // Gone: straight back to the set, which says so. Only a
+                // refusal stays here to be read.
+                if (/success/.test(json_response['message_class'] || '')) {
+                    window.location.replace('/edit_question_set/' + qset_id + '/?deleted=tossup');
+                    return;
+                }
+                var dialog = $('#info-dialog').empty().dialog({
                     modal: true,
                     buttons: {
-                        Ok: function() {
-                            $(this).dialog('close');
-                            window.location.replace('/edit_question_set/' + qset_id);
-                        }
+                        Ok: function() { $(this).dialog('close'); }
                     }
                 })
                 dialog.append('<div class="' + json_response['message_class'] + '">' + json_response['message'] + '</div>');
@@ -155,13 +158,16 @@ $(function () {
             var qset_id = $(this).attr('qset-id');
             $.post('/delete_bonus/', {bonus_id: $(this).attr('value')}, function (response) {
                 var json_response = $.parseJSON(response);
-                var dialog = $('#info-dialog').dialog({
+                // Gone: straight back to the set, which says so. Only a
+                // refusal stays here to be read.
+                if (/success/.test(json_response['message_class'] || '')) {
+                    window.location.replace('/edit_question_set/' + qset_id + '/?deleted=bonus');
+                    return;
+                }
+                var dialog = $('#info-dialog').empty().dialog({
                     modal: true,
                     buttons: {
-                        Ok: function() {
-                            $(this).dialog('close');
-                            window.location.replace('/edit_question_set/' + qset_id);
-                        }
+                        Ok: function() { $(this).dialog('close'); }
                     }
                 })
                 dialog.append('<div class="' + json_response['message_class'] + '">' + json_response['message'] + '</div>');
