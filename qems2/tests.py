@@ -14110,6 +14110,24 @@ class MovedQuestionTagTests(TestCase):
         return self.client.post('/move_tossup/{0}/{1}/'.format(self.a.id, self.tu.id),
                                 {'move_sets': self.b.id})
 
+    def test_the_edit_page_offers_the_destinations_itself(self):
+        """No separate page for choosing the set: the edit page's Move set menu
+        lists the sets you edit -- not this one, not an archived one -- and
+        each posts to the move page's confirm step."""
+        archived = QuestionSet.objects.create(
+            name='MQT Archived', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist, archived=True)
+        archived.editor.add(self.owner)
+        body = self.client.get('/edit_tossup/{0}/'.format(self.tu.id)).content.decode()
+        panel = body[body.index('qmove-panel'):]
+        panel = panel[:panel.index('</div>')]
+        self.assertIn('data-move-url="/move_tossup/{0}/{1}/"'.format(self.a.id, self.tu.id), panel)
+        self.assertIn('data-set="{0}"'.format(self.b.id), panel)
+        self.assertNotIn('data-set="{0}"'.format(self.a.id), panel)
+        self.assertNotIn('MQT Archived', panel)
+        # What the menu posts is exactly what lands on the confirm step.
+        self.assertTemplateUsed(self._confirm_page(), 'move_question_confirm.html')
+
     def test_the_confirmation_checks_the_destination_for_repeats(self):
         """A question that repeats nothing where it was written can repeat
         something where it is going, and after the move it is too late to find

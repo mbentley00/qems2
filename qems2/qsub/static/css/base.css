@@ -2323,6 +2323,9 @@ body.app-authed a.qmenu-item:hover, .qmenu-check:hover { background: #f3f3f7; }
 .qmenu-check input { margin: 0; }
 body.app-authed a.qmenu-danger { color: #b3261e; }
 .qmenu-sep { margin: 6px 4px; border: none; border-top: 1px solid var(--qx-border); }
+.qmenu-empty { display: block; padding: 9px 12px; color: var(--qx-muted); font-size: .9rem; white-space: normal; }
+/* A long list of sets scrolls rather than running off the page. */
+.qmove-panel { max-height: 320px; overflow-y: auto; }
 
 html[data-theme="dark"] .qmeta-bar { background: var(--qx-elevate); }
 html[data-theme="dark"] .qmeta-inline select:hover, html[data-theme="dark"] .qmeta-inline input:hover,
@@ -2331,3 +2334,6 @@ html[data-theme="dark"] body.app-authed a.qmenu-item:hover, html[data-theme="dar
 html[data-theme="dark"] .qmeta-inline select, html[data-theme="dark"] .qmeta-inline input { color: var(--qx-ink); background-color: transparent; }
 html[data-theme="dark"] body.app-authed a.qmeta-btn, html[data-theme="dark"] .qmeta-btn { color: var(--qx-muted); }
 html[data-theme="dark"] body.app-authed a.qmenu-danger { color: #f08c8c; }
+/* The set page's Submit Changes, set off from the packet-credit buttons above it. */
+.set-save { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--qx-border); }
+.set-save .button { margin: 0; }

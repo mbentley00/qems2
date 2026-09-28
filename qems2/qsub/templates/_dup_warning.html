@@ -6,12 +6,8 @@
     {% autoescape off %}
     {% for m in dup_matches %}
         <li>
-            {% if m.type == 'tossup' %}
-                <a href="/edit_tossup/{{ m.id }}/" target="_blank">Tossup</a>
-            {% else %}
-                <a href="/edit_bonus/{{ m.id }}/" target="_blank">Bonus {{ m.part_label }}</a>
-            {% endif %}
-            &mdash; <strong>{{ m.answer_html }}</strong>
+            {# One link for the whole match: the answer is underlined like one, so it is one. #}
+            <a href="/edit_{{ m.type }}/{{ m.id }}/" target="_blank">{% if m.type == 'tossup' %}Tossup{% else %}Bonus {{ m.part_label }}{% endif %} &mdash; <strong>{{ m.answer_html }}</strong></a>
             <small>({{ m.category_str|default:"uncategorized" }}{% if m.packet %}, {{ m.packet }}{% endif %} &mdash; {{ m.author|escape }})</small>
         </li>
     {% endfor %}

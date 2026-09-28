@@ -117,6 +117,18 @@ $(function () {
         $measure.text(opt ? opt.text : '');
         $(select).css('width', ($measure.outerWidth() + 26) + 'px');
     }
+    // Move set: picking the destination posts straight to the move page's
+    // second step. A form of its own, so nothing else on this page goes along.
+    $card.on('click', '.qmove-dest', function (e) {
+        e.preventDefault();
+        var url = $(this).closest('.qmove-panel').attr('data-move-url');
+        var csrf = $('input[name=csrfmiddlewaretoken]').first().val();
+        $('<form method="post"></form>').attr('action', url)
+            .append($('<input type="hidden" name="csrfmiddlewaretoken">').val(csrf))
+            .append($('<input type="hidden" name="move_sets">').val($(this).attr('data-set')))
+            .appendTo('body').trigger('submit');
+    });
+
     $card.find('.qmeta-inline select').each(function () { fit(this); })
         .on('change', function () { fit(this); });
 

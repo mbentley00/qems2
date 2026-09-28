@@ -274,7 +274,10 @@
             </div>
             {% endif %}
             {% if role == "editor" %}
+            {# Its own row, apart from the credit buttons above: those only insert a name list. #}
+            <div class="set-save">
                 <button type="submit" class="button primary">Submit Changes</button>
+            </div>
             {% endif %}
         </form>
         </div>

@@ -265,6 +265,18 @@ def answer_no_formatting(line):
     return get_answer_no_formatting(line)
 
 
+@register.filter(name='move_destinations')
+def move_destinations(writer, qset):
+    """The sets a question in `qset` can be moved to by `writer`: the ones they
+    edit, by name, without this one or any that are archived -- the same list
+    the move page offers, so the edit page can offer it without the stop."""
+    try:
+        return (writer.question_set_editor.exclude(id=qset.id)
+                .exclude(archived=True).order_by('name'))
+    except AttributeError:
+        return []
+
+
 @register.filter(name='without_alternates')
 def without_alternates(line):
     """An answer line without its [accept ...; prompt on ...] brackets -- the
