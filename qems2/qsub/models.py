@@ -678,15 +678,37 @@ class RoleGroup(models.Model):
     members = models.ManyToManyField('Writer', related_name='role_groups', blank=True)
     created_by = models.ForeignKey('Writer', on_delete=models.SET_NULL, null=True,
                                    related_name='created_role_groups')
+    # Members who may run the group alongside its creator: add and remove
+    # people, answer join requests, and make other members owners. Always
+    # members themselves; the creator is an owner without being listed here.
+    owners = models.ManyToManyField('Writer', related_name='owned_role_groups', blank=True)
     created_date = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return self.name
 
-    def can_manage(self, writer):
+    def is_owner(self, writer):
         return (writer is not None and
                 (self.created_by_id == writer.id or
-                 (writer.user and writer.user.is_superuser)))
+                 self.owners.filter(id=writer.id).exists()))
+
+    def can_manage(self, writer):
+        return (writer is not None and
+                (self.is_owner(writer) or (writer.user and writer.user.is_superuser)))
+
+    def can_delete(self, writer):
+        """Deleting takes every role the group grants away from every member of
+        every set it is on, so it stays with the creator -- owners run the
+        group; they don't get to end it."""
+        return (writer is not None and
+                (self.created_by_id == writer.id or (writer.user and writer.user.is_superuser)))
+
+    def owner_writers(self):
+        """The creator and every listed owner: who hears about join requests."""
+        people = list(self.owners.all())
+        if self.created_by is not None and all(w.id != self.created_by_id for w in people):
+            people.insert(0, self.created_by)
+        return people
 
 
 class RoleGroupJoinRequest(models.Model):

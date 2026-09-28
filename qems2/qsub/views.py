@@ -559,7 +559,7 @@ def approve_group_join(request, group_id, writer_id):
 
     if not group.can_manage(user):
         return render(request, 'failure.html',
-                      {'message': 'Only the group\'s creator can approve join requests.',
+                      {'message': 'Only the group\'s owners can approve join requests.',
                        'message_class': 'alert-box alert'})
 
     already = group.members.filter(id=requester.id).exists()
@@ -620,10 +620,10 @@ def _notify_added_to_group(writer, group, by_writer):
 
 
 def _notify_group_join_request(group, requester):
-    """Email the group owner that someone has requested to join, with a direct
-    approve link. Returns False if the owner has no email on file."""
-    email = _writer_email(group.created_by)
-    if not email:
+    """Email the group's owners that someone has requested to join, with a
+    direct approve link. Returns False if none of them has an email on file."""
+    emails = [e for e in (_writer_email(w) for w in group.owner_writers()) if e]
+    if not emails:
         return False
     from .signals import _send_mail_async
     from django.conf import settings as dj_settings
@@ -637,7 +637,7 @@ def _notify_group_join_request(group, requester):
             'Or open Role Groups to review pending requests:\n{5}/role_groups/').format(
         rname, requester.user.username, ', ' + remail if remail else '',
         group.name, approve_url, dj_settings.BASE_URL)
-    _send_mail_async(subject, body, [email])
+    _send_mail_async(subject, body, emails)
     return True
 
 
@@ -2339,11 +2339,11 @@ def role_groups(request):
             else:
                 RoleGroupJoinRequest.objects.get_or_create(role_group=group, requester=user)
                 if _notify_group_join_request(group, user):
-                    message, message_class = ('Your request to join "{0}" was sent to the group '
-                                              'owner.'.format(group.name), 'alert-box success')
+                    message, message_class = ('Your request to join "{0}" was sent to the group\'s '
+                                              'owners.'.format(group.name), 'alert-box success')
                 else:
-                    message, message_class = ('Your request to join "{0}" is pending. (The group '
-                                              'owner has no email on file, but they\'ll see it in '
+                    message, message_class = ('Your request to join "{0}" is pending. (The group\'s '
+                                              'owners have no email on file, but they\'ll see it in '
                                               'their pending list.)'.format(group.name), 'alert-box info')
         else:
             try:
@@ -2351,7 +2351,10 @@ def role_groups(request):
             except (ValueError, RoleGroup.DoesNotExist):
                 group = None
             if group is None or not group.can_manage(user):
-                message, message_class = 'You can only manage groups you created.', 'alert-box alert'
+                message, message_class = 'Only the group\'s owners can manage it.', 'alert-box alert'
+            elif action == 'delete' and not group.can_delete(user):
+                message, message_class = ('Only the person who created the group can delete it.',
+                                          'alert-box alert')
             elif action == 'delete':
                 sets = [a.question_set for a in group.set_assignments.all()]
                 group.delete()
@@ -2404,15 +2407,46 @@ def role_groups(request):
             elif action == 'remove_member':
                 try:
                     w = Writer.objects.get(id=int(request.POST.get('writer_id', 0)))
+                except (ValueError, Writer.DoesNotExist):
+                    w = None
+                if w is None:
+                    pass
+                elif w.id == group.created_by_id and not group.can_delete(user):
+                    # An owner can't take the group away from the person who
+                    # made it.
+                    message, message_class = ('The group\'s creator can\'t be removed by '
+                                              'another owner.', 'alert-box warning')
+                else:
                     group.members.remove(w)
+                    # Only members own a group: leaving it ends the ownership.
+                    group.owners.remove(w)
                     reconcile_group(group)
                     message, message_class = 'Member removed.', 'alert-box success'
+            elif action in ('make_owner', 'remove_owner'):
+                try:
+                    w = Writer.objects.get(id=int(request.POST.get('writer_id', 0)))
                 except (ValueError, Writer.DoesNotExist):
-                    pass
+                    w = None
+                if w is None or not group.members.filter(id=w.id).exists():
+                    message, message_class = ('Only a member of the group can be one of its '
+                                              'owners.', 'alert-box warning')
+                elif w.id == group.created_by_id:
+                    message, message_class = ('The group\'s creator is always an owner.',
+                                              'alert-box info')
+                elif action == 'make_owner':
+                    group.owners.add(w)
+                    message, message_class = ('{0} is now an owner of "{1}" and can add people '
+                                              'to it.'.format(w.user.username, group.name),
+                                              'alert-box success')
+                else:
+                    group.owners.remove(w)
+                    message, message_class = ('{0} is no longer an owner.'.format(
+                        w.user.username), 'alert-box success')
 
     groups = []
     for g in RoleGroup.objects.all().order_by('name').prefetch_related(
-            'members__user', 'set_assignments__question_set', 'join_requests__requester__user'):
+            'members__user', 'owners', 'set_assignments__question_set',
+            'join_requests__requester__user'):
         member_list = list(g.members.all().order_by('user__username'))
         is_member = any(m.id == user.id for m in member_list)
         can_manage = g.can_manage(user)
@@ -2424,7 +2458,12 @@ def role_groups(request):
         if not (g.created_by_id == user.id or is_member or has_requested):
             continue
         # Membership is private: only members (and managers) see who's in a group.
+        owner_ids = {o.id for o in g.owners.all()}
+        if g.created_by_id:
+            owner_ids.add(g.created_by_id)
         groups.append({'group': g,
+                       'owner_ids': owner_ids,
+                       'can_delete': g.can_delete(user),
                        'members': member_list if (is_member or can_manage) else None,
                        'member_count': len(member_list),
                        'assignments': list(g.set_assignments.all()),

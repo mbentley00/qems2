@@ -5260,6 +5260,95 @@ class EscapedUnderscoreTests(TestCase):
 
 @override_settings(EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend',
                    BASE_URL='https://test.example')
+class RoleGroupOwnerTests(TestCase):
+    """A group's creator can make other members owners, who then run the group
+    with them: add and remove people, answer requests, name more owners. Only
+    the creator can delete the group or be beyond removal."""
+
+    def setUp(self):
+        from datetime import timedelta
+        mk = lambda name: User.objects.create_user(name, password='pw', email=name + '@t.com')
+        self.cu, self.ou, self.xu, self.nu = mk('rgo_creator'), mk('rgo_owner'), mk('rgo_other'), mk('rgo_new')
+        for u in (self.cu, self.ou, self.xu, self.nu):
+            u.date_joined = timezone.now() - timedelta(days=3); u.save()
+        self.creator, self.owner, self.other, self.new = (
+            Writer.objects.get(user=u) for u in (self.cu, self.ou, self.xu, self.nu))
+        self.group = RoleGroup.objects.create(name='RGO Group', created_by=self.creator)
+        self.group.members.add(self.creator, self.owner, self.other)
+
+    def _as(self, username):
+        self.client.logout()
+        self.client.login(username=username, password='pw')
+
+    def _post(self, action, writer, **extra):
+        data = {'action': action, 'group_id': self.group.id, 'writer_id': writer.id}
+        data.update(extra)
+        return self.client.post('/role_groups/', data)
+
+    def test_the_creator_makes_a_member_an_owner_who_can_add_people(self):
+        self._as('rgo_creator')
+        self._post('make_owner', self.owner)
+        self.assertTrue(self.group.is_owner(self.owner))
+        self._as('rgo_owner')
+        self._post('add_member', self.new)
+        self.assertIn(self.new, self.group.members.all())
+
+    def test_an_ordinary_member_cannot_add_people_or_make_owners(self):
+        self._as('rgo_other')
+        self._post('add_member', self.new)
+        self._post('make_owner', self.other)
+        self.assertNotIn(self.new, self.group.members.all())
+        self.assertFalse(self.group.is_owner(self.other))
+
+    def test_only_a_member_can_be_an_owner(self):
+        self._as('rgo_creator')
+        self._post('make_owner', self.new)
+        self.assertFalse(self.group.is_owner(self.new))
+
+    def test_an_owner_can_name_more_owners_and_step_them_down(self):
+        self.group.owners.add(self.owner)
+        self._as('rgo_owner')
+        self._post('make_owner', self.other)
+        self.assertTrue(self.group.is_owner(self.other))
+        self._post('remove_owner', self.other)
+        self.assertFalse(self.group.is_owner(self.other))
+
+    def test_leaving_the_group_ends_the_ownership(self):
+        self.group.owners.add(self.owner)
+        self._as('rgo_creator')
+        self._post('remove_member', self.owner)
+        self.assertFalse(self.group.is_owner(self.owner))
+
+    def test_an_owner_cannot_delete_the_group_or_remove_its_creator(self):
+        self.group.owners.add(self.owner)
+        self._as('rgo_owner')
+        self.client.post('/role_groups/', {'action': 'delete', 'group_id': self.group.id})
+        self.assertTrue(RoleGroup.objects.filter(id=self.group.id).exists())
+        self._post('remove_member', self.creator)
+        self.assertIn(self.creator, self.group.members.all())
+        body = self.client.get('/role_groups/').content.decode()
+        self.assertNotIn('Delete group', body)
+        self.assertIn('>Owner<', body)
+
+    def test_join_requests_reach_every_owner(self):
+        self.group.owners.add(self.owner)
+        self._as('rgo_new')
+        mail.outbox = []
+        self.client.post('/role_groups/', {'action': 'request_join', 'group_id': self.group.id})
+        import time
+        end = time.time() + 2
+        while time.time() < end and not mail.outbox:
+            time.sleep(0.02)
+        self.assertEqual(sorted(mail.outbox[0].to), ['rgo_creator@t.com', 'rgo_owner@t.com'])
+
+    def test_an_owner_can_approve_from_the_email_link(self):
+        self.group.owners.add(self.owner)
+        RoleGroupJoinRequest.objects.create(role_group=self.group, requester=self.new)
+        self._as('rgo_owner')
+        self.client.post('/approve_group_join/{0}/{1}/'.format(self.group.id, self.new.id))
+        self.assertIn(self.new, self.group.members.all())
+
+
 class RoleGroupJoinAndNotifyTests(TestCase):
     """Private membership, request-to-join emails, add notifications, and the
     new-account age gate on creating role groups."""
@@ -6189,7 +6278,8 @@ class RoleGroupPendingRequestTests(TestCase):
         self.client.logout(); self.client.login(username='rg_str', password='pw')
         resp = self.client.post('/approve_group_join/{0}/{1}/'.format(self.group.id, self.req.id))
         self.assertFalse(self.group.members.filter(id=self.req.id).exists())
-        self.assertIn(b'creator', resp.content)
+        # Owners, not just the creator, approve now; the refusal says so.
+        self.assertIn(b'owners can approve', resp.content)
 
     def test_add_member_clears_any_pending_request(self):
         self._request_join()

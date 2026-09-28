@@ -79,9 +79,30 @@ them and they lose it.</p>
         <tbody>
         {% for m in g.members %}
             <tr>
-                <td>{{ m.user.first_name }} {{ m.user.last_name }} <span style="color:#888;">"{{ m.user.username }}"</span></td>
+                <td>{{ m.user.first_name }} {{ m.user.last_name }} <span style="color:#888;">"{{ m.user.username }}"</span>
+                    {% if m.id == g.group.created_by_id %}<span class="rg-owner" title="Made the group; always an owner">Creator</span>
+                    {% elif m.id in g.owner_ids %}<span class="rg-owner" title="Can add and remove people, answer join requests, and make other members owners">Owner</span>{% endif %}</td>
                 <td style="text-align:right;">
                     {% if g.can_manage %}
+                    {% if m.id != g.group.created_by_id %}
+                    {% comment %}
+                    An owner runs the group with its creator: adds people to it,
+                    answers requests, and can make other members owners.
+                    {% endcomment %}
+                    <form method="post" action="/role_groups/" style="display:inline;">
+                        {% csrf_token %}
+                        <input type="hidden" name="group_id" value="{{ g.group.id }}">
+                        <input type="hidden" name="writer_id" value="{{ m.id }}">
+                        {% if m.id in g.owner_ids %}
+                        <input type="hidden" name="action" value="remove_owner">
+                        <button type="submit" class="button tiny secondary" style="margin:0 4px 0 0;">Remove owner</button>
+                        {% else %}
+                        <input type="hidden" name="action" value="make_owner">
+                        <button type="submit" class="button tiny secondary" style="margin:0 4px 0 0;" title="Let them add and remove people too">Make owner</button>
+                        {% endif %}
+                    </form>
+                    {% endif %}
+                    {% if m.id != g.group.created_by_id or g.can_delete %}
                     <form method="post" action="/role_groups/" style="display:inline;">
                         {% csrf_token %}
                         <input type="hidden" name="action" value="remove_member">
@@ -89,6 +110,7 @@ them and they lose it.</p>
                         <input type="hidden" name="writer_id" value="{{ m.id }}">
                         <button type="submit" class="button tiny alert" style="margin:0;">Remove</button>
                     </form>
+                    {% endif %}
                     {% endif %}
                 </td>
             </tr>
@@ -109,6 +131,7 @@ them and they lose it.</p>
             <button type="submit" class="button tiny primary" style="margin:0;">Add member</button>
             <div class="member-search-results" style="display:none;"></div>
         </form>
+        {% if g.can_delete %}
         <form method="post" action="/role_groups/" style="display:inline; float:right;"
               onsubmit="return confirm('Delete this group? Members will lose any role it granted.');">
             {% csrf_token %}
@@ -116,12 +139,13 @@ them and they lose it.</p>
             <input type="hidden" name="group_id" value="{{ g.group.id }}">
             <button type="submit" class="button tiny secondary" style="margin:0;">Delete group</button>
         </form>
+        {% endif %}
         {% else %}
-        <p style="color:#999; font-size:0.85em;">You're a member. Only the group's creator can manage members.</p>
+        <p style="color:#999; font-size:0.85em;">You're a member. Only the group's owners can add or remove people.</p>
         {% endif %}
     {% else %}
     {% if g.has_requested %}
-    <p style="color:#888; font-size:0.9em;">Membership is private. <strong>Your request to join is pending</strong> the group owner's approval.</p>
+    <p style="color:#888; font-size:0.9em;">Membership is private. <strong>Your request to join is pending</strong> approval by one of the group's owners.</p>
     {% else %}
     <p style="color:#888; font-size:0.9em;">Membership is private. Ask to be added:</p>
     <form method="post" action="/role_groups/" style="display:inline;">
@@ -145,6 +169,7 @@ them and they lose it.</p>
 .member-search-item { padding: 6px 9px; cursor: pointer; font-size: 0.82em; }
 .member-search-item:hover, .member-search-item.active { background: #eef2f7; }
 .member-search-note { padding: 6px 9px; font-size: 0.82em; color: #888; font-style: italic; }
+.rg-owner { display: inline-block; margin-left: 6px; padding: 0 7px; border-radius: 8px; background: #efe6fb; color: #5b21b6; font-size: 0.75rem; font-weight: 600; }
 </style>
 <script>
 $(function () {
