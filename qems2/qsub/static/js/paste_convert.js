@@ -1246,7 +1246,13 @@ $(function () {
      */
     function formatBonusForDiscordPlain(leadin, parts, author, category, qid) {
         var info = { author: authorDisplayName(author), category: category || '' };
-        var result = qemsToDiscordMarkup((leadin || '').trim()) + ' For 10 points each:\n';
+        var result = qemsToDiscordMarkup((leadin || '').trim());
+        // Most leadins already say it ("... For 10 points each:" or "For 10
+        // points each, name these..."); only supply the phrase when it's missing.
+        if (!/for\s+(\d+|ten)\s+points,?\s+each/i.test(result)) {
+            result += (result ? ' ' : '') + 'For 10 points each:';
+        }
+        result += '\n';
 
         for (var i = 1; i <= 3; i++) {
             var part = parts[i - 1] || {};
