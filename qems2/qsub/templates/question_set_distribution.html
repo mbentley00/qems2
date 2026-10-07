@@ -23,6 +23,13 @@
     {% include "tab_group_2.html" %}
 {% endblock %}
 
+{% if messages %}{% for message in messages %}<div class="alert-box {% if message.tags == 'error' %}alert{% else %}{{ message.tags }}{% endif %}">{{ message }}</div>{% endfor %}{% endif %}
+<div class="alert-box info radius">
+    <strong>There is a per-packet distribution for this set waiting to be reviewed.</strong>
+    One page saying what every packet holds, with the category overview, writers&rsquo; targets and the packetizer
+    all reading it &mdash; worked out from the totals below.
+    <a href="/switch_distribution/{{ qset.id }}/">See what it would be</a>{% if not read_only %} and switch when you&rsquo;re ready{% endif %}.
+</div>
 <div class="tabs-content">
     <div class="content active" id="set-wide-distribution">
         <div class="alert-box warning radius">

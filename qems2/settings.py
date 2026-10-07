@@ -195,6 +195,7 @@ TEMPLATES = [
                 'django.contrib.messages.context_processors.messages',
                 'qems2.qsub.context_processors.debug_flag',
                 'qems2.qsub.context_processors.nav',
+                'qems2.qsub.context_processors.news',
             ],
         },
     },

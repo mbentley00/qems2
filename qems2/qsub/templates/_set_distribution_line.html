@@ -1,0 +1,78 @@
+{% comment %}
+One line of the Distribution page: the row, and the panel that opens under it.
+`line` is None in the <template> the "Add a line" button clones, where `i` is
+the placeholder __I__.
+{% endcomment %}
+<div class="sd-line" data-i="{{ i }}">
+    <div class="sd-row">
+        <div class="sd-handle-cell">
+            <span class="sd-grip" title="Drag to reorder" aria-hidden="true">&#10303;</span>
+            <button type="button" class="sd-toggle" aria-expanded="false" aria-label="Open {{ line.name|default:'this category' }}">&#9656;</button>
+            <input type="hidden" class="sd-line-order" name="line-{{ i }}-order" value="{{ i }}">
+        </div>
+        <div class="sd-name-cell">
+            <input type="text" class="sd-line-name" name="line-{{ i }}-name" value="{{ line.name|default:'' }}" placeholder="Category name" aria-label="Category name">
+            <button type="button" class="sd-issue-badge" hidden>!</button>
+        </div>
+        <div class="sd-covers sd-wide" title="{% if line.covers %}{{ line.covers }}{% elif line %}{{ line.categories }}{% endif %}">
+            {% if line.is_pool %}<span class="sd-chip sd-chip-pool">COMBINED</span> {% endif %}{% if line.covers %}{{ line.covers }}{% elif line %}{{ line.categories }}{% endif %}
+        </div>
+        <div class="num"><input type="text" class="sd-num sd-line-tu" name="line-{{ i }}-tu" value="{{ line.tu|default:'' }}" aria-label="Tossups per packet"></div>
+        <div class="num"><input type="text" class="sd-num sd-line-bs" name="line-{{ i }}-bs" value="{{ line.bs|default:'' }}" aria-label="Bonuses per packet"></div>
+        <div><select class="sd-link sd-line-link" name="line-{{ i }}-link" aria-label="Linked with" data-link="{{ line.link|default:'' }}">
+            <option value="">&ndash;</option>
+            {% for n, letter in link_letters %}<option value="{{ n }}"{% if line.link|stringformat:"s" == n|stringformat:"s" %} selected{% endif %}>{{ letter }}</option>{% endfor %}
+        </select></div>
+        <div class="num sd-cell sd-wide sd-total-col" title="{% include "_set_distribution_total_title.html" %}">{% if line.totals %}{{ line.totals.tu.total }} / {{ line.totals.bs.total }}{% else %}<span class="sd-muted">&ndash;</span>{% endif %}</div>
+        <div class="num sd-cell sd-wide sd-written-col">{% if line.totals %}{{ line.written.0 }} / {{ line.written.1 }}{% else %}<span class="sd-muted">&ndash;</span>{% endif %}</div>
+        <div class="sd-cell sd-wide sd-tags-col">{% if line.tag_count %}{{ line.tag_count }}{% else %}<span class="sd-muted">&ndash;</span>{% endif %}</div>
+    </div>
+    <div class="sd-detail">
+        <div class="sd-detail-grid">
+            <div>
+                <h5>Sub-categories <small class="sd-muted">per packet, optional</small></h5>
+                <div class="sd-tree-head" aria-hidden="true">
+                    <span></span><span></span><span>TU</span><span>B</span><span></span>
+                </div>
+                <div class="sd-items">
+                    {% for item in line.items %}
+                        {% include "_set_distribution_item.html" with i=i j=forloop.counter0 item=item %}
+                    {% endfor %}
+                </div>
+                <ul class="sd-items-warn" role="alert" hidden></ul>
+                <input type="hidden" class="sd-home" name="line-{{ i }}-home" value="{{ line.home|default:'' }}">
+                <input type="hidden" class="sd-item-count" name="line-{{ i }}-item_count" value="{{ line.items|length|default:0 }}">
+                <button type="button" class="button tiny secondary sd-add-item">Add a sub-category</button>
+                <p class="sd-hint">Finer requirements? Use <a href="/category_tags/{{ qset.id }}/">category tags</a>.</p>
+            </div>
+            <div>
+                <h5>Rules <small class="sd-muted">Used to enforce per-packet packetization rules</small></h5>
+                {% comment %}The script writes the rule cards from these boxes and keeps them in step.{% endcomment %}
+                <input type="hidden" class="sd-child-max-root" name="line-{{ i }}-child_max" value="{{ line.child_max|default:'' }}">
+                <input type="hidden" class="sd-links-auto" name="line-{{ i }}-links_auto" value="{% if line.links_auto is False %}0{% else %}1{% endif %}">
+                <input type="hidden" class="sd-differ-input" name="line-{{ i }}-groups_differ" value="{% if line.groups_differ %}1{% endif %}">
+                <div class="sd-rules" aria-live="polite"></div>
+                <div class="sd-add-rules">
+                    <span>Add a rule:</span>
+                    <button type="button" class="sd-add-share">Share a slot</button>
+                    <button type="button" class="sd-add-limit">Limit each sub-category</button>
+                    <button type="button" class="sd-add-differ">Keep tossup and bonus apart</button>
+                </div>
+                <div class="sd-share-pick" hidden></div>
+
+                {% if line.tag_groups %}
+                <h5 style="margin-top:14px">Category tags on {{ line.name }}</h5>
+                {% for group, tags in line.tag_groups %}
+                <div class="sd-axis">
+                    <span class="sd-axis-name">{{ group }}</span>
+                    {% for t in tags %}{% include "_set_distribution_tag.html" with tag=t.tag p=t.p %}{% endfor %}
+                </div>
+                {% endfor %}
+                <p class="sd-hint"><a href="/category_tags/{{ qset.id }}/">Edit tags</a></p>
+                {% endif %}
+
+                <label class="sd-check sd-remove" style="margin-top:14px"><input type="checkbox" class="sd-delete" name="line-{{ i }}-delete" value="1"> Remove this category</label>
+            </div>
+        </div>
+    </div>
+</div>

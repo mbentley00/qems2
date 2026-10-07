@@ -7,6 +7,36 @@ def debug_flag(request):
     return {'DEBUG': settings.DEBUG}
 
 
+def news(request):
+    """The site-news bar and the sidebar's unread count, both lazy: a template
+    calls them only when it shows them, so partial templates rendered for
+    AJAX never count as the bar having been seen, and pages that don't show
+    the shell never query for news."""
+    user = getattr(request, 'user', None)
+    if not (user and user.is_authenticated) or request.path.startswith('/news/'):
+        return {}
+    from . import news as site_news
+    memo = {}
+
+    def news_banner():
+        if 'banner' not in memo:
+            try:
+                memo['banner'] = site_news.banner_for(user.writer)
+            except Exception:
+                memo['banner'] = None
+        return memo['banner']
+
+    def news_unread():
+        if 'unread' not in memo:
+            try:
+                memo['unread'] = site_news.unread(user.writer).count()
+            except Exception:
+                memo['unread'] = 0
+        return memo['unread']
+
+    return {'news_banner': news_banner, 'news_unread': news_unread}
+
+
 def _active_set_id(request):
     """Best-effort active question-set id for the current request, inferred from
     the resolved URL kwargs (set-scoped or object-scoped pages)."""

@@ -322,6 +322,7 @@ def get_formatted_question_html(line, allowUnderlines, allowParens, allowNewLine
     noteFlag = False
     powerFlag = False
     powerIndex = -1
+    splitIndex = -1
     promptFlag = False
     index = 0
     
@@ -341,9 +342,14 @@ def get_formatted_question_html(line, allowUnderlines, allowParens, allowNewLine
         # it; otherwise a stray (+) is left to render as ordinary text.
         plusIndex = line.find(u"(+)") if allowSuperpower else -1
         powerIndex = max(starIndex, plusIndex)
+        # With both marks, the superpower run (to the "(+)") and the power run
+        # (from there to the "(*)") are told apart on screen: the superpower
+        # bold, the power a step lighter (see .q-superpower/.q-power-run in
+        # base.css). Exports read both as plain bold.
+        splitIndex = plusIndex if -1 < plusIndex < starIndex else -1
         if (powerIndex > -1):
             powerFlag = True
-            output += u"<strong>"
+            output += u'<strong class="q-superpower">' if splitIndex > -1 else u"<strong>"
 
     # An all-power tossup with no explicit mark is bold from end to end. The
     # rest of the parsing runs normally so pronunciation guides etc. still
@@ -359,6 +365,11 @@ def get_formatted_question_html(line, allowUnderlines, allowParens, allowNewLine
         else:
             nextChar = ""
         
+        if (splitIndex > -1 and index == splitIndex and powerFlag):
+            output += u'(+)</strong><strong class="q-power-run">'
+            index += 3
+            continue
+
         if (index >= powerIndex and powerFlag):
             powerFlag = False
             output += line[index:index + 3] + u"</strong>"  # the actual mark: (*) or (+)

@@ -1,0 +1,1098 @@
+{% extends "base.html" %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% block title %}{{ qset.name }} - Distribution - QEMS3{% endblock %}
+
+{% block content %}
+<ul class="breadcrumbs">
+    <li><a href="/edit_question_set/{{ qset.id }}/">{{ qset.name }}</a></li>
+    <li class="current"><a href="/set_distribution/{{ qset.id }}/">Distribution</a></li>
+</ul>
+
+<div class="sd-head">
+    <div>
+        <h3 class="page-header sd-title">Distribution</h3>
+        <p class="sd-lede">Per packet. The category overview, writers&rsquo; targets and the packetizer all follow it.</p>
+    </div>
+    {% if can_edit %}
+    <div class="sd-head-actions">
+        <a class="button secondary small" href="/set_distribution/{{ qset.id }}/paste/">Replace by pasting distribution</a>
+        <a class="button secondary small" href="#sd-bring-tags">Bring tags from another set</a>
+    </div>
+    {% endif %}
+</div>
+
+{% for message in messages %}
+<div class="alert-box {% if message.tags == 'error' %}alert{% else %}{{ message.tags }}{% endif %}">{{ message }}</div>
+{% endfor %}
+
+<form method="post" action="/set_distribution/{{ qset.id }}/" id="sd-form">
+{% csrf_token %}
+<fieldset class="sd-fieldset"{% if not can_edit %} disabled{% endif %}>
+
+<div class="sd-size">
+    <div class="sd-size-card">
+        <label for="sd-packets">Packets</label>
+        <input id="sd-packets" name="num_packets" type="number" min="1" value="{{ form_packets }}">
+    </div>
+    {% include "_set_distribution_pair.html" with name="size" label="Each packet" tu=form.size_tu bs=form.size_bs %}
+    {% include "_set_distribution_pair.html" with name="tiebreak" label="Tiebreakers in each packet" tu=form.tiebreak_tu bs=form.tiebreak_bs per_set=tiebreak_per_set %}
+    {% include "_set_distribution_pair.html" with name="extras" label="Extra questions in set" tu=form.extras_tu bs=form.extras_bs %}
+</div>
+
+<div class="sd-table">
+    <div class="sd-row sd-row-head">
+        <div></div><div>Category</div><div>Sub-Categories</div><div class="num">TU / packet</div><div class="num">B / packet</div><div title="Categories with the same letter share their slots">Link</div>
+        <div class="num sd-total-col" title="In packets, plus tiebreakers and extra questions">Set total</div><div class="num sd-written-col">Written</div><div class="sd-tags-col">Tags</div>
+    </div>
+    <div id="sd-lines">
+    {% for line in lines %}
+        {% include "_set_distribution_line.html" with line=line i=line.idx %}
+    {% endfor %}
+    </div>
+    <div class="sd-top-links" id="sd-top-links" aria-live="polite"></div>
+    <div class="sd-foot" id="sd-foot">
+        <span id="sd-sum" class="sd-sum"></span>
+        {% if set_totals %}
+        <span class="sd-foot-detail">
+            {{ set_totals.tu.total }} / {{ set_totals.bs.total }} for the set:
+            {{ set_totals.tu.packets }} / {{ set_totals.bs.packets }} in packets,
+            {{ set_totals.tu.tiebreak }} / {{ set_totals.bs.tiebreak }} tiebreakers,
+            {{ set_totals.tu.extras }} / {{ set_totals.bs.extras }} extras
+        </span>
+        {% endif %}
+    </div>
+</div>
+<input type="hidden" name="line_count" id="sd-line-count" value="{{ lines|length }}">
+{% if can_edit %}
+<div class="sd-actions">
+    <button type="button" class="button secondary small" id="sd-add-line"><i class="fa fa-plus"></i> Add a category</button>
+    <div class="sd-mode sd-top-mode" role="radiogroup" aria-label="How categories are linked"
+         title="Categories with the same letter share their slots. Automatic links categories whose counts only make whole numbers together.">
+        <span class="sd-mode-label">Category links</span>
+        <label><input type="radio" class="sd-top-auto" name="top_links_auto" value="1"{% if top_links_auto %} checked{% endif %}> Automatic</label>
+        <label><input type="radio" class="sd-top-auto" name="top_links_auto" value="0"{% if not top_links_auto %} checked{% endif %}> By hand</label>
+    </div>
+    <span class="sd-actions-hint"></span>
+    <button type="submit" class="button primary sd-save">Save</button>
+</div>
+{% else %}
+<p class="sd-note">Only the set&rsquo;s editors can change its distribution.</p>
+{% endif %}
+
+<div class="sd-card" id="sd-split-card">
+    <h4 class="sd-card-title">Tiebreakers and extras by category</h4>
+    <p class="sd-note">Each category gets its share automatically. Type a number to set one by hand (shaded); clear it to go back.</p>
+    <table class="sd-split">
+        <thead>
+            <tr><th>Category</th><th class="sd-split-pair">Tiebreakers <small>TU / B</small></th><th class="sd-split-pair">Extras <small>TU / B</small></th><th class="num" title="In packets, plus tiebreakers and extra questions">All questions <small>regular + these</small></th></tr>
+        </thead>
+        <tbody>
+        {% for line in lines %}
+            <tr>
+                <td>{{ line.name }}</td>
+                <td class="sd-split-pair"><div class="sd-pairbox">
+                    {% include "_set_distribution_override.html" with i=line.idx field="tb_tu" value=line.tb_tu is_set=line.tb_tu_set auto=line.totals.tu.tiebreak label="Tiebreak tossups" %}
+                    {% include "_set_distribution_override.html" with i=line.idx field="tb_bs" value=line.tb_bs is_set=line.tb_bs_set auto=line.totals.bs.tiebreak label="Tiebreak bonuses" %}
+                </div></td>
+                <td class="sd-split-pair"><div class="sd-pairbox">
+                    {% include "_set_distribution_override.html" with i=line.idx field="extra_tu" value=line.extra_tu is_set=line.extra_tu_set auto=line.totals.tu.extras label="Extra tossups" %}
+                    {% include "_set_distribution_override.html" with i=line.idx field="extra_bs" value=line.extra_bs is_set=line.extra_bs_set auto=line.totals.bs.extras label="Extra bonuses" %}
+                </div></td>
+                <td class="num" title="{% include "_set_distribution_total_title.html" %}">{% if line.totals %}{{ line.totals.tu.total }} / {{ line.totals.bs.total }}{% endif %}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+        {% if set_totals %}
+        <tfoot>
+            <tr>
+                <td>All categories</td>
+                <td class="sd-split-pair">{{ set_totals.tu.tiebreak }} / {{ set_totals.bs.tiebreak }}</td>
+                <td class="sd-split-pair">{{ set_totals.tu.extras }} / {{ set_totals.bs.extras }}</td>
+                <td class="num">{{ set_totals.tu.total }} / {{ set_totals.bs.total }}</td>
+            </tr>
+        </tfoot>
+        {% endif %}
+    </table>
+    {% if set_totals.tu.tiebreak != set_totals.tu.tiebreak_asked or set_totals.bs.tiebreak != set_totals.bs.tiebreak_asked %}
+    <p class="sd-warn">The categories&rsquo; tiebreakers add up to {{ set_totals.tu.tiebreak }} / {{ set_totals.bs.tiebreak }}, but
+        {{ form_packets }} packets of {{ form.tiebreak_tu }} / {{ form.tiebreak_bs }} make {{ set_totals.tu.tiebreak_asked }} / {{ set_totals.bs.tiebreak_asked }}.</p>
+    {% endif %}
+    {% if set_totals.tu.extras != set_totals.tu.extras_asked or set_totals.bs.extras != set_totals.bs.extras_asked %}
+    <p class="sd-warn">The categories&rsquo; extras add up to {{ set_totals.tu.extras }} / {{ set_totals.bs.extras }}, not the
+        {{ set_totals.tu.extras_asked }} / {{ set_totals.bs.extras_asked }} set above.</p>
+    {% endif %}
+</div>
+</fieldset>
+</form>
+
+{% if whole_set_tags is not None %}
+<div class="sd-card">
+    <div class="sd-card-head">
+        <h4 class="sd-card-title">Whole-set tags</h4>
+        <a href="/category_tags/{{ qset.id }}/">Edit tags</a>
+    </div>
+    {% if whole_set_tags %}
+    <div class="sd-tags">
+        {% for t in whole_set_tags %}
+            {% include "_set_distribution_tag.html" with tag=t.tag p=t.p %}
+        {% endfor %}
+    </div>
+    {% else %}<p class="sd-empty">None yet.</p>{% endif %}
+</div>
+{% endif %}
+
+{% for name, count in unbudgeted %}
+<div class="alert-box warning sd-inline-alert">
+    <strong>Unbudgeted: {{ name }}</strong>{% if count %} ({{ count }} question{{ count|pluralize }}){% endif %} &mdash; nothing asks for it, so the packetizer won&rsquo;t place it.
+</div>
+{% endfor %}
+
+{% if can_edit %}
+<div class="sd-card" id="sd-bring-tags">
+    <h4 class="sd-card-title">Bring tags from another set</h4>
+    {% if tag_sources %}
+    <form method="post" action="/set_distribution/{{ qset.id }}/tags/" class="sd-inline-form">
+        {% csrf_token %}
+        <label for="sd-tag-source">Set</label>
+        <select name="source" id="sd-tag-source">
+            {% for s in tag_sources %}<option value="{{ s.id }}">{{ s.name }} ({{ s.num_packets }} packets)</option>{% endfor %}
+        </select>
+        <label class="sd-check"><input type="checkbox" name="scale" value="1" checked> Scale quotas to {{ qset.num_packets }} packets</label>
+        <button type="submit" class="button secondary small">Bring tags</button>
+    </form>
+    {% else %}
+    <p class="sd-empty">None of your other sets has category tags.</p>
+    {% endif %}
+</div>
+{% endif %}
+
+{% if is_owner and qset.legacy_requirements %}
+<div class="sd-card sd-undo">
+    <h4 class="sd-card-title">Undo the switch</h4>
+    <p class="sd-note">Restores the set totals and quotas from before the switch.</p>
+    <form method="post" action="/set_distribution/{{ qset.id }}/revert/"
+          onsubmit="return confirm('Go back to the old set totals and packetizer quotas?');">
+        {% csrf_token %}
+        <button type="submit" class="button secondary small">Go back to the old requirements</button>
+    </form>
+</div>
+{% endif %}
+
+<datalist id="sd-paths">{% for p in category_paths %}<option value="{{ p }}">{% endfor %}</datalist>
+<datalist id="sd-tops">{% for p in top_names %}<option value="{{ p }}">{% endfor %}</datalist>
+
+<template id="sd-line-template">
+    {% include "_set_distribution_line.html" with line=None i="__I__" %}
+</template>
+<template id="sd-item-template">
+    {% include "_set_distribution_item.html" with i="__I__" j="__J__" item=None %}
+</template>
+<datalist id="sd-dl-live"></datalist>
+
+<style>
+.sd-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; flex-wrap: wrap; margin-bottom: 14px; }
+.sd-title { margin-bottom: 4px; }
+.sd-lede { margin: 0; color: #555a68; max-width: 760px; }
+.sd-head-actions { display: flex; gap: 8px; }
+.sd-head-actions .button { margin: 0; }
+.sd-fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.sd-size { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+.sd-size-card { background: #fff; border: 1px solid #e6e6ee; border-radius: 12px; padding: 10px 14px; }
+.sd-size-card label { font-size: 0.8rem; color: #6b7080; margin: 0 0 4px; font-weight: 600; }
+.sd-size-card label small { font-weight: 400; font-size: 0.75rem; text-transform: none; color: #8a8f9c; }
+.sd-size-card input { margin: 0; height: 36px; max-width: 140px; }
+.sd-size-label { display: block; font-size: 0.8rem; color: #6b7080; margin: 0 0 4px; font-weight: 600; }
+.sd-pair { display: flex; gap: 8px; }
+.sd-pair-total { display: block; margin-top: 4px; color: #8a8f9c; font-size: 0.75rem; }
+.sd-pair-field { display: flex; align-items: center; gap: 5px; margin: 0; font-size: 0.78rem; color: #8a8f9c; font-weight: 400; }
+.sd-pair-field input { width: 64px; height: 36px; margin: 0; text-align: center; }
+.sd-table { background: #fff; border: 1px solid #e6e6ee; border-radius: 14px; overflow: hidden; }
+/* Sub-Categories keeps room to show itself; the narrower the page, the more
+   of the less used columns go (Tags, then the counts beside the numbers). */
+.sd-row { display: grid; grid-template-columns: 54px minmax(130px, 1.2fr) minmax(110px, 1.6fr) 72px 72px 56px 96px 84px 56px;
+    align-items: center; gap: 8px; padding: 9px 16px; border-bottom: 1px solid #efeff4; }
+.sd-row > div { min-width: 0; }
+@media (max-width: 1250px) {
+    .sd-row { grid-template-columns: 54px minmax(130px, 1.2fr) minmax(110px, 1.6fr) 72px 72px 56px 96px 84px; }
+    .sd-row > .sd-tags-col { display: none; }
+}
+@media (max-width: 1080px) {
+    .sd-row { grid-template-columns: 54px minmax(130px, 1.2fr) minmax(110px, 1.6fr) 72px 72px 56px 96px; }
+    .sd-row > .sd-written-col { display: none; }
+}
+@media (max-width: 990px) {
+    .sd-row { grid-template-columns: 54px minmax(130px, 1.2fr) minmax(110px, 1.6fr) 72px 72px 56px; }
+    .sd-row > .sd-total-col { display: none; }
+}
+.sd-row-head { background: #fafafc; font-size: 0.74rem; font-weight: 600; color: #6b7080; letter-spacing: 0.03em; text-transform: uppercase; }
+.sd-row .num { text-align: right; font-variant-numeric: tabular-nums; }
+.sd-cell { font-size: 0.85rem; color: #555a68; }
+.sd-row input { margin: 0; height: 32px; }
+.sd-row .sd-num { text-align: center; }
+.sd-num { width: 64px; }
+.sd-covers { font-size: 0.85rem; color: #555a68; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sd-muted { color: #9a9eab; }
+.sd-toggle, .sd-icon-btn { width: 28px; height: 28px; border: 1px solid #e0e0ea; border-radius: 7px; background: #fff;
+    color: #555a68; cursor: pointer; padding: 0; line-height: 26px; text-align: center; margin: 0; }
+.sd-chip { display: inline-block; padding: 1px 7px; border-radius: 6px; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.03em; vertical-align: middle; }
+.sd-chip-pool { background: #e3f0fb; color: #144a78; }
+.sd-chip-edit { background: #efe6fb; color: #3b1a78; }
+.sd-detail { display: none; padding: 12px 16px 16px 62px; background: #fbfbfd; border-bottom: 1px solid #efeff4; }
+.sd-line.open .sd-detail { display: block; }
+.sd-detail-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 16px 28px; }
+.sd-detail h5 { font-size: 0.74rem; font-weight: 700; color: #6b7080; letter-spacing: 0.03em; text-transform: uppercase; margin: 0 0 6px; }
+.sd-detail input, .sd-detail textarea { margin: 0; }
+.sd-detail textarea { min-height: 56px; font-size: 0.88rem; }
+.sd-tree-head, .sd-item { display: grid; grid-template-columns: 16px minmax(0, 1fr) 60px 60px 34px;
+    gap: 6px; align-items: center; }
+.sd-tree-head { font-size: 0.7rem; font-weight: 600; color: #8a8f9c; text-transform: uppercase; letter-spacing: 0.03em;
+    margin-bottom: 4px; text-align: center; }
+.sd-item { margin-bottom: 6px; align-items: start; }
+/* Drag grips: whole categories in the table, rows among their siblings. */
+.sd-handle-cell { display: flex; align-items: center; gap: 4px; }
+.sd-grip, .sd-row-grip { color: #a3a7b3; cursor: grab; user-select: none; font-size: 0.95rem; line-height: 1; touch-action: none; }
+.sd-grip:hover, .sd-row-grip:hover { color: #555a68; }
+.sd-row-grip { height: 32px; display: flex; align-items: center; justify-content: center; }
+.sd-line-placeholder { height: 52px; border: 2px dashed #b9c6e0; border-radius: 10px; margin: 4px 12px; background: #f5f8fd; }
+.sd-line.ui-sortable-helper { background: #fff; box-shadow: 0 8px 24px rgba(20, 20, 40, 0.16); }
+.sd-item.sd-dragging { opacity: 0.45; }
+.sd-drop-marker { height: 3px; margin: -2px 0 2px; border-radius: 2px; background: #1d5fa8; }
+body.sd-drag-active, body.sd-drag-active * { cursor: grabbing !important; user-select: none; }
+/* Every box in a row is one height, so they line up along the top; the
+   words under a name hang below without pushing the numbers down. */
+.sd-item .sd-item-path, .sd-item .sd-num { height: 32px; margin: 0; }
+.sd-seg { position: relative; min-width: 0; padding-left: calc((var(--d, 1) - 1) * 20px); }
+.sd-item:not([data-depth="1"]) .sd-seg::before { content: ""; position: absolute; top: 4px; bottom: 50%;
+    left: calc((var(--d, 1) - 1) * 20px - 12px); width: 8px; border-left: 1px solid #c9ccd6; border-bottom: 1px solid #c9ccd6; }
+.sd-item-path { width: 100%; min-width: 0; height: 32px; }
+.sd-item .sd-num { width: 100%; height: 32px; text-align: center; padding: 0 4px; }
+.sd-item.has-kids .sd-item-path { font-weight: 600; }
+.sd-item-words { display: block; margin: 2px 0 0 2px; font-size: 0.74rem; color: #6b7080; min-height: 0; }
+.sd-item-words:empty { display: none; }
+.sd-dots { width: 32px; height: 32px; border: 1px solid #e0e0ea; border-radius: 7px; background: #fff; color: #555a68;
+    font-size: 1.1rem; line-height: 1; cursor: pointer; padding: 0; margin: 0; }
+.sd-dots:hover, .sd-dots:focus { background: #f3f4f8; }
+/* A shared slot: a header, then its rows (and the rows under them) boxed. */
+.sd-slot-head { display: flex; align-items: center; gap: 8px; margin-top: 2px; padding: 6px 10px; background: #e3f0fb;
+    color: #144a78; font-size: 0.8rem; font-weight: 600; border: 1.5px solid #9cc1e8; border-bottom: 0; border-radius: 10px 10px 0 0; }
+.sd-item.sd-in-slot { background: #f1f7fd; border-left: 1.5px solid #9cc1e8; border-right: 1.5px solid #9cc1e8;
+    margin-bottom: 0; padding: 5px 8px; }
+.sd-item.sd-slot-last { border-bottom: 1.5px solid #9cc1e8; border-radius: 0 0 10px 10px; margin-bottom: 8px; }
+.sd-slot-head.sd-slot-odd { background: #fdecd3; color: #7a4a08; border-color: #e2b877; }
+.sd-item.sd-slot-odd { background: #fdf7ee; border-color: #e2b877; }
+.sd-unlink { margin: 0 0 0 auto; border: 0; background: transparent; color: #1d5fa8; font-size: 0.8rem; cursor: pointer; padding: 0; }
+.sd-unlink:hover { text-decoration: underline; }
+.sd-chip-suggested { background: #fff; border-radius: 999px; padding: 1px 8px; font-size: 0.7rem; font-weight: 600; color: #1d5fa8; }
+/* Rules, one sentence each. */
+.sd-rules { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+.sd-rule-card { display: flex; gap: 10px; align-items: flex-start; background: #fff; border: 1px solid #e6e6ee; border-radius: 10px;
+    padding: 10px 12px; font-size: 0.88rem; line-height: 1.5; }
+.sd-rule-card.bad { border-color: #e8b4ae; }
+.sd-rule-mark { flex: none; width: 22px; height: 22px; border-radius: 50%; background: #dff3e6; color: #1c5e33; font-weight: 700;
+    font-size: 0.75rem; display: flex; align-items: center; justify-content: center; margin-top: 1px; }
+.sd-rule-card.bad .sd-rule-mark { background: #fbe3e1; color: #8f2219; }
+.sd-rule-text { flex: 1 1 auto; min-width: 0; }
+.sd-rule-note { font-size: 0.8rem; color: #6b7080; }
+.sd-rule-card.bad .sd-rule-note { color: #8f2219; }
+.sd-detail .sd-rule-num { display: inline-block; width: 52px; height: 28px; margin: 0 4px; padding: 0 4px; text-align: center; vertical-align: middle; }
+.sd-rule-x { flex: none; border: 0; background: transparent; color: #8a8f9c; font-size: 1.05rem; line-height: 1; cursor: pointer; padding: 2px; margin: 0; }
+.sd-rule-x:hover { color: #a12a20; }
+.sd-rules-empty { margin: 0; font-size: 0.85rem; color: #8a8f9c; }
+.sd-relink { align-self: flex-start; border: 0; background: transparent; color: #1d5fa8; font-size: 0.8rem; padding: 0; margin: 0; cursor: pointer; }
+.sd-add-rules { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 0.8rem; color: #6b7080; }
+.sd-add-rules button, .sd-pick-actions button { border: 1px solid #dcdce6; background: #fff; border-radius: 999px; padding: 4px 11px;
+    font-size: 0.8rem; margin: 0; cursor: pointer; color: #1f2330; }
+.sd-add-rules button:hover, .sd-pick-actions button:hover { background: #f3f4f8; }
+.sd-share-pick { background: #fff; border: 1px solid #9cc1e8; border-radius: 10px; padding: 10px 12px; margin-top: 10px; font-size: 0.86rem; }
+.sd-pick-title { margin: 0 0 6px; font-weight: 600; font-size: 0.86rem; }
+.sd-pick-under { font-size: 0.74rem; font-weight: 700; color: #6b7080; text-transform: uppercase; letter-spacing: 0.03em; margin: 6px 0 2px; }
+.sd-pick-row { display: flex; align-items: center; gap: 6px; margin: 2px 0; font-weight: 400; font-size: 0.86rem; }
+.sd-pick-row input { margin: 0; }
+.sd-pick-actions { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.sd-pick-actions .sd-pick-ok { background: #1d5fa8; border-color: #1d5fa8; color: #fff; }
+.sd-pick-actions .sd-pick-ok:hover { background: #164d8a; }
+.sd-pick-warn { color: #a12a20; font-size: 0.8rem; }
+/* The row menu. */
+.sd-menu { position: absolute; z-index: 1000; display: flex; flex-direction: column; min-width: 230px; padding: 4px;
+    background: #fff; border: 1px solid #dcdce6; border-radius: 10px; box-shadow: 0 8px 24px rgba(20, 20, 40, 0.14); }
+.sd-menu[hidden] { display: none; }
+.sd-menu button { text-align: left; border: 0; background: transparent; padding: 8px 10px; border-radius: 6px;
+    font-size: 0.85rem; margin: 0; color: #1f2330; cursor: pointer; }
+.sd-menu button:hover, .sd-menu button:focus { background: #f3f4f8; outline: none; }
+.sd-menu .sd-menu-danger { color: #a12a20; }
+html[data-theme="dark"] .sd-menu, html[data-theme="dark"] .sd-rule-card, html[data-theme="dark"] .sd-share-pick,
+html[data-theme="dark"] .sd-dots, html[data-theme="dark"] .sd-add-rules button, html[data-theme="dark"] .sd-pick-actions button {
+    background: var(--qx-card); border-color: var(--qx-border); color: var(--qx-ink); }
+html[data-theme="dark"] .sd-menu button { color: var(--qx-ink); }
+html[data-theme="dark"] .sd-item.sd-in-slot, html[data-theme="dark"] .sd-slot-head { filter: brightness(0.9); }
+/* Max each only means something on a row with rows under it. */
+.sd-item:not(.has-kids) .sd-child-max { visibility: hidden; }
+.sd-sub-btn { height: 28px; margin: 0; padding: 0 6px; border: 1px solid #e0e0ea; border-radius: 7px; background: #fff;
+    color: #555a68; font-size: 0.75rem; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.sd-sub-btn:hover, .sd-sub-btn:focus { background: #f3f4f8; color: #222; }
+html[data-theme="dark"] .sd-sub-btn { background: var(--qx-card); border-color: var(--qx-border); color: var(--qx-ink); }
+.sd-link { height: 32px; margin: 0; padding: 0 4px; font-size: 0.85rem; font-weight: 700; text-align: center; }
+.sd-link:disabled { opacity: 1; cursor: default; background-image: none; }
+.sd-link[data-link="1"] { background-color: #e3f0fb; color: #144a78; }
+.sd-link[data-link="2"] { background-color: #e6f5ea; color: #1c5e33; }
+.sd-link[data-link="3"] { background-color: #fdecd3; color: #7a4a08; }
+.sd-link[data-link="4"] { background-color: #efe6fb; color: #3b1a78; }
+.sd-link[data-link="5"], .sd-link[data-link="6"], .sd-link[data-link="7"], .sd-link[data-link="8"] { background-color: #f0f0f4; color: #333; }
+.sd-links { margin-top: 10px; font-size: 0.82rem; color: #555a68; }
+.sd-links p { margin: 0 0 3px; font-size: 0.82rem; line-height: 1.4; }
+.sd-links .sd-link-tag { display: inline-block; height: auto; padding: 0 5px; min-width: 1.6em; text-align: center;
+    font-size: 0.78rem; font-weight: 700; border-radius: 5px; margin-right: 6px; }
+.sd-links .sd-link-odd { color: #7a4a08; }
+.sd-rule { display: flex; align-items: center; gap: 8px; font-weight: 500; font-size: 0.88rem; margin: 0; }
+.sd-rule .sd-num { width: 64px; height: 32px; text-align: center; }
+.sd-items-warn { color: #8f2219; background: #fbe3e1; border-radius: 8px; font-size: 0.82rem; margin: 4px 0 10px;
+    padding: 8px 10px 8px 26px; list-style: disc; }
+.sd-items-warn li { margin: 0; }
+/* A category with problems in its panel says so on its row, shut or open. */
+.sd-name-cell { position: relative; }
+.sd-issue-badge { position: absolute; top: 50%; right: 6px; transform: translateY(-50%); width: 22px; height: 22px; padding: 0;
+    margin: 0; border: 0; border-radius: 50%; background: #d9534f; color: #fff; font-size: 0.78rem; font-weight: 700;
+    line-height: 22px; text-align: center; cursor: pointer; }
+.sd-issue-badge[hidden] { display: none; }
+.sd-line.sd-has-issues .sd-line-name { padding-right: 34px; border-color: #e8b4ae; }
+.sd-rows-over .sd-line-tu, .sd-rows-over .sd-line-bs { border-color: #d9534f; background: #fff5f4; }
+.sd-detail .sd-hint, .sd-note { font-size: 0.8rem; color: #6b7080; margin: 4px 0 0; }
+.sd-cats { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.sd-cats input[type=text] { flex: 1 1 260px; height: 32px; }
+.sd-check { display: inline-flex; gap: 6px; align-items: center; font-weight: 600; margin: 0; }
+.sd-check input { margin: 0; }
+.sd-remove { color: #a12a20; font-weight: 600; }
+.sd-tags { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.sd-axis { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 6px; }
+.sd-axis-name { width: 110px; font-size: 0.85rem; font-weight: 600; }
+.sd-tag { display: inline-flex; gap: 8px; padding: 4px 10px; border-radius: 8px; font-size: 0.85rem; background: #f0f0f4; }
+.sd-tag.ok { background: #dff3e6; } .sd-tag.ok .sd-tag-n { color: #1c5e33; }
+.sd-tag.short { background: #fdecd3; } .sd-tag.short .sd-tag-n { color: #7a4a08; }
+.sd-tag.over { background: #fbe3e1; } .sd-tag.over .sd-tag-n { color: #8f2219; }
+.sd-tag-n { font-variant-numeric: tabular-nums; }
+.sd-differ { margin-top: 10px; font-weight: 500; font-size: 0.88rem; }
+.sd-mode { margin-top: 10px; }
+.sd-mode-label { color: #6b7080; font-weight: 700; font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.03em; }
+.sd-top-links { padding: 8px 16px; border-top: 1px solid #efeff4; font-size: 0.82rem; color: #555a68; }
+.sd-top-links:empty { display: none; }
+.sd-top-links p { margin: 0 0 3px; font-size: 0.82rem; }
+.sd-mode { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-bottom: 6px; font-size: 0.82rem; }
+.sd-mode label { display: inline-flex; align-items: center; gap: 4px; margin: 0; font-size: 0.82rem; font-weight: 500; }
+.sd-mode input { margin: 0; }
+.sd-foot { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding: 12px 16px; background: #f3faf5; }
+.sd-foot.bad { background: #fff8ec; }
+.sd-sum { font-weight: 600; color: #1c5e33; }
+.sd-foot.bad .sd-sum { color: #7a4a08; }
+.sd-foot-detail { color: #555a68; font-size: 0.88rem; }
+.sd-actions { display: flex; align-items: center; gap: 14px; margin: 14px 0 22px; }
+.sd-actions .button { margin: 0; }
+.sd-actions .sd-top-mode { margin: 0; }
+.sd-actions-hint { color: #6b7080; font-size: 0.85rem; flex: 1 1 auto; }
+.sd-card { background: #fff; border: 1px solid #e6e6ee; border-radius: 14px; padding: 16px 20px; margin-bottom: 14px; }
+.sd-card-head { display: flex; justify-content: space-between; align-items: baseline; }
+.sd-card-title { font-family: Georgia, "Times New Roman", serif; font-size: 1.15rem; margin: 0 0 6px; }
+.sd-split { width: 100%; margin: 10px 0 0; border: 0; }
+.sd-split th, .sd-split td { padding: 6px 10px; }
+.sd-split .num { text-align: right; font-variant-numeric: tabular-nums; }
+.sd-split td, .sd-split th { font-size: 0.85rem; vertical-align: middle; }
+.sd-split th small { font-weight: 400; color: #8a8f9c; }
+.sd-split-pair { white-space: nowrap; }
+.sd-pairbox { display: flex; gap: 6px; }
+.sd-split .sd-pairbox input { flex: 0 0 62px; width: 62px; height: 30px; margin: 0; text-align: center; }
+.sd-split tbody tr, .sd-split tbody tr:nth-of-type(even) { background: transparent; }
+.sd-split th:first-child, .sd-split td:first-child { width: 34%; }
+.sd-split .sd-override.sd-set { background: #f3edfd; border-color: #b9a0ec; }
+.sd-split tfoot td { font-weight: 600; border-top: 1px solid #e6e6ee; }
+.sd-warn { color: #7a4a08; font-size: 0.85rem; margin: 8px 0 0; }
+.sd-inline-alert { margin: 0 0 12px; }
+.sd-inline-form { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.sd-inline-form select { width: auto; margin: 0; height: 36px; }
+.sd-inline-form label { margin: 0; }
+.sd-inline-form .button { margin: 0; }
+.sd-empty { color: #8a8f9c; font-size: 0.88rem; margin: 0; }
+@media (max-width: 900px) {
+    .sd-size { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .sd-row { grid-template-columns: 50px minmax(0, 1fr) 64px 64px 56px; }
+    .sd-row > .sd-wide { display: none; }
+    .sd-detail { padding-left: 16px; }
+    .sd-detail-grid { grid-template-columns: 1fr; }
+}
+html[data-theme="dark"] .sd-size-card, html[data-theme="dark"] .sd-table, html[data-theme="dark"] .sd-card,
+html[data-theme="dark"] .sd-toggle, html[data-theme="dark"] .sd-icon-btn { background: var(--qx-card); border-color: var(--qx-border); color: var(--qx-ink); }
+html[data-theme="dark"] .sd-row-head, html[data-theme="dark"] .sd-detail { background: var(--qx-card); }
+html[data-theme="dark"] .sd-link[data-link] { filter: brightness(0.85); }
+html[data-theme="dark"] .sd-row, html[data-theme="dark"] .sd-detail { border-color: var(--qx-border); }
+</style>
+
+<script>
+$(function () {
+    var $form = $('#sd-form'), $lines = $('#sd-lines'), $count = $('#sd-line-count');
+
+    function num(v) { var n = parseFloat(String(v || '').replace(',', '.')); return isNaN(n) ? 0 : n; }
+    function fmt(n) { return String(Math.round(n * 100) / 100); }
+
+    function updateSum() {
+        var tu = 0, bs = 0;
+        $lines.children('.sd-line').each(function () {
+            if ($(this).find('.sd-delete').prop('checked')) { return; }
+            tu += num($(this).find('.sd-line-tu').val());
+            bs += num($(this).find('.sd-line-bs').val());
+        });
+        var stu = num($('#sd-size-tu').val()), sbs = num($('#sd-size-bs').val());
+        var ok = Math.abs(tu - stu) < 0.001 && Math.abs(bs - sbs) < 0.001;
+        $('#sd-foot').toggleClass('bad', !ok);
+        $('#sd-sum').text(ok
+            ? fmt(tu) + ' of ' + fmt(stu) + ' tossups and ' + fmt(bs) + ' of ' + fmt(sbs) + ' bonuses per packet are assigned'
+            : 'The categories come to ' + fmt(tu) + ' / ' + fmt(bs) + ' per packet; a packet is ' + fmt(stu) + ' / ' + fmt(sbs));
+    }
+
+    $form.on('click', '.sd-toggle', function () {
+        var $line = $(this).closest('.sd-line').toggleClass('open');
+        var open = $line.hasClass('open');
+        $(this).html(open ? '&#9662;' : '&#9656;').attr('aria-expanded', open ? 'true' : 'false');
+    });
+
+    $('#sd-add-line').on('click', function () {
+        var i = parseInt($count.val(), 10) || 0;
+        var html = $('#sd-line-template').html().replace(/__I__/g, i).trim();
+        var $line = $(html).appendTo($lines).addClass('open');
+        $line.find('.sd-toggle').html('&#9662;').attr('aria-expanded', 'true');
+        $count.val(i + 1);
+        $line.find('.sd-line-name').trigger('focus');
+        updateSum();
+    });
+
+    $form.on('change', '.sd-delete', function () {
+        $(this).closest('.sd-line').toggleClass('sd-deleting', this.checked);
+        updateSum();
+    });
+
+    $form.on('input', '.sd-line-tu, .sd-line-bs, #sd-size-tu, #sd-size-bs', updateSum);
+
+    // ---- The Sub-categories tree ---------------------------------------
+    // Rows are a flat list in tree order; each has a depth (1 straight under
+    // the category), and its parent is the nearest row above it one level
+    // up. The box shows a row's name under its parent; the hidden path,
+    // written from the names whenever they change, is what is saved.
+    var allPaths = $('#sd-paths option').map(function () { return this.value; }).get();
+    var LETTERS = 'ABCDEFGH';
+    function depthOf($r) { return parseInt($r.attr('data-depth'), 10) || 1; }
+    function liveRows($line) { return $line.find('.sd-item').not('.sd-gone'); }
+    function parentRow($r) {
+        var d = depthOf($r);
+        return $r.prevAll('.sd-item').not('.sd-gone').filter(function () { return depthOf($(this)) < d; }).first();
+    }
+    function subtree($r) {
+        var d = depthOf($r), out = [$r[0]];
+        $r.nextAll('.sd-item').each(function () {
+            if ($(this).hasClass('sd-gone')) { return; }
+            if (depthOf($(this)) <= d) { return false; }
+            out.push(this);
+        });
+        return $(out);
+    }
+    function top(path) { return String(path || '').split(' - ')[0].trim().toLowerCase(); }
+    function homeOf($line) {
+        return $.trim($line.find('.sd-home').val() || '') || $.trim($line.find('.sd-line-name').val() || '');
+    }
+    function has(path) { return allPaths.some(function (p) { return p.toLowerCase() === path.toLowerCase(); }); }
+    // A top row's full path: a bare name that isn't a category of the set is
+    // a sub-category of the home, as the server reads it.
+    function topPath($line, value) {
+        var home = homeOf($line), v = $.trim(value || '');
+        if (!v || v.indexOf(' - ') >= 0 || !home) { return v; }
+        if (v.toLowerCase() === home.toLowerCase()) { return v; }
+        // A sub-category of the home comes first (Fine Arts' "Other").
+        return has(home + ' - ' + v) || !has(v) ? home + ' - ' + v : v;
+    }
+    function fullPath($line, $r) {
+        var seg = $.trim($r.find('.sd-item-path').val() || '');
+        if (!seg) { return ''; }
+        var $p = parentRow($r);
+        if (!$p.length) { return topPath($line, seg); }
+        var above = fullPath($line, $p);
+        return above ? above + ' - ' + seg : seg;
+    }
+    function syncPaths($line) {
+        liveRows($line).each(function () { $(this).find('.sd-item-full').val(fullPath($line, $(this))); });
+        liveRows($line).each(function () {
+            var $next = $(this).nextAll('.sd-item').not('.sd-gone').first();
+            $(this).toggleClass('has-kids', $next.length > 0 && depthOf($next) > depthOf($(this)));
+        });
+    }
+    // {key: [rows]} for every set of siblings, the category's own first.
+    function siblingSets($line) {
+        var sets = [], byParent = new Map();
+        liveRows($line).each(function () {
+            var $p = parentRow($(this)), key = $p.length ? $p[0] : null;
+            if (!byParent.has(key)) { byParent.set(key, { parent: $p, rows: [] }); sets.push(byParent.get(key)); }
+            byParent.get(key).rows.push($(this));
+        });
+        return sets;
+    }
+
+    // Links, as the server works them out: siblings whose counts aren't whole
+    // numbers, in the smallest sets that add up to whole numbers; any left
+    // over share what is left of their parent's fraction. Counts are in
+    // hundredths so the sums are exact.
+    function hundredths(v) { return Math.round(num(v) * 100); }
+    function autoLinks(counts) {
+        var out = counts.map(function () { return null; }), n = 0;
+        var left = counts.map(function (c, i) { return i; }).filter(function (i) { return counts[i][0] % 100 || counts[i][1] % 100; });
+        function whole(idx) {
+            var a = 0, b = 0;
+            idx.forEach(function (i) { a += counts[i][0]; b += counts[i][1]; });
+            return a % 100 === 0 && b % 100 === 0;
+        }
+        function firstCombo(size) {
+            var combo = [];
+            function rec(start) {
+                if (combo.length === size) { return whole(combo) ? combo.slice() : null; }
+                for (var i = start; i < left.length; i++) {
+                    combo.push(left[i]);
+                    var found = rec(i + 1);
+                    combo.pop();
+                    if (found) { return found; }
+                }
+                return null;
+            }
+            return rec(0);
+        }
+        while (left.length >= 2) {
+            var found = null;
+            if (left.length <= 16) {
+                for (var size = 2; size <= left.length && !found; size++) { found = firstCombo(size); }
+            } else {
+                for (var k = 2; k <= left.length && !found; k++) { if (whole(left.slice(0, k))) { found = left.slice(0, k); } }
+            }
+            if (!found) { break; }
+            n += 1;
+            found.forEach(function (i) { out[i] = n; });
+            left = left.filter(function (i) { return found.indexOf(i) < 0; });
+        }
+        if (left.length >= 2) { n += 1; left.forEach(function (i) { out[i] = n; }); }
+        return out;
+    }
+    // ---- Words ---------------------------------------------------------
+    // What a per-packet count means, said plainly: 0.25 is "1 in 4 packets".
+    function gcd(a, b) { return b ? gcd(b, a % b) : a; }
+    function often(h) {                     // h: hundredths of one type
+        if (h <= 0) { return ''; }
+        if (h % 100 === 0) { return (h / 100) + ' every packet'; }
+        if (h > 100) { return Math.floor(h / 100) + ' or ' + Math.ceil(h / 100) + ' a packet'; }
+        var g = gcd(h, 100), n = h / g, d = 100 / g;
+        return n === 1 && d === 2 ? '1 every other packet' : n + ' in ' + d + ' packets';
+    }
+    function rowWords(c) {
+        if (c[0] === c[1]) { return often(c[0]); }
+        return [c[0] && 'TU ' + often(c[0]), c[1] && 'B ' + often(c[1])].filter(Boolean).join(' · ');
+    }
+    // A shared slot's size: "2 / 2 every packet", "1 / 1 every other packet".
+    function slotWords(tu, bs) {
+        if (tu === bs && tu % 100 === 0) { return (tu / 100) + ' / ' + (bs / 100) + ' every packet'; }
+        if (tu === bs && tu < 100) {
+            var g = gcd(tu, 100), n = tu / g, d = 100 / g;
+            return '1 / 1 ' + (n === 1 && d === 2 ? 'every other packet' : 'in ' + n + ' of ' + d + ' packets');
+        }
+        return fmt(tu / 100) + ' / ' + fmt(bs / 100) + ' a packet';
+    }
+    function nameOf($r) { return $.trim($r.find('.sd-item-path').val()) || 'an unnamed row'; }
+    function counts($r) { return [hundredths($r.find('.sd-item-tu').val()), hundredths($r.find('.sd-item-bs').val())]; }
+    function most($r) { var c = counts($r); return Math.ceil((c[0] + c[1]) / 100 - 1e-9); }
+    function lineNameOf($line) { return $.trim($line.find('.sd-line-name').val()) || 'this category'; }
+    // "a", "a and b", "a, b and c" as bold names.
+    function namesInto($el, names) {
+        names.forEach(function (n, k) {
+            if (k) { $el.append(document.createTextNode(k === names.length - 1 ? ' and ' : ', ')); }
+            $('<b>').text(n).appendTo($el);
+        });
+    }
+
+    // ---- Shared slots --------------------------------------------------
+    // Links start as suggestions worked out from the counts; changing one
+    // makes them the editor's own (links_auto = 0), kept as set.
+    function isAuto($line) { return $line.find('.sd-links-auto').val() !== '0'; }
+    function setHand($line) { $line.find('.sd-links-auto').val('0'); }
+    function setOf($line, $r) {
+        return siblingSets($line).filter(function (set) {
+            return set.rows.some(function ($x) { return $x[0] === $r[0]; });
+        })[0];
+    }
+    // [{link, rows}] for the links of one set of siblings that join 2+ rows.
+    function slotsOf(set) {
+        var by = {}, order = [];
+        set.rows.forEach(function ($r) {
+            var l = $r.find('.sd-link').val();
+            if (!l) { return; }
+            if (!by[l]) { by[l] = []; order.push(l); }
+            by[l].push($r);
+        });
+        return order.filter(function (l) { return by[l].length > 1; }).map(function (l) { return { link: l, rows: by[l] }; });
+    }
+    function refreshLinks($line) {
+        siblingSets($line).forEach(function (set) {
+            if (isAuto($line)) {
+                var links = autoLinks(set.rows.map(counts));
+                set.rows.forEach(function ($r, k) { $r.find('.sd-link').val(links[k] ? String(links[k]) : ''); });
+                return;
+            }
+            // A link only one row still carries links nothing.
+            var used = {};
+            set.rows.forEach(function ($r) { var l = $r.find('.sd-link').val(); if (l) { used[l] = (used[l] || 0) + 1; } });
+            set.rows.forEach(function ($r) { var l = $r.find('.sd-link').val(); if (l && used[l] < 2) { $r.find('.sd-link').val(''); } });
+        });
+    }
+    function nextLink(set) {
+        return 1 + Math.max.apply(null, [0].concat(set.rows.map(function ($r) { return parseInt($r.find('.sd-link').val(), 10) || 0; })));
+    }
+    function share($line, rows) {
+        setHand($line);
+        var set = setOf($line, rows[0]);
+        var link = rows.map(function ($r) { return $r.find('.sd-link').val(); }).filter(Boolean)[0] || String(nextLink(set));
+        rows.forEach(function ($r) { $r.find('.sd-link').val(link); });
+        refreshTree($line, true);
+    }
+    function unshare($line, rows) {
+        setHand($line);
+        rows.forEach(function ($r) { $r.find('.sd-link').val(''); });
+        refreshTree($line, true);
+    }
+    // Rows sharing a slot sit together in one box headed by what they share.
+    // Moving rows only happens when focus has left them (never mid-typing).
+    function arrangeSlots($line) {
+        $line.find('.sd-slot-head').remove();
+        $line.find('.sd-item').removeClass('sd-in-slot sd-slot-last sd-slot-odd');
+        siblingSets($line).forEach(function (set) {
+            slotsOf(set).forEach(function (slot) {
+                var $after = subtree(slot.rows[0]).last();
+                slot.rows.slice(1).forEach(function ($r) {
+                    var $sub = subtree($r);
+                    if ($sub.first().prevAll('.sd-item').not('.sd-gone').first()[0] !== $after[0]) { $sub.insertAfter($after); }
+                    $after = $sub.last();
+                });
+                var tu = 0, bs = 0, $rows = $();
+                slot.rows.forEach(function ($r) { var c = counts($r); tu += c[0]; bs += c[1]; $rows = $rows.add(subtree($r)); });
+                var odd = !!(tu % 100 || bs % 100);
+                $rows.addClass('sd-in-slot').toggleClass('sd-slot-odd', odd).last().addClass('sd-slot-last');
+                var $head = $('<div class="sd-slot-head">').toggleClass('sd-slot-odd', odd);
+                $('<span>').text('Shared slot · ' + slotWords(tu, bs)).appendTo($head);
+                if (isAuto($line)) { $('<span class="sd-chip-suggested">suggested</span>').appendTo($head); }
+                $('<button type="button" class="sd-unlink">Unlink</button>').data('rows', slot.rows).appendTo($head);
+                $head.insertBefore(slot.rows[0]);
+            });
+        });
+    }
+    $form.on('click', '.sd-unlink', function () {
+        unshare($(this).closest('.sd-line'), $(this).data('rows'));
+    });
+
+    // ---- Rules, as sentences --------------------------------------------
+    function ruleCard(ok, build, onRemove, note) {
+        var $c = $('<div class="sd-rule-card">').toggleClass('bad', !ok);
+        $('<span class="sd-rule-mark" aria-hidden="true">').text(ok ? '✓' : '!').appendTo($c);
+        var $t = $('<div class="sd-rule-text">').appendTo($c);
+        build($t);
+        if (note) { $('<div class="sd-rule-note">').text(note).appendTo($t); }
+        if (onRemove) {
+            $('<button type="button" class="sd-rule-x" aria-label="Remove this rule">×</button>').data('remove', onRemove).appendTo($c);
+        }
+        return $c;
+    }
+    function limitInput($target, key, label) {
+        return $('<input type="number" min="1" class="sd-rule-num">').val($target.val())
+            .attr({'data-rule': key, 'aria-label': label}).data('target', $target);
+    }
+    // Rows asking for more than a limit lets one sub-category give.
+    function overLimit(rows, limit) {
+        return rows.filter(function ($r) { return most($r) > limit; }).map(function ($r) {
+            return nameOf($r) + ' can give ' + most($r) + ' a packet';
+        });
+    }
+    function renderRules($line) {
+        var $box = $line.find('.sd-rules'), cards = [];
+        var focused = $box.find('.sd-rule-num:focus').attr('data-rule');
+        var sets = siblingSets($line);
+
+        sets.forEach(function (set) {
+            slotsOf(set).forEach(function (slot) {
+                var tu = 0, bs = 0;
+                slot.rows.forEach(function ($r) { var c = counts($r); tu += c[0]; bs += c[1]; });
+                var blank = slot.rows.filter(function ($r) { var c = counts($r); return !c[0] && !c[1]; });
+                cards.push(ruleCard(!blank.length, function ($t) {
+                    namesInto($t, slot.rows.map(nameOf));
+                    $t.append(document.createTextNode(' share ' + slotWords(tu, bs)));
+                    if (set.parent.length) { $t.append(document.createTextNode(' (under ' + nameOf(set.parent) + ')')); }
+                    if (isAuto($line)) { $t.append(' ', $('<span class="sd-chip-suggested">suggested</span>')); }
+                }, function () { unshare($line, slot.rows); },
+                blank.length ? 'Give ' + nameOf(blank[0]) + ' a count to share a slot.' : ''));
+            });
+        });
+
+        var $root = $line.find('.sd-child-max-root'), rootLimit = parseInt($root.val(), 10);
+        if (rootLimit > 0) {
+            var bad = overLimit(sets.length && !sets[0].parent.length ? sets[0].rows : [], rootLimit);
+            cards.push(ruleCard(!bad.length, function ($t) {
+                $t.append(document.createTextNode('No sub-category gives a packet more than '),
+                          limitInput($root, 'root', 'Most questions from one sub-category'),
+                          document.createTextNode(' question' + (rootLimit === 1 ? '' : 's')));
+            }, function () { $root.val(''); renderRules($line); }, bad.join('; ')));
+        }
+        liveRows($line).each(function (k) {
+            var $r = $(this), $max = $r.find('.sd-child-max'), limit = parseInt($max.val(), 10);
+            if (!(limit > 0)) { return; }
+            var kids = sets.filter(function (set) { return set.parent[0] === $r[0]; })[0];
+            var bad = overLimit(kids ? kids.rows : [], limit);
+            cards.push(ruleCard(!bad.length, function ($t) {
+                $t.append(document.createTextNode('Under '), $('<b>').text(nameOf($r)),
+                          document.createTextNode(', no sub-category gives a packet more than '),
+                          limitInput($max, 'row-' + k, 'Most questions from one sub-category under ' + nameOf($r)),
+                          document.createTextNode(' question' + (limit === 1 ? '' : 's')));
+            }, function () { $max.val(''); renderRules($line); }, bad.join('; ')));
+        });
+
+        var $differ = $line.find('.sd-differ-input');
+        if ($differ.val() === '1') {
+            var both = liveRows($line).filter(function () { var c = counts($(this)); return c[0] >= 100 && c[1] >= 100; });
+            cards.push(ruleCard(!both.length, function ($t) {
+                $t.text('A packet’s tossup and bonus never come from the same sub-category');
+            }, function () { $differ.val(''); renderRules($line); },
+            both.length ? nameOf(both.first()) + ' asks for a tossup and a bonus in every packet.' : ''));
+        }
+
+        $line.data('ruleIssues', cards.filter(function ($c) { return $c.hasClass('bad'); })
+            .map(function ($c) { return $c.find('.sd-rule-note').text(); }).filter(Boolean));
+        if (!cards.length) { cards.push($('<p class="sd-rules-empty">No rules yet.</p>')); }
+        if (!isAuto($line)) {
+            cards.push($('<button type="button" class="sd-relink">Suggest shared slots again</button>'));
+        }
+        $box.empty().append(cards);
+        if (focused) { $box.find('[data-rule="' + focused + '"]').trigger('focus'); }
+        showIssues($line);
+    }
+    $form.on('input', '.sd-rule-num', function () {
+        $(this).data('target').val(parseInt($(this).val(), 10) > 0 ? parseInt($(this).val(), 10) : '');
+        var $line = $(this).closest('.sd-line');
+        renderRules($line);
+        checkRows($line);
+        showIssues($line);
+    });
+    $form.on('click', '.sd-rule-x', function () { $(this).data('remove')(); });
+    $form.on('click', '.sd-relink', function () {
+        var $line = $(this).closest('.sd-line');
+        $line.find('.sd-links-auto').val('1');
+        refreshTree($line, true);
+    });
+    $form.on('click', '.sd-add-limit', function () {
+        var $line = $(this).closest('.sd-line'), $root = $line.find('.sd-child-max-root');
+        if (!$root.val()) { $root.val('1'); }
+        renderRules($line);
+        $line.find('[data-rule="root"]').trigger('focus');
+    });
+    $form.on('click', '.sd-add-differ', function () {
+        var $line = $(this).closest('.sd-line');
+        $line.find('.sd-differ-input').val('1');
+        renderRules($line);
+    });
+
+    // Picking rows to share a slot: siblings only, a group per parent.
+    function openPicker($line, $pre) {
+        var $p = $line.find('.sd-share-pick').empty().prop('hidden', false);
+        var sets = siblingSets($line).filter(function (set) { return set.rows.length > 1; });
+        if (!sets.length) {
+            $('<p class="sd-pick-title">').text('Add at least two sub-categories to share a slot.').appendTo($p);
+        } else {
+            $('<p class="sd-pick-title">').text('Which sub-categories share a slot?').appendTo($p);
+        }
+        sets.forEach(function (set, k) {
+            var $g = $('<div class="sd-pick-group">').appendTo($p);
+            if (sets.length > 1) {
+                $('<div class="sd-pick-under">').text('Under ' + (set.parent.length ? nameOf(set.parent) : lineNameOf($line))).appendTo($g);
+            }
+            set.rows.forEach(function ($r) {
+                var $box = $('<input type="checkbox">').data({row: $r, set: k}).prop('checked', !!($pre && $pre[0] === $r[0]));
+                $('<label class="sd-pick-row">').append($box, document.createTextNode(' ' + nameOf($r))).appendTo($g);
+            });
+        });
+        var $actions = $('<div class="sd-pick-actions">').appendTo($p);
+        if (sets.length) { $('<button type="button" class="sd-pick-ok">Share a slot</button>').appendTo($actions); }
+        $('<button type="button" class="sd-pick-cancel">Cancel</button>').appendTo($actions);
+        $('<span class="sd-pick-warn" role="alert">').appendTo($actions);
+    }
+    $form.on('click', '.sd-add-share', function () { openPicker($(this).closest('.sd-line')); });
+    $form.on('click', '.sd-pick-cancel', function () { $(this).closest('.sd-share-pick').prop('hidden', true).empty(); });
+    $form.on('click', '.sd-pick-ok', function () {
+        var $p = $(this).closest('.sd-share-pick'), $line = $p.closest('.sd-line'), groups = {};
+        $p.find('input:checked').each(function () { (groups[$(this).data('set')] = groups[$(this).data('set')] || []).push($(this).data('row')); });
+        var picked = Object.keys(groups).map(function (k) { return groups[k]; }).filter(function (rows) { return rows.length > 1; });
+        if (!picked.length) { $p.find('.sd-pick-warn').text('Pick at least two under the same parent.'); return; }
+        // Each pick is a slot of its own, even when a row already shared one.
+        setHand($line);
+        picked.forEach(function (rows) {
+            var link = String(nextLink(setOf($line, rows[0])));
+            rows.forEach(function ($r) { $r.find('.sd-link').val(link); });
+        });
+        $p.prop('hidden', true).empty();
+        refreshTree($line, true);
+    });
+
+    // ---- The row menu --------------------------------------------------
+    var $menu = $('<div class="sd-menu" role="menu" hidden></div>').appendTo('body');
+    function closeMenu() { $menu.prop('hidden', true).empty(); }
+    $form.on('click', '.sd-item-menu', function (e) {
+        e.stopPropagation();
+        var $btn = $(this), $r = $btn.closest('.sd-item'), $line = $r.closest('.sd-line');
+        var link = $r.find('.sd-link').val(), set = setOf($line, $r);
+        closeMenu();
+        function item(label, fn, cls) {
+            $('<button type="button" role="menuitem">').text(label).addClass(cls || '')
+                .on('click', function () { closeMenu(); fn(); }).appendTo($menu);
+        }
+        item('Add a sub-category under this', function () { addChild($r); });
+        var others = set.rows.filter(function ($x) { return $x[0] !== $r[0] && (!link || $x.find('.sd-link').val() !== link); });
+        if (others.length && others.length <= 5) {
+            others.forEach(function ($o) { item('Share a slot with ' + nameOf($o), function () { share($line, [$r, $o]); }); });
+        } else if (others.length) {
+            item('Share a slot with…', function () { openPicker($line, $r); });
+        }
+        if (link && slotsOf(set).some(function (slot) { return slot.link === link; })) {
+            item('Stop sharing a slot', function () { unshare($line, [$r]); });
+        }
+        if ($r.hasClass('has-kids') && !$r.find('.sd-child-max').val()) {
+            item('Limit each sub-category under this', function () {
+                $r.find('.sd-child-max').val('1');
+                renderRules($line);
+                $line.find('.sd-rule-num').last().trigger('focus');
+            });
+        }
+        item('Remove', function () { removeRow($r); }, 'sd-menu-danger');
+        $menu.prop('hidden', false);
+        var off = $btn.offset();
+        $menu.css({ top: off.top + $btn.outerHeight() + 4, left: Math.max(8, off.left + $btn.outerWidth() - $menu.outerWidth()) });
+        $menu.find('button').first().trigger('focus');
+    });
+    $(document).on('click', function (e) { if (!$(e.target).closest('.sd-menu').length) { closeMenu(); } });
+    $(document).on('keydown', function (e) { if (e.key === 'Escape' && !$menu.prop('hidden')) { closeMenu(); } });
+
+    // Rows can leave part of a count to the rest, but can't ask for more
+    // than their parent holds. Saving refuses it; this says so as you type,
+    // and marks the category's own counts while its panel is shut.
+    function checkRows($line) {
+        var msgs = [], over = false, name = lineNameOf($line);
+        siblingSets($line).forEach(function (set) {
+            var tu = 0, bs = 0;
+            set.rows.forEach(function ($r) { tu += num($r.find('.sd-item-tu').val()); bs += num($r.find('.sd-item-bs').val()); });
+            var holder = set.parent.length ? set.parent : null;
+            var label = holder ? nameOf(holder) : name;
+            var hTu = holder ? holder.find('.sd-item-tu').val() : $line.find('.sd-line-tu').val();
+            var hBs = holder ? holder.find('.sd-item-bs').val() : $line.find('.sd-line-bs').val();
+            if (String(hTu).trim() !== '' && String(hBs).trim() !== '' &&
+                    (tu > num(hTu) + 0.001 || bs > num(hBs) + 0.001)) {
+                if (!holder) { over = true; }
+                msgs.push((holder ? 'The rows under ' + label : 'These rows') + ' add up to ' + fmt(tu) + ' / ' + fmt(bs) +
+                    ' a packet, more than ' + label + '’s ' + fmt(num(hTu)) + ' / ' + fmt(num(hBs)) + '.');
+            }
+        });
+        // Rows that leave part of the count over, when every sub-category the
+        // set has under it already has a row: nothing is left to fill it.
+        var home = $.trim($line.find('.sd-home').val() || '');
+        var rootSet = siblingSets($line).filter(function (set) { return !set.parent.length; })[0];
+        if (home && rootSet) {
+            var lower = home.toLowerCase() + ' - ';
+            var kids = allPaths.filter(function (p) { return p.toLowerCase().indexOf(lower) === 0 && p.split(' - ').length === 2; })
+                .map(function (p) { return p.toLowerCase(); });
+            var rows = rootSet.rows.map(function ($r) { return fullPath($line, $r).toLowerCase(); });
+            var rtu = 0, rbs = 0;
+            rootSet.rows.forEach(function ($r) { rtu += num($r.find('.sd-item-tu').val()); rbs += num($r.find('.sd-item-bs').val()); });
+            var ltu = num($line.find('.sd-line-tu').val()), lbs = num($line.find('.sd-line-bs').val());
+            // A row with a blank count takes whatever is left of that type.
+            var blank = function (cls) {
+                return rootSet.rows.some(function ($r) { return $.trim($r.find(cls).val() || '') === ''; });
+            };
+            var shortTu = rtu < ltu - 0.001 && !blank('.sd-item-tu'), shortBs = rbs < lbs - 0.001 && !blank('.sd-item-bs');
+            if (kids.length && kids.every(function (k) { return rows.indexOf(k) >= 0; }) && (shortTu || shortBs)) {
+                msgs.push('The rows add up to ' + fmt(rtu) + ' / ' + fmt(rbs) + ', short of ' + name + '’s ' +
+                    fmt(ltu) + ' / ' + fmt(lbs) + ', and there is no other sub-category to fill the rest.');
+            }
+        }
+        $line.data('rowIssues', msgs);
+        $line.toggleClass('sd-rows-over', over);
+    }
+    // Everything wrong in a category's panel: listed under its rows, and a
+    // badge on its row in the table so it shows with the panel shut.
+    function showIssues($line) {
+        var all = ($line.data('rowIssues') || []).concat($line.data('ruleIssues') || []);
+        $line.find('.sd-items-warn').prop('hidden', !all.length).empty()
+            .append(all.map(function (m) { return $('<li>').text(m); }));
+        $line.toggleClass('sd-has-issues', all.length > 0);
+        var label = all.length + ' problem' + (all.length === 1 ? '' : 's') + ': ' + all.join(' ');
+        $line.find('.sd-issue-badge').prop('hidden', !all.length).attr({title: label, 'aria-label': label});
+    }
+    $form.on('click', '.sd-issue-badge', function () {
+        var $line = $(this).closest('.sd-line');
+        if (!$line.hasClass('open')) { $line.find('.sd-toggle').trigger('click'); }
+        $line.find('.sd-items-warn')[0].scrollIntoView({block: 'center'});
+    });
+    // `arrange`: regroup the rows into their slots too. Left out while
+    // someone is typing, so the row they are in never moves under them.
+    function refreshTree($line, arrange) {
+        syncPaths($line);
+        refreshLinks($line);
+        if (arrange) { arrangeSlots($line); }
+        liveRows($line).each(function () { $(this).find('.sd-item-words').text(rowWords(counts($(this)))); });
+        checkRows($line);
+        renderRules($line);
+        showIssues($line);
+    }
+
+    function newRow($line, depth) {
+        var i = $line.data('i'), $n = $line.find('.sd-item-count'), j = parseInt($n.val(), 10) || 0;
+        var $row = $($('#sd-item-template').html().replace(/__I__/g, i).replace(/__J__/g, j).trim());
+        $row.attr('data-depth', depth)[0].style.setProperty('--d', String(depth));
+        $n.val(j + 1);
+        return $row;
+    }
+    function addChild($r) {
+        var $line = $r.closest('.sd-line');
+        var $row = newRow($line, depthOf($r) + 1).insertAfter(subtree($r).last());
+        refreshTree($line, true);
+        $row.find('.sd-item-path').trigger('focus');
+    }
+    // A removed row (and everything under it) is emptied and hidden, so the
+    // server never sees it.
+    function removeRow($r) {
+        var $line = $r.closest('.sd-line');
+        subtree($r).addClass('sd-gone').hide().find('input').val('');
+        refreshTree($line, true);
+    }
+    $form.on('click', '.sd-add-item', function () {
+        var $line = $(this).closest('.sd-line');
+        var $row = newRow($line, 1).appendTo($line.find('.sd-items'));
+        refreshTree($line, true);
+        $row.find('.sd-item-path').trigger('focus');
+    });
+    $form.on('input', '.sd-item input, .sd-line-tu, .sd-line-bs, .sd-line-name', function () {
+        refreshTree($(this).closest('.sd-line'), false);
+    });
+    $form.on('change', '.sd-item input, .sd-line-tu, .sd-line-bs', function () {
+        refreshTree($(this).closest('.sd-line'), true);
+    });
+
+    // Links between the categories themselves, as between rows.
+    function refreshTopLinks() {
+        var auto = $('.sd-top-auto:checked').val() !== '0';
+        var $live = $lines.children('.sd-line').filter(function () { return !$(this).find('.sd-delete').prop('checked'); });
+        var $sel = $live.find('.sd-line-link');
+        if (auto) {
+            var links = autoLinks($live.map(function () {
+                return [[hundredths($(this).find('.sd-line-tu').val()), hundredths($(this).find('.sd-line-bs').val())]];
+            }).get());
+            $sel.each(function (k) { $(this).val(links[k] ? String(links[k]) : ''); });
+        }
+        $form.find('.sd-line-link').prop('disabled', auto).each(function () { $(this).attr('data-link', $(this).val()); });
+        var byLink = {};
+        $live.each(function () {
+            var l = $(this).find('.sd-line-link').val();
+            if (l) { (byLink[l] = byLink[l] || []).push($(this)); }
+        });
+        var out = [];
+        Object.keys(byLink).sort().forEach(function (l) {
+            var rows = byLink[l];
+            if (rows.length < 2) { return; }
+            var tu = 0, bs = 0;
+            rows.forEach(function ($r) { tu += hundredths($r.find('.sd-line-tu').val()); bs += hundredths($r.find('.sd-line-bs').val()); });
+            var $p = $('<p>').toggleClass('sd-link-odd', !!(tu % 100 || bs % 100));
+            $('<span class="sd-link-tag sd-link">').attr('data-link', l).text(LETTERS.charAt(parseInt(l, 10) - 1)).appendTo($p);
+            $p.append(document.createTextNode(rows.map(function ($r) { return $.trim($r.find('.sd-line-name').val()) || '?'; })
+                .join(' + ') + ' share ' + fmt(tu / 100) + ' / ' + fmt(bs / 100) + ' a packet'));
+            out.push($p);
+        });
+        $('#sd-top-links').empty().append(out);
+    }
+    $form.on('input change', '.sd-line-tu, .sd-line-bs, .sd-line-name, .sd-delete, .sd-top-auto', refreshTopLinks);
+    $form.on('change', '.sd-line-link', function () { $(this).attr('data-link', $(this).val()); refreshTopLinks(); });
+    $('#sd-add-line').on('click', refreshTopLinks);
+    refreshTopLinks();
+    // Saving keeps the order on the page: each category and each row is
+    // numbered as it now sits.
+    $form.on('submit', function () {
+        $lines.children('.sd-line').each(function (k) {
+            syncPaths($(this));
+            $(this).find('.sd-line-order').val(k);
+            $(this).find('.sd-item').each(function (n) { $(this).find('.sd-item-order').val(n); });
+        });
+    });
+
+    // Dragging whole categories in the table.
+    $lines.sortable({
+        items: '> .sd-line', handle: '.sd-grip', axis: 'y', tolerance: 'pointer',
+        placeholder: 'sd-line-placeholder', update: refreshTopLinks
+    });
+
+    // Dragging a sub-category: it takes the rows under it along, and only
+    // moves among its siblings, so what it sits under never changes.
+    $form.on('pointerdown', '.sd-row-grip', function (e) {
+        if (e.button !== undefined && e.button !== 0) { return; }
+        var $r = $(this).closest('.sd-item'), $line = $r.closest('.sd-line'), set = setOf($line, $r);
+        if (!set || set.rows.length < 2) { return; }
+        e.preventDefault();
+        var others = set.rows.filter(function ($x) { return $x[0] !== $r[0]; });
+        var $moving = subtree($r).addClass('sd-dragging'), $marker = $('<div class="sd-drop-marker">'), drop = null;
+        $('body').addClass('sd-drag-active');
+        function place(y) {
+            drop = null;
+            for (var k = 0; k < others.length; k++) {
+                var $block = subtree(others[k]);
+                var top = $block.first()[0].getBoundingClientRect().top;
+                var bottom = $block.last()[0].getBoundingClientRect().bottom;
+                if (y < (top + bottom) / 2) { drop = { before: $block.first() }; break; }
+            }
+            if (!drop) { drop = { after: subtree(others[others.length - 1]).last() }; }
+            if (drop.before) { $marker.insertBefore(drop.before.prev('.sd-slot-head').length ? drop.before.prev('.sd-slot-head') : drop.before); }
+            else { $marker.insertAfter(drop.after); }
+        }
+        function move(ev) { place(ev.clientY); }
+        function end() {
+            $(document).off('pointermove', move).off('pointerup pointercancel', end);
+            $('body').removeClass('sd-drag-active');
+            $moving.removeClass('sd-dragging');
+            $marker.remove();
+            if (drop && drop.before && drop.before[0] !== $moving[0]) { $moving.insertBefore(drop.before); }
+            else if (drop && drop.after) { $moving.insertAfter(drop.after); }
+            refreshTree($line, true);
+        }
+        $(document).on('pointermove', move).on('pointerup pointercancel', end);
+        place(e.clientY);
+    });
+
+    // What a row's name box suggests: the set's categories one level under
+    // its parent (for a combined category's top rows, the set's categories).
+    $form.on('focus', '.sd-item-path', function () {
+        var $r = $(this).closest('.sd-item'), $line = $r.closest('.sd-line'), $p = parentRow($r);
+        var base = $p.length ? fullPath($line, $p) : homeOf($line);
+        if ($p.length === 0 && $line.find('.sd-home').val() === '' && liveRows($line).length > 1 &&
+                liveRows($line).toArray().some(function (el) { return top(fullPath($line, $(el))) !== top(base); })) {
+            base = '';
+        }
+        var depth = base ? base.split(' - ').length : 0, lower = base.toLowerCase() + ' - ';
+        var names = allPaths.filter(function (p) {
+            return p.split(' - ').length === depth + 1 && (!base || p.toLowerCase().indexOf(lower) === 0);
+        }).map(function (p) { return p.split(' - ').slice(depth).join(' - '); });
+        $('#sd-dl-live').empty().append(names.map(function (n) { return $('<option>').val(n); }));
+        $(this).attr('list', 'sd-dl-live');
+    });
+    $form.find('.sd-line').each(function () { refreshTree($(this), true); });
+
+    // A box someone types in is set by hand; emptied, it goes back to the
+    // automatic share (and shows it again once saved).
+    $form.on('input', '.sd-override', function () {
+        var set = $(this).val() !== '';
+        $(this).toggleClass('sd-set', set).next('input[type=hidden]').val(set ? '1' : '');
+    });
+    updateSum();
+});
+</script>
+{% endblock %}

@@ -142,6 +142,16 @@ class Writer (models.Model):
     # preference.
     search_in_new_tab = models.BooleanField(default=True)
 
+    # Site news. Everything posted after news_seen_at is unread; dismissing the
+    # bar or opening the News page moves it to now. The bar is a nudge, not a
+    # wall: for the newest unread announcement (news_nudge_id) it counts the
+    # pages it has been shown on and when it first appeared, and stops showing
+    # after a few of either (see Announcement.NUDGE_*), read or not.
+    news_seen_at = models.DateTimeField(null=True, blank=True)
+    news_nudge_id = models.PositiveIntegerField(null=True, blank=True)
+    news_nudge_count = models.PositiveSmallIntegerField(default=0)
+    news_nudge_started = models.DateTimeField(null=True, blank=True)
+
     def get_real_name(self):
         return '{0!s} {1!s} '.format(self.user.first_name, self.user.last_name)
         
@@ -369,6 +379,29 @@ class QuestionSet (models.Model):
     # Regular (non-tiebreaker) questions per packet, used by auto-packetization
     tossups_per_packet = models.PositiveIntegerField(default=20)
     bonuses_per_packet = models.PositiveIntegerField(default=20)
+
+    # The per-packet distribution (DistributionLine rows, edited on the
+    # Distribution page). While this is off the set runs exactly as it always
+    # has, on its set totals and packetizer quotas. Once on, those tables are
+    # no longer typed into: they are written from the lines every time the
+    # distribution or the set's size changes (distribution_lines.derive).
+    # None of these are on QuestionSetForm -- a field the settings form does
+    # not render would be saved as off/blank by every settings save.
+    per_packet_distribution = models.BooleanField(default=False)
+    # Links between the per-packet distribution's top-level lines are worked
+    # out from their counts (lines whose shares only make a whole number
+    # together); off, each line's `link` is as an editor set it.
+    top_links_auto = models.BooleanField(default=True)
+    # Tiebreakers ride in every packet, after its regular questions.
+    tiebreak_tossups_per_packet = models.PositiveIntegerField(default=0)
+    tiebreak_bonuses_per_packet = models.PositiveIntegerField(default=0)
+    # Spares for the whole set, written like anything else and never placed.
+    extra_tossups = models.PositiveIntegerField(default=0)
+    extra_bonuses = models.PositiveIntegerField(default=0)
+    # What the set had before it switched (set totals, tiebreak entries and
+    # packetizer quotas, by category path), so the switch can be undone.
+    # Empty for a set that never switched or was created per packet.
+    legacy_requirements = models.TextField(blank=True, default='')
 
     # When true, tossups may carry a 20-point superpower mark "(+)" (before the
     # 15-point power "(*)"). Off by default: a stray (+) then renders as plain
@@ -903,6 +936,29 @@ class AITagSuggestion(models.Model):
             self.tag_id, self.question_type, self.question_id)
 
 
+class Announcement(models.Model):
+    """A piece of site news, posted by an administrator on the News page and
+    shown once, unobtrusively, to each person on their next visit."""
+
+    # How long the bar keeps showing an announcement someone neither opens
+    # nor dismisses: this many pages, or this many days after it first
+    # appeared to them, whichever comes first.
+    NUDGE_PAGES = 5
+    NUDGE_DAYS = 3
+
+    title = models.CharField(max_length=200)
+    body = models.TextField(blank=True, default='')
+    created_by = models.ForeignKey('Writer', null=True, blank=True, on_delete=models.SET_NULL,
+                                   related_name='announcements')
+    created_date = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_date', '-id']
+
+    def __str__(self):
+        return self.title
+
+
 class DistributionPerPacket(models.Model):
 
     #packet = models.ManyToManyField(Packet)
@@ -944,6 +1000,14 @@ class Distribution(models.Model):
     # create-a-set list is where that is felt. Archiving takes it out of that
     # list without touching the sets already built on it.
     archived = models.BooleanField(default=False)
+
+    # The set this distribution belongs to, when it is a set's own copy
+    # rather than one of the shared templates. A set on a per-packet
+    # distribution owns its categories, so changing them can never reach
+    # another set; see distribution_lines.give_set_own_distribution.
+    owner_set = models.ForeignKey('QuestionSet', null=True, blank=True,
+                                  on_delete=models.SET_NULL,
+                                  related_name='owned_distributions')
 
     def __str__(self):
         return '{0!s}'.format(self.name)
@@ -1372,6 +1436,9 @@ class CategorySuperGroup(models.Model):
     sort_order = models.IntegerField(default=0)
     created_by = models.ForeignKey(Writer, null=True, blank=True,
                                    on_delete=models.SET_NULL)
+    # Written from a pool line of the per-packet distribution, and rewritten
+    # (or removed) with it. Groups an editor made by hand are never touched.
+    from_distribution = models.BooleanField(default=False)
 
     class Meta:
         ordering = ['sort_order', 'name']
@@ -1385,6 +1452,98 @@ class CategorySuperGroup(models.Model):
 
     def set_category_list(self, names):
         self.categories = '\n'.join(n.strip() for n in names if n and n.strip())
+
+
+class DistributionLine(models.Model):
+    """One line of a set's per-packet distribution: "4 / 4 Literature".
+
+    Counts are per packet and may be fractional (1.25 Biology is five every
+    four packets). A line covers one top-level category, or -- a pool --
+    several, which then share the line's count between them ("1 / 1 Geo / CE
+    / Other Academic"). Everything a set needs in total is worked out from
+    these and the set's size; see distribution_lines.derive.
+    """
+
+    question_set = models.ForeignKey(QuestionSet, on_delete=models.CASCADE,
+                                     related_name='distribution_lines')
+    name = models.CharField(max_length=200)
+    # Top-level category names, one per line. One for an ordinary line.
+    categories = models.TextField(blank=True, default='')
+    is_pool = models.BooleanField(default=False)
+    tossups = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    bonuses = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    # The line's share of the set's extras when an editor set it by hand.
+    # Null means "its proportional share", which is what every line starts as.
+    extra_tossups = models.PositiveIntegerField(null=True, blank=True)
+    extra_bonuses = models.PositiveIntegerField(null=True, blank=True)
+    # The same for its share of the set's tiebreakers (across all packets).
+    tiebreak_tossups = models.PositiveIntegerField(null=True, blank=True)
+    tiebreak_bonuses = models.PositiveIntegerField(null=True, blank=True)
+    # A rule the numbers can't say ("one audio and one visual Other Arts
+    # question in each packet"), shown with the line.
+    rule = models.TextField(blank=True, default='')
+    # A packet's tossup and bonus never come from the same sub-category (for
+    # a combined line, the same category).
+    groups_differ = models.BooleanField(default=False)
+    # No one sub-category (for a combined line, no one category) gives a
+    # packet more than this many questions, tossups and bonuses together.
+    child_max = models.PositiveSmallIntegerField(null=True, blank=True)
+    # Links between sibling rows are worked out from their counts (siblings
+    # whose shares only make a whole number together); off, each row's
+    # `link` is as an editor set it.
+    links_auto = models.BooleanField(default=True)
+    # Lines sharing a number are linked: 0.5 / 0.5 Philosophy and 0.5 / 0.5
+    # Social Science share one slot a packet. Null: not linked.
+    link = models.PositiveSmallIntegerField(null=True, blank=True)
+    sort_order = models.IntegerField(default=0)
+
+    class Meta:
+        ordering = ['sort_order', 'id']
+
+    def __str__(self):
+        return '{0!s}: {1!s}'.format(self.question_set, self.name)
+
+    def category_list(self):
+        return [c.strip() for c in (self.categories or '').splitlines() if c.strip()]
+
+    def set_category_list(self, names):
+        seen, keep = set(), []
+        for n in names:
+            n = (n or '').strip()
+            if n and n.lower() not in seen:
+                seen.add(n.lower())
+                keep.append(n)
+        self.categories = '\n'.join(keep)
+
+
+class DistributionLineItem(models.Model):
+    """A row of a line's breakdown: a subcategory of the line's category
+    ("Science - Biology", 1.25 / 1.25), or for a pool one of its member
+    categories with its rough share. Counts are per packet; a blank count
+    leaves that type to the rest of the line.
+
+    Rows nest by path: "Fine Arts - Auditory - Opera" sits under a "Fine Arts
+    - Auditory" row when there is one. Siblings with the same `link` share
+    one per-packet slot between them (0.5 / 0.5 Opera and 0.5 / 0.5 Ballet:
+    one of the two a packet)."""
+
+    line = models.ForeignKey(DistributionLine, on_delete=models.CASCADE,
+                             related_name='items')
+    path = models.CharField(max_length=500)
+    tossups = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    bonuses = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    # Siblings sharing a number are linked. Null: not linked.
+    link = models.PositiveSmallIntegerField(null=True, blank=True)
+    # No one sub-category under this row gives a packet more than this many
+    # questions, tossups and bonuses together.
+    child_max = models.PositiveSmallIntegerField(null=True, blank=True)
+    sort_order = models.IntegerField(default=0)
+
+    class Meta:
+        ordering = ['sort_order', 'id']
+
+    def __str__(self):
+        return '{0!s} / {1!s}'.format(self.line.name, self.path)
 
 
 class CategoryTag(models.Model):

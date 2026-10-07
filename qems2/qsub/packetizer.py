@@ -264,16 +264,55 @@ def _quota_cap(value):
 
 def _combined_cap(quota):
     """Cap on tossups+bonuses combined for a path whose quota is fractional.
-    1.5/1.5 caps the combined count at 3 even though each type allows 2."""
+    1.5/1.5 caps the combined count at 3 even though each type allows 2.
+    A distribution rule's `max_q` ("at most one, either type") caps it too."""
+    caps = []
     max_tu = quota.get('max_tu')
     max_bs = quota.get('max_bs')
-    if max_tu is None or max_bs is None:
-        return None
-    total = float(max_tu) + float(max_bs)
-    return int(math.ceil(total - 1e-9))
+    if max_tu is not None and max_bs is not None:
+        caps.append(int(math.ceil(float(max_tu) + float(max_bs) - 1e-9)))
+    if quota.get('max_q') is not None:
+        caps.append(int(quota['max_q']))
+    return min(caps) if caps else None
+
+POOL = '__pool__'
+RULES = '__rules__'
+GROUP = '__group__'
+
+
+def _under(parts, members):
+    """Whether a question at `parts` falls under any of the paths `members`."""
+    return any(m and parts[:len(m)] == m for m in members)
+
+def pool_map(quotas):
+    """{top-level category: pool key} for the pools in a quota dict. A pool is
+    a line of a per-packet distribution covering several top-level categories
+    that share one count ("1 / 1 Geo / CE / Other Academic"); its quota is
+    keyed (POOL, name) and lists its members."""
+    out = {}
+    for key, quota in quotas.items():
+        if key and key[0] == POOL:
+            for member in quota.get('members', ()):
+                out.setdefault(member, key)
+    return out
 
 class PacketTarget:
     """Mutable per-packet assignment state."""
+
+    # Set by auto_packetize when the quotas have pools in them.
+    pool_of = {}
+    # ("pool", members) / ("category", path) / ("groups", ((key, members),...))
+    # for each "tossup and bonus never from the same ..." rule;
+    # ((key, member paths), ...) for every group with limits (a link between
+    # sibling rows of a distribution); and ("pool", members, n) / ("path",
+    # path, n) for every "no sub-category more than n a packet" rule. All
+    # are set by auto_packetize.
+    different = ()
+    groups = ()
+    child_caps = ()
+
+    def group_keys(self, parts):
+        return [key for key, members in self.groups if _under(parts, members)]
 
     def __init__(self, packet, index):
         self.packet = packet
@@ -299,8 +338,11 @@ class PacketTarget:
             return False
         counts = self.counts(qtype)
         max_key = 'max_tu' if qtype == 'tu' else 'max_bs'
-        for i in range(1, len(parts) + 1):
-            prefix = parts[:i]
+        keys = [parts[:i] for i in range(1, len(parts) + 1)]
+        if parts and parts[0] in self.pool_of:
+            keys.append(self.pool_of[parts[0]])
+        keys.extend(self.group_keys(parts))
+        for prefix in keys:
             quota = quotas.get(prefix)
             if not quota:
                 continue
@@ -310,7 +352,32 @@ class PacketTarget:
             combined = _combined_cap(quota)
             if combined is not None and self.combined_count(prefix) >= combined:
                 return False
-        return True
+        for kind, scope, limit in self.child_caps:
+            if kind == 'pool':
+                child = parts[:1] if parts and parts[0] in scope else None
+            else:
+                child = (parts[:len(scope) + 1]
+                         if len(parts) > len(scope) and parts[:len(scope)] == scope else None)
+            if child is not None and self.combined_count(child) >= limit:
+                return False
+        member = self.member_taken_by_other_type(parts, qtype)
+        return member is None
+
+    def member_taken_by_other_type(self, parts, qtype):
+        """The member a "different members" rule says this question would
+        share with the packet's other type, or None if there is no clash."""
+        other = self.bs_counts if qtype == 'tu' else self.tu_counts
+        for kind, scope in self.different:
+            if kind == 'groups':
+                member = next((key for key, members in scope if _under(parts, members)), None)
+            elif kind == 'pool':
+                member = parts[:1] if parts and parts[0] in scope else None
+            else:
+                member = (parts[:len(scope) + 1]
+                          if len(parts) > len(scope) and parts[:len(scope)] == scope else None)
+            if member and other.get(member):
+                return member
+        return None
 
     def take(self, question, parts, qtype):
         self.regular(qtype).append((question, parts))
@@ -318,6 +385,25 @@ class PacketTarget:
         for i in range(1, len(parts) + 1):
             prefix = parts[:i]
             counts[prefix] = counts.get(prefix, 0) + 1
+        if parts and parts[0] in self.pool_of:
+            pool = self.pool_of[parts[0]]
+            counts[pool] = counts.get(pool, 0) + 1
+        for key in self.group_keys(parts):
+            counts[key] = counts.get(key, 0) + 1
+
+    def group_need(self, parts, qtype, quotas):
+        """How far this packet is below a minimum of a group the question
+        belongs to, for this type or either type. The dealer sends a question
+        where it is still needed before anywhere else."""
+        min_key = 'min_tu' if qtype == 'tu' else 'min_bs'
+        need = 0
+        for key in self.group_keys(parts):
+            q = quotas.get(key) or {}
+            if q.get(min_key) is not None:
+                need = max(need, q[min_key] - self.counts(qtype).get(key, 0))
+            if q.get('min_q') is not None:
+                need = max(need, q['min_q'] - self.combined_count(key))
+        return need
 
 def _interleave_groups(groups, rnd):
     """Round-robin merge of question groups so that consecutive questions
@@ -355,6 +441,29 @@ def _compute_budgets(by_top, qtype, quotas, num_targets, capacity):
             budgets[top] = min(avail[top], int(round(float(minimum) * num_targets)))
         else:
             budgets[top] = avail[top]
+
+    # A pool's members have no minimum of their own: they share the pool's,
+    # in proportion to what has been written in each.
+    pools = {}
+    for top in budgets:
+        key = pool_map(quotas).get(top[0]) if top else None
+        if key is not None and not quotas.get(top):
+            pools.setdefault(key, []).append(top)
+    for key, members in pools.items():
+        minimum = quotas[key].get(min_key)
+        if minimum is None:
+            continue
+        want = int(round(float(minimum) * num_targets))
+        weights = [avail[m] for m in members]
+        if sum(weights) <= want:
+            continue
+        shares = [want * w / float(sum(weights)) for w in weights]
+        floors = [int(x) for x in shares]
+        for i in sorted(range(len(members)), key=lambda i: shares[i] - floors[i],
+                        reverse=True)[:want - sum(floors)]:
+            floors[i] += 1
+        for m, f in zip(members, floors):
+            budgets[m] = min(avail[m], f)
 
     total = sum(budgets.values())
     if total > capacity:
@@ -405,6 +514,7 @@ def _deal_questions(questions, qtype, targets, per_packet_limit, quotas, rnd):
             # the fewest of this leaf to spread subcategories
             candidates.sort(key=lambda t: (
                 t.counts(qtype).get(parts[:1], 0) if parts else 0,
+                -t.group_need(parts, qtype, quotas),
                 t.combined_count(parts[:1]) if parts else 0,
                 len(t.regular(qtype)),
                 t.counts(qtype).get(parts, 0),
@@ -494,7 +604,9 @@ def _offset_bonuses(tossups, bonuses, rnd):
 
 def build_quota_dict(qset):
     """Read the saved PacketizationEntry rows for a set into the quota dict
-    used by auto_packetize."""
+    used by auto_packetize. A set on a per-packet distribution adds one quota
+    per pool line, keyed (POOL, name); one per link between sibling rows,
+    keyed (GROUP, line id, parent, link); and its rules."""
     quotas = {}
     for entry in PacketizationEntry.objects.filter(question_set=qset):
         path = tuple(p.strip() for p in entry.path.split(' - ') if p.strip())
@@ -504,7 +616,71 @@ def build_quota_dict(qset):
             'min_bs': entry.min_bonuses,
             'max_bs': entry.max_bonuses,
         }
+    if getattr(qset, 'per_packet_distribution', False):
+        spelled = {}
+        for e in qset.distribution.distributionentry_set.all():
+            if e.category:
+                spelled.setdefault(e.category.strip().lower(), e.category.strip())
+
+        def spell(path):
+            parts = tuple(p.strip() for p in (path or '').split(' - ') if p.strip())
+            return (spelled.get(parts[0].lower(), parts[0]),) + parts[1:] if parts else ()
+
+        from qems2.qsub import distribution_lines as dl
+        for line in qset.distribution_lines.prefetch_related('items'):
+            members = tuple(spelled.get(c.lower(), c) for c in line.category_list())
+            if line.is_pool:
+                quotas[(POOL, line.name)] = {
+                    'min_tu': line.tossups, 'max_tu': line.tossups,
+                    'min_bs': line.bonuses, 'max_bs': line.bonuses,
+                    'members': members,
+                }
+            items = list(line.items.all())
+            for parent, link, idx in dl.link_sets(items, dl.line_links(line, items)):
+                (min_tu, max_tu), (min_bs, max_bs), (min_q, max_q) = dl.link_bounds(items, idx)
+                quotas[(GROUP, line.id, parent, link)] = {
+                    'min_tu': min_tu, 'max_tu': max_tu, 'min_bs': min_bs, 'max_bs': max_bs,
+                    'min_q': min_q, 'max_q': max_q,
+                    'paths': tuple(spell(items[i].path) for i in idx),
+                    'label': '{0} - {1}'.format(line.name, dl.link_label(items, idx))}
+            if line.child_max:
+                cap = (('pool', frozenset(members)) if line.is_pool else ('path', members[:1]))
+                quotas[(RULES, 'child_max', line.id, '')] = {'child_max': cap + (line.child_max,)}
+            for it in items:
+                if it.child_max:
+                    quotas[(RULES, 'child_max', line.id, it.path)] = {
+                        'child_max': ('path', spell(it.path), it.child_max)}
+            if line.groups_differ:
+                scope = ('pool', frozenset(members)) if line.is_pool else ('category', members[:1])
+                quotas[(RULES, 'different', line.name)] = {'different': scope}
+        # Top-level lines linked to share their slots.
+        for link, linked in dl.top_link_sets(qset):
+            (min_tu, max_tu), (min_bs, max_bs), (min_q, max_q) = dl.top_link_bounds(linked)
+            quotas[(GROUP, 'top', link)] = {
+                'min_tu': min_tu, 'max_tu': max_tu, 'min_bs': min_bs, 'max_bs': max_bs,
+                'min_q': min_q, 'max_q': max_q,
+                'paths': tuple(spell(c) for l in linked for c in l.category_list()),
+                'label': ' + '.join(l.name for l in linked)}
     return quotas
+
+
+def group_settings(quotas):
+    """((key, member paths), ...) for every group in a quota dict."""
+    return tuple((key, q['paths']) for key, q in quotas.items() if key[:1] == (GROUP,))
+
+
+def rule_settings(quotas):
+    """The "different members" rules in a quota dict, as PacketTarget wants
+    them."""
+    return tuple(q['different'] for key, q in quotas.items()
+                 if key[:2] == (RULES, 'different'))
+
+
+def child_cap_settings(quotas):
+    """The "no sub-category more than n a packet" rules in a quota dict, as
+    PacketTarget wants them."""
+    return tuple(q['child_max'] for key, q in quotas.items()
+                 if key[:2] == (RULES, 'child_max'))
 
 # EXTRAS_PACKET_NAME comes from utils
 def get_or_create_extras_packet(qset, created_by):
@@ -551,6 +727,15 @@ def auto_packetize(qset, num_packets, tossups_per_packet, bonuses_per_packet,
     rnd = random.Random(seed)
     packets = _ensure_packets(qset, num_packets, created_by)
     targets = [PacketTarget(p, i) for i, p in enumerate(packets)]
+    pools = pool_map(quotas)
+    different = rule_settings(quotas)
+    groups = group_settings(quotas)
+    child_caps = child_cap_settings(quotas)
+    for t in targets:
+        t.pool_of = pools
+        t.different = different
+        t.groups = groups
+        t.child_caps = child_caps
 
     tossups = [(t, get_path_parts(t.category)) for t in
                Tossup.objects.filter(question_set=qset).select_related('category')]
@@ -589,6 +774,7 @@ def auto_packetize(qset, num_packets, tossups_per_packet, bonuses_per_packet,
     # Always created so the default exists even when nothing overflows.
     extras_packet = get_or_create_extras_packet(qset, created_by)
     extras_target = PacketTarget(extras_packet, len(targets))
+    extras_target.pool_of = pools
     for question, parts in still_tu:
         extras_target.take(question, parts, 'tu')
     for question, parts in still_bs:
@@ -641,8 +827,27 @@ def auto_packetize(qset, num_packets, tossups_per_packet, bonuses_per_packet,
     Tossup.objects.bulk_update(changed_tossups, ['packet', 'question_number'], batch_size=200)
     Bonus.objects.bulk_update(changed_bonuses, ['packet', 'question_number'], batch_size=200)
 
+    # Group minimums a packet ended up short of: the packetizer never breaks
+    # a maximum to meet one, so this is where a set short of questions shows.
+    for key, quota in sorted(quotas.items(), key=lambda kv: str(kv[0])):
+        if key[:1] != (GROUP,):
+            continue
+        for min_key, label, count in (
+                ('min_tu', 'tossups', lambda t: t.tu_counts.get(key, 0)),
+                ('min_bs', 'bonuses', lambda t: t.bs_counts.get(key, 0)),
+                ('min_q', 'questions', lambda t: t.combined_count(key))):
+            minimum = quota.get(min_key)
+            if not minimum:
+                continue
+            short = [t.packet.packet_name for t in targets[:-1] if count(t) < minimum]
+            if short:
+                report['warnings'].append(
+                    '{0}: {1} packet(s) have fewer than {2} {3}: {4}'.format(
+                        quota['label'], len(short), minimum, label,
+                        ', '.join(short[:5]) + ('...' if len(short) > 5 else '')))
+
     # Report quota shortfalls at the top level
-    for path, quota in sorted(quotas.items()):
+    for path, quota in sorted(quotas.items(), key=lambda kv: str(kv[0])):
         if len(path) != 1:
             continue
         for qtype, min_key in (('tu', 'min_tu'), ('bs', 'min_bs')):

@@ -34,6 +34,8 @@
         <i class="fa fa-table-cells-large"></i> Dashboard</a>
     <a class="app-nav-item{% if '/category_overview/' in request.path %} active{% endif %}" href="/category_overview/{{ nav_active.id }}/">
         <i class="fa fa-chart-pie"></i> Category Overview</a>
+    <a class="app-nav-item{% if '/set_distribution/' in request.path or '/switch_distribution/' in request.path %} active{% endif %}" href="/set_distribution/{{ nav_active.id }}/">
+        <i class="fa fa-sliders"></i> Distribution</a>
     <a class="app-nav-item{% if '/packet_grid/' in request.path %} active{% endif %}" href="/packet_grid/{{ nav_active.id }}/">
         <i class="fa fa-table-cells"></i> Packet Grid</a>
     {% if nav_first_packet %}
@@ -80,7 +82,7 @@
     back to the list you came from was the browser's back button.
     {% endcomment %}
     <a class="app-nav-item{% if 'distribution' in request.path %} active{% endif %}" href="/distributions/">
-        <i class="fa fa-sliders"></i> Distribution Entry</a>
+        <i class="fa fa-sliders"></i> Old Distributions</a>
     <a class="app-nav-item{% if 'role_group' in request.path %} active{% endif %}" href="/role_groups/">
         <i class="fa fa-users"></i> Role Groups</a>
     {% endif %}
@@ -89,8 +91,10 @@
     Outside the active-set block: a bug is worth reporting whether or not you
     are in a set, and the form is the same either way.
     {% endcomment %}
+    <div class="app-nav-section">QEMS</div>
+    <a class="app-nav-item{% if '/news/' in request.path %} active{% endif %}" href="/news/">
+        <i class="fa fa-bullhorn"></i> News{% with n=news_unread %}{% if n %}<span class="app-nav-dot" title="{{ n }} new"></span>{% endif %}{% endwith %}</a>
     {% if nav_support_on %}
-    <div class="app-nav-section">Support</div>
     <a class="app-nav-item{% if '/report_issue/' in request.path %} active{% endif %}" href="/report_issue/">
         <i class="fa fa-bug"></i> Report a Bug / Idea</a>
     {% endif %}

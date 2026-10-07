@@ -1,0 +1,11 @@
+{% comment %}
+One tiebreak/extras box on the Distribution page. It always shows the line's
+number; `field_set` says whether that number was set by hand. Only a box
+someone has typed in (or that was already set) is saved as a fixed number --
+an untouched box stays the line's automatic share.
+{% endcomment %}
+<input type="number" min="0" class="sd-override{% if is_set %} sd-set{% endif %}" name="line-{{ i }}-{{ field }}"
+       value="{% if is_set %}{{ value }}{% else %}{{ auto|default_if_none:'' }}{% endif %}"
+       data-auto="{{ auto|default_if_none:'' }}" aria-label="{{ label }}"
+       title="{% if is_set %}Set by hand; clear it to go back to the automatic share{% else %}Automatic share{% endif %}">
+<input type="hidden" name="line-{{ i }}-{{ field }}_set" value="{% if is_set %}1{% endif %}">

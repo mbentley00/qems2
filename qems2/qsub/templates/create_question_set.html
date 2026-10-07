@@ -25,37 +25,105 @@
     {% if form.non_field_errors %}<div class="alert-box alert">{{ form.non_field_errors }}</div>{% endif %}
 
     <div class="cqs-card">
-        <h4 class="cqs-heading">The basics</h4>
+        <div class="cqs-heading-row">
+            <h4 class="cqs-heading">The basics</h4>
+            <span class="cqs-req-legend"><span class="cqs-req" aria-hidden="true">*</span> Required</span>
+        </div>
         <div class="cqs-grid">
             <div class="cqs-field">
-                <label for="{{ form.name.id_for_label }}">Set Name</label>
+                <label for="{{ form.name.id_for_label }}">Set Name <span class="cqs-req" aria-hidden="true">*</span></label>
                 {{ form.name }}{{ form.name.errors }}
-                <small>What writers will see everywhere — e.g. "2027 NSC".</small>
             </div>
             <div class="cqs-field">
-                <label for="{{ form.date.id_for_label }}">Due Date</label>
+                <label for="{{ form.date.id_for_label }}">Due Date <span class="cqs-req" aria-hidden="true">*</span></label>
                 {{ form.date }}{{ form.date.errors }}
-                <small>When questions are due (mm/dd/yyyy).</small>
             </div>
             <div class="cqs-field">
-                <label for="{{ form.num_packets.id_for_label }}">Number of Packets</label>
+                <label for="{{ form.num_packets.id_for_label }}">Number of Packets <span class="cqs-req" aria-hidden="true">*</span></label>
                 {{ form.num_packets }}{{ form.num_packets.errors }}
-                <small>Per-packet category quotas are multiplied by this.</small>
             </div>
             <div class="cqs-field">
-                <label for="{{ form.distribution.id_for_label }}">Distribution</label>
-                {{ form.distribution }}{{ form.distribution.errors }}
-                <small>The category template for the set. <a href="/edit_distribution/" target="_blank" rel="noopener">Make a new one</a> if none fit.</small>
+                <span class="cqs-label" id="cqs-size-label">Each packet <span class="cqs-req" aria-hidden="true">*</span></span>
+                <div class="cqs-pair" role="group" aria-labelledby="cqs-size-label">
+                    <label><input type="number" min="1" name="packet_size_tu" value="{{ posted.packet_size_tu|default:'20' }}" required aria-label="Tossups per packet"> TU</label>
+                    <label><input type="number" min="0" name="packet_size_bs" value="{{ posted.packet_size_bs|default:'20' }}"> B</label>
+                    <label class="cqs-tu-only">{{ form.tossups_only }} Tossups only</label>
+                </div>
+            </div>
+            <div class="cqs-field">
+                <span class="cqs-label" id="cqs-tb-label">Tiebreakers in each packet</span>
+                <div class="cqs-pair" role="group" aria-labelledby="cqs-tb-label">
+                    <label><input type="number" min="0" name="tiebreak_tu" value="{{ posted.tiebreak_tu|default:'0' }}"> TU</label>
+                    <label><input type="number" min="0" name="tiebreak_bs" value="{{ posted.tiebreak_bs|default:'0' }}"> B</label>
+                </div>
+                <small>Read after a packet&rsquo;s regular questions. Most sets leave this at 0.</small>
+            </div>
+            <div class="cqs-field">
+                <span class="cqs-label" id="cqs-extras-label">Extra questions in set</span>
+                <div class="cqs-pair" role="group" aria-labelledby="cqs-extras-label">
+                    <label><input type="number" min="0" name="extras_tu" value="{{ posted.extras_tu|default:'0' }}"> TU</label>
+                    <label><input type="number" min="0" name="extras_bs" value="{{ posted.extras_bs|default:'0' }}"> B</label>
+                </div>
+                <small>Spares for a dedicated tiebreaker packet</small>
             </div>
         </div>
+    </div>
 
-        {# Filled in by JS from /distribution_preview/<id>/ as the picker changes. #}
-        <div class="cqs-dist-preview" id="cqs-dist-preview">
-            <div class="cqs-dist-head">
-                <strong id="cqs-dist-name">&nbsp;</strong>
-                <span class="cqs-dist-meta" id="cqs-dist-meta"></span>
+    <div class="cqs-card">
+        <h4 class="cqs-heading">Create Distribution From</h4>
+        {% with src=posted.source|default:'' %}
+        <div class="cqs-sources" role="radiogroup" aria-label="Where the distribution comes from">
+            <label class="cqs-source">
+                <input type="radio" name="source" value="copy"{% if src == 'copy' %} checked{% endif %}{% if not copy_sets %} disabled{% endif %}>
+                <span><strong>Copy from existing set</strong>
+                    <small>Distribution, category tags, tiebreaker / extra totals, adjusted to this set&rsquo;s size.{% if not copy_sets %} (You aren&rsquo;t on any set yet.){% endif %}</small></span>
+            </label>
+            <label class="cqs-source">
+                <input type="radio" name="source" value="write"{% if src == 'write' or not src %} checked{% endif %}>
+                <span><strong>Create new</strong>
+                    <small>Paste the set announcement (&ldquo;4/4 Literature&rdquo;, then its breakdown), or enter the categories one by one.</small></span>
+            </label>
+            <label class="cqs-source">
+                <input type="radio" name="source" value="distribution"{% if src == 'distribution' %} checked{% endif %}>
+                <span><strong>Start from an older QEMS2-style distribution</strong>
+                    <small>One of the shared distributions, its per-packet minimums as the lines.</small></span>
+            </label>
+        </div>
+        {% endwith %}
+
+        <div class="cqs-panel" data-source="copy">
+            <div class="cqs-grid">
+                <div class="cqs-field">
+                    <label for="cqs-copy-source">Set to copy</label>
+                    <select id="cqs-copy-source" name="copy_source">
+                        {% for s in copy_sets %}<option value="{{ s.id }}"{% if posted.copy_source == s.id|stringformat:'s' %} selected{% endif %}>{{ s.name }} &middot; {{ s.num_packets }} packets{% if s.per_packet_distribution %} &middot; {{ s.distribution_lines.count }} lines{% endif %}</option>{% endfor %}
+                    </select>
+                </div>
+                <div class="cqs-field cqs-field-checks">
+                    <label class="cqs-check"><input type="checkbox" name="copy_scale" value="1" checked>
+                        <span>Scale tag quotas to this set&rsquo;s packets</span></label>
+                    <label class="cqs-check"><input type="checkbox" name="copy_extras" value="1">
+                        <span>Also copy its tiebreakers and extras<small>Instead of the numbers above.</small></span></label>
+                </div>
             </div>
-            <div class="cqs-dist-body" id="cqs-dist-body"></div>
+        </div>
+        <div class="cqs-panel" data-source="write">
+            <p class="cqs-note" style="margin:0">You&rsquo;ll set the distribution on the next screen.</p>
+        </div>
+        <div class="cqs-panel" data-source="distribution">
+            <div class="cqs-field">
+                <label for="{{ form.distribution.id_for_label }}">Old distribution</label>
+                {{ form.distribution }}{{ form.distribution.errors }}
+                <small>Its categories are copied into the set. <a href="/edit_distribution/" target="_blank" rel="noopener">Make a new one</a> if none fit.</small>
+            </div>
+            {# Filled in by JS from /distribution_preview/<id>/ as the picker changes. #}
+            <div class="cqs-dist-preview" id="cqs-dist-preview">
+                <div class="cqs-dist-head">
+                    <strong id="cqs-dist-name">&nbsp;</strong>
+                    <span class="cqs-dist-meta" id="cqs-dist-meta"></span>
+                </div>
+                <div class="cqs-dist-body" id="cqs-dist-body"></div>
+            </div>
         </div>
     </div>
 
@@ -80,17 +148,13 @@
         <p class="cqs-note">All of these can be changed later from the set's page.</p>
         <div class="cqs-checks">
             <label class="cqs-check">{{ form.enable_superpower }}
-                <span>Enable superpowers (20-point <code>(+)</code> mark)
-                    <small>Lets tossups carry a 20-point superpower mark before the 15-point power. Off: a stray (+) is plain text and never scores 20.</small></span></label>
+                <span>Enable superpowers (20-point <code>(+)</code> mark)</span></label>
             <label class="cqs-check">{{ form.char_count_ignores_pronunciation_guides }}
                 <span>Character counts ignore pronunciation guides
                     <small>A ("pruh-nun-see-AY-shun") guide doesn't eat into the length limit.</small></span></label>
             <label class="cqs-check">{{ form.guides_require_quotes }}
                 <span>Only quoted parentheses are pronunciation guides
                     <small>On: <code>("DID-er-OW")</code> is a guide, but <code>(a plain aside)</code> is ordinary text — read normally, counted in the length, and left alone by the \P rules.</small></span></label>
-            <label class="cqs-check">{{ form.tossups_only }}
-                <span>Tossup-only tournament (no bonuses)
-                    <small>Hides bonus requirements and quotas. Bonuses are never deleted.</small></span></label>
             <label class="cqs-check">{{ form.structured_answers }}
                 <span>Structured answer lines
                     <small>Records an answer as a primary answer plus its accepts and directed prompts, editable as fields. The printed line is unchanged.</small></span></label>
@@ -120,7 +184,9 @@
 .cqs-check { display: flex; align-items: flex-start; gap: 10px;
     font-weight: 600; color: #2b2f3a; cursor: pointer; }
 .cqs-check input { margin: 2px 0 0; flex: 0 0 auto; }
-.cqs-check small { display: block; font-weight: 400; color: #8a8f9c; margin-top: 3px; }
+.cqs-check small { display: block; font-weight: 400; color: #8a8f9c; margin-top: 3px;
+    /* Foundation shrinks and capitalises <small> inside a label. */
+    text-transform: none; font-size: 0.8rem; line-height: 1.4; }
 .cqs-actions { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-bottom: 2rem; }
 .cqs-actions .button { margin: 0; }
 /* Distribution preview: what you're about to build the set on. */
@@ -134,7 +200,35 @@
 .cqs-dist-table td.num, .cqs-dist-table th.num { text-align: right; padding-right: 14px; white-space: nowrap; }
 .cqs-dist-empty { color: #8a8f9c; font-size: 0.85rem; }
 .cqs-dist-scroll { max-height: 260px; overflow-y: auto; }
-@media (max-width: 760px) { .cqs-grid { grid-template-columns: 1fr; } }
+.cqs-sources { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+.cqs-source { display: flex; gap: 10px; align-items: flex-start; padding: 14px 16px; border: 2px solid #e0e0ea;
+    border-radius: 12px; cursor: pointer; margin: 0; }
+.cqs-source:has(input:checked) { border-color: #6d28d9; background: #f8f4fe; }
+.cqs-source input { margin: 3px 0 0; }
+.cqs-source small { display: block; color: #6b7080; font-size: 0.8rem; margin-top: 4px; line-height: 1.4;
+    text-transform: none; font-weight: 400; }
+.cqs-label { font-weight: 600; font-size: 0.82rem; color: #565b66; }
+.cqs-pair { display: flex; gap: 14px; }
+.cqs-pair label { display: flex; align-items: center; gap: 6px; margin: 0; color: #8a8f9c; font-size: 0.85rem; }
+.cqs-field .cqs-pair input { width: 80px; text-align: center; }
+.cqs-pair label.cqs-tu-only { color: #2b2f3a; font-weight: 600; margin-left: 6px; }
+.cqs-pair label.cqs-tu-only input { width: auto; height: auto; margin: 0; }
+/* A tossup-only set has no bonuses to count. */
+.cqs-no-bonuses .cqs-pair label:has(input[name$="_bs"]) { display: none; }
+.cqs-heading-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.cqs-req { color: #b3261e; font-weight: 700; }
+.cqs-req-legend { color: #8a8f9c; font-size: 0.8rem; }
+/* Django's field errors, shown under the field they belong to. */
+.cqs-field .errorlist { list-style: none; margin: 2px 0 0; padding: 0; color: #b3261e; font-size: 0.82rem; }
+.cqs-field:has(.errorlist) input, .cqs-field:has(.errorlist) select { border-color: #d9534f; }
+.cqs-panel { display: none; }
+.cqs-panel.on { display: block; }
+.cqs-field-checks { justify-content: center; gap: 12px; }
+.cqs-field-checks .cqs-check input { height: auto; width: auto; margin: 3px 0 0; }
+.cqs-field-checks .cqs-check small { text-transform: none; }
+@media (max-width: 760px) { .cqs-grid, .cqs-sources { grid-template-columns: 1fr; } }
+html[data-theme="dark"] .cqs-source { border-color: var(--qx-border); }
+html[data-theme="dark"] .cqs-source:has(input:checked) { background: var(--qx-card); }
 html[data-theme="dark"] .cqs-card { background: var(--qx-card); border-color: var(--qx-border); }
 html[data-theme="dark"] .cqs-heading, html[data-theme="dark"] .cqs-check { color: var(--qx-ink); }
 html[data-theme="dark"] .cqs-dist-table th { border-bottom-color: var(--qx-border); }
@@ -142,6 +236,19 @@ html[data-theme="dark"] .cqs-dist-table td { border-bottom-color: var(--qx-borde
 </style>
 
 <script>
+$(function () {
+    function showSource() {
+        var src = $('input[name="source"]:checked').val();
+        $('.cqs-panel').each(function () { $(this).toggleClass('on', $(this).data('source') === src); });
+    }
+    $(document).on('change', 'input[name="source"]', showSource);
+    showSource();
+
+    var $tuOnly = $('#{{ form.tossups_only.id_for_label }}');
+    function showBonuses() { $('.cqs-form').toggleClass('cqs-no-bonuses', $tuOnly.prop('checked')); }
+    $tuOnly.on('change', showBonuses);
+    showBonuses();
+});
 $(function () {
     var $select = $('#{{ form.distribution.id_for_label }}'),
         $name = $('#cqs-dist-name'), $meta = $('#cqs-dist-meta'), $body = $('#cqs-dist-body');

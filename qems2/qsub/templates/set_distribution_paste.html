@@ -1,0 +1,334 @@
+{% extends "base.html" %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% block title %}{{ qset.name }} - Create Distribution - QEMS3{% endblock %}
+
+{% block content %}
+<ul class="breadcrumbs">
+    <li><a href="/edit_question_set/{{ qset.id }}/">{{ qset.name }}</a></li>
+    <li><a href="/set_distribution/{{ qset.id }}/">Distribution</a></li>
+    <li class="current"><a href="/set_distribution/{{ qset.id }}/paste/">Paste an announcement</a></li>
+</ul>
+
+<p class="sp-kicker">{{ qset.name }} &middot; {{ qset.num_packets }} packets of {{ qset.tossups_per_packet }} / {{ qset.bonuses_per_packet }}</p>
+<h3 class="page-header" style="margin-bottom:6px">Create Distribution</h3>
+<p class="sp-lede">Paste it the way a set would be written out in a tournament announcement. See the examples tab.
+    Show which lines are sub-categories by indenting them (tab, spaces or a dash), ending their category with a
+    colon, or putting a blank line between categories whose sub-categories add up to them.</p>
+
+{% for message in messages %}
+<div class="alert-box {% if message.tags == 'error' %}alert{% else %}{{ message.tags }}{% endif %}">{{ message }}</div>
+{% endfor %}
+
+{% if has_lines %}
+<div class="alert-box alert sp-overwrite">
+    <strong>This set already has a distribution. Pasting replaces all of it.</strong>
+    Every category, sub-category, rule, note and hand-set tiebreaker or extra on the Distribution page is
+    thrown away and rebuilt from what you paste. There is no undo. To change a few numbers, edit the
+    <a href="/set_distribution/{{ qset.id }}/">Distribution page</a> instead.
+</div>
+{% endif %}
+
+<form method="post" action="/set_distribution/{{ qset.id }}/paste/">
+{% csrf_token %}
+<input type="hidden" name="new" value="{% if new_set %}1{% endif %}">
+<div class="sp-grid{% if parsed %} sp-grid-review{% endif %}">
+    <div class="sp-card">
+        <div class="sp-tabs" role="tablist">
+            <button type="button" role="tab" class="sp-tab active" id="sp-tab-paste" aria-selected="true" aria-controls="sp-panel-paste">Your announcement</button>
+            <button type="button" role="tab" class="sp-tab" id="sp-tab-example" aria-selected="false" aria-controls="sp-panel-example">Example</button>
+        </div>
+
+        <div role="tabpanel" id="sp-panel-paste" aria-labelledby="sp-tab-paste">
+            <div class="sp-toolbar" role="toolbar" aria-label="Structure">
+                <button type="button" class="sp-tool" id="sp-indent" title="Make the selected lines sub-categories (Tab)">&rarr; Indent</button>
+                <button type="button" class="sp-tool" id="sp-outdent" title="Make the selected lines categories (Shift+Tab)">&larr; Outdent</button>
+                <span class="sp-tool-hint">Tab indents, Shift+Tab outdents, Enter keeps the indent.</span>
+            </div>
+            <textarea id="sp-text" name="text" class="sp-text" aria-label="Your announcement" spellcheck="false" placeholder="4/4 Literature
+    1/1 American Literature (Emily Bussa)
+    1/1 British Literature
+...">{{ text }}</textarea>
+            <div class="sp-read">
+                <button type="submit" name="action" value="review" class="button secondary small">Parse</button>
+                <a href="/set_distribution/{{ qset.id }}/">or enter the categories by hand</a>
+            </div>
+        </div>
+
+        <div role="tabpanel" id="sp-panel-example" aria-labelledby="sp-tab-example" hidden>
+            <p class="sp-hint" style="margin-top:0">Each category with its count per packet (tossups / bonuses), and
+                its sub-categories indented under it. Indenting other categories under a heading
+                (&ldquo;Other&rdquo; below) makes them share its count.</p>
+<pre class="sp-example" id="sp-example">4/4 Literature
+    1/1 American Literature
+    1/1 British Literature
+    1/1 European Literature
+    1/1 World Literature
+4/4 History
+    1/1 American History
+    1/1 European History
+    1/1 World History
+    1/1 Other History
+5/5 Science
+    1.25/1.25 Biology
+    1/1 Chemistry
+    1/1 Physics
+    1/1 Math
+    0.75/0.75 Other Science
+3/3 Fine Arts
+    1/1 Painting and Sculpture
+    1/1 Music
+    1/1 Other Fine Arts
+3/3 Religion, Mythology and Philosophy
+    1/1 Religion
+    1/1 Mythology
+    1/1 Philosophy
+1/1 Other
+    0.5/0.5 Geography
+    0.5/0.5 Current Events</pre>
+            <button type="button" class="button secondary small" id="sp-use-example">Use this example</button>
+        </div>
+    </div>
+
+    {% if parsed %}
+    <div class="sp-card">
+        <div class="sp-counts">
+            <span class="sp-pill sp-ok">{{ parsed.counts.match }} matched</span>
+            {% if parsed.counts.close %}<span class="sp-pill sp-close">{{ parsed.counts.close }} close match{{ parsed.counts.close|pluralize:"es" }} to confirm</span>{% endif %}
+            {% if parsed.counts.new %}<span class="sp-pill sp-new">{{ parsed.counts.new }} new</span>{% endif %}
+            {% if parsed.counts.pool %}<span class="sp-pill sp-close">{{ parsed.counts.pool }} combined</span>{% endif %}
+            <span class="sp-total">{{ parsed.total_tu|floatformat:"-2" }} / {{ parsed.total_bs|floatformat:"-2" }} per packet</span>
+        </div>
+        <table class="sp-table">
+            <thead><tr><th class="num">Per packet</th><th>Pasted</th><th></th><th>Becomes</th><th>Subject editor</th></tr></thead>
+            <tbody>
+            {% for b in parsed.blocks %}
+                <tr class="sp-head-row">
+                    <td class="num">{{ b.tu|floatformat:"-2" }} / {{ b.bs|floatformat:"-2" }}</td>
+                    <td>{{ b.pasted }}</td>
+                    <td><span class="sp-chip sp-chip-{{ b.status }}">{% if b.status == 'pool' %}COMBINED{% else %}{{ b.status|upper }}{% endif %}</span></td>
+                    <td>{{ b.becomes }}</td>
+                    <td>{{ b.editor }}</td>
+                </tr>
+                {% for c in b.children %}
+                <tr>
+                    <td class="num">{{ c.tu|floatformat:"-2" }} / {{ c.bs|floatformat:"-2" }}</td>
+                    <td class="sp-indent">{{ c.pasted }}</td>
+                    <td><span class="sp-chip sp-chip-{{ c.status }}">{{ c.status|upper }}</span></td>
+                    <td>{{ c.becomes }}</td>
+                    <td>{{ c.editor }}</td>
+                </tr>
+                {% endfor %}
+                {% for note in b.notes %}
+                <tr><td></td><td colspan="4" class="sp-note-row">{{ note }}</td></tr>
+                {% endfor %}
+            {% endfor %}
+            </tbody>
+        </table>
+        {% if parsed.flat %}
+        <div class="alert-box warning sp-alert"><strong>No sub-categories found,</strong> so every line was read as
+            a category of its own. If some are sub-categories, indent them under their category, or end the
+            category with a colon, and parse again.</div>
+        {% endif %}
+        {% if parsed.orphans %}
+        <div class="alert-box warning sp-alert">Indented with no category above, so read as categories:
+            {{ parsed.orphans|join:"; " }}</div>
+        {% endif %}
+        {% if parsed.unread %}
+        <div class="alert-box warning sp-alert">Not read (no count at the start): {{ parsed.unread|join:"; " }}</div>
+        {% endif %}
+        {% if parsed.mismatch %}
+        <div class="alert-box warning sp-alert sp-mismatch">
+            <p>These categories add up to <strong>{{ parsed.mismatch.pasted }}</strong> per packet, but a packet in this
+                set is <strong>{{ parsed.mismatch.set }}</strong>.</p>
+            {% if parsed.mismatch.whole %}
+            <label class="sp-option"><input type="radio" name="resize" value="1">
+                <span>Change the set to {{ parsed.mismatch.pasted }} per packet</span></label>
+            <label class="sp-option"><input type="radio" name="resize" value="0" checked>
+                <span>Keep {{ parsed.mismatch.set }} and save the counts as pasted. The Distribution page will warn
+                    until they add up to {{ parsed.mismatch.set }}.</span></label>
+            {% else %}
+            <p>A packet can only hold whole questions, so the counts need to change. Fix the text and parse again, or
+                save it as pasted and fix the counts on the Distribution page, which will warn until they add up to
+                {{ parsed.mismatch.set }}.</p>
+            {% endif %}
+        </div>
+        {% endif %}
+        <p class="sp-hint"><strong>CLOSE</strong> lines were matched to an existing name that isn&rsquo;t spelled the same;
+            <strong>NEW</strong> ones become new categories. Edit the text and parse it again to change either. Names in
+            brackets are tagged as subject editors if they are on this set.</p>
+        {% if parsed.blocks and impact %}
+        <div class="sp-impact">
+            <strong>Accepting replaces this set&rsquo;s distribution. You will lose:</strong>
+            <ul>
+                {% if impact.categories %}<li>All {{ impact.categories }} current categor{{ impact.categories|pluralize:"y,ies" }}{% if impact.rows %}, with their {{ impact.rows }} sub-category row{{ impact.rows|pluralize }}{% endif %}</li>{% endif %}
+                {% if impact.rules %}<li>Per-packet rules and hand-set links ({{ impact.rules }})</li>{% endif %}
+                {% if impact.hand_set %}<li>Hand-set tiebreakers or extras on {{ impact.hand_set }} categor{{ impact.hand_set|pluralize:"y,ies" }}</li>{% endif %}
+                {% if impact.removed %}<li>{{ impact.removed|length }} categor{{ impact.removed|length|pluralize:"y,ies" }} the paste leaves out, deleted: {{ impact.removed|join:", " }}</li>{% endif %}
+            </ul>
+            {% if impact.kept %}
+            <strong>Kept, because questions are filed under them</strong> &mdash; they will be unbudgeted until you
+            recategorize those questions or add the categories back:
+            <ul>{% for path, n in impact.kept %}<li>{{ path }} ({{ n }} question{{ n|pluralize }})</li>{% endfor %}</ul>
+            {% endif %}
+            {% if impact.orphaned_tags %}<p>{{ impact.orphaned_tags }} category tag{{ impact.orphaned_tags|pluralize }} on categories not in the paste will stay but count nothing.</p>{% endif %}
+            <p>Not affected: questions, packets, the packet count, tiebreakers per packet and extras per set.
+                <strong>There is no undo.</strong></p>
+            <label class="sp-confirm"><input type="checkbox" name="confirm_replace" value="1" required>
+                I understand this replaces the current distribution</label>
+        </div>
+        {% endif %}
+        {% if parsed.blocks %}
+        <div class="sp-actions">
+            <a class="button secondary small" href="/set_distribution/{{ qset.id }}/">Back</a>
+            {% if impact %}
+            <button type="submit" name="action" value="accept" class="button alert small">Replace the distribution</button>
+            {% else %}
+            <button type="submit" name="action" value="accept" class="button primary small">Accept{% if decisions %} with {{ decisions }} note{{ decisions|pluralize }}{% endif %} and save</button>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+</form>
+
+<style>
+.sp-kicker { color: #6b7080; margin: 0 0 4px; }
+.sp-lede { color: #555a68; max-width: 900px; }
+.sp-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; margin-bottom: 2rem; }
+.sp-grid-review { grid-template-columns: minmax(280px, 0.8fr) minmax(0, 1.6fr); }
+.sp-card { background: #fff; border: 1px solid #e6e6ee; border-radius: 14px; padding: 14px 18px; }
+.sp-label { font-weight: 600; }
+.sp-read { display: flex; align-items: center; gap: 14px; }
+.sp-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 6px; }
+.sp-tool { background: var(--qx-card, #fff); border: 1px solid #e0e0ea; border-radius: 7px; padding: 4px 10px;
+    font-size: 0.82rem; font-weight: 600; color: #3b3f4c; margin: 0; cursor: pointer; }
+.sp-tool:hover, .sp-tool:focus { background: #f3f3f7; color: #20232e; }
+.sp-tool-hint { color: #8a8f9c; font-size: 0.8rem; margin-left: 6px; }
+.sp-text { tab-size: 4; }
+.sp-tabs { display: flex; gap: 4px; border-bottom: 1px solid #e6e6ee; margin-bottom: 10px; }
+.sp-tab { background: none; border: 0; border-bottom: 2px solid transparent; margin: 0 0 -1px; padding: 6px 12px;
+    font-size: 0.9rem; font-weight: 600; color: #6b7080; cursor: pointer; }
+.sp-tab.active { color: #20232e; border-bottom-color: #6d28d9; }
+.sp-tab:hover, .sp-tab:focus { background: none; color: #20232e; }
+.sp-example { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.85rem; line-height: 1.55;
+    background: #fafafc; border: 1px solid #e6e6ee; border-radius: 8px; padding: 10px 12px; margin: 0 0 10px;
+    max-height: 420px; overflow: auto; white-space: pre; }
+html[data-theme="dark"] .sp-example { background: var(--qx-card); border-color: var(--qx-border); }
+.sp-overwrite { margin-bottom: 14px; }
+.sp-mismatch p { margin: 0 0 6px; }
+.sp-option { display: flex; gap: 8px; align-items: flex-start; margin: 4px 0 0; color: inherit; }
+.sp-option input { margin: 3px 0 0; }
+.sp-overwrite a { color: #fff; text-decoration: underline; }
+.sp-impact { margin-top: 14px; padding: 12px 16px; border: 1px solid #f0b4ad; border-radius: 10px; background: #fff5f4;
+    color: #5c1a14; font-size: 0.88rem; }
+.sp-impact ul { margin: 4px 0 10px 1.2rem; }
+.sp-impact p { margin: 0 0 8px; }
+.sp-confirm { display: flex; gap: 8px; align-items: center; font-weight: 600; color: #5c1a14; margin: 0; }
+.sp-confirm input { margin: 0; }
+.sp-read .button { margin: 0; }
+.sp-text { min-height: 420px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.85rem; line-height: 1.55; }
+.sp-counts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+.sp-pill { padding: 3px 10px; border-radius: 999px; font-size: 0.8rem; font-weight: 600; }
+.sp-ok { background: #dff3e6; color: #1c5e33; }
+.sp-close { background: #e3f0fb; color: #144a78; }
+.sp-new { background: #fdecd3; color: #7a4a08; }
+.sp-total { margin-left: auto; color: #555a68; font-size: 0.85rem; }
+.sp-table { width: 100%; border: 0; font-size: 0.85rem; margin: 0; }
+.sp-table th, .sp-table td { padding: 5px 8px; }
+.sp-table .num { text-align: left; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.sp-head-row td { background: #fafafc; font-weight: 600; }
+.sp-indent { padding-left: 22px !important; }
+.sp-chip { display: inline-block; padding: 1px 7px; border-radius: 6px; font-size: 0.66rem; font-weight: 700; }
+.sp-chip-match { background: #dff3e6; color: #1c5e33; }
+.sp-chip-close, .sp-chip-pool { background: #e3f0fb; color: #144a78; }
+.sp-chip-new { background: #fdecd3; color: #7a4a08; }
+.sp-note-row { color: #7a4a08; font-size: 0.8rem; }
+.sp-alert { margin: 10px 0 0; }
+.sp-check { display: inline-flex; gap: 6px; align-items: center; margin: 0 0 0 14px; }
+.sp-check input { margin: 0; }
+.sp-hint { color: #6b7080; font-size: 0.8rem; margin: 10px 0 0; }
+.sp-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.sp-actions .button { margin: 0; }
+@media (max-width: 900px) { .sp-grid-review { grid-template-columns: 1fr; } .sp-text { min-height: 240px; } }
+html[data-theme="dark"] .sp-card { background: var(--qx-card); border-color: var(--qx-border); }
+html[data-theme="dark"] .sp-head-row td { background: var(--qx-card); }
+</style>
+
+<script>
+$(function () {
+    function show(which) {
+        ['paste', 'example'].forEach(function (name) {
+            var on = name === which;
+            $('#sp-tab-' + name).toggleClass('active', on).attr('aria-selected', on ? 'true' : 'false');
+            $('#sp-panel-' + name).prop('hidden', !on);
+        });
+    }
+    $('#sp-tab-paste').on('click', function () { show('paste'); });
+    $('#sp-tab-example').on('click', function () { show('example'); });
+    // Structure is indentation, so the box makes indenting easy: Tab and
+    // Shift+Tab (or the buttons) indent and outdent every line the selection
+    // touches, and Enter starts the next line at the same indent.
+    var INDENT = '    ';
+    var ta = document.getElementById('sp-text');
+    function shift(out) {
+        var v = ta.value, a = ta.selectionStart, b = ta.selectionEnd;
+        var start = v.lastIndexOf('\n', a - 1) + 1;
+        var end = v.indexOf('\n', b > a && v[b - 1] === '\n' ? b - 1 : b);
+        if (end < 0) { end = v.length; }
+        var collapsed = a === b;
+        var before = v.slice(start, end);
+        var block = before.split('\n').map(function (line) {
+            // With just a caret, its own line is indented even while empty,
+            // so Tab-then-type works on a fresh line.
+            if (!out) { return (line.trim() || collapsed) ? INDENT + line : line; }
+            var m = line.match(/^(\t| {1,4}|[-*\u2022]\s*)/);
+            return m ? line.slice(m[0].length) : line;
+        }).join('\n');
+        ta.setRangeText(block, start, end, 'preserve');
+        if (collapsed) {
+            // Keep typing where you were: the caret moves with its line.
+            var caret = Math.max(start, a + block.length - before.length);
+            ta.selectionStart = ta.selectionEnd = caret;
+        } else {
+            ta.selectionStart = start;
+            ta.selectionEnd = start + block.length;
+        }
+        ta.focus();
+    }
+    $('#sp-indent').on('click', function () { shift(false); });
+    $('#sp-outdent').on('click', function () { shift(true); });
+    $(ta).on('keydown', function (e) {
+        if (e.key === 'Tab') {
+            e.preventDefault();
+            shift(e.shiftKey);
+        } else if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+            var v = ta.value, a = ta.selectionStart;
+            var line = v.slice(v.lastIndexOf('\n', a - 1) + 1, a);
+            var lead = (line.match(/^(\s*(?:[-*\u2022]\s+)?)/) || [''])[0];
+            if (!lead) { return; }
+            e.preventDefault();
+            // Enter on an empty indented line ends the indent instead.
+            if (!line.slice(lead.length).trim()) {
+                ta.setRangeText('', a - line.length, a, 'end');
+                return;
+            }
+            ta.setRangeText('\n' + lead, a, ta.selectionEnd, 'end');
+        }
+    });
+
+    // Copy the example in to try it, or to edit it into your own.
+    $('#sp-use-example').on('click', function () {
+        var $text = $('#sp-text');
+        if ($.trim($text.val()) && !window.confirm('Replace what you have pasted with the example?')) { return; }
+        $text.val($('#sp-example').text());
+        show('paste');
+        $text.trigger('focus');
+    });
+});
+</script>
+{% endblock %}

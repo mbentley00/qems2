@@ -1,0 +1,4 @@
+<span class="sd-tag {% if p.over %}over{% elif p.complete %}ok{% else %}short{% endif %}" title="{{ tag.category_path|default:'Whole set' }}">
+    <span>{{ tag.name }}</span>
+    <span class="sd-tag-n">{% if tag.num_questions or tag.max_questions is not None %}{{ p.q_done }}{% if tag.num_questions %} / &ge; {{ tag.num_questions }}{% endif %}{% if tag.max_questions is not None %} &le; {{ tag.max_questions }}{% endif %}{% else %}{{ p.tu_done }}&middot;{{ p.bs_done }}{% if tag.num_tossups or tag.num_bonuses %} / &ge; {{ tag.num_tossups }}&middot;{{ tag.num_bonuses }}{% endif %}{% endif %}</span>
+</span>

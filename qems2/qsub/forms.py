@@ -65,9 +65,15 @@ class QuestionSetForm(forms.ModelForm):
         # owner's: they're set when the set is created and changed only from
         # the review page. Left in, the form would render neither but demand
         # both, so every submit would fail validation.
+        # The per-packet distribution's fields live on the Distribution page.
+        # Left here, a settings save -- which never renders them -- would
+        # turn the distribution off and zero the extras.
         exclude = ['owner', 'address', 'host', 'max_vhsl_bonus_length',
                    'tossups_per_packet', 'bonuses_per_packet',
-                   'approval_status', 'approval_date']
+                   'approval_status', 'approval_date',
+                   'per_packet_distribution', 'tiebreak_tossups_per_packet',
+                   'tiebreak_bonuses_per_packet', 'extra_tossups', 'extra_bonuses',
+                   'legacy_requirements']
 
     def clean_question_table_columns(self):
         """Only keys the model knows, in its own order. The value is a list the
@@ -509,6 +515,9 @@ class ImportSetForm(forms.Form):
         list is the permission check as well as the menu -- importing thousands
         of questions into somebody else's tournament is not undoable by hand."""
         writer = kwargs.pop('writer', None)
+        # Only an administrator may create a new set by importing; anyone else
+        # imports into one of their own.
+        self.allow_new_set = kwargs.pop('allow_new_set', True)
         super(ImportSetForm, self).__init__(*args, **kwargs)
         if writer is not None:
             self.fields['target_set'].queryset = QuestionSet.objects.filter(
@@ -519,6 +528,10 @@ class ImportSetForm(forms.Form):
         cleaned = super().clean()
         name = (cleaned.get('set_name') or '').strip()
         target = cleaned.get('target_set')
+        if not self.allow_new_set:
+            if name or not target:
+                raise forms.ValidationError('Choose one of your sets to import into.')
+            return cleaned
         if not name and not target:
             raise forms.ValidationError(
                 'Enter a new set name, or choose an existing set to add to.')
@@ -558,6 +571,7 @@ class ImportPacketsForm(forms.Form):
         importing a packet into it. A ModelChoiceField validates the posted id
         against this queryset, so it's the check as well as the list."""
         writer = kwargs.pop('writer', None)
+        self.allow_new_set = kwargs.pop('allow_new_set', True)
         super(ImportPacketsForm, self).__init__(*args, **kwargs)
         if writer is not None:
             self.fields['target_set'].queryset = QuestionSet.objects.filter(
@@ -568,6 +582,10 @@ class ImportPacketsForm(forms.Form):
         cleaned = super().clean()
         name = (cleaned.get('set_name') or '').strip()
         target = cleaned.get('target_set')
+        if not self.allow_new_set:
+            if name or not target:
+                raise forms.ValidationError('Choose one of your sets to add the packets to.')
+            return cleaned
         if not name and not target:
             raise forms.ValidationError('Enter a new tournament name, or choose an existing set to add to.')
         if name and target:

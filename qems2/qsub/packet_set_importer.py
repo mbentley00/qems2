@@ -38,6 +38,7 @@ from qems2.qsub.packet_parser import parse_packet_data, is_answer, is_bpart, ans
 from qems2.qsub.utils import (QUESTION_CREATE, ACF_STYLE_TOSSUP, ACF_STYLE_BONUS,
                               InvalidTossup, InvalidBonus)
 from qems2.qsub import signals as qems_signals
+from qems2.qsub import distribution_lines
 from qems2.qsub import category_mapper
 
 
@@ -476,6 +477,14 @@ def _yapp_author(q, resolve, owner):
     return resolve(metadata_author(q.get('metadata'))) or owner
 
 
+def _yapp_credit(q, resolve):
+    """The "credit to" text when the question's author has no account and
+    none was made for them."""
+    if resolve is None or not hasattr(resolve, 'credit'):
+        return ''
+    return resolve.credit(metadata_author(q.get('metadata')))
+
+
 # --- YAPP question builders ------------------------------------------------
 
 
@@ -486,7 +495,7 @@ def _build_tossup_from_yapp(t, qset, owner, acf_type, lookup, resolve=None):
         tossup_text=_html_to_qems(t.get('question', ''), is_answer=False),
         tossup_answer=_html_to_qems(answer_html, is_answer=True),
         category=_question_category(t, is_bonus=False, lookup=lookup),
-        author=_yapp_author(t, resolve, owner),
+        author=_yapp_author(t, resolve, owner), author_text=_yapp_credit(t, resolve),
         question_type=acf_type, locked=False, edited=False)
 
 
@@ -513,7 +522,7 @@ def _build_bonus_from_yapp(b, qset, owner, acf_type, lookup, resolve=None):
         part2_text=part(1), part2_answer=ans(1), part2_difficulty=diff(1),
         part3_text=part(2), part3_answer=ans(2), part3_difficulty=diff(2),
         category=_question_category(b, is_bonus=True, lookup=lookup),
-        author=_yapp_author(b, resolve, owner),
+        author=_yapp_author(b, resolve, owner), author_text=_yapp_credit(b, resolve),
         question_type=acf_type, locked=False, edited=False)
 
 
@@ -873,12 +882,14 @@ def _unique_packet_name(name, used):
     return '{0} ({1})'.format(name, i)
 
 
-def import_packets_into_set(uploaded_files, qset, owner):
+def import_packets_into_set(uploaded_files, qset, owner, create_accounts=True):
     """Add packets (one per uploaded file) to an EXISTING question set."""
-    return import_packets_from_files(uploaded_files, owner=owner, existing_qset=qset)
+    return import_packets_from_files(uploaded_files, owner=owner, existing_qset=qset,
+                                     create_accounts=create_accounts)
 
 
-def import_packets_from_files(uploaded_files, set_name=None, owner=None, existing_qset=None):
+def import_packets_from_files(uploaded_files, set_name=None, owner=None, existing_qset=None,
+                              create_accounts=True):
     """Import packet files (.json/.docx/.pdf), one Packet per file. Creates a new
     QuestionSet named `set_name`, or — when `existing_qset` is given — adds the
     packets to that set. Returns a summary dict; raises PacketImportError on a
@@ -900,7 +911,9 @@ def import_packets_from_files(uploaded_files, set_name=None, owner=None, existin
     # survives even for writers who have no account here — the alternative is
     # crediting every imported question to whoever pressed Import.
     from . import set_importer as _set_importer
-    legacy_ids, author_resolve = _set_importer._author_resolver(owner)
+    members = (None if create_accounts
+               else list(_set_importer._set_member_writers(existing_qset, owner)))
+    legacy_ids, author_resolve = _set_importer._author_resolver(owner, create_accounts, members)
 
     try:
         with transaction.atomic():
@@ -986,6 +999,8 @@ def import_packets_from_files(uploaded_files, set_name=None, owner=None, existin
                 # Grow the packet count by however many packets we added.
                 qset.num_packets = (qset.num_packets or 0) + len(prepared)
                 qset.save(update_fields=['num_packets'])
+                # More packets means bigger set totals for a per-packet set.
+                distribution_lines.derive(qset)
 
             summary['question_set'] = qset
             summary['added_to_existing'] = existing_qset is not None

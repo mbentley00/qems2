@@ -1,0 +1,8 @@
+<div class="sd-size-card">
+    <span class="sd-size-label" id="sd-{{ name }}-label">{{ label }}</span>
+    <div class="sd-pair" role="group" aria-labelledby="sd-{{ name }}-label">
+        <label class="sd-pair-field"><input type="number" min="0" id="sd-{{ name }}-tu" name="{{ name }}_tu" value="{{ tu }}"><span>TU</span></label>
+        <label class="sd-pair-field"><input type="number" min="0" id="sd-{{ name }}-bs" name="{{ name }}_bs" value="{{ bs }}"><span>B</span></label>
+    </div>
+    {% if per_set %}<small class="sd-pair-total">{{ per_set }}</small>{% endif %}
+</div>

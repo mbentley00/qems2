@@ -6493,9 +6493,29 @@ class SuperpowerTests(TestCase):
         self.client.login(username='sp_owner', password='pw')
 
     def test_render_bolds_through_last_mark(self):
+        # Bold through the last mark, in two runs so the screen can tell the
+        # superpower (to the (+)) from the power (from there to the (*)).
         from qems2.qsub.utils import get_formatted_question_html
         html = get_formatted_question_html('a (+) b (*) c', True, True, False, True)
-        self.assertEqual(html, '<strong>a (+) b (*)</strong> c')
+        self.assertEqual(html, '<strong class="q-superpower">a (+)</strong>'
+                               '<strong class="q-power-run"> b (*)</strong> c')
+
+    def test_one_mark_is_one_plain_run(self):
+        from qems2.qsub.utils import get_formatted_question_html
+        self.assertEqual(get_formatted_question_html('a (*) c', True, True, False, True),
+                         '<strong>a (*)</strong> c')
+        self.assertEqual(get_formatted_question_html('a (+) c', True, True, False, True),
+                         '<strong>a (+)</strong> c')
+
+    def test_pdf_still_prints_both_runs_bold(self):
+        # Exports know nothing of the screen-only split: both runs print bold.
+        from qems2.qsub import pdf_export
+        from qems2.qsub.utils import get_formatted_question_html
+        written = []
+        with mock.patch.object(pdf_export, '_write_text',
+                               lambda pdf, data, family, style, size, color: written.append((data, style))):
+            pdf_export._RunWriter(None).feed(get_formatted_question_html('a (+) b (*) c', True, True, False, True))
+        self.assertEqual(written, [('a (+)', 'B'), (' b (*)', 'B'), (' c', '')])
 
     def test_guide_inside_power_region_stays_a_guide(self):
         # A guide within the bolded power region keeps the gray, non-bold
@@ -6504,7 +6524,8 @@ class SuperpowerTests(TestCase):
         html = get_formatted_question_html('a ("AY") (+) b (*) c', True, True, False, True)
         self.assertEqual(
             html,
-            '<strong>a <strong class="pronunciation-guide">("AY")</strong> (+) b (*)</strong> c')
+            '<strong class="q-superpower">a <strong class="pronunciation-guide">("AY")</strong> (+)</strong>'
+            '<strong class="q-power-run"> b (*)</strong> c')
 
     def test_reading_reports_both_indices(self):
         from qems2.qsub.views import _tossup_reading
@@ -12367,7 +12388,7 @@ class PendingSetListTests(TestCase):
         self.client.login(username='ps_admin', password='pw')
         body = self.client.get('/question_sets/').content.decode()
         self.assertIn('/pending_sets/', body)
-        self.assertIn('Sets Awaiting Approval (1)', body)
+        self.assertIn('Sets awaiting approval <span class="hm-badge">1</span>', body)
 
     def test_the_home_page_offers_nothing_to_an_ordinary_user(self):
         self.client.login(username='ps_new', password='pw')
@@ -13075,6 +13096,18 @@ class ImportIntoExistingSetCategoryTests(TestCase):
         got = sorted(str(t.category) for t in self.qset.tossup_set.all())
         self.assertEqual(got, ['Fine Arts - Audio', 'History - American',
                                'Other - Geography', 'RMP - Mythology'])
+
+    def test_per_packet_set_totals_grow_with_imported_packets(self):
+        from qems2.qsub import distribution_lines as dl
+        dl.switch_set(self.qset, [{'name': 'History', 'categories': ['History'],
+                                   'tu': Decimal('2'), 'bs': Decimal('1')}])
+        self._import(['A, History - American&gt; ~1~ &lt;Editor: B'])
+        self.qset.refresh_from_db()
+        self.assertEqual(self.qset.num_packets, 3)
+        rows = SetWideDistributionEntry.objects.filter(
+            question_set=self.qset, dist_entry__category='History')
+        self.assertEqual(sum(r.num_tossups for r in rows), 6)
+        self.assertEqual(sum(r.num_bonuses for r in rows), 3)
 
     def test_a_category_with_no_home_leaves_the_question_uncategorized(self):
         lean = Distribution.objects.create(name='Science only')
@@ -16309,3 +16342,1276 @@ class SidebarOutsideASetTests(TestCase):
         body = self.client.get('/edit_distribution/{0}/'.format(self.dist.id)).content.decode()
         self.assertIn('href="/distributions/"', body)
         self.assertIn('href="/role_groups/"', body)
+
+
+from qems2.qsub import distribution_lines as dl
+from qems2.qsub import news
+
+
+class PerPacketDistributionTests(TestCase):
+    """The per-packet distribution: switching an existing set onto it without
+    breaking anything, working out its totals, going back, and starting new
+    sets from it."""
+
+    def setUp(self):
+        self.owner_user = User.objects.create_user('ppd_owner', password='pw', email='o@ppd.com',
+                                                   first_name='PPD', last_name='Owner')
+        self.owner_user.date_joined = timezone.now() - timedelta(days=30)
+        self.owner_user.save()
+        self.owner = Writer.objects.get(user=self.owner_user)
+        self.other_user = User.objects.create_user('ppd_other', password='pw', email='x@ppd.com')
+        self.other = Writer.objects.get(user=self.other_user)
+
+        self.dist = Distribution.objects.create(name='ACF Regular 2024', public=True)
+        self.e = {}
+        for cat, sub in [('Literature', 'American'), ('Literature', 'British'),
+                         ('Science', 'Biology'), ('Science', 'Chemistry'),
+                         ('Fine Arts', 'Painting'), ('Geography', ''), ('Current Events', ''),
+                         ('Trash', 'Video Games')]:
+            self.e[(cat, sub)] = DistributionEntry.objects.create(
+                distribution=self.dist, category=cat, subcategory=sub,
+                min_tossups=1, max_tossups=1, min_bonuses=1, max_bonuses=1)
+        self.qset = self._set('Spring Invitational', self.owner, 12)
+        self.neighbour = self._set('Neighbour Set', self.other, 12)
+        totals = {('Literature', 'American'): (24, 24), ('Literature', 'British'): (24, 24),
+                  ('Science', 'Biology'): (26, 24), ('Science', 'Chemistry'): (24, 24),
+                  ('Fine Arts', 'Painting'): (35, 36), ('Geography', ''): (6, 6),
+                  ('Current Events', ''): (6, 6), ('Trash', 'Video Games'): (0, 0)}
+        for key, (tu, bs) in totals.items():
+            for s in (self.qset, self.neighbour):
+                SetWideDistributionEntry.objects.create(
+                    question_set=s, dist_entry=self.e[key], num_tossups=tu, num_bonuses=bs)
+        PacketizationEntry.objects.create(question_set=self.qset, path='Science', depth=0,
+                                          min_tossups=4, max_tossups=4, min_bonuses=4, max_bonuses=4)
+        CategorySuperGroup.objects.create(question_set=self.qset, name='Geo / CE',
+                                          categories='Geography\nCurrent Events')
+        self.tu = self._tossup(self.qset, ('Literature', 'American'))
+        self.trash_tu = self._tossup(self.qset, ('Trash', 'Video Games'))
+        self.n_tu = self._tossup(self.neighbour, ('Literature', 'American'))
+        self.client.login(username='ppd_owner', password='pw')
+
+    def _set(self, name, owner, packets):
+        qs = QuestionSet.objects.create(
+            name=name, date=timezone.now(), host='h', address='', owner=owner,
+            num_packets=packets, distribution=self.dist, tossups_per_packet=20, bonuses_per_packet=20)
+        owner.question_set_editor.add(qs)
+        return qs
+
+    def _tossup(self, qset, key):
+        entry = self.e[key]
+        if qset.distribution_id != entry.distribution_id:
+            entry = qset.distribution.distributionentry_set.get(
+                category=entry.category, subcategory=entry.subcategory)
+        return Tossup.objects.create(
+            author=qset.owner, question_set=qset, tossup_text='A clue.', tossup_answer='_a_',
+            category=entry, created_date=datetime.now(), last_changed_date=datetime.now())
+
+    def _totals(self, qset):
+        out = {}
+        for s in qset.setwidedistributionentry_set.select_related('dist_entry'):
+            top = s.dist_entry.category
+            agg = out.setdefault(top, [0, 0])
+            agg[0] += s.num_tossups
+            agg[1] += s.num_bonuses
+        return {k: tuple(v) for k, v in out.items()}
+
+    def _switch(self, **extra):
+        proposal = dl.propose_lines(self.qset)
+        data = {}
+        for row in proposal['rows']:
+            if row['include']:
+                data['row-{0}-include'.format(row['index'])] = '1'
+            data['row-{0}-tu'.format(row['index'])] = dl.fmt(row['tu'])
+            data['row-{0}-bs'.format(row['index'])] = dl.fmt(row['bs'])
+        data.update(extra)
+        resp = self.client.post('/switch_distribution/{0}/'.format(self.qset.id), data)
+        self.qset.refresh_from_db()
+        return resp
+
+    # --- existing sets ----------------------------------------------------
+
+    def test_an_existing_set_is_left_alone_until_its_owner_switches(self):
+        before = self._totals(self.qset)
+        resp = self.client.get('/set_distribution/{0}/'.format(self.qset.id))
+        self.assertRedirects(resp, '/switch_distribution/{0}/'.format(self.qset.id))
+        self.assertContains(self.client.get('/switch_distribution/{0}/'.format(self.qset.id)),
+                            'Doesn’t divide evenly')
+        self.qset.refresh_from_db()
+        self.assertFalse(self.qset.per_packet_distribution)
+        self.assertEqual(self._totals(self.qset), before)
+        self.assertEqual(self.qset.distribution_id, self.dist.id)
+
+    def test_the_proposal_reads_what_the_set_stores(self):
+        rows = {r['name']: r for r in dl.propose_lines(self.qset)['rows']}
+        self.assertEqual(rows['Literature']['kind'], 'same')
+        self.assertEqual((rows['Literature']['tu'], rows['Literature']['bs']), (4, 4))
+        self.assertEqual(rows['Science']['kind'], 'quota')        # the quota wins over 50/48
+        self.assertEqual(rows['Fine Arts']['kind'], 'decide')     # 35 doesn't divide by 12
+        self.assertEqual((rows['Fine Arts']['tu'], rows['Fine Arts']['bs']), (3, 3))
+        self.assertEqual(rows['Geo / CE']['kind'], 'pool')
+        self.assertEqual(rows['Geo / CE']['categories'], ['Geography', 'Current Events'])
+        self.assertEqual((rows['Geo / CE']['tu'], rows['Geo / CE']['bs']), (1, 1))
+        self.assertEqual(rows['Trash']['kind'], 'gap')            # a question, no requirement
+        self.assertFalse(rows['Trash']['include'])
+
+    def test_only_the_owner_can_switch(self):
+        self.qset.editor.add(self.other)
+        self.client.login(username='ppd_other', password='pw')
+        resp = self._switch()
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(self.qset.per_packet_distribution)
+
+    def test_switching_works_out_totals_and_keeps_every_question_where_it_was(self):
+        resp = self._switch()
+        self.assertRedirects(resp, '/set_distribution/{0}/'.format(self.qset.id))
+        self.assertTrue(self.qset.per_packet_distribution)
+        totals = self._totals(self.qset)
+        self.assertEqual(totals['Literature'], (48, 48))
+        self.assertEqual(totals['Science'], (48, 48))
+        self.assertEqual(totals['Fine Arts'], (36, 36))
+        self.assertEqual(totals['Geography'][0] + totals['Current Events'][0], 12)
+        self.assertEqual(totals['Trash'], (0, 0))
+        self.tu.refresh_from_db()
+        self.assertEqual((self.tu.category.category, self.tu.category.subcategory), ('Literature', 'American'))
+        self.assertEqual(Tossup.objects.filter(question_set=self.qset).count(), 2)
+        self.assertTrue(CategorySuperGroup.objects.filter(question_set=self.qset, name='Geo / CE').exists())
+
+    def test_switching_a_shared_distribution_never_reaches_another_set(self):
+        neighbour_before = self._totals(self.neighbour)
+        self._switch()
+        self.assertNotEqual(self.qset.distribution_id, self.dist.id)
+        self.assertEqual(self.qset.distribution.owner_set_id, self.qset.id)
+        self.tu.refresh_from_db()
+        self.assertEqual(self.tu.category.distribution_id, self.qset.distribution_id)
+        self.n_tu.refresh_from_db()
+        self.assertEqual(self.n_tu.category.distribution_id, self.dist.id)
+        self.assertEqual(self._totals(self.neighbour), neighbour_before)
+        self.assertEqual(self.dist.distributionentry_set.count(), 8)
+        # Adding a category to this set's own distribution leaves the template alone.
+        self.client.post('/set_distribution/{0}/'.format(self.qset.id), self._page_post(
+            extra_lines=[{'name': 'Philosophy', 'categories': 'Philosophy', 'tu': '0', 'bs': '0'}]))
+        self.assertFalse(self.dist.distributionentry_set.filter(category='Philosophy').exists())
+        self.assertTrue(self.qset.distribution.distributionentry_set.filter(category='Philosophy').exists())
+
+    def test_going_back_restores_exactly_what_the_set_had(self):
+        before = self._totals(self.qset)
+        self._switch()
+        self.assertNotEqual(self._totals(self.qset), before)
+        resp = self.client.post('/set_distribution/{0}/revert/'.format(self.qset.id))
+        self.assertEqual(resp.status_code, 302)
+        self.qset.refresh_from_db()
+        self.assertFalse(self.qset.per_packet_distribution)
+        self.assertEqual(self._totals(self.qset), before)
+        self.assertEqual(list(PacketizationEntry.objects.filter(question_set=self.qset)
+                              .values_list('path', 'min_tossups')), [('Science', Decimal('4.0'))])
+        self.assertFalse(CategorySuperGroup.objects.filter(question_set=self.qset,
+                                                           from_distribution=True).exists())
+
+    def test_old_tiebreak_entries_can_become_extras(self):
+        TieBreakDistributionEntry.objects.create(question_set=self.qset, dist_entry=self.e[('Science', 'Biology')],
+                                                 num_tossups=2, num_bonuses=0)
+        self._switch(tiebreak_as_extras='1')
+        self.assertEqual((self.qset.extra_tossups, self.qset.extra_bonuses), (2, 0))
+        self.assertEqual(self._totals(self.qset)['Science'], (50, 48))
+
+    def test_a_settings_save_keeps_the_switch_and_moves_the_totals(self):
+        self._switch()
+        form = QuestionSetForm(writer=self.owner, instance=self.qset)
+        data = {}
+        for name, field in form.fields.items():
+            value = form.initial.get(name, field.initial)
+            if isinstance(value, bool):
+                if value:
+                    data[name] = 'on'
+            elif value is not None:
+                data[name] = getattr(value, 'pk', value)
+        data.update({'num_packets': 10, 'distribution': self.dist.id, 'date': '2026-08-01'})
+        self.client.post('/edit_question_set/{0}/'.format(self.qset.id), data)
+        self.qset.refresh_from_db()
+        self.assertTrue(self.qset.per_packet_distribution)
+        self.assertEqual(self.qset.num_packets, 10)
+        self.assertNotEqual(self.qset.distribution_id, self.dist.id)   # not moved back onto the template
+        self.assertEqual(self._totals(self.qset)['Literature'], (40, 40))
+
+    def test_legacy_page_points_at_the_new_one(self):
+        body = self.client.get('/question_set_distribution/{0}/'.format(self.qset.id)).content.decode()
+        self.assertIn('/switch_distribution/{0}/'.format(self.qset.id), body)
+        self._switch()
+        resp = self.client.get('/question_set_distribution/{0}/'.format(self.qset.id))
+        self.assertRedirects(resp, '/set_distribution/{0}/'.format(self.qset.id))
+
+    # --- the Distribution page -----------------------------------------
+
+    def _page_post(self, extra_lines=(), **header):
+        lines = list(self.qset.distribution_lines.all())
+        data = {'num_packets': header.get('num_packets', self.qset.num_packets),
+                'size': header.get('size', '20 / 20'), 'tiebreak': header.get('tiebreak', '0 / 0'),
+                'extras': header.get('extras', '0 / 0'),
+                'line_count': len(lines) + len(extra_lines)}
+        for i, l in enumerate(lines):
+            data.update({'line-{0}-name'.format(i): l.name,
+                         'line-{0}-categories'.format(i): ', '.join(l.category_list()),
+                         'line-{0}-tu'.format(i): dl.fmt(l.tossups), 'line-{0}-bs'.format(i): dl.fmt(l.bonuses),
+                         'line-{0}-item_count'.format(i): l.items.count()})
+            if l.is_pool:
+                data['line-{0}-pool'.format(i)] = '1'
+            for j, it in enumerate(l.items.all()):
+                data.update({'line-{0}-item-{1}-path'.format(i, j): it.path,
+                             'line-{0}-item-{1}-tu'.format(i, j): dl.fmt(it.tossups),
+                             'line-{0}-item-{1}-bs'.format(i, j): dl.fmt(it.bonuses)})
+        for k, extra in enumerate(extra_lines):
+            i = len(lines) + k
+            data.update({'line-{0}-{1}'.format(i, key): value for key, value in extra.items()})
+        return data
+
+    def test_the_page_renders_and_saving_moves_every_total_with_the_packets(self):
+        self._switch()
+        resp = self.client.get('/set_distribution/{0}/'.format(self.qset.id))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'Unbudgeted: Trash')
+        resp = self.client.post('/set_distribution/{0}/'.format(self.qset.id),
+                                self._page_post(num_packets=13))
+        self.assertEqual(resp.status_code, 302)
+        self.qset.refresh_from_db()
+        self.assertEqual(self.qset.num_packets, 13)
+        self.assertEqual(self._totals(self.qset)['Literature'], (52, 52))
+
+    def test_a_category_on_two_lines_is_refused_without_losing_the_edits(self):
+        self._switch()
+        resp = self.client.post('/set_distribution/{0}/'.format(self.qset.id), self._page_post(
+            extra_lines=[{'name': 'Again', 'categories': 'Literature', 'tu': '1', 'bs': '1'}]))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'is in two categories')
+        self.assertContains(resp, 'value="Again"')
+
+    def test_writers_can_look_but_not_change(self):
+        self._switch()
+        self.qset.writer.add(self.other)
+        self.client.login(username='ppd_other', password='pw')
+        self.assertEqual(self.client.get('/set_distribution/{0}/'.format(self.qset.id)).status_code, 200)
+        before = self._totals(self.qset)
+        self.client.post('/set_distribution/{0}/'.format(self.qset.id), self._page_post(num_packets=20))
+        self.assertEqual(self._totals(self.qset), before)
+
+    # --- the arithmetic --------------------------------------------------
+
+    def test_fractions_tiebreakers_and_extras_add_up_exactly(self):
+        self._switch()
+        self.qset.num_packets = 10
+        self.qset.tiebreak_tossups_per_packet = 1
+        self.qset.extra_tossups = 7
+        self.qset.save()
+        sci = self.qset.distribution_lines.get(name='Science')
+        sci.tossups = Decimal('4.25')
+        sci.save()
+        lit = self.qset.distribution_lines.get(name='Literature')
+        lit.tossups = Decimal('3.75')
+        lit.extra_tossups = 3
+        lit.save()
+        totals = dl.line_totals(self.qset)
+        summary = totals['set']['tu']
+        self.assertEqual(summary['tiebreak'], 10)
+        self.assertEqual(summary['extras'], 7)
+        self.assertEqual(totals[lit.id]['tu']['extras'], 3)
+        self.assertEqual(summary['packets'], int(round(float(summary['per_packet']) * 10)))
+        self.assertEqual(sum(totals[l.id]['tu']['total'] for l in self.qset.distribution_lines.all()),
+                         summary['total'])
+        dl.derive(self.qset)
+        self.assertEqual(sum(t[0] for t in self._totals(self.qset).values()), summary['total'])
+
+    def test_tiebreakers_and_extras_can_be_set_by_hand_per_line(self):
+        self._switch()
+        data = self._page_post(tiebreak='1 / 1', extras='10 / 10')
+        lit = [k for k, v in data.items() if v == 'Literature' and k.endswith('-name')][0].split('-')[1]
+        data.update({'line-{0}-tb_tu'.format(lit): '6', 'line-{0}-tb_tu_set'.format(lit): '1',
+                     'line-{0}-extra_bs'.format(lit): '4', 'line-{0}-extra_bs_set'.format(lit): '1',
+                     # Shown but untouched: stays automatic.
+                     'line-{0}-extra_tu'.format(lit): '9'})
+        data.pop('size')
+        data.update({'size_tu': '20', 'size_bs': '20'})
+        self.client.post('/set_distribution/{0}/'.format(self.qset.id), data)
+        self.qset.refresh_from_db()
+        self.assertEqual((self.qset.tossups_per_packet, self.qset.bonuses_per_packet), (20, 20))
+        line = self.qset.distribution_lines.get(name='Literature')
+        self.assertEqual((line.tiebreak_tossups, line.tiebreak_bonuses), (6, None))
+        totals = dl.line_totals(self.qset)
+        self.assertEqual(totals[line.id]['tu']['tiebreak'], 6)
+        self.assertEqual(totals[line.id]['bs']['extras'], 4)
+        self.assertEqual(totals['set']['tu']['tiebreak'], 12)   # the other lines share the other 6
+        self.assertEqual(totals['set']['bs']['extras'], 10)
+        self.assertEqual(self._totals(self.qset)['Literature'], (48 + 6 + totals[line.id]['tu']['extras'],
+                                                                  48 + totals[line.id]['bs']['tiebreak'] + 4))
+
+    def test_largest_remainder(self):
+        self.assertEqual(dl.largest_remainder(10, [1, 1, 1]), [4, 3, 3])
+        self.assertEqual(sum(dl.largest_remainder(125, [1.25, 1, 1, 1, 0.75])), 125)
+        self.assertEqual(dl.largest_remainder(3, [0, 0]), [2, 1])
+
+    def test_a_pool_caps_its_categories_together_in_the_packetizer(self):
+        self._switch()
+        quotas = build_quota_dict(self.qset)
+        self.assertIn((POOL, 'Geo / CE'), quotas)
+        for n in range(6):
+            self._tossup(self.qset, ('Geography', ''))
+            self._tossup(self.qset, ('Current Events', ''))
+        auto_packetize(self.qset, 3, 20, 20, quotas, created_by=self.owner, seed=1)
+        for p in Packet.objects.filter(question_set=self.qset).exclude(packet_name=EXTRAS_PACKET_NAME):
+            n_pool = Tossup.objects.filter(packet=p, category__category__in=['Geography', 'Current Events']).count()
+            self.assertLessEqual(n_pool, 1)
+
+    # --- new sets ----------------------------------------------------------
+
+    def _create(self, **data):
+        base = {'name': 'Brand New', 'date': '2026-08-01', 'distribution': self.dist.id,
+                'num_packets': 10, 'max_acf_tossup_length': 750, 'max_acf_bonus_length': 400}
+        base.update(data)
+        return self.client.post('/create_question_set/', base)
+
+    def test_a_new_set_from_an_old_distribution_owns_a_copy(self):
+        self._create(packet_size='8 / 8')
+        new = QuestionSet.objects.get(name='Brand New')
+        self.assertTrue(new.per_packet_distribution)
+        self.assertEqual(new.distribution.owner_set_id, new.id)
+        self.assertEqual((new.tossups_per_packet, new.bonuses_per_packet), (8, 8))
+        self.assertEqual(self._totals(new)['Literature'], (20, 20))   # 2 per packet x 10
+        self.assertEqual(new.distribution_lines.count(), 6)
+
+    def test_copying_a_set_scales_its_tags_and_stays_independent(self):
+        self._switch()
+        CategoryTag.objects.create(question_set=self.qset, category_path='Literature', name='Poetry',
+                                   num_tossups=12, num_bonuses=6)
+        self._create(source='copy', copy_source=self.qset.id, copy_scale='1')
+        new = QuestionSet.objects.get(name='Brand New')
+        self.assertEqual(new.distribution_lines.count(), self.qset.distribution_lines.count())
+        tag = CategoryTag.objects.get(question_set=new, name='Poetry')
+        self.assertEqual((tag.num_tossups, tag.num_bonuses), (10, 5))
+        self.assertNotEqual(new.distribution_id, self.qset.distribution_id)
+        self.assertEqual(self._totals(new)['Literature'], (40, 40))
+        lit = new.distribution_lines.get(name='Literature')
+        lit.tossups = 6
+        lit.save()
+        dl.derive(new)
+        self.assertEqual(self._totals(self.qset)['Literature'], (48, 48))
+
+    def test_cannot_copy_a_set_you_are_not_on(self):
+        self._create(source='copy', copy_source=self.neighbour.id)
+        new = QuestionSet.objects.get(name='Brand New')
+        self.assertEqual(new.distribution_lines.count(), 6)   # fell back to the old distribution
+
+    def test_writing_it_by_pasting_the_announcement(self):
+        resp = self._create(source='write')
+        new = QuestionSet.objects.get(name='Brand New')
+        self.assertRedirects(resp, '/set_distribution/{0}/paste/?new=1'.format(new.id),
+                             fetch_redirect_response=False)
+        text = ('4/4 Literature\n  1/1 American Literature (PPD Owner)\n  - 1/1 British Literature\n'
+                '\t2/2 European Literature\n'
+                '2/2 Other\n    1/1 Geography\n    1/1 Current Events\n'
+                '1.5/1.5 Beliefs\n  * 1/1 Narratives\n  * 0.5/0.5 Practices\n')
+        resp = self.client.post('/set_distribution/{0}/paste/'.format(new.id),
+                                {'text': text, 'action': 'review'})
+        self.assertContains(resp, 'Literature - American')
+        self.assertContains(resp, 'Combined: the categories indented under')
+        self.client.post('/set_distribution/{0}/paste/'.format(new.id),
+                         {'text': text, 'action': 'accept', 'resize': '0'})
+        new.refresh_from_db()
+        lines = {l.name: l for l in new.distribution_lines.all()}
+        self.assertEqual(set(lines), {'Literature', 'Other', 'Beliefs'})
+        self.assertTrue(lines['Other'].is_pool)
+        self.assertEqual(lines['Other'].category_list(), ['Geography', 'Current Events'])
+        self.assertEqual(self._totals(new)['Literature'], (40, 40))
+        self.assertEqual(self._totals(new)['Beliefs'], (15, 15))
+        self.assertEqual(
+            set(new.distribution.distributionentry_set.filter(category='Literature')
+                .values_list('subcategory', flat=True)),
+            {'American', 'British', 'European'})
+        self.assertTrue(EditorTag.objects.filter(question_set=new, editor=self.owner,
+                                                 category='Literature - American').exists())
+
+    def test_only_indented_lines_are_sub_categories(self):
+        known = {'Literature': {'American', 'British'}, 'History': {'American', 'European'},
+                 'Science': {'Biology'}, 'Geography': set(), 'Current Events': set()}
+        parsed = dl.parse_announcement(
+            '4/4 Literature\n  1/1 American Literature\n  3/3 British Literature\n'
+            '4/4 History\n1/1 Trash\n1.25/1.25 Science\n', known, packet_size=(20, 20))
+        names = [(b['name'], b['status'], len(b['children'])) for b in parsed['blocks']]
+        self.assertEqual(names, [('Literature', 'match', 2), ('History', 'match', 0),
+                                 ('Trash', 'new', 0), ('Science', 'match', 0)])
+        self.assertFalse(parsed['flat'])
+        # The same lines unindented: every one is its own category, and the
+        # review says nothing was indented.
+        flat = dl.parse_announcement('4/4 Literature\n1/1 American Literature\n3/3 British Literature\n', known)
+        self.assertEqual([len(b['children']) for b in flat['blocks']], [0, 0, 0])
+        self.assertTrue(flat['flat'])
+        self.assertEqual(parsed['mismatch']['pasted'], '10.25 / 10.25')
+
+    # --- the tree: links and per-packet rules ---------------------------------
+
+    def _rework(self, line_name, items=None, **fields):
+        """Rewrite one line of the set: its rows (dicts) and any fields."""
+        specs = dl.specs_from_set(self.qset)
+        spec = [x for x in specs if x['name'] == line_name][0]
+        if items is not None:
+            spec['items'] = [dict({'tu': None, 'bs': None, 'link': None, 'child_max': None}, **it) for it in items]
+        spec.update(fields)
+        dl.apply_lines(self.qset, specs)
+        self.qset.refresh_from_db()
+        return self.qset.distribution_lines.get(name=line_name)
+
+    def _pack(self, packets=3):
+        self.qset.refresh_from_db()
+        return auto_packetize(self.qset, packets, 20, 20, build_quota_dict(self.qset),
+                              created_by=self.owner, seed=3)
+
+    def _bonus(self, key):
+        entry = self.qset.distribution.distributionentry_set.get(
+            category=key[0], subcategory=key[1])
+        return Bonus.objects.create(
+            author=self.owner, question_set=self.qset, leadin='L', part1_text='a', part1_answer='_a_',
+            part2_text='b', part2_answer='_b_', part3_text='c', part3_answer='_c_',
+            category=entry, created_date=datetime.now(), last_changed_date=datetime.now())
+
+    def _in_packet(self, packet, keys, model=None):
+        models = [model] if model else [Tossup, Bonus]
+        return sum(m.objects.filter(packet=packet, category__category=k[0], category__subcategory=k[1]).count()
+                   for m in models for k in keys)
+
+    def _packets(self):
+        return Packet.objects.filter(question_set=self.qset).exclude(packet_name=EXTRAS_PACKET_NAME)
+
+    def _half_and_half(self):
+        D = Decimal
+        return [{'path': 'Literature - American', 'tu': D('0.5'), 'bs': D('0.5')},
+                {'path': 'Literature - British', 'tu': D('0.5'), 'bs': D('0.5')}]
+
+    def test_auto_links_join_the_siblings_that_make_whole_numbers(self):
+        D = Decimal
+        self.assertEqual(dl.auto_links([(D('0.5'), D('0.5')), (D('0.5'), D('0.5'))]), [1, 1])
+        # The smallest whole sets first; whole counts are never linked.
+        self.assertEqual(dl.auto_links([(D('0.5'), D('0.5')), (D('0.25'), D('0.25')), (D('0.5'), D('0.5')),
+                                        (D('0.75'), D('0.75')), (1, 1)]), [1, 2, 1, 2, None])
+        # Six minor sub-categories that only make one slot all together.
+        minor = [(D('0.2'), D('0.2'))] * 4 + [(D('0.1'), D('0.1'))] * 2
+        self.assertEqual(dl.auto_links(minor), [1] * 6)
+        # What can't make a whole number shares its parent's fraction.
+        rows = [{'path': 'Fine Arts - Auditory', 'tu': D('1.5'), 'bs': D('1.5')},
+                {'path': 'Fine Arts - Auditory - Classical', 'tu': D(1), 'bs': D(1)},
+                {'path': 'Fine Arts - Auditory - Opera', 'tu': D('0.25'), 'bs': D('0.25')},
+                {'path': 'Fine Arts - Auditory - Jazz', 'tu': D('0.25'), 'bs': D('0.25')},
+                {'path': 'Fine Arts - Visual', 'tu': D('1.5'), 'bs': D('1.5')}]
+        self.assertEqual(dl.item_parents([r['path'] for r in rows]), [None, 0, 0, 0, None])
+        self.assertEqual(dl.resolve_links(rows), [1, None, 1, 1, 1])
+
+    def test_linked_rows_share_one_slot_a_packet(self):
+        self._switch()
+        line = self._rework('Literature', self._half_and_half())
+        self.assertEqual([it.link for it in line.items.all()], [1, 1])
+        for n in range(3):
+            for sub in ('American', 'British'):
+                self._tossup(self.qset, ('Literature', sub))
+                self._bonus(('Literature', sub))
+        self._pack(packets=3)
+        lit = [('Literature', 'American'), ('Literature', 'British')]
+        for p in self._packets():
+            self.assertEqual(self._in_packet(p, lit, Tossup), 1, p.packet_name)
+            self.assertEqual(self._in_packet(p, lit, Bonus), 1, p.packet_name)
+        self.assertEqual(dl.rule_problems(self.qset), [])
+
+    def test_no_sub_category_more_than_n_a_packet(self):
+        self._switch()
+        self._rework('Literature', [], child_max=1)
+        for n in range(4):
+            self._tossup(self.qset, ('Literature', 'American'))
+            self._bonus(('Literature', 'American'))
+        self._pack(packets=3)
+        for p in self._packets():
+            self.assertLessEqual(self._in_packet(p, [('Literature', 'American')]), 1, p.packet_name)
+
+    def test_a_short_link_is_reported_not_forced(self):
+        self._switch()
+        self._rework('Literature', self._half_and_half())
+        self._tossup(self.qset, ('Literature', 'British'))
+        report = self._pack(packets=3)
+        self.assertTrue(any('Literature - American + British' in w and 'fewer than 1 tossups' in w
+                            for w in report['warnings']), report['warnings'])
+
+    def test_never_the_same_sub_category(self):
+        self._switch()
+        self._rework('Literature', groups_differ=True)
+        for n in range(4):
+            for sub in ('American', 'British'):
+                self._tossup(self.qset, ('Literature', sub))
+                self._bonus(('Literature', sub))
+        self._pack(packets=3)
+        for p in self._packets():
+            for sub in ('American', 'British'):
+                both = (self._in_packet(p, [('Literature', sub)], Tossup)
+                        and self._in_packet(p, [('Literature', sub)], Bonus))
+                self.assertFalse(both, '{0}: {1}'.format(p.packet_name, sub))
+        self.assertEqual(dl.rule_problems(self.qset), [])
+
+    def test_never_the_same_keeps_a_combined_categorys_tossup_and_bonus_apart(self):
+        self._switch()
+        geo = self.qset.distribution_lines.get(name='Geo / CE')
+        geo.tossups, geo.bonuses, geo.groups_differ = 1, 1, True
+        geo.save()
+        for n in range(3):
+            self._tossup(self.qset, ('Geography', ''))
+            self._bonus(('Geography', ''))
+            self._tossup(self.qset, ('Current Events', ''))
+            self._bonus(('Current Events', ''))
+        self._pack(packets=3)
+        for p in self._packets():
+            tu = set(Tossup.objects.filter(packet=p, category__category__in=['Geography', 'Current Events'])
+                     .values_list('category__category', flat=True))
+            bs = set(Bonus.objects.filter(packet=p, category__category__in=['Geography', 'Current Events'])
+                     .values_list('category__category', flat=True))
+            self.assertFalse(tu & bs, p.packet_name)
+
+    def _tree_post(self, line_name, rows, **fields):
+        data = self._page_post()
+        i = [k for k, v in data.items() if v == line_name and k.endswith('-name')][0].split('-')[1]
+        data['line-{0}-item_count'.format(i)] = str(len(rows))
+        for j, row in enumerate(rows):
+            for field, value in row.items():
+                data['line-{0}-item-{1}-{2}'.format(i, j, field)] = value
+        for field, value in fields.items():
+            data['line-{0}-{1}'.format(i, field)] = value
+        return self.client.post('/set_distribution/{0}/'.format(self.qset.id), data)
+
+    def test_rows_nest_and_are_checked_against_their_parent(self):
+        from qems2.qsub.distribution_views import _lines_from_post
+        post = {'line_count': '1', 'line-0-name': 'Fine Arts', 'line-0-tu': '3', 'line-0-bs': '3',
+                'line-0-item_count': '4',
+                'line-0-item-0-path': 'Fine Arts - Auditory', 'line-0-item-0-tu': '1.5',
+                'line-0-item-0-bs': '1.5', 'line-0-item-0-child_max': '1',
+                'line-0-item-1-path': 'Fine Arts - Auditory - Classical', 'line-0-item-1-tu': '1',
+                'line-0-item-1-bs': '1',
+                'line-0-item-2-path': 'Fine Arts - Auditory - Opera', 'line-0-item-2-tu': '0.5',
+                'line-0-item-2-bs': '0.5',
+                'line-0-item-3-path': 'Fine Arts - Visual', 'line-0-item-3-tu': '1.5', 'line-0-item-3-bs': '1.5'}
+        display, specs, errors = _lines_from_post(post, ['Fine Arts'])
+        # 1 / 1 Classical is two questions; Auditory allows one per sub-category.
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn('no sub-category of Auditory may give a packet more than 1 question', errors[0])
+        self.assertEqual([(r['label'], r['depth']) for r in display[0]['items']],
+                         [('Auditory', 1), ('Classical', 2), ('Opera', 2), ('Visual', 1)])
+        post['line-0-item-0-child_max'] = '2'
+        self.assertEqual(_lines_from_post(post, ['Fine Arts'])[2], [])
+        post['line-0-item-2-tu'] = post['line-0-item-2-bs'] = '1'
+        errors = _lines_from_post(post, ['Fine Arts'])[2]
+        self.assertTrue(any('the rows under Auditory add up to 2 / 2 a packet, more than its own 1.5 / 1.5'
+                            in e for e in errors), errors)
+
+    def test_impossible_rules_are_refused_on_save(self):
+        self._switch()
+        before = list(self.qset.distribution_lines.get(name='Literature').items.values_list('path', 'tossups'))
+        resp = self._tree_post('Literature', [
+            {'path': 'Literature - American', 'tu': '1', 'bs': '1'},
+            {'path': 'Literature - British', 'tu': '1', 'bs': '0'},
+        ], child_max='1', groups_differ='1')
+        self.assertContains(resp, 'may give a packet more than 1 question')
+        self.assertContains(resp, 'asks every packet for a tossup and a bonus')
+        self.assertEqual(list(self.qset.distribution_lines.get(name='Literature').items
+                              .values_list('path', 'tossups')), before)
+
+    def test_hand_set_links_and_rules_save_from_the_page_and_are_copied(self):
+        self._switch()
+        self._tree_post('Literature', [
+            {'path': 'Literature - American', 'tu': '0.5', 'bs': '0.5', 'link': '2'},
+            {'path': 'Literature - British', 'tu': '0.5', 'bs': '0.5', 'link': '2'},
+            {'path': 'Literature - European', 'tu': '1', 'bs': '1', 'link': '', 'child_max': '1'},
+        ], links_auto='0', child_max='2')
+        line = self.qset.distribution_lines.get(name='Literature')
+        self.assertEqual((line.links_auto, line.child_max), (False, 2))
+        self.assertEqual([(it.path, it.link, it.child_max) for it in line.items.all()],
+                         [('Literature - American', 1, None), ('Literature - British', 1, None),
+                          ('Literature - European', None, 1)])
+        quotas = build_quota_dict(self.qset)
+        link = quotas[(GROUP, line.id, None, 1)]
+        self.assertEqual((link['min_tu'], link['max_tu'], link['max_q'], link['paths']),
+                         (1, 1, 2, (('Literature', 'American'), ('Literature', 'British'))))
+        self.assertEqual(quotas[(RULES, 'child_max', line.id, '')]['child_max'], ('path', ('Literature',), 2))
+        # Unlinked by hand: no link at all, though the counts would make one.
+        self._tree_post('Literature', [
+            {'path': 'Literature - American', 'tu': '0.5', 'bs': '0.5', 'link': ''},
+            {'path': 'Literature - British', 'tu': '0.5', 'bs': '0.5', 'link': '1'},
+        ], links_auto='0')
+        line = self.qset.distribution_lines.get(name='Literature')
+        self.assertEqual([it.link for it in line.items.all()], [None, None])
+        self._tree_post('Literature', [
+            {'path': 'Literature - American', 'tu': '0.5', 'bs': '0.5', 'link': '1'},
+            {'path': 'Literature - British', 'tu': '0.5', 'bs': '0.5', 'link': '1'},
+        ], links_auto='0', child_max='1')
+        self._create(source='copy', copy_source=self.qset.id)
+        copied = QuestionSet.objects.get(name='Brand New').distribution_lines.get(name='Literature')
+        self.assertEqual((copied.links_auto, copied.child_max, [it.link for it in copied.items.all()]),
+                         (False, 1, [1, 1]))
+
+    def test_top_level_categories_link_too(self):
+        self._switch()
+        D = Decimal
+        self._rework('Geo / CE', [], tu=D('0.5'), bs=D('0.5'))
+        line = self._rework('Literature', [], tu=D('3.5'), bs=D('3.5'))
+        geo = self.qset.distribution_lines.get(name='Geo / CE')
+        self.assertEqual((line.link, geo.link), (1, 1))
+        quota = build_quota_dict(self.qset)[(GROUP, 'top', 1)]
+        self.assertEqual((quota['min_tu'], quota['max_tu'], quota['label']), (4, 4, 'Geo / CE + Literature'))
+        self.assertEqual(set(quota['paths']), {('Literature',), ('Geography',), ('Current Events',)})
+        # By hand: the page's letters are kept, and a lone letter links nothing.
+        data = self._page_post(top_links_auto='0')
+        names = {v: k.split('-')[1] for k, v in data.items() if k.endswith('-name')}
+        data['top_links_auto'] = '0'
+        data['line-{0}-link'.format(names['Science'])] = '2'
+        data['line-{0}-link'.format(names['Fine Arts'])] = '2'
+        data['line-{0}-link'.format(names['Literature'])] = '3'
+        self.client.post('/set_distribution/{0}/'.format(self.qset.id), data)
+        self.qset.refresh_from_db()
+        self.assertFalse(self.qset.top_links_auto)
+        links = dict(self.qset.distribution_lines.values_list('name', 'link'))
+        self.assertEqual((links['Science'], links['Fine Arts'], links['Literature'], links['Geo / CE']),
+                         (2, 2, None, None))
+        self.assertIn((GROUP, 'top', 2), build_quota_dict(self.qset))
+
+    def test_the_order_on_the_page_is_the_order_saved(self):
+        from qems2.qsub.distribution_views import _lines_from_post
+        post = {'line_count': '2',
+                'line-0-name': 'Literature', 'line-0-tu': '4', 'line-0-bs': '4', 'line-0-order': '1',
+                'line-0-item_count': '2',
+                'line-0-item-0-path': 'Literature - American', 'line-0-item-0-order': '1',
+                'line-0-item-1-path': 'Literature - British', 'line-0-item-1-order': '0',
+                'line-1-name': 'Science', 'line-1-tu': '4', 'line-1-bs': '4', 'line-1-order': '0'}
+        display, specs, errors = _lines_from_post(post, ['Literature', 'Science'])
+        self.assertEqual(errors, [])
+        self.assertEqual([x['name'] for x in specs], ['Science', 'Literature'])
+        self.assertEqual([it['path'] for it in specs[1]['items']], ['Literature - British', 'Literature - American'])
+
+    def test_rounded_rows_too_big_for_their_category_are_shared_out(self):
+        D = Decimal
+        n = 24.0
+        items = [{'path': 'Literature - ' + name, 'tu': dl._quarter(tu / n), 'bs': dl._quarter(bs / n),
+                  'w_tu': tu / n, 'w_bs': bs / n}
+                 for name, tu, bs in [('American', 27, 26), ('British', 25, 27), ('European', 25, 25),
+                                      ('World', 25, 26)]]
+        self.assertEqual(sum(it['tu'] for it in items), D('4.25'))       # rounding overshoots
+        fitted = dl._fit_items(items, D(4), D(4))
+        self.assertEqual([(it['tu'], it['bs']) for it in fitted], [(D(1), D(1))] * 4)
+        # A category smaller than its rows' quarters: still adds up exactly.
+        fitted = dl._fit_items([{'path': 'A', 'tu': D('0.5'), 'bs': D('0.5'), 'w_tu': 0.6, 'w_bs': 0.6},
+                                {'path': 'B', 'tu': D('0.5'), 'bs': D('0.5'), 'w_tu': 0.4, 'w_bs': 0.4}],
+                               D('0.75'), D('0.75'))
+        self.assertEqual([it['tu'] for it in fitted], [D('0.5'), D('0.25')])
+
+    def test_the_page_shows_the_tree(self):
+        self._switch()
+        self._rework('Literature', self._half_and_half())
+        resp = self.client.get('/set_distribution/{0}/'.format(self.qset.id))
+        self.assertContains(resp, 'Add a sub-category')
+        self.assertContains(resp, 'Add a rule:')
+        self.assertContains(resp, 'Limit each sub-category')
+        # The rows sharing a slot: Literature's two halves, and Geo / CE's.
+        self.assertEqual(len(re.findall(r'-item-\d+-link" value="1"', resp.content.decode())), 4)
+
+    def test_the_packet_grid_flags_a_rule_broken_by_hand(self):
+        self._switch()
+        self._rework('Literature', [], child_max=1)
+        packet = Packet.objects.create(question_set=self.qset, packet_name='Round 01', created_by=self.owner)
+        for n in range(2):
+            t = self._tossup(self.qset, ('Literature', 'American'))
+            t.packet, t.question_number = packet, n + 1
+            t.save()
+        problems = dl.rule_problems(self.qset)
+        self.assertEqual(len(problems), 1)
+        self.assertIn('Round 01', problems[0])
+        self.assertContains(self.client.get('/packet_grid/{0}/'.format(self.qset.id)), 'Distribution rules not met')
+
+    def test_includes_rows_decide_what_a_category_covers(self):
+        from qems2.qsub.distribution_views import _lines_from_post
+        post = {'line_count': '3',
+                # Rows from two categories: they share the count.
+                'line-0-name': 'Geo / CE', 'line-0-tu': '1', 'line-0-bs': '1', 'line-0-item_count': '2',
+                'line-0-item-0-path': 'Geography', 'line-0-item-1-path': 'Current Events',
+                # A bare name that isn't a category is a sub-category of this one.
+                'line-1-name': 'Literature', 'line-1-tu': '4', 'line-1-bs': '4', 'line-1-item_count': '1',
+                'line-1-item-0-path': 'American', 'line-1-item-0-tu': '1', 'line-1-item-0-bs': '1',
+                # No rows: everything filed under its name.
+                'line-2-name': 'Science', 'line-2-tu': '4', 'line-2-bs': '4'}
+        display, specs, errors = _lines_from_post(post, ['Geography', 'Current Events', 'Literature', 'Science'])
+        self.assertEqual(errors, [])
+        geo, lit, sci = specs
+        self.assertEqual((geo['categories'], geo['is_pool']), (['Geography', 'Current Events'], True))
+        self.assertEqual((lit['categories'], lit['is_pool']), (['Literature'], False))
+        self.assertEqual(lit['items'][0]['path'], 'Literature - American')
+        self.assertEqual((sci['categories'], sci['items']), (['Science'], []))
+
+    def test_repasting_overwrites_everything_but_only_after_confirming(self):
+        self._switch()
+        self._rework('Literature', child_max=1)
+        url = '/set_distribution/{0}/paste/'.format(self.qset.id)
+        text = '10/10 Literature\n10/10 Science\n'
+        resp = self.client.post(url, {'text': text, 'action': 'review'})
+        self.assertContains(resp, 'Pasting replaces all of it')
+        self.assertContains(resp, 'Per-packet rules and hand-set links (1)')
+        self.assertContains(resp, 'Fine Arts - Painting')          # empty, will be deleted
+        self.assertContains(resp, 'Trash - Video Games (1 question)')   # kept: a question is filed there
+
+        # Without the tick nothing changes.
+        before = list(self.qset.distribution_lines.values_list('name', flat=True))
+        self.client.post(url, {'text': text, 'action': 'accept'})
+        self.assertEqual(list(self.qset.distribution_lines.values_list('name', flat=True)), before)
+
+        self.client.post(url, {'text': text, 'action': 'accept', 'confirm_replace': '1'})
+        self.qset.refresh_from_db()
+        self.assertEqual(sorted(self.qset.distribution_lines.values_list('name', flat=True)),
+                         ['Literature', 'Science'])
+        self.assertIsNone(self.qset.distribution_lines.get(name='Literature').child_max)
+        cats = set(self.qset.distribution.distributionentry_set.values_list('category', flat=True))
+        self.assertEqual(cats, {'Literature', 'Science', 'Trash'})   # Trash survives for its question
+        self.trash_tu.refresh_from_db()
+        self.assertEqual(self.trash_tu.category.category, 'Trash')
+        self.assertEqual(self._totals(self.qset)['Trash'], (0, 0))
+        # The shared template the set started from is untouched.
+        self.assertEqual(self.dist.distributionentry_set.count(), 8)
+
+    def test_rows_cannot_ask_for_more_than_their_category(self):
+        from qems2.qsub.distribution_views import _lines_from_post
+        post = {'line_count': '1', 'line-0-name': 'Science', 'line-0-tu': '1', 'line-0-bs': '1',
+                'line-0-item_count': '2',
+                'line-0-item-0-path': 'Science - Physics', 'line-0-item-0-tu': '1', 'line-0-item-0-bs': '1',
+                'line-0-item-1-path': 'Science - Chemistry', 'line-0-item-1-tu': '1', 'line-0-item-1-bs': '1'}
+        display, specs, errors = _lines_from_post(post, ['Science'])
+        self.assertEqual(len(errors), 1)
+        self.assertIn('add up to 2 / 2 a packet, more than its own 1 / 1', errors[0])
+        post['line-0-tu'] = post['line-0-bs'] = '3'       # leaving some to the rest is fine
+        self.assertEqual(_lines_from_post(post, ['Science'])[2], [])
+
+    def test_a_category_does_not_swallow_the_next_categories(self):
+        known = {'Literature': {'American'}, 'Social Science': set(), 'Philosophy': set(),
+                 'Geography': set(), 'Current Events': set(), 'Other': set()}
+        text = ('4/4 Literature\n1/1 Social Science\n1/1 Philosophy\n1/1 Geography\n1/1 Current Events\n'
+                '1/1 Other\n  - 0.5/0.5 Geography\n  - 0.5/0.5 Current Events\n')
+        blocks = dl.parse_announcement(text, known)['blocks']
+        self.assertEqual([(b['name'], len(b['children'])) for b in blocks][:5],
+                         [('Literature', 0), ('Social Science', 0), ('Philosophy', 0),
+                          ('Geography', 0), ('Current Events', 0)])
+        other = blocks[-1]
+        self.assertEqual((other['name'], other['kind']), ('Other', 'pool'))   # a catch-all may group
+        indented = dl.parse_announcement('4/4 Literature\n  1/1 Social Science\n  3/3 Philosophy\n', known)
+        self.assertEqual(len(indented['blocks']), 1)                          # indenting decides
+
+
+class RealAnnouncementParsingTests(TestCase):
+    """Set distributions as they are actually posted on the hsquizbowl.org
+    collegiate announcements board (2026), editors' names replaced. None of
+    them indents its sub-categories, so these pin down the other ways a post
+    shows its structure, and the posts that must stay flat."""
+
+    KNOWN = {'History': {'American', 'European', 'World'}, 'Science': {'Biology', 'Chemistry', 'Physics'},
+             'Literature': {'American', 'British', 'European', 'World', 'Poetry', 'Drama'},
+             'Fine Arts': {'Music', 'Other'}, 'Religion': set(), 'Mythology': set(), 'Philosophy': set(),
+             'Social Science': set(), 'Geography': set(), 'Other': set(), 'Europe': set(), 'Asia': set()}
+
+    # Blocks separated by blank lines; editors in square brackets, with the
+    # school in parentheses inside them.
+    BLANK_LINE_BLOCKS = (
+        '4/4 History\n'
+        '1/1 American History [Editor One]\n'
+        '1/1 European History [Editor Two (formerly GT)]\n'
+        '1/1 World History [Editor Two (formerly GT)]\n'
+        '1/1 Ancient/Other History [Editor Three (GT)]\n'
+        '\n'
+        '4/4 Science\n'
+        '1/1 Biology [Editor Four (WUSTL)]\n'
+        '1/1 Chemistry [Editor Four (WUSTL)]\n'
+        '1/1 Physics [Editor Five (Ohio State)]\n'
+        '0.5/0.5 Math and Computer Science [Editor Five (Ohio State)]\n'
+        '0.5/0.5 Other Science [Editor Five (Ohio State)]\n'
+        '\n'
+        '4/4 Literature\n'
+        '1.25/1.25 Long Fiction [Editor Two (formerly GT)]\n'
+        '1/1 Short Fiction + Nonfiction [Editor Six (Virginia Tech)]\n'
+        '1/1 Poetry [Editor Seven (formerly GT)]\n'
+        '0.75/0.75 Drama [Editor Seven (formerly GT)]\n'
+        '\n'
+        '3/3 Fine Arts\n'
+        '1/1 Painting/Sculpture/Photography [Editor Eight]\n'
+        '1/1 Classical Music [Editor Nine (GT)]\n'
+        '1/1 Other Fine Arts [Editor Eight]\n'
+        '\n'
+        '3/3 Belief & Thought\n'
+        '0.75/0.75 Religion [Editor Six (Virginia Tech)]\n'
+        '0.75/0.75 Mythology [Editor Three (GT)]\n'
+        '0.75/0.75 Philosophy [Editor Ten (GT)]\n'
+        '0.75/0.75 Social Science [Editor Six (Virginia Tech)]\n'
+        '\n'
+        '2/2 Other\n'
+        '1/1 Pop Culture [Editor Eleven (GT)]\n'
+        '0.5/0.5 Geography [Editor Twelve (GT)]\n'
+        '0.5/0.5 Other Academic [Editor Eleven (GT)]\n'
+        '\n'
+        'The questions have been written entirely by club members.\n')
+
+    # Headings ending in a colon, notes in parentheses between blocks, and a
+    # last category with no breakdown.
+    COLON_HEADINGS = (
+        '4 History:\n'
+        '1 pre-1300 History\n'
+        '1 1300-1700 History\n'
+        '1 1700-1900 History\n'
+        '1 1900-Present History\n'
+        '(Non-significant overlap between time periods is acceptable.)\n'
+        '\n'
+        '4 Science:\n'
+        '1 Biology\n'
+        '1 Chemistry\n'
+        '1 Physics\n'
+        '1 Other Science\n'
+        '\n'
+        '4 Literature:\n'
+        '1 American Literature\n'
+        '1 British/Commonwealth Literature\n'
+        '1 European Literature (including Ancient)\n'
+        '1 World Literature\n'
+        '\n'
+        '3 Fine Arts:\n'
+        '1 Painting/Sculpture\n'
+        '1 Classical Music/Opera\n'
+        '1 Other Fine Arts\n'
+        '\n'
+        '4 RMPSS:\n'
+        '1 Religion\n'
+        '1 Mythology\n'
+        '1 Philosophy\n'
+        '1 Social Science\n'
+        '\n'
+        '1 Geography or Current Events\n')
+
+    # A single-subject event: one flat list, counts that don't add up to the
+    # first line.
+    FLAT = ('4 United States\n1 Canada\n1 North America\n2 South America\n5 Europe\n'
+            '2 Africa\n2 Asia\n3 Miscellaneous\n')
+
+    # Flat, with descriptions in parentheses that aren't editors.
+    DESCRIBED = ('2.5 United States\n'
+                 '2.5 Americas (Canada, Mexico, Caribbean, Central and South America)\n'
+                 '4 Europe\n'
+                 '3 Asia (non-Middle East)\n'
+                 '1 Middle East/North Africa (includes Turkey, Iran, and Sudan)\n'
+                 '2 Sub-Saharan Africa\n'
+                 '1 Australia/Oceania/Antarctica\n'
+                 '6 Misc. (cross-regional topics, common links, "other academic," pop culture/sports, etc.)\n')
+
+    def parse(self, text):
+        return dl.parse_announcement(text, self.KNOWN, packet_size=(20, 20))
+
+    def outline(self, parsed):
+        return [(b['pasted'], len(b['children'])) for b in parsed['blocks']]
+
+    def test_blank_lines_separate_categories(self):
+        parsed = self.parse(self.BLANK_LINE_BLOCKS)
+        self.assertEqual(self.outline(parsed), [('History', 4), ('Science', 5), ('Literature', 4),
+                                                ('Fine Arts', 3), ('Belief & Thought', 4), ('Other', 3)])
+        self.assertEqual((parsed['total_tu'], parsed['total_bs']), (20, 20))
+        self.assertFalse(parsed['flat'])
+        self.assertIsNone(parsed['mismatch'])
+        self.assertEqual(parsed['unread'], ['The questions have been written entirely by club members.'])
+
+    def test_bracketed_editors_with_their_school(self):
+        history = self.parse(self.BLANK_LINE_BLOCKS)['blocks'][0]
+        self.assertEqual([c['editor'] for c in history['children']],
+                         ['Editor One', 'Editor Two (formerly GT)', 'Editor Two (formerly GT)',
+                          'Editor Three (GT)'])
+        self.assertEqual([c['path'] for c in history['children'][:3]],
+                         ['History - American', 'History - European', 'History - World'])
+
+    def test_colon_headings(self):
+        parsed = self.parse(self.COLON_HEADINGS)
+        self.assertEqual(self.outline(parsed), [('History', 4), ('Science', 4), ('Literature', 4),
+                                                ('Fine Arts', 3), ('RMPSS', 4),
+                                                ('Geography or Current Events', 0)])
+        self.assertEqual((parsed['total_tu'], parsed['total_bs']), (20, 20))
+        self.assertIn('(Non-significant overlap between time periods is acceptable.)', parsed['unread'])
+        self.assertEqual(parsed['blocks'][-1]['status'], 'close')   # matched to Geography, for you to confirm
+
+    def test_a_flat_list_stays_flat(self):
+        parsed = self.parse(self.FLAT)
+        self.assertEqual([n for n, kids in self.outline(parsed)], [
+            'United States', 'Canada', 'North America', 'South America', 'Europe', 'Africa', 'Asia',
+            'Miscellaneous'][:len(parsed['blocks'])])
+        self.assertTrue(all(kids == 0 for _, kids in self.outline(parsed)))
+        self.assertTrue(parsed['flat'])
+
+    def test_descriptions_in_parentheses_are_not_editors(self):
+        parsed = self.parse(self.DESCRIBED)
+        self.assertEqual([b['editor'] for b in parsed['blocks']], [''] * 8)
+        self.assertEqual(parsed['blocks'][1]['pasted'], 'Americas')
+        self.assertEqual(parsed['blocks'][1]['description'],
+                         'Canada, Mexico, Caribbean, Central and South America')
+        self.assertEqual((parsed['total_tu'], parsed['total_bs']), (22, 22))
+
+    def test_a_person_in_parentheses_is_an_editor(self):
+        block = self.parse('4/4 Literature\n  2/2 American Literature (Ada Byron)\n  2/2 British Literature\n')['blocks'][0]
+        self.assertEqual(block['children'][0]['editor'], 'Ada Byron')
+
+    def test_one_matching_line_is_not_a_breakdown(self):
+        # Two lines in one block whose counts happen to match: two categories.
+        parsed = self.parse('1/1 Trash\n1/1 Geography\n')
+        self.assertEqual(self.outline(parsed), [('Trash', 0), ('Geography', 0)])
+
+
+class OwnerImportTests(TestCase):
+    """Anyone who owns or edits a set may import questions into it; only an
+    administrator may create a new set by import, and nobody else's import
+    makes accounts."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        self.ou = User.objects.create_user('oi_owner', password='pw', email='oi@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.wu = User.objects.create_user('oi_writer', password='pw', email='oiw@t.com')
+        self.writer = Writer.objects.get(user=self.wu)
+        self.dist = Distribution.objects.create(name='OI dist')
+        DistributionEntry.objects.create(distribution=self.dist, category='History',
+                                         subcategory='American', min_tossups=1, min_bonuses=1)
+
+        def make(name, owner):
+            return QuestionSet.objects.create(name=name, date=timezone.now(), host='h', address='',
+                                              owner=owner, num_packets=1, distribution=self.dist)
+        self.mine = make('Owner Set', self.owner)
+        self.owner.question_set_editor.add(self.mine)     # as creating a set does
+        self.mine.writer.add(self.writer)
+        self.other = make('Someone Else', self.writer)
+        self.client.login(username='oi_owner', password='pw')
+
+    def _upload(self, author='Nobody Here'):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        payload = json.dumps({'tossups': [{'question': 'A clue. For 10 points, name it.',
+                                           'answer': '<b><u>Thing</u></b>',
+                                           'metadata': '{0}, History - American'.format(author)}],
+                              'bonuses': []}).encode('utf-8')
+        return SimpleUploadedFile('Round 1.json', payload, content_type='application/json')
+
+    def test_an_owner_imports_packets_into_their_set_without_making_accounts(self):
+        users_before = User.objects.count()
+        resp = self.client.post('/import_packets/', {'set_name': '', 'target_set': str(self.mine.id),
+                                                     'packet_files': self._upload()})
+        self.assertEqual(resp.status_code, 200)
+        tu = self.mine.tossup_set.get()
+        self.assertEqual(tu.author, self.owner)
+        self.assertEqual(tu.author_text, 'Nobody Here')
+        self.assertEqual(User.objects.count(), users_before)
+
+    def test_an_owner_cannot_create_a_set_by_import(self):
+        sets_before = QuestionSet.objects.count()
+        resp = self.client.post('/import_packets/', {'set_name': 'Brand New Import', 'target_set': '',
+                                                     'packet_files': self._upload()})
+        self.assertTrue(resp.context['form'].errors)
+        self.assertEqual(QuestionSet.objects.count(), sets_before)
+        body = self.client.get('/import_packets/').content.decode()
+        self.assertNotIn('Create a new tournament named', body)
+
+    def test_an_owner_cannot_import_into_someone_elses_set(self):
+        resp = self.client.post('/import_packets/', {'set_name': '', 'target_set': str(self.other.id),
+                                                     'packet_files': self._upload()})
+        self.assertTrue(resp.context['form'].errors)
+        self.assertEqual(self.other.tossup_set.count(), 0)
+
+    def test_a_writer_with_no_set_of_their_own_is_turned_away(self):
+        # oi_writer owns "Someone Else", so take that away first.
+        self.other.owner = self.owner
+        self.other.save()
+        self.client.login(username='oi_writer', password='pw')
+        resp = self.client.get('/import_packets/')
+        self.assertEqual(resp.status_code, 302)
+        resp = self.client.get('/import_set/')
+        self.assertEqual(resp.status_code, 302)
+
+    def test_the_set_page_offers_both_imports_to_its_owner(self):
+        body = self.client.get('/edit_question_set/{0}/'.format(self.mine.id)).content.decode()
+        self.assertIn('/import_set/?target={0}'.format(self.mine.id), body)
+        self.assertIn('/import_packets/?target={0}'.format(self.mine.id), body)
+
+    def test_unknown_commenters_keep_their_name_in_the_comment(self):
+        from qems2.qsub import set_importer
+        users_before = User.objects.count()
+        cache, resolve = set_importer._user_resolver(self.ou, create_accounts=False)
+        self.assertEqual(resolve('ghost_commenter'), self.ou)
+        self.assertIn('ghost_commenter', resolve.unknown)
+        legacy, resolve_author = set_importer._author_resolver(self.owner, create_accounts=False)
+        self.assertEqual(resolve_author('Ghost Author'), self.owner)
+        self.assertEqual(resolve_author.credit('Ghost Author'), 'Ghost Author')
+        self.assertEqual(resolve_author.credit(''), '')
+        self.assertEqual(User.objects.count(), users_before)
+
+
+class CreatorImportTests(TestCase):
+    """Anyone allowed to create a set (`_account_can_create`) may also create
+    one by import; a non-administrator's import makes no accounts and credits
+    only people already on the set, so a name in the file can't land a
+    question or comment under a stranger's account."""
+
+    CSV = ('"Tossup Question","Answer","Category","Author","Comments"\r\n'
+           '"A clue. For 10 points, name it.","_Thing_","History - American","{author}",'
+           '"{commenter}: Nice one."\r\n')
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        self.cu = User.objects.create_user('ci_creator', password='pw', email='cic@t.com')
+        self.creator = Writer.objects.get(user=self.cu)
+        User.objects.filter(id=self.cu.id).update(date_joined=timezone.now() - timedelta(days=3))
+        self.nu = User.objects.create_user('ci_newbie', password='pw', email='cin@t.com')
+        # Somebody else on the site whose name and handle the file uses.
+        self.ada_u = User.objects.create_user('ada', password='pw', email='ada@t.com',
+                                              first_name='Ada', last_name='Lovelace')
+        self.ada = Writer.objects.get(user=self.ada_u)
+        self.au = User.objects.create_superuser('ci_admin', 'cia@t.com', 'pw')
+
+    def _csv(self, author='Ada Lovelace', commenter='ada'):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        return SimpleUploadedFile('export.csv', self.CSV.format(author=author, commenter=commenter)
+                                  .encode('utf-8'), content_type='text/csv')
+
+    def _packet(self, author='Ada Lovelace'):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        payload = json.dumps({'tossups': [{'question': 'A clue. For 10 points, name it.',
+                                           'answer': '<b><u>Thing</u></b>',
+                                           'metadata': '{0}, History - American'.format(author)}],
+                              'bonuses': []}).encode('utf-8')
+        return SimpleUploadedFile('Round 1.json', payload, content_type='application/json')
+
+    def test_an_approved_creator_with_no_sets_can_import_a_new_set(self):
+        self.client.login(username='ci_creator', password='pw')
+        resp = self.client.get('/import_set/')
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'New set name')
+        users_before = User.objects.count()
+        resp = self.client.post('/import_set/', {'set_name': 'Creator Import', 'target_set': '',
+                                                 'set_file': self._csv()})
+        self.assertEqual(resp.status_code, 200)
+        qset = QuestionSet.objects.get(name='Creator Import')
+        self.assertEqual(qset.owner, self.creator)
+        self.assertIn(qset, self.creator.question_set_editor.all())
+        self.assertEqual(User.objects.count(), users_before)
+        tu = qset.tossup_set.get()
+        # Ada isn't on the set, so the question is the importer's, credited by name.
+        self.assertEqual(tu.author, self.creator)
+        self.assertEqual(tu.author_text, 'Ada Lovelace')
+        from django_comments.models import Comment
+        comment = Comment.objects.get(object_pk=str(tu.id))
+        self.assertEqual(comment.user, self.cu)
+        self.assertTrue(comment.comment.startswith('[ada] '))
+
+    def test_an_approved_creator_can_import_packets_as_a_new_tournament(self):
+        self.client.login(username='ci_creator', password='pw')
+        users_before = User.objects.count()
+        resp = self.client.post('/import_packets/', {'set_name': 'Creator Packets', 'target_set': '',
+                                                     'packet_files': self._packet('Nobody Here')})
+        self.assertEqual(resp.status_code, 200)
+        tu = QuestionSet.objects.get(name='Creator Packets').tossup_set.get()
+        self.assertEqual((tu.author, tu.author_text), (self.creator, 'Nobody Here'))
+        self.assertEqual(User.objects.count(), users_before)
+
+    def test_can_create_early_lets_a_new_account_import_a_set(self):
+        self.nu.writer.can_create_early = True
+        self.nu.writer.save()
+        self.client.login(username='ci_newbie', password='pw')
+        self.assertEqual(self.client.get('/import_set/').status_code, 200)
+        self.client.post('/import_set/', {'set_name': 'Early Import', 'target_set': '',
+                                          'set_file': self._csv()})
+        self.assertTrue(QuestionSet.objects.filter(name='Early Import').exists())
+
+    def test_a_user_who_may_not_create_sets_is_refused(self):
+        self.client.login(username='ci_newbie', password='pw')
+        self.assertEqual(self.client.get('/import_set/').status_code, 302)
+        self.assertEqual(self.client.get('/import_packets/').status_code, 302)
+        sets_before = QuestionSet.objects.count()
+        resp = self.client.post('/import_set/', {'set_name': 'Sneaky', 'target_set': '',
+                                                 'set_file': self._csv()})
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(QuestionSet.objects.count(), sets_before)
+        body = self.client.get('/main/').content.decode()
+        self.assertNotIn('href="/import_set/"', body)
+
+    def test_the_home_page_offers_import_to_an_approved_creator(self):
+        self.client.login(username='ci_creator', password='pw')
+        body = self.client.get('/main/').content.decode()
+        self.assertIn('href="/import_set/"', body)
+        self.assertIn('href="/import_packets/"', body)
+
+    def test_a_set_member_is_still_matched_by_name(self):
+        dist = Distribution.objects.create(name='CI dist')
+        DistributionEntry.objects.create(distribution=dist, category='History',
+                                         subcategory='American', min_tossups=1, min_bonuses=1)
+        qset = QuestionSet.objects.create(name='Creator Set', date=timezone.now(), host='h',
+                                          address='', owner=self.creator, num_packets=1,
+                                          distribution=dist)
+        self.creator.question_set_editor.add(qset)
+        qset.writer.add(self.ada)
+        self.client.login(username='ci_creator', password='pw')
+        self.client.post('/import_set/', {'set_name': '', 'target_set': str(qset.id),
+                                          'set_file': self._csv()})
+        tu = qset.tossup_set.get()
+        self.assertEqual((tu.author, tu.author_text), (self.ada, ''))
+        from django_comments.models import Comment
+        self.assertEqual(Comment.objects.get(object_pk=str(tu.id)).user, self.ada_u)
+
+    def test_an_admin_import_still_matches_site_wide_and_makes_accounts(self):
+        self.client.login(username='ci_admin', password='pw')
+        self.client.post('/import_set/', {'set_name': 'Admin Import', 'target_set': '',
+                                          'set_file': self._csv()})
+        tu = QuestionSet.objects.get(name='Admin Import').tossup_set.get()
+        self.assertEqual(tu.author, self.ada)
+        users_before = User.objects.count()
+        self.client.post('/import_set/', {'set_name': 'Admin Import 2', 'target_set': '',
+                                          'set_file': self._csv('Ghost Writer', 'ghost')})
+        tu = QuestionSet.objects.get(name='Admin Import 2').tossup_set.get()
+        self.assertEqual(tu.author.user.username, 'ghost-writer-legacy')
+        self.assertEqual(User.objects.count(), users_before + 2)   # author + commenter
+
+
+class SiteNewsTests(TestCase):
+    """Administrators post announcements; everyone else sees the newest one
+    once, in a bar that goes away when dismissed, read, or ignored a while."""
+
+    def setUp(self):
+        self.admin = User.objects.create_superuser('news_admin', 'na@t.com', 'pw')
+        self.u = User.objects.create_user('news_reader', password='pw', email='nr@t.com')
+        self.writer = Writer.objects.get(user=self.u)
+        # Joined a week ago, so anything posted since is news to them.
+        User.objects.filter(id=self.u.id).update(date_joined=timezone.now() - timedelta(days=7))
+
+    def _post(self, title='New feature', body=''):
+        return Announcement.objects.create(title=title, body=body,
+                                           created_by=Writer.objects.get(user=self.admin))
+
+    def _bar(self):
+        self.client.login(username='news_reader', password='pw')
+        return 'id="news-bar"' in self.client.get('/main/').content.decode()
+
+    def test_admin_posts_and_others_cannot(self):
+        self.client.login(username='news_reader', password='pw')
+        self.client.post('/news/', {'title': 'Sneaky'})
+        self.assertFalse(Announcement.objects.exists())
+        self.client.login(username='news_admin', password='pw')
+        self.client.post('/news/', {'title': 'Hello', 'body': 'See https://example.com'})
+        a = Announcement.objects.get()
+        self.assertEqual(a.title, 'Hello')
+        page = self.client.get('/news/').content.decode()
+        self.assertIn('href="https://example.com"', page)
+        self.client.post('/news/', {'action': 'delete', 'id': a.id})
+        self.assertFalse(Announcement.objects.exists())
+
+    def test_body_is_escaped(self):
+        self._post(body='<script>alert(1)</script>')
+        self.client.login(username='news_reader', password='pw')
+        page = self.client.get('/news/').content.decode()
+        self.assertNotIn('<script>alert(1)', page)
+
+    def test_bar_shows_until_dismissed(self):
+        self._post()
+        self.assertTrue(self._bar())
+        self.assertEqual(self.client.post('/news/dismiss/').status_code, 200)
+        self.assertFalse(self._bar())
+
+    def test_reading_news_page_clears_bar(self):
+        a = self._post()
+        self.client.login(username='news_reader', password='pw')
+        page = self.client.get('/news/').content.decode()
+        self.assertIn('class="news-tag"', page)            # marked New on the visit that reads it
+        self.assertNotIn('id="news-bar"', page)
+        self.assertFalse(self._bar())
+        self.assertNotIn('class="news-tag"', self.client.get('/news/').content.decode())
+
+    def test_ignored_bar_gives_up_after_a_few_pages(self):
+        self._post()
+        shown = [self._bar() for _ in range(Announcement.NUDGE_PAGES + 2)]
+        self.assertEqual(shown, [True] * Announcement.NUDGE_PAGES + [False, False])
+        # Still unread, just no longer nagging.
+        self.assertEqual(news.unread(Writer.objects.get(user=self.u)).count(), 1)
+
+    def test_ignored_bar_gives_up_after_a_few_days(self):
+        self._post()
+        self.assertTrue(self._bar())
+        Writer.objects.filter(id=self.writer.id).update(
+            news_nudge_started=timezone.now() - timedelta(days=Announcement.NUDGE_DAYS + 1))
+        self.assertFalse(self._bar())
+
+    def test_a_newer_post_gets_its_own_bar(self):
+        self._post('First')
+        for _ in range(Announcement.NUDGE_PAGES):
+            self._bar()
+        self.assertFalse(self._bar())
+        self._post('Second')
+        self.assertTrue(self._bar())
+
+    def test_new_account_is_not_shown_old_news(self):
+        self._post()
+        User.objects.create_user('news_newbie', password='pw', email='nn@t.com')
+        self.client.login(username='news_newbie', password='pw')
+        self.assertNotIn('id="news-bar"', self.client.get('/main/').content.decode())
+
+    def test_anonymous_pages_have_no_bar(self):
+        self._post()
+        self.assertNotIn('news-bar', self.client.get('/').content.decode())
+        self.assertEqual(self.client.post('/news/dismiss/').status_code, 302)
+
+
+class HomeCardsTests(TestCase):
+    """The home page's set cards: role, and progress counted per category so
+    one category's overshoot can't cover another's shortfall."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('hc_owner', password='pw', email='hc@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.wu = User.objects.create_user('hc_writer', password='pw', email='hcw@t.com')
+        self.writer = Writer.objects.get(user=self.wu)
+        dist = Distribution.objects.create(name='HC dist')
+        self.hist = DistributionEntry.objects.create(distribution=dist, category='History',
+                                                     subcategory='American', min_tossups=1, min_bonuses=1)
+        self.sci = DistributionEntry.objects.create(distribution=dist, category='Science',
+                                                    subcategory='Physics', min_tossups=1, min_bonuses=1)
+        self.qset = QuestionSet.objects.create(name='HC Open', date=timezone.now() + timedelta(days=60),
+                                               host='h', address='', owner=self.owner, num_packets=2,
+                                               distribution=dist)
+        self.qset.writer.add(self.writer)
+        for e in (self.hist, self.sci):
+            SetWideDistributionEntry.objects.create(question_set=self.qset, dist_entry=e,
+                                                    num_tossups=2, num_bonuses=2)
+        tu_type = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        for n in range(4):   # four History tossups: two more than History needs
+            Tossup.objects.create(question_set=self.qset, tossup_text='t{0}'.format(n),
+                                  tossup_answer='a{0}'.format(n), category=self.hist,
+                                  author=self.writer, question_type=tu_type,
+                                  created_date=timezone.now(), last_changed_date=timezone.now())
+
+    def _card(self, username):
+        self.client.login(username=username, password='pw')
+        cards = self.client.get('/question_sets/').context['cards']
+        return next(c for c in cards if c['qset'].id == self.qset.id)
+
+    def test_owner_card_counts_progress_per_category(self):
+        card = self._card('hc_owner')
+        self.assertEqual(card['role'], 'Owner')
+        self.assertEqual(card['required'], 8)
+        self.assertEqual(card['percent'], 25)            # 2 of 8, not 4 of 8
+        self.assertEqual((card['tu_left'], card['bs_left']), (2, 4))
+
+    def test_writer_card_shows_their_own_count(self):
+        card = self._card('hc_writer')
+        self.assertEqual(card['role'], 'Writer')
+        self.assertEqual(card['mine'], 4)
+        self.assertIn('written 4', self.client.get('/question_sets/').content.decode())
+
+    def test_co_owner_sees_the_set(self):
+        cu = User.objects.create_user('hc_co', password='pw', email='hcc@t.com')
+        self.qset.co_owners.add(Writer.objects.get(user=cu))
+        self.assertEqual(self._card('hc_co')['role'], 'Owner')
+
+    def test_a_set_with_no_distribution_totals_asks_for_one(self):
+        SetWideDistributionEntry.objects.filter(question_set=self.qset).delete()
+        self.client.login(username='hc_owner', password='pw')
+        body = self.client.get('/question_sets/').content.decode()
+        self.assertIn('/set_distribution/{0}/'.format(self.qset.id), body)
+        self.assertIn('Not started', body)

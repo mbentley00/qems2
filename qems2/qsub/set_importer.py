@@ -4,7 +4,9 @@ distribution section, each introduced by its header row and separated by a
 blank row. Comments (including threaded replies) and category tags are
 recreated, and the new set's questions are pushed into the search index.
 
-Admin-only; wired up in views.import_set.
+Wired up in views.import_set, open to anyone allowed to create a set (and,
+for an existing set, to its owners and editors). Only an administrator's
+import makes placeholder accounts.
 """
 
 import csv
@@ -15,6 +17,7 @@ from django.contrib.auth.models import User
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.sites.models import Site
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from django_comments.models import Comment
 
@@ -24,6 +27,7 @@ from qems2.qsub.models import (QuestionSet, Distribution, DistributionEntry,
 from qems2.qsub.utils import (ACF_STYLE_TOSSUP, ACF_STYLE_BONUS, VHSL_BONUS,
                               QUESTION_CREATE)
 from qems2.qsub import signals as qems_signals
+from qems2.qsub import distribution_lines
 from django.db.models.signals import post_save
 
 
@@ -221,7 +225,25 @@ def legacy_username(username):
     return (name + LEGACY_SUFFIX)[:150]
 
 
-def _user_resolver(fallback_user):
+def _set_member_writers(qset, importer):
+    """Who a non-administrator's import may credit: the importer and the people
+    already on `qset` (owner, co-owners, editors, writers) -- just the importer
+    for a set the import is creating.
+
+    Matching an imported name against every account on the site guesses: a
+    common name, or a handle someone else happens to hold, would hand the
+    question (or put the comment) under a stranger's name, in a set they never
+    joined. An administrator's import still matches site-wide; anyone else's
+    credits a name it can't place among the set's own people by text instead."""
+    if qset is None:
+        return Writer.objects.filter(id=importer.id).select_related('user')
+    return Writer.objects.filter(
+        Q(id=importer.id) | Q(id=qset.owner_id) | Q(co_owned_sets=qset)
+        | Q(question_set_editor=qset) | Q(question_set_writer=qset)
+    ).distinct().select_related('user')
+
+
+def _user_resolver(fallback_user, create_accounts=True, members=None):
     """Returns a function that maps an exported username to a User, creating an
     inactive placeholder for unknown commenters (preserving attribution), and
     caching results.
@@ -229,8 +251,13 @@ def _user_resolver(fallback_user):
     An account that already exists under the exported handle is a real person
     and is used as-is. Otherwise the placeholder is named ``<handle>-legacy``,
     the same convention imported authors use, and a re-import finds it again
-    rather than making a second one."""
+    rather than making a second one.
+
+    `members` (Writers), when given, is the only pool an existing account is
+    matched from; see _set_member_writers."""
     cache = {}
+    member_user_ids = (None if members is None
+                       else set(w.user_id for w in members))
 
     def resolve(username):
         if not username:
@@ -240,7 +267,15 @@ def _user_resolver(fallback_user):
         username = username[:150]
         user = (User.objects.filter(username=username).first()
                 or User.objects.filter(username=legacy_username(username)).first())
-        if user is None:
+        if (user is not None and member_user_ids is not None
+                and user.id not in member_user_ids):
+            user = None
+        if user is None and not create_accounts:
+            # Someone who isn't an administrator is importing: no accounts are
+            # made for them. The comment is theirs, and says who wrote it.
+            user = fallback_user
+            resolve.unknown.add(username)
+        elif user is None:
             try:
                 user = User(username=legacy_username(username), is_active=False)
                 user.set_unusable_password()
@@ -250,6 +285,7 @@ def _user_resolver(fallback_user):
         cache[username] = user
         return user
 
+    resolve.unknown = set()
     return cache, resolve
 
 
@@ -275,13 +311,17 @@ def _make_legacy_writer(author_name):
     return writer
 
 
-def _author_resolver(owner):
+def _author_resolver(owner, create_accounts=True, members=None):
     """Returns (legacy_ids, resolve). resolve(author_name) -> the Writer to
     attribute an imported question to: an existing account whose real name or
     username matches, otherwise a legacy placeholder Writer (whose id is added
-    to legacy_ids). Empty author falls back to the importing owner."""
+    to legacy_ids). Empty author falls back to the importing owner.
+
+    `members` (Writers), when given, is the only pool an existing account is
+    matched from; see _set_member_writers."""
     by_name = {}
-    for w in Writer.objects.select_related('user').all():
+    pool = Writer.objects.select_related('user').all() if members is None else members
+    for w in pool:
         rn = _norm_name(w.get_real_name())
         if rn:
             by_name.setdefault(rn, w)
@@ -291,6 +331,14 @@ def _author_resolver(owner):
 
     cache = {}
     legacy_ids = set()
+    uncredited = {}
+
+    def credit(author_name):
+        """The "credit to" text for a question whose author has no account
+        and couldn't be given one; '' otherwise."""
+        key = (author_name or '').strip()
+        resolve(key)
+        return key[:200] if key in uncredited else ''
 
     def resolve(author_name):
         key = (author_name or '').strip()
@@ -300,6 +348,12 @@ def _author_resolver(owner):
             return cache[key]
         norm = _norm_name(key)
         writer = by_name.get(norm)
+        if writer is None and not create_accounts:
+            # No account made: the question is the importer's, credited to
+            # the named author in its "credit to" text (see credit()).
+            uncredited[key] = True
+            cache[key] = owner
+            return owner
         if writer is None:
             writer = _make_legacy_writer(key)
             legacy_ids.add(writer.id)
@@ -307,6 +361,7 @@ def _author_resolver(owner):
         cache[key] = writer
         return writer
 
+    resolve.credit = credit
     return legacy_ids, resolve
 
 
@@ -322,7 +377,8 @@ def _create_comments(question, content_type, site, comment_cell, resolve):
             object_pk=str(question.id),
             site=site,
             user=resolve(username),
-            comment=text,
+            comment=('[{0}] {1}'.format(username, text)
+                     if username in getattr(resolve, 'unknown', ()) else text),
             is_public=True,
             is_removed=False,
             submit_date=timezone.now(),
@@ -374,7 +430,7 @@ def _build_distribution(dist_rows, qset, merge=False):
     return lookup
 
 
-def import_set_from_file(uploaded_file, set_name, owner, target_set=None):
+def import_set_from_file(uploaded_file, set_name, owner, target_set=None, create_accounts=True):
     """Parse uploaded_file into a QuestionSet owned by `owner`.
 
     With no `target_set` a new set is created and named `set_name`. With one,
@@ -418,8 +474,9 @@ def import_set_from_file(uploaded_file, set_name, owner, target_set=None):
     tossup_ct = ContentType.objects.get_for_model(Tossup)
     bonus_ct = ContentType.objects.get_for_model(Bonus)
     site = Site.objects.get_current()
-    user_cache, resolve = _user_resolver(owner.user)
-    legacy_author_ids, resolve_author = _author_resolver(owner)
+    members = None if create_accounts else list(_set_member_writers(target_set, owner))
+    user_cache, resolve = _user_resolver(owner.user, create_accounts, members)
+    legacy_author_ids, resolve_author = _author_resolver(owner, create_accounts, members)
 
     summary = {'tossups': 0, 'bonuses': 0, 'comments': 0, 'tags': 0, 'errors': [],
                'added_to_existing': target_set is not None,
@@ -487,6 +544,7 @@ def import_set_from_file(uploaded_file, set_name, owner, target_set=None):
                             tossup_answer=_cell(row, tmap, 'Answer'),
                             category=category_lookup.get(_cell(row, tmap, 'Category').strip()),
                             author=resolve_author(_cell(row, tmap, 'Author')),
+                            author_text=resolve_author.credit(_cell(row, tmap, 'Author')),
                             question_type=acf_tossup_type,
                             question_number=_to_int(_cell(row, tmap, 'Question Number')),
                             edited=_to_bool(_cell(row, tmap, 'Edited')),
@@ -524,6 +582,7 @@ def import_set_from_file(uploaded_file, set_name, owner, target_set=None):
                             part3_difficulty=_difficulty(_cell(row, bmap, 'Part 3 Difficulty')),
                             category=category_lookup.get(_cell(row, bmap, 'Category').strip()),
                             author=resolve_author(_cell(row, bmap, 'Author')),
+                            author_text=resolve_author.credit(_cell(row, bmap, 'Author')),
                             question_type=vhsl_bonus_type if is_vhsl else acf_bonus_type,
                             question_number=_to_int(_cell(row, bmap, 'Question Number')),
                             edited=_to_bool(_cell(row, bmap, 'Edited')),
@@ -549,9 +608,15 @@ def import_set_from_file(uploaded_file, set_name, owner, target_set=None):
             total_t = Tossup.objects.filter(question_set=qset).count()
             total_b = Bonus.objects.filter(question_set=qset).count()
             est_packets = max(1, round(max(total_t, total_b) / 20.0))
-            if target_set is None or est_packets > (qset.num_packets or 0):
+            # A per-packet set's packet count is what its totals are built
+            # from, so a guess from question volume doesn't get to change it.
+            if target_set is None or (est_packets > (qset.num_packets or 0)
+                                      and not qset.per_packet_distribution):
                 qset.num_packets = est_packets
                 qset.save(update_fields=['num_packets'])
+            # Categories the file added get their totals from the set's
+            # Distribution page, not from the counts in the file.
+            distribution_lines.derive(qset)
 
             summary['question_set'] = qset
             summary['users_created'] = sum(1 for u in user_cache.values()

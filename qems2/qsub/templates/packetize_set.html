@@ -96,7 +96,14 @@
         </div>
     </div>
 
-    <table class="table-striped table-hover" id="packetize-table">
+    {% if qset.per_packet_distribution %}
+    <div class="alert-box info">
+        This set&rsquo;s quotas come from its <a href="/set_distribution/{{ qset.id }}/">Distribution page</a>: each category&rsquo;s
+        per-packet count is its category&rsquo;s minimum and maximum, a sub-category row caps that sub-category, and a combined category
+        caps its categories together. Change them there; the table below is what the packetizer will use.
+    </div>
+    {% endif %}
+    <table class="table-striped table-hover" id="packetize-table"{% if qset.per_packet_distribution %} data-readonly="1"{% endif %}>
         <thead>
             <tr>
                 <th>Category</th>
@@ -167,6 +174,7 @@ $(function() {
     }
     $(document).on('input', '.top-min-tu, .top-min-bs, input[name="tossups_per_packet"], input[name="bonuses_per_packet"]', updateTotals);
     updateTotals();
+    $('#packetize-table[data-readonly] .quota-input').prop('readonly', true);
 });
 </script>
 

@@ -98,6 +98,13 @@
     </div>
 </div>
 
+{% if rule_problems %}
+<div class="alert-box warning" id="rule-problems">
+    <strong>Distribution rules not met</strong> (<a href="/set_distribution/{{ qset.id }}/">rules</a>):
+    {% for p in rule_problems %}<br>{{ p }}{% endfor %}
+</div>
+{% endif %}
+
 {% if unplaced_tu or unplaced_bs %}
 <div class="panel radius unplaced-panel" id="unplaced-panel">
     <strong><i class="fa fa-triangle-exclamation"></i> Not shown in the grid below</strong>

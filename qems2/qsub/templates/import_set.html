@@ -22,8 +22,8 @@
 <p>Upload a <strong>.tsv</strong> or <strong>.csv</strong> file in the format produced by
 a set's <em>Export</em> action. All tossups, bonuses, comments (including threaded replies),
 category tags and the category distribution come across, and the questions are added to the
-search index. Unknown commenters become inactive placeholder accounts so attribution is
-preserved.</p>
+search index.{% if is_admin %} Unknown commenters become inactive placeholder accounts so attribution is
+preserved.{% endif %}</p>
 
 <p>Name a <strong>new set</strong>, or choose an <strong>existing set</strong> to add the
 questions to &mdash; which is how an archive too big for one upload arrives in several,
@@ -38,6 +38,7 @@ its quotas, packets and name are left alone.</p>
             {% if form.non_field_errors %}
                 <div class="alert-box warning">{{ form.non_field_errors }}</div>
             {% endif %}
+            {% if allow_new_set %}
             <label>New set name
                 {{ form.set_name }}
             </label>
@@ -45,6 +46,16 @@ its quotas, packets and name are left alone.</p>
             <label>&hellip;or add these questions to an existing set
                 {{ form.target_set }}
             </label>
+            {% else %}
+            <label>Add these questions to one of your sets
+                {{ form.target_set }}
+            </label>
+            {% endif %}
+            {% if not is_admin %}
+            <p class="import-note">No accounts are made by your import. An author or commenter is matched
+                only to someone already on the set; anyone else is credited by name: their questions are
+                yours, with &ldquo;credit to&rdquo; set to them.</p>
+            {% endif %}
             {% if form.target_set.errors %}{{ form.target_set.errors }}{% endif %}
             <label>TSV or CSV file
                 {{ form.set_file }}

@@ -34,6 +34,7 @@ from .utils import *
 from .packet_parser import parse_packet_data
 from . import answer_structure
 from . import category_mapper
+from . import distribution_lines
 from .duplicate_checker import (find_duplicates, find_internal_issues,
                                 find_topic_repeats, find_answer_matches,
                                 build_answer_index, lookup_answer_matches,
@@ -169,8 +170,9 @@ def question_sets (request):
     # the tournaments for which this user is an editor
     editor_sets = writer.question_set_editor.all()
     
-    all_sets = owned_sets | editor_sets | writer.question_set_writer.all()
-    all_sets = all_sets.order_by('date')
+    all_sets = (owned_sets | editor_sets | writer.question_set_writer.all()
+                | QuestionSet.objects.filter(co_owners=writer))
+    all_sets = all_sets.distinct().order_by('date')
     
     # Sets that are upcoming or finished within the last month
     upcoming_sets = {}
@@ -213,7 +215,7 @@ def question_sets (request):
                          'id': 'qsets-archived'})
 
     # Public sets the user isn't already part of — they can request to join.
-    my_set_ids = {qset.id for qset in all_sets[0]['qsets']} | {qset.id for qset in all_sets[1]['qsets']}
+    my_set_ids = {qset.id for group in all_sets for qset in group['qsets']}
     public_sets = [qs for qs in QuestionSet.objects.filter(
                        public=True, approval_status=QuestionSet.APPROVAL_APPROVED).order_by('-date')
                    if qs.id not in my_set_ids]
@@ -224,9 +226,72 @@ def question_sets (request):
         approval_status=QuestionSet.APPROVAL_PENDING).count()
         if request.user.is_superuser else 0)
 
+    cards = _home_cards(writer, upcoming_sets)
+    today = datetime.now().date()
+    next_due = min((c['qset'].date for c in cards if c['qset'].date >= today), default=None)
+
     return render(request, 'question_sets.html',
                   {'question_set_list': all_sets, 'public_sets': public_sets, 'user': writer,
-                   'pending_set_count': pending_set_count})
+                   'pending_set_count': pending_set_count, 'cards': cards,
+                   'completed_sets': list(reversed(completed_sets)),
+                   'archived_sets': archived_sets, 'next_due': next_due,
+                   'can_import_new_set': _account_can_create(request.user)})
+
+
+def _home_cards(writer, qsets):
+    """One card's worth for each set in progress: the viewer's role, and how
+    much of the set is written against what its distribution asks for. A
+    category's overshoot doesn't make up for another's shortfall, so
+    'written' is counted per category, capped at what each one needs."""
+    from django.db.models import Sum
+    ids = [q.id for q in qsets]
+    if not ids:
+        return []
+    need = {}
+    for row in (SetWideDistributionEntry.objects.filter(question_set_id__in=ids)
+                .values('question_set_id', 'dist_entry_id', 'num_tossups', 'num_bonuses')):
+        need[(row['question_set_id'], row['dist_entry_id'])] = (
+            row['num_tossups'] or 0, row['num_bonuses'] or 0)
+    have = {}
+    for i, model in enumerate((Tossup, Bonus)):
+        for row in (model.objects.filter(question_set_id__in=ids)
+                    .values('question_set_id', 'category_id').annotate(n=Count('id'))):
+            have.setdefault((row['question_set_id'], row['category_id']), [0, 0])[i] = row['n']
+    mine = {}
+    for i, model in enumerate((Tossup, Bonus)):
+        for row in (model.objects.filter(question_set_id__in=ids, author=writer)
+                    .values('question_set_id').annotate(n=Count('id'))):
+            mine[row['question_set_id']] = mine.get(row['question_set_id'], 0) + row['n']
+    owned = set(QuestionSet.objects.filter(id__in=ids).filter(
+        Q(owner=writer) | Q(co_owners=writer)).values_list('id', flat=True))
+    edited = set(writer.question_set_editor.filter(id__in=ids).values_list('id', flat=True))
+
+    today = datetime.now().date()
+    cards = []
+    for qset in qsets:
+        req = [0, 0]
+        done = [0, 0]
+        for (set_id, entry_id), counts in need.items():
+            if set_id != qset.id:
+                continue
+            got = have.get((set_id, entry_id), (0, 0))
+            for i in (0, 1):
+                req[i] += counts[i]
+                done[i] += min(counts[i], got[i])
+        if qset.tossups_only:
+            req[1] = done[1] = 0
+        total = req[0] + req[1]
+        role = 'Owner' if qset.id in owned else 'Editor' if qset.id in edited else 'Writer'
+        days = (qset.date - today).days
+        cards.append({
+            'qset': qset, 'role': role, 'is_editor': role != 'Writer',
+            'required': total,
+            'percent': int(100 * (done[0] + done[1]) / total) if total else 0,
+            'tu_left': req[0] - done[0], 'bs_left': req[1] - done[1],
+            'mine': mine.get(qset.id, 0),
+            'due_soon': 0 <= days <= 30,
+        })
+    return cards
 
 @login_required
 def request_to_join(request):
@@ -1020,12 +1085,21 @@ def approve_new_set(request, qset_id):
 
 @login_required
 def import_set(request):
-    """Admin-only: create a new question set from an uploaded TSV/CSV in the
-    export format, including comments, and index it for search."""
-    user = request.user.writer
+    """Import questions from an uploaded TSV/CSV in the export format,
+    including comments, and index them for search.
 
-    if not request.user.is_superuser:
-        messages.error(request, 'Only the admin account may import sets.')
+    Anyone allowed to create a set (`_account_can_create`, the same rule the
+    create-set page uses) may create one this way; anyone else may import only
+    into a set they own, co-own or edit (the form's target list is that check).
+    Only an administrator's import makes accounts: for anyone else, authors and
+    commenters are matched only to people already on the set, and everyone else
+    is credited by name instead (see set_importer._set_member_writers)."""
+    user = request.user.writer
+    is_admin = request.user.is_superuser
+    can_create = _account_can_create(request.user)
+
+    if not can_create and not _sets_to_import_into(user):
+        messages.error(request, 'You can import questions into a set you own or edit; you have none yet.')
         return HttpResponseRedirect('/failure.html/')
 
     message = ''
@@ -1033,7 +1107,7 @@ def import_set(request):
     summary = None
 
     if request.method == 'POST':
-        form = ImportSetForm(request.POST, request.FILES, writer=user)
+        form = ImportSetForm(request.POST, request.FILES, writer=user, allow_new_set=can_create)
         if form.is_valid():
             from .set_importer import import_set_from_file, SetImportError
             try:
@@ -1041,7 +1115,7 @@ def import_set(request):
                 summary = import_set_from_file(
                     form.cleaned_data['set_file'],
                     (form.cleaned_data.get('set_name') or '').strip(), user,
-                    target_set=target)
+                    target_set=target, create_accounts=is_admin)
                 qset = summary['question_set']
                 # Name the file, not just the set: importing an archive is a
                 # run of near-identical uploads, and "which one did I just do"
@@ -1078,21 +1152,34 @@ def import_set(request):
         # making you find it in the list again. An id you cannot import into is
         # simply not in the field's queryset and is ignored.
         target = request.GET.get('target', '')
-        form = ImportSetForm(writer=user,
+        form = ImportSetForm(writer=user, allow_new_set=can_create,
                              initial={'target_set': target} if target.isdigit() else None)
 
     return render(request, 'import_set.html',
-                  {'form': form, 'user': user, 'summary': summary,
+                  {'form': form, 'user': user, 'summary': summary, 'is_admin': is_admin,
+                   'allow_new_set': can_create,
                    'message': message, 'message_class': message_class})
+
+
+def _sets_to_import_into(writer):
+    """The sets `writer` may import questions into: ones they own, co-own or
+    edit -- the same list the import forms offer."""
+    return QuestionSet.objects.filter(
+        Q(owner=writer) | Q(co_owners=writer) | Q(editor=writer)).distinct()
 
 @login_required
 def import_packets(request):
-    """Admin-only: create a new tournament (question set) from uploaded packet
-    files (.docx or .pdf), one packet per file."""
-    user = request.user.writer
+    """Import packet files (.docx, .pdf or YAPP .json), one packet per file.
 
-    if not request.user.is_superuser:
-        messages.error(request, 'Only the admin account may import packets.')
+    Anyone allowed to create a set may create a new tournament this way;
+    anyone else may add packets only to a set they own, co-own or edit. Only
+    an administrator's import makes accounts (see import_set)."""
+    user = request.user.writer
+    is_admin = request.user.is_superuser
+    can_create = _account_can_create(request.user)
+
+    if not can_create and not _sets_to_import_into(user):
+        messages.error(request, 'You can import packets into a set you own or edit; you have none yet.')
         return HttpResponseRedirect('/failure.html/')
 
     message = ''
@@ -1100,7 +1187,7 @@ def import_packets(request):
     summary = None
 
     if request.method == 'POST':
-        form = ImportPacketsForm(request.POST, request.FILES, writer=user)
+        form = ImportPacketsForm(request.POST, request.FILES, writer=user, allow_new_set=can_create)
         if form.is_valid():
             from .packet_set_importer import (import_packets_from_files,
                                               import_packets_into_set, PacketImportError)
@@ -1108,14 +1195,14 @@ def import_packets(request):
             target = form.cleaned_data.get('target_set')
             try:
                 if target is not None:
-                    summary = import_packets_into_set(files, target, user)
+                    summary = import_packets_into_set(files, target, user, create_accounts=is_admin)
                     qset = summary['question_set']
                     message = ('Added {0} packet(s) to "{1}": {2} tossups, {3} bonuses.'
                                .format(len(summary['packets']), qset.name,
                                        summary['tossups'], summary['bonuses']))
                 else:
                     summary = import_packets_from_files(
-                        files, form.cleaned_data['set_name'], user)
+                        files, form.cleaned_data['set_name'], user, create_accounts=is_admin)
                     qset = summary['question_set']
                     message = ('Imported "{0}" from {1} packet(s): {2} tossups, {3} bonuses.'
                                .format(qset.name, len(summary['packets']),
@@ -1134,10 +1221,13 @@ def import_packets(request):
             message = errs[0] if errs else 'Please choose files and a destination (new name or existing set).'
             message_class = 'alert-box alert'
     else:
-        form = ImportPacketsForm(writer=user)
+        target = request.GET.get('target', '')
+        form = ImportPacketsForm(writer=user, allow_new_set=can_create,
+                                 initial={'target_set': target} if target.isdigit() else None)
 
     return render(request, 'import_packets.html',
-                  {'form': form, 'user': user, 'summary': summary,
+                  {'form': form, 'user': user, 'summary': summary, 'is_admin': is_admin,
+                   'allow_new_set': can_create,
                    'message': message, 'message_class': message_class})
 
 def packet(request):
@@ -1237,13 +1327,47 @@ def create_question_set (request):
                     print('Could not e-mail the new-set approval request:',
                           sys.exc_info()[0], sys.exc_info()[1])
 
-            _sync_set_categories(question_set)
+            # Where the distribution comes from. Every new set owns its
+            # distribution: copied from another set, written by pasting the
+            # announcement, or copied from one of the old shared ones. A post
+            # that doesn't say (an older form) is the last of these.
+            source = request.POST.get('source', 'distribution')
+            _new_set_sizes(question_set, request.POST)
+            copy_from = None
+            if source == 'copy':
+                copy_from = QuestionSet.objects.filter(
+                    id=_int_or_none(request.POST.get('copy_source'))).first()
+                if copy_from is None or copy_from.id not in {s.id for s in _sets_to_copy(user)}:
+                    copy_from, source = None, 'distribution'
+            if source == 'copy':
+                distribution_lines.copy_from_set(
+                    question_set, copy_from,
+                    scale_tags=request.POST.get('copy_scale') == '1',
+                    copy_extras=request.POST.get('copy_extras') == '1')
+            elif source == 'write':
+                own =Distribution.objects.create(
+                    name='{0} (distribution)'.format(question_set.name)[:100],
+                    created_by=user, owner_set=question_set)
+                question_set.distribution = own
+                question_set.per_packet_distribution = True
+                question_set.save(update_fields=['distribution', 'per_packet_distribution'])
+            else:
+                template = question_set.distribution
+                distribution_lines.copy_distribution_for(question_set, template)
+                _sync_set_categories(question_set)
+                question_set.per_packet_distribution = True
+                question_set.save(update_fields=['per_packet_distribution'])
+                distribution_lines.apply_lines(
+                    question_set, distribution_lines.lines_from_distribution(template))
 
             # Redirect rather than render: the set page's own URL is what tells
             # the shell which set is active (rendering here left the sidebar's
             # active set on whatever you had before), and it stops a refresh
             # from re-submitting the form.
             request.session['nav_active_set'] = question_set.id
+            if source == 'write':
+                return HttpResponseRedirect(
+                    '/set_distribution/{0}/paste/?new=1'.format(question_set.id))
             return HttpResponseRedirect(
                 '/edit_question_set/{0}/?created=1'.format(question_set.id))
         else:
@@ -1255,16 +1379,68 @@ def create_question_set (request):
                                        'form': form,
                                        'distributions': distributions,
                                        'needs_approval': needs_approval,
+                                       'copy_sets': _sets_to_copy(user),
+                                       'posted': request.POST,
                                        'user': user})
     else:
         form = QuestionSetForm(writer=user)
+        # The old shared distributions, not the copies sets own.
+        form.fields['distribution'].queryset = form.fields['distribution'].queryset.filter(
+            owner_set__isnull=True)
         distributions = Distribution.visible_to(user)
 
     return render(request, 'create_question_set.html',
                               {'form': form,
                                'distributions': distributions,
                                'needs_approval': needs_approval,
+                               'copy_sets': _sets_to_copy(user),
+                               'posted': {},
                                'user': user})
+
+
+def _int_or_none(raw):
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _sets_to_copy(writer):
+    """The sets a new set may copy its distribution from: any the writer is on."""
+    sets = (QuestionSet.objects.filter(owner=writer) | writer.co_owned_sets.all()
+            | writer.question_set_editor.all() | writer.question_set_writer.all())
+    return list(sets.distinct().order_by('-id'))
+
+
+def _new_set_sizes(qset, post):
+    """Packet size, tiebreakers and extras from the create page ("20 / 20").
+    Anything missing or unreadable keeps the model's default."""
+    def read(name):
+        # Two boxes (name_tu, name_bs) or one "20 / 20".
+        if (name + '_tu') in post or (name + '_bs') in post:
+            raw = '{0}/{1}'.format((post.get(name + '_tu') or '').strip() or '0',
+                                   (post.get(name + '_bs') or '').strip() or '0')
+        else:
+            raw = (post.get(name) or '').replace(' ', '')
+        if not raw:
+            return None
+        try:
+            nums = [int(p) for p in raw.split('/') if p != '']
+        except ValueError:
+            return None
+        if not nums or any(n < 0 or n > 1000 for n in nums):
+            return None
+        return nums[0], (nums[1] if len(nums) > 1 else nums[0])
+    size = read('packet_size')
+    if size and size[0] > 0:
+        qset.tossups_per_packet, qset.bonuses_per_packet = size
+    tb = read('tiebreak')
+    if tb:
+        qset.tiebreak_tossups_per_packet, qset.tiebreak_bonuses_per_packet = tb
+    extras = read('extras')
+    if extras:
+        qset.extra_tossups, qset.extra_bonuses = extras
+    qset.save()
 
 def _editor_tag_context(qset):
     """Editor tags for the Writers & Editors tab: {editor_id: [EditorTag,...]}
@@ -1346,6 +1522,7 @@ def edit_question_set(request, qset_id):
             if form.is_valid():
                 qset = QuestionSet.objects.get(id=qset_id)
                 previous_distribution_id = qset.distribution_id
+                previous_packets = qset.num_packets
                 # Every field the form carries, rather than a list repeated
                 # here: the list had fallen behind the form twice over
                 # (export_category_tags and enable_duplicate_checks were on the
@@ -1361,15 +1538,25 @@ def edit_question_set(request, qset_id):
                 for _field in form.fields:
                     if _field in form.cleaned_data and _field not in _m2m:
                         setattr(qset, _field, form.cleaned_data[_field])
+                saved_message = 'Your changes have been successfully saved.'
+                if qset.per_packet_distribution and previous_distribution_id != qset.distribution_id:
+                    # A set on a per-packet distribution owns its categories;
+                    # pointing it at another distribution would strand its
+                    # lines and questions. That is the Distribution page's job.
+                    qset.distribution_id = previous_distribution_id
+                    saved_message += (' The distribution was not changed: this set\'s categories '
+                                      'are edited on its Distribution page.')
                 qset.save()
+                if qset.per_packet_distribution and previous_packets != qset.num_packets:
+                    distribution_lines.derive(qset)
 
                 # Switching the distribution used to change nothing but the
                 # foreign key: the set's categories are its own rows, so they
                 # went on describing the distribution it was created with. The
                 # `not exists()` arm repairs a set that ended up with no
                 # categories at all.
-                saved_message = 'Your changes have been successfully saved.'
-                if (previous_distribution_id != qset.distribution_id
+                if not qset.per_packet_distribution and (
+                        previous_distribution_id != qset.distribution_id
                         or not qset.setwidedistributionentry_set.exists()):
                     added, removed, stranded = _sync_set_categories(qset)
                     if added or removed:
@@ -1979,7 +2166,10 @@ def question_set_distribution(request, qset_id):
         message = 'You are not authorized to view this set'
         return render(request, 'failure.html',
                                  {'message': message,
-                                  'message_class': 'alert-box alert'})                
+                                  'message_class': 'alert-box alert'})
+    elif qset.per_packet_distribution:
+        # Its set totals are worked out from the Distribution page now.
+        return HttpResponseRedirect('/set_distribution/{0}/'.format(qset.id))
     elif qset.is_owner(user):
         set_distro_formset = create_set_distro_formset(qset)
         tiebreak_formset = create_tiebreak_formset(qset)    
@@ -2008,6 +2198,10 @@ def edit_set_distribution(request, qset_id):
         DistributionEntryFormset = formset_factory(SetWideDistributionEntryForm, can_delete=False, extra=0)
         formset = DistributionEntryFormset(data=request.POST, prefix='distentry')
 
+        if qset.per_packet_distribution:
+            # Typing a total in would be overwritten by the next change to the
+            # distribution; the lines are where it is set.
+            return HttpResponseRedirect('/set_distribution/{0}/'.format(qset.id))
         if formset.is_valid() and qset.is_owner(user):
             for dist_form in formset.forms:
                 entry_id = int(dist_form.cleaned_data['entry_id'])
@@ -8646,7 +8840,9 @@ def packetize_set(request, qset_id):
             if num_packets < 1 or tossups_per_packet < 1 or bonuses_per_packet < 1:
                 raise ValueError('Packet counts must be positive')
 
-            row_count = int(request.POST.get('row_count', 0))
+            # A per-packet distribution writes the quotas itself; the page
+            # shows them rather than offering a table to type over them.
+            row_count = 0 if qset.per_packet_distribution else int(request.POST.get('row_count', 0))
             new_entries = []
             for i in range(row_count):
                 path = request.POST.get('row_{0}_path'.format(i), '').strip()
@@ -8676,8 +8872,11 @@ def packetize_set(request, qset_id):
                 qset.bonuses_per_packet = bonuses_per_packet
                 qset.save()
 
-                PacketizationEntry.objects.filter(question_set=qset).delete()
-                PacketizationEntry.objects.bulk_create(new_entries)
+                if qset.per_packet_distribution:
+                    distribution_lines.derive(qset)
+                else:
+                    PacketizationEntry.objects.filter(question_set=qset).delete()
+                    PacketizationEntry.objects.bulk_create(new_entries)
 
                 quotas = build_quota_dict(qset)
                 report = auto_packetize(qset, num_packets, tossups_per_packet,
@@ -9029,6 +9228,10 @@ def packet_grid(request, qset_id):
                               'unpacketized_bs': unpacketized_bs,
                               'extra_crumb': 'Packet Grid',
                               'extra_crumb_url': '/packet_grid/{0}/'.format(qset.id),
+                              # Rules on the per-packet distribution the packets
+                              # as they stand break -- a hand move is checked
+                              # here, not only the packetizer's own placing.
+                              'rule_problems': distribution_lines.rule_problems(qset),
                               'read_only': read_only})
 
 def _log_packet_grid_change(qset, changer, description, prior_states):
@@ -9219,6 +9422,7 @@ def add_packet(request, qset_id):
         new = _create_packets_continuing(qset, 1, existing, user)
         qset.num_packets = (qset.num_packets or 0) + 1
         qset.save(update_fields=['num_packets'])
+        distribution_lines.derive(qset)
         cache.clear()
         if new:
             messages.success(request, 'Added packet "{0}".'.format(new[0].packet_name))
@@ -9308,6 +9512,7 @@ def assign_unpacketized(request):
             fill_new(Bonus, bs_per, 'bonus', rem_bs, new_packets)
             qset.num_packets = max(qset.num_packets or 0, len(existing) + n_new)
             qset.save(update_fields=['num_packets'])
+            distribution_lines.derive(qset)
 
         if prior:
             _log_packet_grid_change(

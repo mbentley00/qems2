@@ -8,7 +8,16 @@
 
 {% block content %}
 
-<h3 class="page-header">Available Distributions</h3>
+<h3 class="page-header">Old Distributions</h3>
+<div class="alert-box warning old-dist-warning">
+    <strong>These distributions are deprecated.</strong> You now set a distribution when you
+    <a href="/create_question_set/">create a new set</a>, and each set keeps its own, edited on its Distribution
+    page. These stay only so an existing set, or a new one, can still start from them.
+</div>
+<style>
+.old-dist-warning { margin: 0 0 14px; }
+.old-dist-warning a { color: inherit; text-decoration: underline; }
+</style>
 <ul class="button-group even">
     <li><a href="/edit_distribution/" class="button primary"><i class="fa fa-plus-circle"></i> Add Distribution</a></li>
     <li><a href="/import_distribution/" class="button secondary"><i class="fa fa-file-import"></i> Import from Spreadsheet</a></li>
@@ -117,7 +126,7 @@ before changing anything, and the owner is who may archive or delete it.
    offering a button that would refuse. */
 .dist-nodelete { font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.04em;
     color: #8a8f9c; border: 1px dashed #d5d9e0; border-radius: 3px; padding: 1px 5px;
-    cursor: help; margin-left: 6px; }
+    cursor: help; margin-left: 6px; white-space: nowrap; display: inline-block; }
 .dist-public-note { font-size: 0.9em; color: #8a8f9c; margin-bottom: 0.5rem; }
 </style>
 

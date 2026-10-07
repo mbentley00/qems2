@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% block title %}{{ qset.name }} - Switch distribution - QEMS3{% endblock %}
+
+{% block content %}
+<ul class="breadcrumbs">
+    <li><a href="/edit_question_set/{{ qset.id }}/">{{ qset.name }}</a></li>
+    <li class="current"><a href="/switch_distribution/{{ qset.id }}/">Distribution</a></li>
+</ul>
+
+{% for message in messages %}
+<div class="alert-box {% if message.tags == 'error' %}alert{% else %}{{ message.tags }}{% endif %}">{{ message }}</div>
+{% endfor %}
+
+<h3 class="page-header sw-title">Switch to a per-packet distribution</h3>
+<p class="sw-lede">Each category&rsquo;s count per packet, worked out from this set&rsquo;s current totals across
+    {{ proposal.num_packets }} packets. Adjust any of them and the totals update as you go. Questions stay where
+    they are, and you can switch back from the Distribution page.
+    {% if not is_owner %}Only the set&rsquo;s owner can switch it.{% endif %}</p>
+
+<form method="post" action="/switch_distribution/{{ qset.id }}/" id="sw-form"
+      data-packets="{{ proposal.num_packets }}" data-size-tu="{{ qset.tossups_per_packet }}" data-size-bs="{{ qset.bonuses_per_packet }}">
+{% csrf_token %}
+<fieldset class="sw-fieldset"{% if not is_owner %} disabled{% endif %}>
+<table class="sw-table">
+    <thead>
+        <tr>
+            <th class="sw-c-check"><span class="show-for-sr">Include</span></th>
+            <th>Category</th>
+            <th class="num">Now</th>
+            <th class="sw-c-pp">Per packet</th>
+            <th class="num">New total</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for row in proposal.rows %}
+        <tr class="sw-row{% if row.kind == 'decide' or row.kind == 'gap' %} sw-flag{% endif %}" data-old-tu="{{ row.old_tu }}" data-old-bs="{{ row.old_bs }}">
+            <td class="sw-c-check"><input type="checkbox" class="sw-include" name="row-{{ row.index }}-include" value="1" aria-label="Include {{ row.name }}"{% if row.include %} checked{% endif %}></td>
+            <td>
+                <span class="sw-name">{{ row.name }}</span>
+                {% if row.note %}<span class="sw-note">{{ row.note }}</span>{% endif %}
+            </td>
+            <td class="num sw-old">{{ row.old_tu }} / {{ row.old_bs }}</td>
+            <td class="sw-c-pp"><div class="sw-pair">
+                <input type="text" inputmode="decimal" class="sw-tu" name="row-{{ row.index }}-tu" value="{{ row.tu_s }}" aria-label="{{ row.name }} tossups per packet">
+                <span class="sw-slash">/</span>
+                <input type="text" inputmode="decimal" class="sw-bs" name="row-{{ row.index }}-bs" value="{{ row.bs_s }}" aria-label="{{ row.name }} bonuses per packet">
+            </div></td>
+            <td class="num"><span class="sw-new"></span> <span class="sw-delta"></span></td>
+        </tr>
+    {% empty %}
+        <tr><td></td><td colspan="4" class="sw-note">This set has no totals yet. Switch, then write its lines on the Distribution page.</td></tr>
+    {% endfor %}
+    </tbody>
+    <tfoot>
+        <tr>
+            <td></td>
+            <td><strong>Per packet</strong> <span class="sw-note" id="sw-fit"></span></td>
+            <td class="num sw-old">{{ proposal.old_totals }}</td>
+            <td class="sw-c-pp"><strong id="sw-pp"></strong> <span class="sw-of">of {{ qset.tossups_per_packet }} / {{ qset.bonuses_per_packet }}</span></td>
+            <td class="num"><strong id="sw-total"></strong> <span class="sw-delta" id="sw-total-delta"></span></td>
+        </tr>
+    </tfoot>
+</table>
+
+<p class="sw-dropped" id="sw-dropped" hidden></p>
+
+{% if proposal.tiebreak_edited and proposal.tiebreak_tu or proposal.tiebreak_edited and proposal.tiebreak_bs %}
+<label class="sw-check">
+    <input type="checkbox" name="tiebreak_as_extras" value="1">
+    <span>Keep the old tiebreak numbers as extras ({{ proposal.tiebreak_tu }} / {{ proposal.tiebreak_bs }})
+        <span class="sw-note">They were never placed in a packet; as extras they count toward what the set needs.</span></span>
+</label>
+{% endif %}
+
+<div class="sw-actions">
+    <a class="button secondary" href="/question_set_distribution/{{ qset.id }}">Not now</a>
+    {% if is_owner %}<button type="submit" class="button primary">Switch</button>{% endif %}
+</div>
+</fieldset>
+</form>
+
+<style>
+.sw-title { margin-bottom: 6px; }
+.sw-lede { color: #555a68; max-width: 760px; margin-bottom: 18px; }
+.sw-dropped { max-width: 860px; margin: 0 0 16px; padding: 10px 14px; border-radius: 10px; background: #eef5fd;
+    color: #144a78; font-size: 0.9rem; line-height: 1.5; }
+.sw-dropped[hidden] { display: none; }
+.sw-fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.sw-table { width: 100%; max-width: 860px; border: 1px solid #e6e6ee; border-radius: 12px; border-collapse: separate;
+    border-spacing: 0; overflow: hidden; background: #fff; margin: 0 0 16px; }
+.sw-table th { background: #fafafc; color: #6b7080; font-size: 0.78rem; font-weight: 600; padding: 10px 14px;
+    border-bottom: 1px solid #e6e6ee; text-align: left; }
+.sw-table td { padding: 9px 14px; border-bottom: 1px solid #f0f0f4; vertical-align: middle; font-size: 0.92rem; }
+.sw-table tbody tr:last-child td { border-bottom: 0; }
+.sw-table tfoot td { border-top: 1px solid #e6e6ee; border-bottom: 0; background: #fafafc; }
+.sw-table .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.sw-c-check { width: 40px; }
+.sw-c-check input { margin: 0; }
+.sw-c-pp { white-space: nowrap; width: 190px; }
+.sw-pair { display: flex; align-items: center; gap: 6px; }
+.sw-table .sw-pair input { flex: 0 0 58px; width: 58px; height: 32px; margin: 0; text-align: center; }
+.sw-table tbody tr, .sw-table tbody tr:nth-of-type(even) { background: #fff; }
+.sw-slash, .sw-of { color: #9a9eab; }
+.sw-name { font-weight: 600; }
+.sw-note { display: block; color: #8a8f9c; font-size: 0.8rem; font-weight: 400; margin-top: 1px; }
+.sw-old { color: #8a8f9c; }
+.sw-flag .sw-note { color: #9a6b12; }
+.sw-row.sw-off td { opacity: 0.45; }
+.sw-row.sw-off .sw-c-check { opacity: 1; }
+.sw-delta { font-size: 0.8rem; color: #8a8f9c; }
+.sw-delta.up { color: #1c7c3e; }
+.sw-delta.down { color: #b3261e; }
+#sw-fit { display: inline; margin-left: 6px; }
+#sw-fit.bad { color: #9a6b12; }
+.sw-check { display: flex; gap: 10px; align-items: flex-start; max-width: 860px; margin: 0 0 16px; font-weight: 600; }
+.sw-check input { margin: 3px 0 0; }
+.sw-actions { display: flex; gap: 10px; justify-content: flex-end; max-width: 860px; margin-bottom: 2rem; }
+.sw-actions .button { margin: 0; }
+@media (max-width: 640px) {
+    .sw-table th:nth-child(3), .sw-table td:nth-child(3) { display: none; }
+    .sw-table .sw-pair input { flex-basis: 48px; width: 48px; }
+}
+html[data-theme="dark"] .sw-table { background: var(--qx-card); border-color: var(--qx-border); }
+html[data-theme="dark"] .sw-table th, html[data-theme="dark"] .sw-table tfoot td { background: var(--qx-card); border-color: var(--qx-border); }
+html[data-theme="dark"] .sw-table td { border-color: var(--qx-border); }
+</style>
+
+<script>
+$(function () {
+    var $form = $('#sw-form'), n = +$form.data('packets') || 1;
+    var sizeTu = +$form.data('size-tu'), sizeBs = +$form.data('size-bs');
+
+    function num(v) { var x = parseFloat(String(v || '').replace(',', '.')); return isNaN(x) || x < 0 ? 0 : x; }
+    function fmt(x) { return String(Math.round(x * 100) / 100); }
+    function delta($el, tu, bs) {
+        var parts = [];
+        if (tu) { parts.push((tu > 0 ? '+' : '') + tu + ' TU'); }
+        if (bs) { parts.push((bs > 0 ? '+' : '') + bs + ' B'); }
+        $el.text(parts.join(', ')).toggleClass('up', tu + bs > 0).toggleClass('down', tu + bs < 0);
+    }
+
+    function update() {
+        var ppTu = 0, ppBs = 0, oldTu = 0, oldBs = 0;
+        $form.find('.sw-row').each(function () {
+            var $r = $(this), on = $r.find('.sw-include').prop('checked');
+            var tu = on ? num($r.find('.sw-tu').val()) : 0, bs = on ? num($r.find('.sw-bs').val()) : 0;
+            var newTu = Math.round(tu * n), newBs = Math.round(bs * n);
+            var wasTu = +$r.data('old-tu'), wasBs = +$r.data('old-bs');
+            $r.toggleClass('sw-off', !on);
+            $r.find('.sw-new').text(newTu + ' / ' + newBs);
+            delta($r.find('.sw-delta'), newTu - wasTu, newBs - wasBs);
+            ppTu += tu; ppBs += bs; oldTu += wasTu; oldBs += wasBs;
+        });
+        var totTu = Math.round(ppTu * n), totBs = Math.round(ppBs * n);
+        $('#sw-pp').text(fmt(ppTu) + ' / ' + fmt(ppBs));
+        $('#sw-total').text(totTu + ' / ' + totBs);
+        delta($('#sw-total-delta'), totTu - oldTu, totBs - oldBs);
+        // Fewer than now: say plainly that nothing is lost.
+        var lessTu = Math.max(0, oldTu - totTu), lessBs = Math.max(0, oldBs - totBs);
+        var fewer = [lessTu && lessTu + ' tossup' + (lessTu === 1 ? '' : 's'), lessBs && lessBs + ' bonus' + (lessBs === 1 ? '' : 'es')]
+            .filter(Boolean).join(' and ');
+        $('#sw-dropped').prop('hidden', !fewer).text(fewer ? 'The packets hold ' + fewer + ' fewer than the set asks for now. ' +
+            'No questions are deleted: after switching, keep room for them as extras or tiebreakers on the Distribution page.' : '');
+        var fits = Math.abs(ppTu - sizeTu) < 0.001 && Math.abs(ppBs - sizeBs) < 0.001;
+        $('#sw-fit').toggleClass('bad', !fits).text(fits ? 'fills every packet exactly' :
+            (ppTu > sizeTu || ppBs > sizeBs ? 'more than a packet holds' : 'leaves room in every packet'));
+    }
+
+    $form.on('input change', 'input', update);
+    update();
+});
+</script>
+{% endblock %}

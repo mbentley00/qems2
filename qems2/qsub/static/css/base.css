@@ -1215,6 +1215,88 @@ a.app-crumb-muted:hover { color: var(--qx-ink); }
     background: var(--qx-card); box-shadow: inset 0 -1px 0 var(--qx-border); }
 
 .app-nav-badge { background: #e05260; color: #fff; }
+/* Home: your sets as cards, the rest folded away below. */
+.hm { display: flex; flex-direction: column; gap: 26px; padding-top: 6px; }
+.hm a:hover { text-decoration: underline; }
+.hm-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.hm-head h1 { font-family: var(--qx-serif); font-size: 2rem; margin: 0; color: var(--qx-ink); line-height: 1.2; }
+.hm-head p { margin: 4px 0 0; color: var(--qx-muted); }
+.hm-quick { display: flex; gap: 8px; flex-wrap: wrap; }
+.hm-btn { display: inline-flex; align-items: center; gap: 7px; padding: 9px 14px; border-radius: 9px; font-weight: 600;
+    font-size: 0.88rem; border: 1px solid var(--qx-border); background: var(--qx-card); color: var(--qx-ink); }
+body.app-authed a.hm-btn { color: var(--qx-ink); }
+body.app-authed .hm a.hm-btn:hover { text-decoration: none; border-color: var(--qx-primary); color: var(--qx-ink); }
+body.app-authed a.hm-btn-primary, body.app-authed .hm a.hm-btn-primary:hover { background: var(--qx-primary); border-color: var(--qx-primary); color: #fff; }
+.app-content h2.hm-label, .hm-label { font-family: var(--qx-sans); font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--qx-muted); margin: 0 0 10px; font-weight: 600; }
+.hm-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+.hm-card { background: var(--qx-card); border: 1px solid var(--qx-border); border-radius: 12px; padding: 16px 18px;
+    display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.hm-card:hover { border-color: var(--qx-primary); }
+.hm-card-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.hm-card h3 { margin: 0; font-family: var(--qx-sans); font-size: 1.05rem; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+body.app-authed .hm-card h3 a { color: var(--qx-ink); }
+.hm-role { font-size: 0.7rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; padding: 2px 7px;
+    border-radius: 6px; background: #f1ebfd; color: var(--qx-primary); white-space: nowrap; }
+.hm-meta { color: var(--qx-muted); font-size: 0.84rem; display: flex; gap: 6px 14px; flex-wrap: wrap; }
+.hm-due-soon { color: #8a5a00; font-weight: 600; }
+.hm-bar { height: 6px; border-radius: 6px; background: var(--qx-border); overflow: hidden; }
+.hm-bar span { display: block; height: 100%; background: var(--qx-primary); border-radius: 6px; }
+.hm-progress { display: flex; justify-content: space-between; gap: 10px; font-size: 0.8rem; color: var(--qx-muted);
+    font-variant-numeric: tabular-nums; }
+.hm-progress > span:first-child { white-space: nowrap; }
+.hm-progress > span:last-child { text-align: right; }
+.hm-progress strong { color: var(--qx-ink); }
+.hm-links { display: flex; gap: 6px 14px; flex-wrap: wrap; font-size: 0.84rem; border-top: 1px solid var(--qx-border);
+    padding-top: 10px; margin-top: auto; }
+.hm-card-new { border-style: dashed; align-items: center; justify-content: center; color: var(--qx-muted);
+    min-height: 160px; text-align: center; gap: 6px; }
+body.app-authed a.hm-card-new, body.app-authed .hm a.hm-card-new:hover { text-decoration: none; color: var(--qx-muted); }
+.hm-card-new strong { color: var(--qx-primary); font-size: 1rem; }
+.hm-lists { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+.hm-lists-one { grid-template-columns: minmax(0, 1fr); max-width: 760px; }
+.hm-stack { display: flex; flex-direction: column; gap: 12px; }
+.hm-panel { background: var(--qx-card); border: 1px solid var(--qx-border); border-radius: 12px; overflow: hidden; }
+.hm-panel summary, .hm-ph { list-style: none; padding: 12px 16px; display: flex; justify-content: space-between;
+    align-items: center; font-weight: 600; color: var(--qx-ink); }
+.hm-panel summary { cursor: pointer; }
+.hm-panel summary::-webkit-details-marker { display: none; }
+.hm-panel summary::after { content: "\25B8"; color: var(--qx-muted); transition: transform 0.15s; }
+.hm-panel[open] summary::after { transform: rotate(90deg); }
+.hm-count { color: var(--qx-muted); font-weight: 500; margin-left: 6px; }
+.hm-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; padding: 9px 16px;
+    border-top: 1px solid var(--qx-border); align-items: center; color: var(--qx-ink); }
+.hm-sub { color: var(--qx-muted); font-size: 0.8rem; }
+body.app-authed a.hm-join { color: var(--qx-ink); }
+.hm-join { font-size: 0.8rem; font-weight: 600; padding: 5px 10px; border-radius: 7px; border: 1px solid var(--qx-border);
+    background: var(--qx-card); color: var(--qx-ink); white-space: nowrap; }
+.hm .hm-join:hover { text-decoration: none; border-color: var(--qx-primary); color: var(--qx-ink); }
+.hm-join.disabled { opacity: 0.6; cursor: default; }
+.hm-admin { background: var(--qx-card); border: 1px solid var(--qx-border); border-radius: 12px; padding: 14px 16px; }
+.hm-admin-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 2px 14px; }
+body.app-authed .hm-admin-grid a { color: var(--qx-ink); font-size: 0.9rem; padding: 6px 0; display: flex; align-items: center; gap: 8px; }
+.hm-admin-grid .fa { color: var(--qx-muted); width: 16px; text-align: center; }
+.hm-badge { background: #fdecd3; color: #8a5a00; font-size: 0.72rem; font-weight: 700; padding: 1px 7px; border-radius: 10px; }
+.hm-foot { color: var(--qx-muted); font-size: 0.82rem; border-top: 1px solid var(--qx-border); padding-top: 14px; }
+@media (max-width: 860px) { .hm-lists { grid-template-columns: minmax(0, 1fr); } }
+html[data-theme="dark"] .hm-role { background: #2c2547; color: #b49bff; }
+html[data-theme="dark"] .hm-due-soon { color: #f0c27a; }
+html[data-theme="dark"] .hm-badge { background: #3d2f17; color: #f0c27a; }
+
+.app-nav-dot { width: 7px; height: 7px; border-radius: 50%; background: #7c3aed; margin-left: auto; flex: 0 0 auto; }
+
+/* Site news: one quiet line above the page, gone once dismissed or read. */
+.news-bar { display: flex; align-items: center; gap: 10px; margin: 0 0 14px; padding: 8px 10px 8px 14px;
+    background: #f4effd; border: 1px solid #e0d4f8; border-radius: 10px; color: #3b2a63; font-size: 0.9rem; }
+.news-bar .fa { color: #7c3aed; }
+.news-bar-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.news-bar-read { font-weight: 600; color: #6d28d9; white-space: nowrap; }
+.news-bar-close { background: none; border: 0; margin: 0; padding: 0 4px; font-size: 1.25rem; line-height: 1;
+    color: #8a7fa6; cursor: pointer; }
+.news-bar-close:hover { color: #3b2a63; }
+html[data-theme="dark"] .news-bar { background: #2a2340; border-color: #3d3360; color: #ddd3f5; }
+html[data-theme="dark"] .news-bar-read { color: #b9a2f2; }
+html[data-theme="dark"] .news-bar-close:hover { color: #fff; }
 
 .app-topbar-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 /* Uniform control height so the burger, search, and action buttons line up. */
@@ -2260,6 +2342,14 @@ html[data-theme="dark"] body.app-authed a.qhead-btn { color: var(--qx-ink); }
    Display only: rich_editor.js adds these spans and the markup conversion
    ignores them, since power is applied from the (*) mark, not from bold. */
 .rich-editor .q-power { font-weight: bold; }
+/* A tossup with both a superpower and a power: the superpower stays bold and
+   the power a step lighter, so the (+) boundary shows at a glance. Question
+   text is Georgia, which has no weights between regular and bold, so the
+   semi-bold is regular weight with a hairline stroke. Exports print both as
+   bold. */
+.rich-editor .q-power.q-power-run, strong.q-power-run {
+    font-weight: normal; -webkit-text-stroke: 0.45px currentColor; }
+.rich-editor .q-power.q-superpower, strong.q-superpower { font-weight: bold; }
 /* History sits in the tab row but is its own page, so it is a link. */
 body.app-authed a.qtab-link { display: inline-flex; align-items: center; color: var(--qx-muted); text-decoration: none; }
 body.app-authed a.qtab-link:hover { color: var(--qx-ink); }

@@ -3,6 +3,8 @@ from django.views.generic import ListView
 from qems2.qsub.views import *
 from qems2.qsub.models import *
 from qems2.qsub.api import api_ping, api_buzzes, api_bonus_results, api_comments, api_threads
+from qems2.qsub import distribution_views
+from qems2.qsub import news_views
 
 import django
 
@@ -185,6 +187,15 @@ urlpatterns = [
     re_path(r'^compare_repeats/(?P<qset_id>[0-9]+)/$', compare_repeats),
     re_path(r'^view_all_comments/(?P<qset_id>[0-9]+)/$', view_all_comments),
     re_path(r'^question_set_distribution/(?P<qset_id>[0-9]+)/$', question_set_distribution),
+    # Site news (news_views.py).
+    re_path(r'^news/$', news_views.news),
+    re_path(r'^news/dismiss/$', news_views.dismiss_news),
+    # The per-packet distribution (distribution_views.py).
+    re_path(r'^set_distribution/(?P<qset_id>[0-9]+)/$', distribution_views.set_distribution),
+    re_path(r'^set_distribution/(?P<qset_id>[0-9]+)/paste/$', distribution_views.set_distribution_paste),
+    re_path(r'^set_distribution/(?P<qset_id>[0-9]+)/tags/$', distribution_views.set_distribution_tags),
+    re_path(r'^set_distribution/(?P<qset_id>[0-9]+)/revert/$', distribution_views.revert_distribution),
+    re_path(r'^switch_distribution/(?P<qset_id>[0-9]+)/$', distribution_views.switch_distribution),
 
     # json calls
     re_path(r'^get_unassigned_tossups/$', get_unassigned_tossups),

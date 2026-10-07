@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% block title %}News - QEMS3{% endblock %}
+
+{% block content %}
+<h3 class="page-header">News</h3>
+
+{% for message in messages %}
+<div class="alert-box {% if message.tags == 'error' %}alert{% else %}{{ message.tags }}{% endif %}">{{ message }}</div>
+{% endfor %}
+
+{% if is_admin %}
+<form method="post" action="/news/" class="news-post">
+    {% csrf_token %}
+    <h4 class="news-post-title">Post an announcement</h4>
+    <label for="news-title">Title</label>
+    <input type="text" id="news-title" name="title" maxlength="200" value="{{ form_title }}" required>
+    <label for="news-body">Details <small>optional; blank lines start a new paragraph, and links work</small></label>
+    <textarea id="news-body" name="body" rows="4">{{ form_body }}</textarea>
+    <div class="news-post-actions">
+        <span class="news-hint">Everyone sees it once, in a bar on their next visit.</span>
+        <button type="submit" class="button primary small">Post</button>
+    </div>
+</form>
+{% endif %}
+
+<div class="news-list">
+{% for a in announcements %}
+    <article class="news-item{% if a.id in unread_ids %} news-new{% endif %}" id="news-{{ a.id }}">
+        <div class="news-head">
+            <h4>{{ a.title }}{% if a.id in unread_ids %} <span class="news-tag">New</span>{% endif %}</h4>
+            <span class="news-date">{{ a.created_date|date:"M j, Y" }}{% if a.created_by %} &middot; {{ a.created_by.user.get_full_name|default:a.created_by.user.username }}{% endif %}</span>
+        </div>
+        {% if a.body %}<div class="news-body">{{ a.body|urlize|linebreaks }}</div>{% endif %}
+        {% if is_admin %}
+        <form method="post" action="/news/" class="news-delete"
+              onsubmit="return confirm('Remove this announcement for everyone?');">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="delete">
+            <input type="hidden" name="id" value="{{ a.id }}">
+            <button type="submit" class="news-delete-btn">Remove</button>
+        </form>
+        {% endif %}
+    </article>
+{% empty %}
+    <p class="news-empty">No news yet.</p>
+{% endfor %}
+</div>
+
+<style>
+.news-post { background: var(--qx-card, #fff); border: 1px solid #e6e6ee; border-radius: 12px; padding: 16px 20px; margin-bottom: 22px; max-width: 760px; }
+.news-post-title { font-size: 1rem; margin: 0 0 10px; }
+.news-post label { font-weight: 600; font-size: 0.85rem; }
+.news-post label small { font-weight: 400; color: #8a8f9c; text-transform: none; }
+.news-post-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.news-post-actions .button { margin: 0; }
+.news-hint { color: #8a8f9c; font-size: 0.82rem; }
+.news-list { display: flex; flex-direction: column; gap: 12px; max-width: 760px; margin-bottom: 2rem; }
+.news-item { background: var(--qx-card, #fff); border: 1px solid #e6e6ee; border-radius: 12px; padding: 14px 18px; }
+.news-item.news-new { border-color: #c9b6f2; }
+.news-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.news-head h4 { margin: 0; font-size: 1.05rem; }
+.news-tag { font-size: 0.68rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #6d28d9;
+    background: #f1ebfd; border-radius: 6px; padding: 1px 6px; vertical-align: 2px; }
+.news-date { color: #8a8f9c; font-size: 0.82rem; }
+.news-body { margin-top: 8px; color: #3b3f4c; }
+.news-body p { margin: 0 0 8px; }
+.news-delete { margin: 6px 0 0; text-align: right; }
+.news-delete-btn { background: none; border: 0; padding: 0; margin: 0; color: #a12a20; font-size: 0.8rem; cursor: pointer; }
+.news-empty { color: #8a8f9c; }
+html[data-theme="dark"] .news-item, html[data-theme="dark"] .news-post { border-color: var(--qx-border); }
+html[data-theme="dark"] .news-body { color: var(--qx-ink); }
+</style>
+{% endblock %}

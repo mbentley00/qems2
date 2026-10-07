@@ -451,7 +451,7 @@ time, and where the questions nobody has tagged stand out.
             <input type="submit" value="Add" class="button small primary tag-add-button">
         </div>
     </div>
-    <p class="home-note">Adding a tag that already exists in that category updates its group and counts. Each quota has two ends and either may be left off: a minimum of 0 asks for no minimum, and an empty maximum sets no ceiling &mdash; so &ldquo;This Empire Indicator&rdquo; can cap the set at 7/0 without demanding any. &ldquo;Any type&rdquo; counts tossups and bonuses together.</p>
+    <p class="home-note">0 means no minimum; a blank maximum means no limit. &ldquo;Any type&rdquo; counts tossups and bonuses together. Re-adding an existing tag updates it.</p>
 </form>
 {% endif %}
 </div>
@@ -469,7 +469,7 @@ time, and where the questions nobody has tagged stand out.
         </form>
         {% endif %}
     </div>
-    <p class="home-note">Same columns as the export (Category, Group, Tag, Tossups, Bonuses, Any Type, Max Tossups, Max Bonuses, Max Any Type, Order, In Exports). The typed columns are minimums; an empty Max column means no ceiling. Existing tags are updated by name and keep their questions; categories this set lacks are skipped.</p>
+    <p class="home-note">Import uses the export&rsquo;s columns. Existing tags are updated and keep their questions; categories the set doesn&rsquo;t have are skipped.</p>
 </div>
 
 <script>

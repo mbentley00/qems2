@@ -1,0 +1,23 @@
+{% comment %}
+One row of a category's Sub-categories tree. `item` is None in the
+<template> the page clones, where `i` and `j` are placeholders and the
+script sets the depth. The box shows the row's name under its parent
+("Opera"); the hidden path is the whole path ("Fine Arts - Auditory -
+Opera"), which the script keeps in step as names change. The row's link
+and its "no sub-category more than N" limit are edited from the Rules
+column and the row's menu; the script keeps them in the hidden boxes.
+{% endcomment %}
+<div class="sd-item{% if item.has_kids %} has-kids{% endif %}" data-depth="{{ item.depth|default:1 }}" style="--d: {{ item.depth|default:1 }}">
+    <span class="sd-row-grip" title="Drag to reorder among its siblings" aria-hidden="true">&#10303;</span>
+    <input type="hidden" class="sd-item-order" name="line-{{ i }}-item-{{ j }}-order" value="{{ j }}">
+    <div class="sd-seg">
+        <input type="hidden" class="sd-item-full" name="line-{{ i }}-item-{{ j }}-path" value="{{ item.path|default:'' }}">
+        <input type="text" class="sd-item-path" value="{% if item %}{{ item.label|default:item.path }}{% endif %}" placeholder="Sub-category" aria-label="Sub-category" autocomplete="off">
+        <span class="sd-item-words"></span>
+    </div>
+    <input type="text" class="sd-num sd-item-tu" name="line-{{ i }}-item-{{ j }}-tu" value="{{ item.tu|default:'' }}" placeholder="TU" aria-label="Tossups per packet">
+    <input type="text" class="sd-num sd-item-bs" name="line-{{ i }}-item-{{ j }}-bs" value="{{ item.bs|default:'' }}" placeholder="B" aria-label="Bonuses per packet">
+    <input type="hidden" class="sd-link" name="line-{{ i }}-item-{{ j }}-link" value="{{ item.link|default:'' }}">
+    <input type="hidden" class="sd-child-max" name="line-{{ i }}-item-{{ j }}-child_max" value="{{ item.child_max|default:'' }}">
+    <button type="button" class="sd-dots sd-item-menu" aria-haspopup="menu" aria-label="Actions for this row" title="Actions">&#8943;</button>
+</div>

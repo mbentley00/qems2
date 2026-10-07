@@ -154,9 +154,10 @@ $(function () {
     var enhanceCount = 0;
 
     // What an empty field says. The edit pages have no field labels, so this
-    // is how an empty one says what it is for.
+    // is how an empty one says what it is for. The tossup's two fields are
+    // labelled wherever they show (the edit page uses the one combined box
+    // below), so they say nothing.
     var FIELD_PLACEHOLDERS = {
-        id_tossup_text: 'Question text', id_tossup_answer: 'Answer line',
         id_leadin: 'Leadin',
         id_part1_text: 'Part 1', id_part1_answer: 'Part 1 answer line',
         id_part2_text: 'Part 2', id_part2_answer: 'Part 2 answer line',
@@ -559,16 +560,29 @@ $(function () {
             sel.addRange(r);
         }
 
+        // Where a superpower run ends: just past the "(+)", when the stem also
+        // has a later "(*)" for it to be told apart from. -1 otherwise.
+        function superEnd(text) {
+            var plus = text.indexOf('(+)'), star = text.lastIndexOf('(*)');
+            return plus > -1 && star > plus ? plus + 3 : -1;
+        }
+
         function paintPower() {
             if (!showsPower) { return; }
             var root = $editor[0];
             var end = powerEnd(root.textContent);
+            var split = superEnd(root.textContent);
             var wanted = end > 0 ? root.textContent.slice(0, end) : '';
             var spans = root.querySelectorAll('span.q-power');
             var have = Array.prototype.map.call(spans, function (el) { return el.textContent; }).join('');
+            var haveSuper = Array.prototype.map.call(root.querySelectorAll('span.q-superpower'),
+                function (el) { return el.textContent; }).join('');
+            var wantedSuper = split > 0 ? root.textContent.slice(0, split) : '';
             // Most keystrokes land inside or after the run and leave it
-            // right; only rebuild when the run itself moved.
-            if (have === wanted && (!spans.length || root.textContent.indexOf(have) === 0)) { return; }
+            // right; only rebuild when the run itself, or the (+) within it,
+            // moved.
+            if (have === wanted && haveSuper === wantedSuper &&
+                    (!spans.length || root.textContent.indexOf(have) === 0)) { return; }
             var caret = document.activeElement === root ? caretOffsets() : null;
             Array.prototype.forEach.call(spans, function (el) {
                 while (el.firstChild) { el.parentNode.insertBefore(el.firstChild, el); }
@@ -583,10 +597,20 @@ $(function () {
                     pos += len;
                     var target = node;
                     if (start + len > end) { target.splitText(end - start); }
-                    var span = document.createElement('span');
-                    span.className = 'q-power';
-                    target.parentNode.insertBefore(span, target);
-                    span.appendChild(target);
+                    // A node straddling the end of the superpower is cut
+                    // there, so each piece gets one class.
+                    var pieces = [target];
+                    if (split > start && split < Math.min(start + len, end)) {
+                        pieces.push(target.splitText(split - start));
+                    }
+                    pieces.forEach(function (piece, k) {
+                        var at = k === 0 ? start : split;
+                        var span = document.createElement('span');
+                        span.className = split < 0 ? 'q-power'
+                            : (at < split ? 'q-power q-superpower' : 'q-power q-power-run');
+                        piece.parentNode.insertBefore(span, piece);
+                        span.appendChild(piece);
+                    });
                 });
             }
             if (caret) { restoreCaret(caret); }

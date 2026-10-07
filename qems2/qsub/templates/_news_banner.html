@@ -1,0 +1,24 @@
+{% comment %}
+The site-news bar: one line above the page for the newest announcement this
+person hasn't seen. It never blocks anything. Dismissing it, or opening News,
+marks the news read; ignored, it stops appearing on its own after a few pages
+or days (news.banner_for).
+{% endcomment %}
+{% with banner=news_banner %}
+{% if banner %}
+<div class="news-bar" role="status" id="news-bar">
+    <i class="fa fa-bullhorn" aria-hidden="true"></i>
+    <span class="news-bar-text"><strong>News:</strong> {{ banner.title }}</span>
+    <a class="news-bar-read" href="/news/#news-{{ banner.id }}">Read</a>
+    <button type="button" class="news-bar-close" aria-label="Dismiss" title="Dismiss">&times;</button>
+</div>
+<script>
+$(function () {
+    $('#news-bar .news-bar-close').on('click', function () {
+        $('#news-bar').remove();
+        $.post('/news/dismiss/', {csrfmiddlewaretoken: $('[name=csrfmiddlewaretoken]').first().val() || $.cookie('csrftoken')});
+    });
+});
+</script>
+{% endif %}
+{% endwith %}

@@ -38,6 +38,7 @@ them by hand afterward.</p>
     {% if form.non_field_errors %}<div class="alert-box alert">{{ form.non_field_errors }}</div>{% endif %}
     <div class="row">
         <div class="small-8 columns">
+            {% if allow_new_set %}
             <p><strong>Destination</strong> &mdash; either create a new tournament or add the
             packets to a set you already have:</p>
             <label>Create a new tournament named
@@ -47,6 +48,16 @@ them by hand afterward.</p>
             <label>…or add packets to an existing set
                 {{ form.target_set }}
             </label>
+            {% else %}
+            <label>Add the packets to one of your sets
+                {{ form.target_set }}
+            </label>
+            {% endif %}
+            {% if not is_admin %}
+            <p class="import-note">No accounts are made by your import. An author or commenter is matched
+                only to someone already on the set; anyone else is credited by name: their questions are
+                yours, with &ldquo;credit to&rdquo; set to them.</p>
+            {% endif %}
             {% if form.target_set.errors %}{{ form.target_set.errors }}{% endif %}
             <label style="margin-top:1rem;">Packet files (.json, .docx, or .pdf) &mdash; select multiple
                 {{ form.packet_files }}
