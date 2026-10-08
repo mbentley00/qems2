@@ -868,6 +868,13 @@ $(function () {
                 $line.find('.sd-rule-num').last().trigger('focus');
             });
         }
+        var saved = $.trim($r.find('.sd-item-full').val());
+        if (saved.indexOf(' - ') > 0 && allPaths.some(function (p) { return p.toLowerCase() === saved.toLowerCase(); })) {
+            item('Merge into its parent…', function () {
+                window.location = '/merge_category/{{ qset.id }}/?path=' + encodeURIComponent(saved) +
+                    '&next=' + encodeURIComponent('/set_distribution/{{ qset.id }}/');
+            });
+        }
         item('Remove', function () { removeRow($r); }, 'sd-menu-danger');
         $menu.prop('hidden', false);
         var off = $btn.offset();

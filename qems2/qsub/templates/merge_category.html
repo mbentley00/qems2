@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% block title %}Merge {{ leaf }} - {{ qset.name }} - QEMS3{% endblock %}
+
+{% block content %}
+<ul class="breadcrumbs">
+    <li><a href="/edit_question_set/{{ qset.id }}/">{{ qset.name }}</a></li>
+    <li><a href="/category_overview/{{ qset.id }}/">Category Overview</a></li>
+    <li class="current"><a href="#">Merge {{ leaf }}</a></li>
+</ul>
+
+<h3 class="page-header mc-title">Merge {{ source }}</h3>
+
+{% for message in messages %}
+<div class="alert-box {% if message.tags == 'error' %}alert{% else %}{{ message.tags }}{% endif %}">{{ message }}</div>
+{% endfor %}
+
+<form method="post" action="/merge_category/{{ qset.id }}/" class="mc-card">
+    {% csrf_token %}
+    <input type="hidden" name="path" value="{{ source }}">
+    <input type="hidden" name="next" value="{{ next }}">
+
+    <fieldset class="mc-targets">
+        <legend>Merge it into</legend>
+        {% for t in targets %}
+        <label class="mc-target"><input type="radio" name="target" value="{{ t }}"{% if forloop.first %} checked{% endif %}> {{ t }}</label>
+        {% endfor %}
+    </fieldset>
+
+    <h5 class="mc-h">What moves</h5>
+    <ul class="mc-list">
+        <li><strong>{{ plan.tossups }}</strong> tossup{{ plan.tossups|pluralize }} and <strong>{{ plan.bonuses }}</strong> bonus{{ plan.bonuses|pluralize:"es" }}, filed under the parent from now on. They keep their packets and numbers.</li>
+        {% if plan.below %}<li>Its sub-categories go with it: {{ plan.below|join:", " }}.</li>{% endif %}
+        {% if plan.tags %}<li>{{ plan.tags|length }} category tag{{ plan.tags|length|pluralize }} ({% for t in plan.tags %}{{ t.name }}{% if not forloop.last %}, {% endif %}{% endfor %}). A tag the parent already has by the same name takes these questions instead.</li>{% endif %}
+        {% if plan.comments %}<li>{{ plan.comments }} category comment{{ plan.comments|pluralize }}.</li>{% endif %}
+        <li>Its counts in the distribution, totals and packetizer quotas are added to the parent&rsquo;s.</li>
+        {% if plan.shared %}<li>Other sets use this set&rsquo;s categories, so this set gets its own copy first. Theirs stay as they are.</li>{% endif %}
+    </ul>
+    <p class="mc-warn">{{ leaf }} itself is removed. This can&rsquo;t be undone from here: to split it out again, make the category again and move questions back.</p>
+
+    <label class="mc-confirm"><input type="checkbox" name="confirm" value="1"> Merge {{ leaf }} and move its questions</label>
+    <div class="mc-actions">
+        <a class="button secondary small" href="{{ next }}">Cancel</a>
+        <button type="submit" class="button small alert">Merge</button>
+    </div>
+</form>
+
+<style>
+.mc-title { margin-bottom: 14px; }
+.mc-card { background: #fff; border: 1px solid #e6e6ee; border-radius: 14px; padding: 18px 22px; max-width: 760px; }
+.mc-targets { border: 0; padding: 0; margin: 0 0 14px; }
+.mc-targets legend { font-size: 0.78rem; font-weight: 700; color: #6b7080; letter-spacing: 0.03em; text-transform: uppercase; margin-bottom: 6px; }
+.mc-target { display: flex; align-items: center; gap: 8px; font-size: 0.95rem; margin: 4px 0; }
+.mc-target input { margin: 0; }
+.mc-h { font-size: 0.78rem; font-weight: 700; color: #6b7080; letter-spacing: 0.03em; text-transform: uppercase; margin: 10px 0 6px; }
+.mc-list { margin: 0 0 12px 1.2em; font-size: 0.92rem; line-height: 1.55; }
+.mc-warn { color: #7a4a08; background: #fdf3e3; border-radius: 8px; padding: 8px 12px; font-size: 0.88rem; }
+.mc-confirm { display: flex; align-items: center; gap: 8px; font-weight: 600; margin: 12px 0; }
+.mc-confirm input { margin: 0; }
+.mc-actions { display: flex; gap: 10px; justify-content: flex-end; }
+.mc-actions .button { margin: 0; }
+html[data-theme="dark"] .mc-card { background: var(--qx-card); border-color: var(--qx-border); }
+</style>
+{% endblock %}

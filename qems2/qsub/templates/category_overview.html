@@ -13,6 +13,9 @@
 
 <style>
 .cat-editors { white-space: normal; }
+/* Merging a sub-category into its parent: there when the row is pointed at. */
+.cat-merge { margin-left: 8px; font-size: 0.78rem; color: #6b7080; opacity: 0; }
+tr:hover .cat-merge, .cat-merge:focus { opacity: 1; }
 /* A super-group names what it covers, quietly, under its own name */
 .sg-cats { display: block; font-size: 0.8em; color: var(--qx-muted, #8a8f9c); font-weight: normal; }
 .sg-missing { display: block; font-size: 0.8em; color: #a94442; font-weight: normal; }
@@ -59,6 +62,7 @@
                     {{ row.short_name }}
                 {% else %}
                     <a href="/categories/{{ qset.id }}/{{ row.category_id }}">{{ row.short_name }}</a>
+                    {% if can_edit_tags and ' - ' in row.name %}<a class="cat-merge" href="/merge_category/{{ qset.id }}/?path={{ row.name|urlencode }}" title="Merge {{ row.short_name }} into its parent, with its questions">Merge&hellip;</a>{% endif %}
                 {% endif %}
             </td>
             <td class="cat-editors">

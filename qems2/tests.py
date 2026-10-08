@@ -17099,6 +17099,123 @@ class PerPacketDistributionTests(TestCase):
         self.assertEqual(len(indented['blocks']), 1)                          # indenting decides
 
 
+class CategoryMergeTests(TestCase):
+    """Merging a sub-category (and what is under it) into one of its parents:
+    the questions, tags, comments and distribution rows all follow."""
+
+    def setUp(self):
+        user = User.objects.create_user('merge_owner', password='pw', email='m@merge.com')
+        self.owner = Writer.objects.get(user=user)
+        self.dist = Distribution.objects.create(name='Merge dist')
+        self.e = {}
+        for cat, sub in [('Literature', 'American'), ('Literature', 'American - Drama'),
+                         ('Literature', 'British'), ('History', '')]:
+            self.e[(cat, sub)] = DistributionEntry.objects.create(
+                distribution=self.dist, category=cat, subcategory=sub,
+                min_tossups=0, min_bonuses=0, max_tossups=0, max_bonuses=0)
+        self.qset = QuestionSet.objects.create(
+            name='Merge Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=4, distribution=self.dist, tossups_per_packet=20, bonuses_per_packet=20)
+        self.owner.question_set_editor.add(self.qset)
+        self.client.login(username='merge_owner', password='pw')
+
+    def _tu(self, key, qset=None):
+        qset = qset or self.qset
+        entry = qset.distribution.distributionentry_set.get(category=key[0], subcategory=key[1])
+        return Tossup.objects.create(author=self.owner, question_set=qset, tossup_text='A clue.',
+                                     tossup_answer='_a_', category=entry,
+                                     created_date=datetime.now(), last_changed_date=datetime.now())
+
+    def _paths(self):
+        return sorted(str(e).rstrip(' -') for e in self.qset.distribution.distributionentry_set.all())
+
+    def _merge(self, path, target, confirm='1'):
+        return self.client.post('/merge_category/{0}/'.format(self.qset.id),
+                                {'path': path, 'target': target, 'confirm': confirm})
+
+    def test_a_sub_sub_category_merges_into_its_parent_with_its_tags_and_comments(self):
+        drama = self._tu(('Literature', 'American - Drama'))
+        moved = CategoryTag.objects.create(question_set=self.qset, category_path='Literature - American - Drama',
+                                           name='Plays')
+        moved.tossups.add(drama)
+        twin_src = CategoryTag.objects.create(question_set=self.qset, category_path='Literature - American - Drama',
+                                              name='Modern')
+        twin_src.tossups.add(drama)
+        twin = CategoryTag.objects.create(question_set=self.qset, category_path='Literature - American', name='modern')
+        CategoryComment.objects.create(question_set=self.qset, category_path='Literature - American - Drama',
+                                       author=self.owner, comment='Fewer musicals')
+        resp = self._merge('Literature - American - Drama', 'Literature - American')
+        self.assertEqual(resp.status_code, 302)
+        drama.refresh_from_db()
+        self.assertEqual(str(drama.category), 'Literature - American')
+        self.assertNotIn('Literature - American - Drama', self._paths())
+        moved.refresh_from_db()
+        self.assertEqual(moved.category_path, 'Literature - American')
+        self.assertIn(drama, moved.tossups.all())              # kept: the tag moved with it
+        self.assertFalse(CategoryTag.objects.filter(id=twin_src.id).exists())
+        self.assertIn(drama, twin.tossups.all())               # same name on the parent: joined it
+        self.assertEqual(CategoryComment.objects.get().category_path, 'Literature - American')
+
+    def test_a_sub_category_takes_its_own_sub_categories_into_the_top(self):
+        a, d, b = (self._tu(('Literature', 'American')), self._tu(('Literature', 'American - Drama')),
+                   self._tu(('Literature', 'British')))
+        self._merge('Literature - American', 'Literature')
+        for q in (a, d):
+            q.refresh_from_db()
+            self.assertEqual(q.category.category, 'Literature')
+            self.assertEqual(q.category.subcategory, '')
+        b.refresh_from_db()
+        self.assertEqual(str(b.category), 'Literature - British')
+        self.assertEqual(self._paths(), ['History', 'Literature', 'Literature - British'])
+
+    def test_the_per_packet_rows_add_up_into_the_parent(self):
+        from qems2.qsub import distribution_lines as dl
+        D = Decimal
+        self.qset.per_packet_distribution = True
+        self.qset.save()
+        dl.apply_lines(self.qset, [{'name': 'Literature', 'categories': ['Literature'], 'tu': D(4), 'bs': D(4),
+                                    'items': [{'path': 'Literature - American', 'tu': D(1), 'bs': D(1)},
+                                              {'path': 'Literature - American - Drama', 'tu': D('0.5'), 'bs': D('0.5')},
+                                              {'path': 'Literature - British', 'tu': D(1), 'bs': D(1)}]},
+                                   {'name': 'History', 'categories': ['History'], 'tu': D(4), 'bs': D(4)}])
+        self.qset.refresh_from_db()
+        self._merge('Literature - American - Drama', 'Literature - American')
+        rows = lambda: [(it.path, it.tossups) for it in self.qset.distribution_lines.get(name='Literature').items.all()]
+        self.assertEqual(rows(), [('Literature - American', D('1.5')), ('Literature - British', D(1))])
+        self._merge('Literature - American', 'Literature')
+        self.assertEqual(rows(), [('Literature - British', D(1))])    # the category's own count holds it now
+
+    def test_another_set_on_the_same_categories_is_left_alone(self):
+        other = QuestionSet.objects.create(
+            name='Other Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=4, distribution=self.dist, tossups_per_packet=20, bonuses_per_packet=20)
+        theirs = self._tu(('Literature', 'American - Drama'), qset=other)
+        ours = self._tu(('Literature', 'American - Drama'))
+        self._merge('Literature - American - Drama', 'Literature - American')
+        self.qset.refresh_from_db()
+        self.assertNotEqual(self.qset.distribution_id, self.dist.id)            # a copy of its own
+        ours.refresh_from_db()
+        theirs.refresh_from_db()
+        self.assertEqual(str(ours.category), 'Literature - American')
+        self.assertEqual(str(theirs.category), 'Literature - American - Drama')
+        self.assertTrue(self.dist.distributionentry_set.filter(subcategory='American - Drama').exists())
+
+    def test_the_page_asks_first_and_only_offers_parents(self):
+        resp = self.client.get('/merge_category/{0}/?path=Literature%20-%20American%20-%20Drama'.format(self.qset.id))
+        self.assertContains(resp, 'value="Literature - American"')
+        self.assertContains(resp, 'value="Literature"')
+        self.assertNotContains(resp, 'value="Literature - British"')
+        self._merge('Literature - American - Drama', 'Literature - American', confirm='')
+        self.assertIn('Literature - American - Drama', self._paths())      # no tick, nothing merged
+        self._merge('Literature - American - Drama', 'History')
+        self.assertIn('Literature - American - Drama', self._paths())      # not a parent
+        stranger = User.objects.create_user('merge_stranger', password='pw', email='s@merge.com')
+        self.client.login(username='merge_stranger', password='pw')
+        self.assertContains(self._merge('Literature - American - Drama', 'Literature - American'),
+                            'Only the set')
+        self.assertIn('Literature - American - Drama', self._paths())
+
+
 class RealAnnouncementParsingTests(TestCase):
     """Set distributions as they are actually posted on the hsquizbowl.org
     collegiate announcements board (2026), editors' names replaced. None of

@@ -5,6 +5,7 @@ from qems2.qsub.models import *
 from qems2.qsub.api import api_ping, api_buzzes, api_bonus_results, api_comments, api_threads
 from qems2.qsub import distribution_views
 from qems2.qsub import news_views
+from qems2.qsub import category_merge_views
 
 import django
 
@@ -103,6 +104,7 @@ urlpatterns = [
     re_path(r'^category_comment/(?P<qset_id>[0-9]+)/$', category_comment),
     re_path(r'^category_problems/(?P<qset_id>[0-9]+)/$', category_problems),
     re_path(r'^tidy_categories/(?P<qset_id>[0-9]+)/$', tidy_categories),
+    re_path(r'^merge_category/(?P<qset_id>[0-9]+)/$', category_merge_views.merge_category),
     re_path(r'^distributions/$', distributions),
     re_path(r'^role_groups/$', role_groups),
     re_path(r'^user_search/$', user_search),
