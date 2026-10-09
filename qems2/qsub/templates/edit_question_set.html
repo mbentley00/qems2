@@ -666,6 +666,7 @@
                 <li><a href="/add_co_owner/{{ qset.id }}" class="button primary" id="btn-add-co-owner"><i class="fa fa-plus-circle"></i> Add a Co-owner</a></li>
                 <li><a href="/add_editor/{{ qset.id }}" class="button primary" id="btn-add-editor"><i class="fa fa-plus-circle"></i> Add an Editor</a></li>
                 <li><a href="/add_writer/{{ qset.id }}" class="button primary"><i class="fa fa-plus-circle"></i> Add a Writer</a></li>
+                <li><a href="/add_proofreader/{{ qset.id }}/" class="button primary"><i class="fa fa-plus-circle"></i> Add a Proofreader</a></li>
             </ul>
 
             <div class="panel radius">
@@ -831,9 +832,17 @@
                 <tr>
                     <td>
                         {% if writer.writer.user.username == qset.owner.user.username %}Owner
+                        {% elif qset|is_set_owner:user and writer.writer.id not in group_granted_ids %}
+                        <select class="member-role-select" data-writer-id="{{ writer.writer.id }}" data-qset-id="{{ qset.id }}" aria-label="Role of {{ writer.writer.user.username }}">
+                            <option value="co-owner"{% if writer.writer in qset.co_owners.all %} selected{% endif %}>Co-owner</option>
+                            <option value="editor"{% if writer.writer not in qset.co_owners.all and writer.writer in editors %} selected{% endif %}>Editor</option>
+                            <option value="writer"{% if writer.writer not in editors and writer.writer in writers %} selected{% endif %}>Writer</option>
+                            <option value="proofreader"{% if writer.writer in proofreaders %} selected{% endif %}>Proofreader</option>
+                        </select>
                         {% elif writer.writer in qset.co_owners.all %}Co-owner
                         {% elif writer.writer in editors %}Editor
                         {% elif writer.writer in writers %}Writer
+                        {% elif writer.writer in proofreaders %}Proofreader
                         {% endif %}
                         {% with mg=member_groups|lookup:writer.writer.id %}{% if mg %}
                         <br><small class="member-via-group">via {% for g in mg %}{{ g }}{% if not forloop.last %}, {% endif %}{% endfor %}</small>

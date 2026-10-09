@@ -5,6 +5,7 @@ import re
 from bs4 import BeautifulSoup
 from django.utils.encoding import smart_str
 from django.utils.safestring import mark_safe
+import html as html_module
 import unicodedata
 
 DEFAULT_ALLOWED_TAGS = ['b', 'i', 'u', 'strong', 'em']
@@ -879,13 +880,48 @@ def strip_special_chars(line):
     return line.replace('_', '').replace('~', '')
 
 def strip_unicode(line):
-    if (isinstance(line, str)):
-        # line is not a unicode string, and normalizing it will throw
-        return line
+    """`line` with its accents dropped: "Gödel" -> "Godel"."""
     if (line is None or line == ""):
         return ""
     return ''.join(c for c in unicodedata.normalize('NFKD', line)
               if unicodedata.category(c) != 'Mn')
+
+
+#: QEMS's paired markers: bold, strike, super/subscript, pronunciation-guide
+#: target, note.
+_SEARCH_MARKERS = re.compile(r'\\[BDSsPN]')
+#: A parenthetical that opens with a quote is a pronunciation guide:
+#: Goethe ("GUR-tuh").
+_SEARCH_GUIDE = re.compile(r'\s*\(\s*["“”\']([^()]*)\)')
+
+
+def search_text(line, remove_unicode=True):
+    """`line` (QEMS markup) as the plain words a search should find in it.
+
+    Everything that isn't a word comes out -- tags, entities, the \\P...\\P
+    around a guided word, the _ and ~ of underline and italics -- since
+    leaving "\\PGoethe\\P" in made Postgres index the word as "pgoethe", and a
+    search for Goethe missed it. Pronunciation guides are moved to the end, so
+    "von Goethe" still matches the phrase it interrupted, and the respelling
+    itself can still be searched for. Accents are dropped unless
+    `remove_unicode` is false; queries go through this too, so "Godel" and
+    "Gödel" find each other either way round.
+    """
+    if not line:
+        return ''
+    t = html_module.unescape(line)
+    if '<' in t:
+        t = BeautifulSoup(t, 'html.parser').get_text()
+    t = _SEARCH_MARKERS.sub('', t)
+    t = re.sub(r'(?<!\\)[_~]', '', t)
+    t = re.sub(r'\\(.)', r'\1', t)
+    guides = _SEARCH_GUIDE.findall(t)
+    t = _SEARCH_GUIDE.sub('', t)
+    if guides:
+        t = t + ' ' + ' '.join(g.strip('"“”\' ') for g in guides)
+    if remove_unicode:
+        t = strip_unicode(t)
+    return re.sub(r'\s+', ' ', t).strip()
 
 def get_bonus_type_from_question_type(question_type):
     if (question_type is None or str(question_type) == ''):

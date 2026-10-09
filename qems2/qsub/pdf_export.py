@@ -92,6 +92,19 @@ def _runs_by_font(text):
     return out
 
 
+def _set_font(pdf, family, style, size):
+    """set_font, registering the DejaVu fallback the first time a run needs it.
+
+    Most packets never need it, and parsing the four TTF files costs real time
+    in a set export that builds one PDF per packet.
+    """
+    if family == _UNICODE and hasattr(pdf, 'add_font') and not getattr(pdf, '_qems_unicode', False):
+        for st, fname in _UNICODE_FILES.items():
+            pdf.add_font(_UNICODE, st, os.path.join(_FONT_DIR, fname))
+        pdf._qems_unicode = True
+    pdf.set_font(family, style, size)
+
+
 def _write_text(pdf, text, family, style, size, color=BLACK, line_h=LINE_H):
     """One formatted run, in the body face where it can be and the fallback
     where it can't."""
@@ -99,7 +112,7 @@ def _write_text(pdf, text, family, style, size, color=BLACK, line_h=LINE_H):
         return
     pdf.set_text_color(*color)
     for chunk, fallback in _runs_by_font(text):
-        pdf.set_font(_UNICODE if fallback else family, style, size)
+        _set_font(pdf, _UNICODE if fallback else family, style, size)
         pdf.write(line_h, chunk)
     pdf.set_text_color(*BLACK)
 
@@ -262,7 +275,7 @@ def _heading(pdf, text, size, space_before=0, space_after=0, center=True):
     if space_before:
         pdf.ln(space_before)
     pdf.set_text_color(*BLACK)
-    pdf.set_font(_SERIF if _encodable(text) else _UNICODE, 'B', size)
+    _set_font(pdf, _SERIF if _encodable(text) else _UNICODE, 'B', size)
     pdf.cell(0, size + 2, text, align='C' if center else 'L',
              new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     if space_after:
@@ -313,12 +326,121 @@ def _atomic(pdf, render):
     break, and the page is turned first if it would. Something too long to fit
     a page of its own still has to break somewhere, so this only turns the page
     when there is anything above it to move away from.
+
+    The trial run goes into a separate scratch document (see _probe) rather
+    than fpdf's offset_rendering(): that deep-copies the whole document, every
+    page drawn so far included, for each question -- quadratic in a packet's
+    length, which made a full-size set's export run for minutes and well
+    past the server's request timeout.
     """
-    with pdf.offset_rendering() as dummy:
-        render(dummy)
-    if dummy.page_break_triggered and pdf.get_y() > pdf.t_margin:
+    probe = _probe(pdf)
+    if pdf.font_family:
+        _set_font(probe, pdf.font_family, pdf.font_style, pdf.font_size_pt)
+    # Most questions are nowhere near the foot of the page; if even a generous
+    # bound on the block's height fits, the trial run can only say "fits".
+    bound = _Bound(probe, indent=pdf.get_x() - pdf.l_margin)
+    render(bound)
+    if pdf.get_y() + bound.total() <= pdf.page_break_trigger:
+        render(pdf)
+        return
+    probe.add_page()
+    start_page = probe.page
+    if pdf.font_family:
+        _set_font(probe, pdf.font_family, pdf.font_style, pdf.font_size_pt)
+    probe.set_xy(pdf.get_x(), pdf.get_y())
+    render(probe)
+    breaks = probe.page > start_page or probe.get_y() > probe.page_break_trigger
+    if breaks and pdf.get_y() > pdf.t_margin:
         pdf.add_page()
     render(pdf)
+
+
+class _Bound:
+    """Stands in for the document to put an upper bound on a block's height
+    without laying any text out.
+
+    Widths are measured for real (in the probe's fonts), and a wrapped line can
+    fall short of the full width by no more than the longest word in its
+    paragraph, so a paragraph of total width W wraps at most W // (width -
+    longest word) times; each wrap moves down a line, and the ln() after the
+    paragraph is counted as it comes. `indent` is how far along its line the
+    block starts. One spare line on top covers rounding.
+    """
+
+    def __init__(self, probe, indent=0):
+        self.probe = probe
+        self.width = probe.epw
+        self.height = 0
+        self._para()
+        self.para_w = max(indent, 0)
+
+    def _para(self):
+        self.para_w = self.longest = self.line_h = 0
+        self.extra_lines = 0
+
+    def _close(self):
+        if self.para_w or self.extra_lines:
+            avail = self.width - self.longest
+            if avail <= 0:
+                wraps = 10 ** 6   # a word wider than the page: never "fits"
+            else:
+                wraps = int(self.para_w // avail) + self.extra_lines
+            self.height += wraps * self.line_h
+        self._para()
+
+    def set_font(self, family, style, size):
+        _set_font(self.probe, family, style, size)
+
+    def set_text_color(self, *rgb):
+        pass
+
+    def write(self, h, text):
+        self.line_h = max(self.line_h, h)
+        self.extra_lines += text.count('\n')
+        width_of = self.probe.get_string_width
+        self.para_w += width_of(text)
+        space = width_of(' ')
+        for word in text.split():
+            self.longest = max(self.longest, width_of(word) + space)
+
+    def ln(self, h=None):
+        self._close()
+        self.height += self.probe.font_size if h is None else h
+
+    def cell(self, w=None, h=None, *args, **kwargs):
+        self._close()
+        self.height += h or 0
+
+    def total(self):
+        self._close()
+        return self.height + LINE_H
+
+
+#: Trial runs a scratch document takes before it is replaced, so its throwaway
+#: pages don't pile up over a long packet.
+_PROBE_RUNS = 50
+
+
+def _new_pdf():
+    pdf = FPDF(unit='pt', format='letter')
+    # Curly quotes and dashes are cp1252, not latin-1, and a packet is full of
+    # them; without this every one of them would take the fallback face.
+    pdf.core_fonts_encoding = 'cp1252'
+    pdf.set_margins(MARGIN, MARGIN, MARGIN)
+    pdf.set_auto_page_break(True, margin=MARGIN)
+    return pdf
+
+
+def _probe(pdf):
+    """The scratch document _atomic measures a question in: the same page,
+    margins and faces as `pdf`, and never output."""
+    probe = getattr(pdf, '_qems_probe', None)
+    if probe is None or probe._qems_runs >= _PROBE_RUNS:
+        probe = _new_pdf()
+        probe._qems_runs = 0
+        pdf._qems_probe = probe
+    probe._qems_runs += 1
+    return probe
 
 
 def _numbered(questions, start=1):
@@ -419,14 +541,7 @@ def build_packetized_pdf(set_name, groups, opts, credits=None, front_matter=None
     Questions flagged "read answer carefully" are listed under all of that, as
     they are in the Word export.
     """
-    pdf = FPDF(unit='pt', format='letter')
-    # Curly quotes and dashes are cp1252, not latin-1, and a packet is full of
-    # them; without this every one of them would take the fallback face.
-    pdf.core_fonts_encoding = 'cp1252'
-    pdf.set_margins(MARGIN, MARGIN, MARGIN)
-    pdf.set_auto_page_break(True, margin=MARGIN)
-    for style, fname in _UNICODE_FILES.items():
-        pdf.add_font(_UNICODE, style, os.path.join(_FONT_DIR, fname))
+    pdf = _new_pdf()
 
     for gi, (packet_name, tossups, bonuses) in enumerate(groups):
         pdf.add_page()

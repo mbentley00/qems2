@@ -268,6 +268,35 @@ $(function () {
         }
     });
 
+    // Writers and Editors tab: change a member's role in place (owners only).
+    // On success the page is fetched again with a GET, since the row's
+    // Remove link and tag cell depend on the role; on failure the select goes
+    // back to what it was.
+    $('.member-role-select').each(function() {
+        $(this).data('was', $(this).val());
+    }).change(function() {
+        var $sel = $(this);
+        var qset_id = $sel.data('qset-id');
+        $sel.prop('disabled', true);
+        $.post('/change_set_role/', {qset_id: qset_id, writer_id: $sel.data('writer-id'), role: $sel.val()})
+            .done(function(data) {
+                if (data.ok) {
+                    window.location.replace('/edit_question_set/' + qset_id + '/');
+                    return;
+                }
+                $sel.val(data.role || $sel.data('was')).prop('disabled', false);
+                var dialog = $('#info-dialog').dialog({
+                    modal: true,
+                    buttons: {Ok: function() { $(this).dialog('close'); }}
+                });
+                dialog.empty().append($('<div class="alert-box warning">').text(data.message));
+                dialog.dialog('open');
+            })
+            .fail(function() {
+                $sel.val($sel.data('was')).prop('disabled', false);
+            });
+    });
+
     // Delegated so the handler still fires on comments inserted by an in-place
     // comments refresh (edit tossup/bonus). Deletes immediately — no confirm:
     // the comment is only hidden, and the question's History page keeps it, so

@@ -117,6 +117,10 @@ class Writer (models.Model):
 
     question_set_writer = models.ManyToManyField('QuestionSet', related_name='writer')
     question_set_editor = models.ManyToManyField('QuestionSet', related_name='editor')
+    # Proofreaders read a set's questions, comment on them and suggest edits,
+    # but never edit a question or write one of their own.
+    question_set_proofreader = models.ManyToManyField('QuestionSet', related_name='proofreader',
+                                                      blank=True)
 
     administrator = models.BooleanField(default=False)
 
@@ -192,7 +196,7 @@ def split_visible_sets(sets, writer):
         return [], sets.count()
     visible = sets.filter(
         models.Q(owner=writer) | models.Q(co_owners=writer)
-        | models.Q(editor=writer) | models.Q(writer=writer)
+        | models.Q(editor=writer) | models.Q(writer=writer) | models.Q(proofreader=writer)
         | models.Q(public=True, approval_status='approved')
     ).distinct()
     return list(visible.order_by('name')), sets.count() - visible.count()
@@ -555,6 +559,12 @@ class QuestionSet (models.Model):
         if writer is None:
             return False
         return writer == self.owner or self.co_owners.filter(id=writer.id).exists()
+
+    def is_proofreader(self, writer):
+        """True if the writer proofreads this set (and holds no other role)."""
+        if writer is None:
+            return False
+        return self.proofreader.filter(id=writer.id).exists()
 
     def all_owners(self):
         """The primary owner followed by any co-owners."""
@@ -1929,12 +1939,8 @@ class Tossup (models.Model):
         return True
 
     def setup_search_fields(self, remove_unicode=True):
-        if (remove_unicode):
-            self.search_question_content = strip_special_chars(strip_unicode(self.tossup_text))
-            self.search_question_answers = strip_special_chars(strip_unicode(self.tossup_answer))
-        else:            
-            self.search_question_content = strip_special_chars(self.tossup_text)
-            self.search_question_answers = strip_special_chars(self.tossup_answer)
+        self.search_question_content = search_text(self.tossup_text, remove_unicode)
+        self.search_question_answers = search_text(self.tossup_answer, remove_unicode)
 
     def author_name(self):
         """Who this question is credited to, for anything that shows a name.
@@ -2364,12 +2370,12 @@ class Bonus(models.Model):
             raise InvalidBonus('question_type', self.question_type, self.question_number)
 
     def setup_search_fields(self, remove_unicode=True):
-        if (remove_unicode):
-            self.search_question_content = strip_special_chars(strip_unicode(self.leadin)) + " " + strip_special_chars(strip_unicode(self.part1_text)) + " " + strip_special_chars(strip_unicode(self.part2_text)) + " " + strip_special_chars(strip_unicode(self.part3_text))
-            self.search_question_answers = strip_special_chars(strip_unicode(self.part1_answer)) + " " + strip_special_chars(strip_unicode(self.part2_answer)) + " " + strip_special_chars(strip_unicode(self.part3_answer))
-        else:
-            self.search_question_content = strip_special_chars(self.leadin) + " " + strip_special_chars(self.part1_text) + " " + strip_special_chars(self.part2_text) + " " + strip_special_chars(self.part3_text)
-            self.search_question_answers = strip_special_chars(self.part1_answer) + " " + strip_special_chars(self.part2_answer) + " " + strip_special_chars(self.part3_answer)
+        self.search_question_content = " ".join(
+            search_text(t, remove_unicode)
+            for t in (self.leadin, self.part1_text, self.part2_text, self.part3_text))
+        self.search_question_answers = " ".join(
+            search_text(t, remove_unicode)
+            for t in (self.part1_answer, self.part2_answer, self.part3_answer))
 
     def author_name(self):
         """Who this question is credited to, for anything that shows a name.

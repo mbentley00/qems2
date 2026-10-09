@@ -3054,6 +3054,77 @@ class StyleDismissAllAndLiveCountTests(TestCase):
         self.assertEqual(json.loads(resp.content)['count'], 5)
 
 
+class ChangeSetRoleTests(TestCase):
+    """An owner moves a member between roles in one step, instead of removing
+    them and adding them back."""
+
+    def setUp(self):
+        self.ou = User.objects.create_user('csr_owner', password='pw', email='o@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.eu = User.objects.create_user('csr_ed', password='pw', email='e@t.com')
+        self.ed = Writer.objects.get(user=self.eu)
+        self.wu = User.objects.create_user('csr_wr', password='pw', email='w@t.com')
+        self.wr = Writer.objects.get(user=self.wu)
+        self.dist = Distribution.objects.create(name='csr dist')
+        self.qset = QuestionSet.objects.create(
+            name='CSR Set', date=timezone.now(), host='', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.owner.question_set_editor.add(self.qset)
+        self.qset.editor.add(self.ed)
+        self.qset.writer.add(self.wr)
+
+    def _change(self, who, role, login='csr_owner'):
+        import json as _json
+        self.client.login(username=login, password='pw')
+        resp = self.client.post('/change_set_role/', {
+            'qset_id': self.qset.id, 'writer_id': who.id, 'role': role})
+        return _json.loads(resp.content)
+
+    def test_an_editor_becomes_a_writer(self):
+        data = self._change(self.ed, 'writer')
+        self.assertTrue(data['ok'], data)
+        self.assertEqual(get_role(self.ed, self.qset), 'writer')
+        self.assertNotIn(self.ed, self.qset.editor.all())
+
+    def test_a_writer_becomes_an_editor_then_a_co_owner_and_back(self):
+        self.assertTrue(self._change(self.wr, 'editor')['ok'])
+        self.assertIn(self.wr, self.qset.editor.all())
+        self.assertNotIn(self.wr, self.qset.writer.all())
+        self.assertTrue(self._change(self.wr, 'co-owner')['ok'])
+        self.assertIn(self.wr, self.qset.co_owners.all())
+        self.assertIn(self.wr, self.qset.editor.all())
+        self.assertTrue(self._change(self.wr, 'writer')['ok'])
+        self.assertNotIn(self.wr, self.qset.co_owners.all())
+        self.assertNotIn(self.wr, self.qset.editor.all())
+        self.assertIn(self.wr, self.qset.writer.all())
+
+    def test_only_an_owner_may(self):
+        data = self._change(self.wr, 'editor', login='csr_ed')
+        self.assertFalse(data['ok'])
+        self.assertIn(self.wr, self.qset.writer.all())
+
+    def test_the_primary_owner_cannot_be_moved(self):
+        self.assertFalse(self._change(self.owner, 'writer')['ok'])
+        self.assertIn(self.owner, self.qset.editor.all())
+
+    def test_a_role_that_comes_from_a_group_is_left_to_the_group(self):
+        group = RoleGroup.objects.create(name='CSR group', created_by=self.owner)
+        group.members.add(self.wr)
+        self.qset.writer.remove(self.wr)
+        SetRoleGroupAssignment.objects.create(question_set=self.qset, role_group=group, role='writer')
+        reconcile_group_roles(self.qset)
+        self.assertFalse(self._change(self.wr, 'editor')['ok'])
+        self.assertNotIn(self.wr, self.qset.editor.all())
+
+    def test_the_tab_offers_owners_a_role_menu(self):
+        self.client.login(username='csr_owner', password='pw')
+        resp = self.client.get('/edit_question_set/{0}/'.format(self.qset.id))
+        self.assertContains(resp, 'class="member-role-select" data-writer-id="{0}"'.format(self.ed.id))
+        self.client.login(username='csr_ed', password='pw')
+        resp = self.client.get('/edit_question_set/{0}/'.format(self.qset.id))
+        self.assertNotContains(resp, 'member-role-select')
+
+
 class RoleGroupTests(TestCase):
     """Role groups grant a role to all members; membership is live (added later
     => gains access on existing sets; removed => loses it)."""
@@ -3234,6 +3305,149 @@ class SuggestedEditTests(TestCase):
         self.assertIn('<del>quick</del>', out)
         self.assertIn('<ins>slow</ins>', out)
         self.assertIn('brown fox', out)
+
+
+class ProofreaderRoleTests(TestCase):
+    """A proofreader reads the set, comments and suggests edits, but can't edit
+    a question, write one, or take a suggestion. A writer suggests on questions
+    they didn't write but can't edit them either."""
+
+    def setUp(self):
+        from datetime import datetime
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('pr_owner', password='pw', email='o@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.pu = User.objects.create_user('pr_proof', password='pw', email='p@t.com')
+        self.proof = Writer.objects.get(user=self.pu)
+        self.wu = User.objects.create_user('pr_writer', password='pw', email='w@t.com')
+        self.writer = Writer.objects.get(user=self.wu)
+        self.dist = Distribution.objects.create(name='pr dist')
+        self.entry = DistributionEntry.objects.create(
+            distribution=self.dist, category='Science', subcategory='Biology')
+        self.qset = QuestionSet.objects.create(
+            name='PR Set', date=timezone.now(), host='', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist, max_acf_tossup_length=850)
+        self.owner.question_set_editor.add(self.qset)
+        self.qset.writer.add(self.writer)
+        self.qset.proofreader.add(self.proof)
+        self.packet = Packet.objects.create(
+            question_set=self.qset, packet_name='Packet 1', created_by=self.owner)
+        self.tu = Tossup.objects.create(author=self.owner, question_set=self.qset,
+            packet=self.packet, question_type=self.acf, category=self.entry,
+            tossup_text='Old stem.', tossup_answer='_Ans_',
+            created_date=datetime.now(), last_changed_date=datetime.now(), question_number=1)
+
+    def _as(self, username):
+        self.client.login(username=username, password='pw')
+
+    def test_role(self):
+        self.assertEqual(get_role(self.proof, self.qset), 'proofreader')
+        self.assertTrue(self.qset.is_proofreader(self.proof))
+
+    def test_proofreader_reads_the_set_its_questions_and_packets(self):
+        self._as('pr_proof')
+        for url in ('/edit_question_set/{0}/', '/view_all_questions/{0}/', '/packet_grid/{0}/'):
+            resp = self.client.get(url.format(self.qset.id))
+            self.assertEqual(resp.status_code, 200, url)
+        resp = self.client.get('/view_packet/{0}/'.format(self.packet.id))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'Old stem')
+
+    def test_proofreader_sees_a_read_only_question_with_suggest(self):
+        self._as('pr_proof')
+        resp = self.client.get('/edit_tossup/{0}/'.format(self.tu.id))
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        self.assertIn('save_as_suggestion', html)
+        self.assertNotIn('value="Save"', html)
+        self.assertNotIn('id_locked', html)
+
+    def test_proofreader_suggests_but_cannot_edit(self):
+        self._as('pr_proof')
+        self.client.post('/edit_tossup/{0}/'.format(self.tu.id), {
+            'tossup_text': 'Hijacked stem.', 'tossup_answer': '_Ans_'})
+        self.tu.refresh_from_db()
+        self.assertEqual(self.tu.tossup_text, 'Old stem.')
+        resp = self.client.post('/edit_tossup/{0}/'.format(self.tu.id), {
+            'save_as_suggestion': '1', 'tossup_text': 'New stem.', 'tossup_answer': '_Ans_'})
+        self.assertEqual(resp.status_code, 302)
+        s = SuggestedEdit.objects.get(question_id=self.tu.id, field='tossup_text')
+        self.assertEqual((s.suggested_by, s.status), (self.proof, 'pending'))
+        self.tu.refresh_from_db()
+        self.assertEqual(self.tu.tossup_text, 'Old stem.')
+
+    def test_proofreader_cannot_take_a_suggestion(self):
+        s = SuggestedEdit.objects.create(question_set=self.qset, question_type='tossup',
+            question_id=self.tu.id, field='tossup_text', field_label='Tossup Text',
+            old_value='Old stem.', new_value='New stem.', suggested_by=self.writer)
+        self._as('pr_proof')
+        resp = self.client.post('/resolve_suggestion/', {'suggestion_id': s.id, 'action': 'accept'})
+        self.assertFalse(json.loads(resp.content)['ok'])
+
+    def test_proofreader_comments(self):
+        self._as('pr_proof')
+        self.client.post('/add_question_comment/', {
+            'question_type': 'tossup', 'question_id': self.tu.id, 'comment_text': 'Typo in clue 2.'})
+        from django_comments.models import Comment
+        self.assertTrue(Comment.objects.filter(user=self.pu, comment__contains='Typo').exists())
+
+    def test_proofreader_cannot_write_or_inline_edit(self):
+        self._as('pr_proof')
+        before = Tossup.objects.count()
+        self.client.post('/add_tossups/{0}/'.format(self.qset.id), {
+            'tossup_text': 'Mine.', 'tossup_answer': '_Mine_', 'category': self.entry.id})
+        self.assertEqual(Tossup.objects.count(), before)
+        resp = self.client.get('/add_tossups/{0}/'.format(self.qset.id))
+        self.assertNotContains(resp, 'id_tossup_text')
+        self.client.post('/inline_save_question/', {
+            'question_type': 'tossup', 'question_id': self.tu.id,
+            'field': 'tossup_text', 'value': 'Inline hijack.'})
+        self.tu.refresh_from_db()
+        self.assertEqual(self.tu.tossup_text, 'Old stem.')
+
+    def test_packet_page_is_read_only_for_a_proofreader(self):
+        self._as('pr_proof')
+        resp = self.client.get('/edit_packet/{0}/'.format(self.packet.id))
+        self.assertTrue(resp.context['read_only'])
+
+    def test_proofreader_appears_in_their_sets_and_without_new_question_buttons(self):
+        self._as('pr_proof')
+        resp = self.client.get('/edit_question_set/{0}/'.format(self.qset.id))
+        self.assertIn(self.qset, list(resp.context['nav_sets']))
+        self.assertTrue(resp.context['nav_is_proofreader'])
+        self.assertNotContains(resp, 'href="/add_tossups/{0}/"'.format(self.qset.id))
+
+    def test_owner_adds_a_proofreader_and_moves_one(self):
+        nu = User.objects.create_user('pr_new', password='pw', email='n@t.com')
+        new = Writer.objects.get(user=nu)
+        self._as('pr_owner')
+        self.client.post('/add_proofreader/{0}/'.format(self.qset.id), {'proofreaders_to_add': [new.id]})
+        self.assertTrue(self.qset.is_proofreader(new))
+        resp = self.client.post('/change_set_role/', {
+            'qset_id': self.qset.id, 'writer_id': self.writer.id, 'role': 'proofreader'})
+        self.assertTrue(json.loads(resp.content)['ok'])
+        self.assertTrue(self.qset.is_proofreader(self.writer))
+        self.assertNotIn(self.writer, self.qset.writer.all())
+        resp = self.client.post('/change_set_role/', {
+            'qset_id': self.qset.id, 'writer_id': self.proof.id, 'role': 'editor'})
+        self.assertTrue(json.loads(resp.content)['ok'])
+        self.assertFalse(self.qset.is_proofreader(self.proof))
+        self.assertIn(self.proof, self.qset.editor.all())
+
+    def test_a_proofreader_is_not_offered_as_an_author(self):
+        self._as('pr_owner')
+        resp = self.client.get('/edit_tossup/{0}/'.format(self.tu.id))
+        author_ids = [c[0] for c in resp.context['form'].fields['author'].choices] \
+            if 'author' in resp.context['form'].fields else []
+        self.assertNotIn(self.proof.id, author_ids)
+
+    def test_non_author_writer_cannot_edit_directly(self):
+        self._as('pr_writer')
+        self.client.post('/edit_tossup/{0}/'.format(self.tu.id), {
+            'tossup_text': 'Writer hijack.', 'tossup_answer': '_Ans_'})
+        self.tu.refresh_from_db()
+        self.assertEqual(self.tu.tossup_text, 'Old stem.')
 
 
 class SaveAsSuggestionFlowTests(TestCase):
@@ -3850,6 +4064,59 @@ class SearchNewTabPreferenceTests(TestCase):
         self.client.post('/profile/', dict(fields, search_in_new_tab='on'))
         self.writer.refresh_from_db()
         self.assertTrue(self.writer.search_in_new_tab)
+
+
+class SearchTextTests(TestCase):
+    """A word with a pronunciation guide, or in any other QEMS markup, has to
+    be findable by the word itself. The stored search text used to keep
+    \\PGoethe\\P, which Postgres indexed as "pgoethe"."""
+
+    def setUp(self):
+        self.ou = User.objects.create_user('st_owner', password='pw', email='st@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='st dist')
+        self.entry = DistributionEntry.objects.create(
+            distribution=self.dist, category='Literature', subcategory='European')
+        self.qset = QuestionSet.objects.create(
+            name='ST Set', date=timezone.now(), host='', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.tu = Tossup.objects.create(
+            author=self.owner, question_set=self.qset, question_number=1,
+            tossup_text=r'Johann Wolfgang von \PGoethe\P ("GUR-tuh") wrote it. \BKurt\B G&ouml;del too.',
+            tossup_answer=r'\PSigmund\P ("ZEEG-moond") _Freud_ [or \_Freud\_]',
+            category=self.entry, created_date=datetime.now(), last_changed_date=datetime.now())
+
+    def test_markup_and_guides_come_out_of_the_stored_text(self):
+        from qems2.qsub.utils import search_text
+        self.assertEqual(
+            search_text(r'von \PGoethe\P ("GUR-tuh") wrote ~Faust~'),
+            'von Goethe wrote Faust GUR-tuh')
+        self.assertEqual(search_text(r'\BKurt\B \DGödel\D'), 'Kurt Godel')
+        self.assertEqual(search_text('Caf&eacute; <b>au</b> lait'), 'Cafe au lait')
+        self.assertEqual(search_text(r'a \_literal\_ underscore'), 'a _literal_ underscore')
+        # A parenthetical that isn't a guide stays where it is.
+        self.assertEqual(search_text('Paris (France) is it'), 'Paris (France) is it')
+
+    def test_search_finds_a_guided_word_a_phrase_across_its_guide_and_the_respelling(self):
+        from qems2.qsub.views import fulltext_filter
+        tossups = Tossup.objects.filter(question_set=self.qset)
+        for query in ('Goethe', 'von Goethe', 'GUR-tuh', 'Sigmund Freud', 'Kurt Godel', 'Kurt Gödel'):
+            self.assertEqual(list(fulltext_filter(tossups, query)), [self.tu], query)
+
+    def test_quick_search_finds_an_answer_with_a_guide(self):
+        import json as _json
+        self.client.login(username='st_owner', password='pw')
+        resp = self.client.get('/quick_search_results/', {'qset': self.qset.id, 'q': 'Sigmund Freud'})
+        self.assertEqual([r['type'] for r in _json.loads(resp.content)['results']], ['tossup'])
+
+    def test_bonus_search_text_covers_every_part(self):
+        bs = Bonus.objects.create(
+            author=self.owner, question_set=self.qset, question_number=1,
+            leadin=r'About \PDvořák\P ("VOR-zhahk").', part1_text='p1', part1_answer='_Rusalka_',
+            part2_text='p2', part2_answer=r'\PJanáček\P', part3_text='p3', part3_answer='_a3_',
+            category=self.entry, created_date=datetime.now(), last_changed_date=datetime.now())
+        self.assertIn('About Dvorak.', bs.search_question_content)
+        self.assertEqual(bs.search_question_answers, 'Rusalka Janacek a3')
 
 
 class QuickSearchTests(TestCase):
@@ -9715,6 +9982,35 @@ class ExportedPdfMatchesWordTests(TestCase):
             # where a question does ends on its answer or attribution line.
             self.assertTrue(lines[-1].startswith('<') or lines[-1].startswith('ANSWER:'),
                             'page ends mid-question: {0!r}'.format(lines[-1]))
+
+    def test_keeping_questions_whole_does_not_copy_the_document(self):
+        """fpdf's offset_rendering() deep-copies every page drawn so far for
+        each question, which made a full-size set's export run past the
+        server's timeout (an intermittent 500)."""
+        from fpdf import FPDF
+        with mock.patch.object(FPDF, 'offset_rendering',
+                               side_effect=AssertionError('offset_rendering used')):
+            self.assertGreater(len(self._pdf().pages), 1)
+
+    def test_the_height_bound_never_undercounts(self):
+        """_atomic skips its trial run when _Bound says the question fits, so
+        the bound must be at least the real height."""
+        from qems2.qsub import pdf_export as pe
+        opts = {'writers': True, 'editors': True, 'ids': True, 'tag_names': {}}
+        for tu in Tossup.objects.filter(question_set=self.qset):
+            pdf = pe._new_pdf()
+            pdf.set_auto_page_break(False)
+            pdf.add_page()
+            y0 = pdf.get_y()
+            pe._tossup(pdf, tu, 1, opts)
+            bound = pe._Bound(pe._new_pdf())
+            pe._tossup(bound, tu, 1, opts)
+            self.assertGreaterEqual(bound.total(), pdf.get_y() - y0)
+
+    def test_a_packet_needing_no_fallback_does_not_embed_it(self):
+        Tossup.objects.filter(question_set=self.qset).update(
+            tossup_text='Plain clue text. For 10 points, name it.')
+        self.assertFalse(any('DejaVu' in f for f in self._fonts(self._pdf())))
 
 
 class EditPacketTitleTests(TestCase):

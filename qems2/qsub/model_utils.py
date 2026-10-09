@@ -171,6 +171,8 @@ def get_role(user, qset):
         role = 'editor'
     elif user in qset_writers:
         role = 'writer'
+    elif qset.is_proofreader(user):
+        role = 'proofreader'
 
     return role
 
@@ -184,8 +186,10 @@ def get_role_no_owner(user, qset):
         role = 'editor'
     elif user in qset_writers:
         role = 'writer'
+    elif qset.is_proofreader(user):
+        role = 'proofreader'
 
-    return role    
+    return role
 
 def export_packet(packet_id):
 
@@ -827,7 +831,8 @@ def get_writer_questions_remaining(qset, total_tu_req, total_bs_req):
     bs_counts = {row['author']: row['n'] for row in
                  qset.bonus_set.values('author').annotate(n=Count('id'))}
 
-    for writer in list(qset_writers) + list(qset_editors):
+    qset_proofreaders = qset.proofreader.all().select_related('user')
+    for writer in list(qset_proofreaders) + list(qset_writers) + list(qset_editors):
         writer_tu_written = tu_counts.get(writer.id, 0)
         writer_bonus_written = bs_counts.get(writer.id, 0)
         writer_question_percent = (float(writer_tu_written + writer_bonus_written) * 100) / total_qs_req

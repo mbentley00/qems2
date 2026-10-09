@@ -68,6 +68,9 @@ def fulltext_filter(queryset, query, answers_only=False):
     already asked about, where a match in the middle of somebody's clue is
     noise.
     """
+    # The stored fields are search_text(); a query has to be put the same way,
+    # or "Gödel" can't find what is stored as "Godel".
+    query = search_text(query)
     if not query:
         return queryset.none()
     if connection.vendor == 'postgresql':
@@ -95,7 +98,7 @@ def answer_matches_first(questions, query):
     word is the lesser hit. A question counts as an answer match when every
     word of the query is in its answer lines. The sort is stable, so within
     each group the order is what it was (tossups, then bonuses)."""
-    terms = [t for t in re.findall(r'\w+', (query or '').lower())
+    terms = [t for t in re.findall(r'\w+', search_text(query).lower())
              if t not in _SEARCH_OPERATORS]
     if not terms:
         return list(questions)
@@ -171,6 +174,7 @@ def question_sets (request):
     editor_sets = writer.question_set_editor.all()
     
     all_sets = (owned_sets | editor_sets | writer.question_set_writer.all()
+                | writer.question_set_proofreader.all()
                 | QuestionSet.objects.filter(co_owners=writer))
     all_sets = all_sets.distinct().order_by('date')
     
@@ -265,6 +269,7 @@ def _home_cards(writer, qsets):
     owned = set(QuestionSet.objects.filter(id__in=ids).filter(
         Q(owner=writer) | Q(co_owners=writer)).values_list('id', flat=True))
     edited = set(writer.question_set_editor.filter(id__in=ids).values_list('id', flat=True))
+    proofread = set(writer.question_set_proofreader.filter(id__in=ids).values_list('id', flat=True))
 
     today = datetime.now().date()
     cards = []
@@ -281,10 +286,12 @@ def _home_cards(writer, qsets):
         if qset.tossups_only:
             req[1] = done[1] = 0
         total = req[0] + req[1]
-        role = 'Owner' if qset.id in owned else 'Editor' if qset.id in edited else 'Writer'
+        role = ('Owner' if qset.id in owned else 'Editor' if qset.id in edited
+                else 'Proofreader' if qset.id in proofread else 'Writer')
         days = (qset.date - today).days
         cards.append({
-            'qset': qset, 'role': role, 'is_editor': role != 'Writer',
+            'qset': qset, 'role': role, 'is_editor': role in ('Owner', 'Editor'),
+            'is_proofreader': role == 'Proofreader',
             'required': total,
             'percent': int(100 * (done[0] + done[1]) / total) if total else 0,
             'tu_left': req[0] - done[0], 'bs_left': req[1] - done[1],
@@ -594,12 +601,14 @@ def _grant_set_role(qset, requester, role, by_writer):
     and email them. Shared by every approval path."""
     if role == 'editor':
         qset.editor.add(requester)
+        qset.proofreader.remove(requester)
         GroupRoleGrant.objects.filter(
             question_set=qset, writer=requester, role='editor').delete()
         if qset.writer.filter(id=requester.id).exists():
             qset.writer.remove(requester)
     else:
         qset.writer.add(requester)
+        qset.proofreader.remove(requester)
         GroupRoleGrant.objects.filter(
             question_set=qset, writer=requester, role='writer').delete()
     qset.save()
@@ -662,7 +671,8 @@ def _notify_added_to_set(writer, qset, role, by_writer):
         return
     from .signals import _send_mail_async
     from django.conf import settings as dj_settings
-    role_label = {'editor': 'an editor', 'writer': 'a writer', 'co-owner': 'a co-owner'}.get(role, role)
+    role_label = {'editor': 'an editor', 'writer': 'a writer', 'co-owner': 'a co-owner',
+                  'proofreader': 'a proofreader'}.get(role, role)
     subject = 'QEMS3: you were added to "{0}"'.format(qset.name)
     body = ('{0} added you as {1} on the QEMS3 question set "{2}".\n\n'
             '{3}/edit_question_set/{4}/').format(
@@ -1509,7 +1519,7 @@ def edit_question_set(request, qset_id):
 
     role = get_role_no_owner(user, qset)
 
-    if not qset.is_owner(user) and user not in qset_editors and user not in qset_writers:
+    if not _is_set_member(user, qset):
         messages.error(request, 'You are not authorized to view information about this tournament!')
         return HttpResponseRedirect('/failure.html/')
 
@@ -1622,7 +1632,7 @@ def edit_question_set(request, qset_id):
             return render(request, 'failure.html', {'message': 'You are not authorized to change this set!', 'message_class': 'alert-box alert'})
     else:
         print("Begin edit_question_set get", time.strftime("%H:%M:%S"))
-        if user not in qset_editors and not qset.is_owner(user) and user not in qset.writer.all():
+        if not _is_set_member(user, qset):
             # Just redirect to main in this case of no permissions
             # TODO: a better story
             return HttpResponseRedirect('/main.html')
@@ -1666,6 +1676,7 @@ def edit_question_set(request, qset_id):
                                'credit_tokens': QuestionSet.CREDIT_TOKENS,
                                'editors': [ed for ed in qset_editors if ed != qset.owner],
                                'writers': [wr for wr in qset_writers if wr != qset.owner],
+                               'proofreaders': list(qset.proofreader.all()),
                                'writer_stats': writer_stats,
                                'set_status': set_status,
                                'set_pct_complete': '{0:0.2f}%'.format(set_pct_complete),
@@ -1729,7 +1740,7 @@ def categories(request, qset_id, category_id):
     message = category_object.category
     tossups = []
     bonuses = []
-    if user not in qset_editors and not qset.is_owner(user) and user not in qset.writer.all():
+    if not _is_set_member(user, qset):
         message = 'You are not authorized to view this set'
     else:
         # The table has a tags column; without prefetching it, showing it
@@ -1769,7 +1780,7 @@ def top_category(request, qset_id, category_name):
     user = request.user.writer
     qset = QuestionSet.objects.get(id=qset_id)
 
-    if user not in qset.editor.all() and not qset.is_owner(user) and user not in qset.writer.all():
+    if not _is_set_member(user, qset):
         return render(request, 'failure.html', {'message': 'You are not authorized to view this set'})
 
     role = get_role_no_owner(user, qset)
@@ -1809,7 +1820,7 @@ def category_document(request, qset_id, category_id=None, category_name=None):
     (e.g. all of History - American, or all of History)."""
     user = request.user.writer
     qset = QuestionSet.objects.get(id=qset_id)
-    if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+    if not _is_set_member(user, qset):
         return render(request, 'failure.html',
                       {'message': 'You are not authorized to view this set',
                        'message_class': 'alert-box alert'})
@@ -1949,7 +1960,7 @@ def compare_repeats(request, qset_id):
     from . import set_compare
     user = request.user.writer
     qset = QuestionSet.objects.get(id=qset_id)
-    if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+    if not _is_set_member(user, qset):
         return render(request, 'failure.html',
                       {'message': 'You are not authorized to view this set.',
                        'message_class': 'alert-box alert'})
@@ -1993,7 +2004,7 @@ def duplicate_check(request, qset_id):
     user = request.user.writer
     qset = QuestionSet.objects.get(id=qset_id)
 
-    if not qset.is_owner(user) and user not in qset.editor.all() and user not in qset.writer.all():
+    if not _is_set_member(user, qset):
         messages.error(request, 'You are not authorized to view this set.')
         return render(request, 'failure.html',
                       {'message': 'You are not authorized to view this set.',
@@ -2107,7 +2118,7 @@ def view_all_questions(request, qset_id):
     message = ''
     tossups = []
     bonuses = []
-    if user not in qset_editors and not qset.is_owner(user) and user not in qset.writer.all():
+    if not _is_set_member(user, qset):
         message = 'You are not authorized to view this set'
         return render(request, 'failure.html',
                                  {'message': message,
@@ -2135,7 +2146,7 @@ def view_all_comments(request, qset_id):
     message = ''
     tossups = []
     bonuses = []
-    if user not in qset_editors and not qset.is_owner(user) and user not in qset.writer.all():
+    if not _is_set_member(user, qset):
         message = 'You are not authorized to view this set'
         return render(request, 'failure.html',
                                  {'message': message,
@@ -2162,7 +2173,7 @@ def question_set_distribution(request, qset_id):
     read_only = True
 
     message = ''
-    if user not in qset_editors and not qset.is_owner(user) and user not in qset.writer.all():
+    if not _is_set_member(user, qset):
         message = 'You are not authorized to view this set'
         return render(request, 'failure.html',
                                  {'message': message,
@@ -2295,6 +2306,7 @@ def add_editor(request, qset_id):
                 for editor_id in editors_to_add:
                     editor = Writer.objects.get(id=editor_id)
                     qset.editor.add(editor)
+                    qset.proofreader.remove(editor)
                     _notify_added_to_set(editor, qset, 'editor', user)
                     # A direct add takes ownership of the membership (so it
                     # survives role-group changes).
@@ -2354,6 +2366,7 @@ def add_co_owner(request, qset_id):
                 qset.co_owners.add(co_owner)
                 # Co-owners get full editor privileges as well
                 qset.editor.add(co_owner)
+                qset.proofreader.remove(co_owner)
                 _notify_added_to_set(co_owner, qset, 'co-owner', user)
 
                 # Don't have someone be both a writer and a co-owner--remove them as writer
@@ -2400,6 +2413,153 @@ def delete_co_owner(request):
 
     return HttpResponse(json.dumps({'message': message, 'message_class': message_class}))
 
+
+#: The roles a set member can be moved between, in the order the Writers and
+#: Editors tab offers them.
+SET_ROLE_LABELS = {'co-owner': 'Co-owner', 'editor': 'Editor', 'writer': 'Writer',
+                   'proofreader': 'Proofreader'}
+
+
+def set_role_of(qset, member):
+    """The member's role on the set, as a SET_ROLE_LABELS key ('' if none);
+    'owner' for the set's primary owner."""
+    if member.id == qset.owner_id:
+        return 'owner'
+    if qset.co_owners.filter(id=member.id).exists():
+        return 'co-owner'
+    if qset.editor.filter(id=member.id).exists():
+        return 'editor'
+    if qset.writer.filter(id=member.id).exists():
+        return 'writer'
+    if qset.proofreader.filter(id=member.id).exists():
+        return 'proofreader'
+    return ''
+
+
+@login_required
+def change_set_role(request):
+    """Move a set member to another role in one step -- an editor to writer,
+    say -- instead of removing them and adding them back. Owners only.
+
+    POST: qset_id, writer_id, role (a SET_ROLE_LABELS key). The member keeps
+    their questions, comments and tags; only the role changes. They are told
+    by email, the way being added is."""
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'message': 'Invalid request'}, status=405)
+    user = request.user.writer
+    try:
+        qset = QuestionSet.objects.get(id=int(request.POST.get('qset_id', '')))
+        member = Writer.objects.get(id=int(request.POST.get('writer_id', '')))
+    except (ValueError, QuestionSet.DoesNotExist, Writer.DoesNotExist):
+        return JsonResponse({'ok': False, 'message': 'That set or person no longer exists.'})
+    role = request.POST.get('role', '')
+
+    if not qset.is_owner(user):
+        return JsonResponse({'ok': False, 'message': "Only the set's owners can change roles."})
+    if role not in SET_ROLE_LABELS:
+        return JsonResponse({'ok': False, 'message': 'Unknown role.'})
+    current = set_role_of(qset, member)
+    if current == 'owner':
+        return JsonResponse({'ok': False, 'message': "The set's owner can't be given another role."})
+    if not current:
+        return JsonResponse({'ok': False, 'message': 'They are not on this set.'})
+    if current == role:
+        return JsonResponse({'ok': True, 'role': role, 'label': SET_ROLE_LABELS[role],
+                             'message': 'No change.'})
+    if GroupRoleGrant.objects.filter(question_set=qset, writer=member).exists():
+        return JsonResponse({'ok': False, 'message':
+                             'They are on this set through a role group; change the group instead.'})
+
+    if role != 'co-owner':
+        qset.co_owners.remove(member)
+    if role != 'proofreader':
+        qset.proofreader.remove(member)
+    if role in ('co-owner', 'editor'):
+        if role == 'co-owner':
+            qset.co_owners.add(member)
+        qset.editor.add(member)
+        qset.writer.remove(member)
+    elif role == 'writer':
+        qset.editor.remove(member)
+        qset.writer.add(member)
+    else:
+        # A proofreader holds no writing role at all; their questions, if
+        # they wrote any while a writer, stay theirs.
+        qset.editor.remove(member)
+        qset.writer.remove(member)
+        qset.proofreader.add(member)
+    qset.save()
+    # A role group might hand back the role just taken away.
+    reconcile_group_roles(qset)
+    cache.clear()
+
+    now = set_role_of(qset, member)
+    name = _actor_name(member)
+    if now != role:
+        return JsonResponse({'ok': False, 'role': now, 'label': SET_ROLE_LABELS.get(now, now),
+                             'message': '{0} is still {1} through a role group.'.format(
+                                 name, SET_ROLE_LABELS.get(now, now).lower())})
+    _notify_role_changed(member, qset, role, user)
+    return JsonResponse({'ok': True, 'role': role, 'label': SET_ROLE_LABELS[role],
+                         'message': '{0} is now {1}.'.format(
+                             name, SET_ROLE_LABELS[role].lower())})
+
+
+def _notify_role_changed(writer, qset, role, by_writer):
+    """Email a set member that their role on it changed."""
+    email = _writer_email(writer)
+    if not email:
+        return
+    from .signals import _send_mail_async
+    from django.conf import settings as dj_settings
+    subject = 'QEMS3: your role on "{0}" changed'.format(qset.name)
+    body = ('{0} made you {1} on the QEMS3 question set "{2}".\n\n'
+            '{3}/edit_question_set/{4}/').format(
+        _actor_name(by_writer), ('an ' if role == 'editor' else 'a ') + SET_ROLE_LABELS[role].lower(),
+        qset.name, dj_settings.BASE_URL, qset.id)
+    _send_mail_async(subject, body, [email])
+
+@login_required
+def add_proofreader(request, qset_id):
+    """Owners add proofreaders: people who read the set's questions, comment
+    and suggest edits, but don't write or edit. Only people not already on the
+    set are offered -- someone who is can be moved with the role menu."""
+    user = request.user.writer
+    qset = QuestionSet.objects.get(id=qset_id)
+    if not qset.is_owner(user):
+        return render(request, 'failure.html',
+                      {'message': 'You are not authorized to make changes to this tournament!',
+                       'message_class': 'alert-box alert'})
+
+    def available():
+        on_set = set(Writer.objects.filter(
+            Q(question_set_writer=qset) | Q(question_set_editor=qset)
+            | Q(question_set_proofreader=qset)).values_list('id', flat=True))
+        return [w for w in pickable_writers().order_by('user__last_name', 'user__first_name', 'user__username')
+                if w.id not in on_set and not qset.is_owner(w)]
+
+    message = ''
+    if request.method == 'POST':
+        ids = request.POST.getlist('proofreaders_to_add')
+        if all(x.isdigit() for x in ids):
+            offered = {w.id: w for w in available()}
+            added = 0
+            for wid in ids:
+                w = offered.get(int(wid))
+                if w is None:
+                    continue
+                qset.proofreader.add(w)
+                _notify_added_to_set(w, qset, 'proofreader', user)
+                added += 1
+            cache.clear()
+            message = '{0} proofreader{1} added.'.format(added, '' if added == 1 else 's')
+        else:
+            message = 'Invalid data entered!'
+
+    return render(request, 'add_proofreader.html',
+                  {'qset': qset, 'available_writers': available(), 'message': message, 'user': user})
+
+
 @login_required
 def add_writer(request, qset_id):
     user = request.user.writer
@@ -2434,6 +2594,7 @@ def add_writer(request, qset_id):
                 for writer_id in writers_to_add:
                     writer = Writer.objects.get(id=writer_id)
                     qset.writer.add(writer)
+                    qset.proofreader.remove(writer)
                     _notify_added_to_set(writer, qset, 'writer', user)
                     GroupRoleGrant.objects.filter(
                         question_set=qset, writer=writer, role='writer').delete()
@@ -2771,7 +2932,7 @@ def edit_packet(request, packet_id):
             message_class = 'alert-box alert'
 
     if request.method in ('GET', 'POST'):
-        if qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all():
+        if _is_set_member(user, qset):
             # The table shows each question's author, editor, category, type
             # and comments. Without this the page asked the database for every
             # one of those a row at a time -- 2,500 queries for a 24-question
@@ -2783,7 +2944,9 @@ def edit_packet(request, packet_id):
                            .select_related(*QUESTION_LIST_RELATED))
             attach_question_comments({t.id: t for t in tossups},
                                      {b.id: b for b in bonuses})
-            if user not in qset.writer.all():
+            # Edit mode is for owners and editors -- not "anyone who isn't a
+            # writer", which would hand it to a proofreader.
+            if qset.is_owner(user) or user in qset.editor.all():
                 read_only = False
 
             # Per-packet requirements, shown per top-level category AND broken
@@ -3241,7 +3404,11 @@ SUGGESTABLE_FIELDS = {
 
 
 def _is_set_member(user, qset):
-    return qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()
+    """Anyone on the set, proofreaders included: the test for reading it,
+    commenting and suggesting edits. Writing and editing questions have their
+    own, narrower checks."""
+    return (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()
+            or qset.is_proofreader(user))
 
 
 def _can_review_suggestions(user, question, qset):
@@ -3708,16 +3875,19 @@ def edit_tossup(request, tossup_id):
                 message_class = 'alert-box warning'
 
 
-        elif user in qset.writer.all():
+        elif _is_set_member(user, qset):
+            # A writer who isn't the author, or a proofreader: they can see
+            # the question and suggest changes, never save one.
             read_only = True
             form = None
             message = 'You are only authorized to view, not to edit, this question!'
             message_class = 'alert-box warning'
         else:
-            read_only = True
-            tossup = None
-            message = 'You are not authorized to view or edit this question!'
-            message_class = 'alert-box alert'
+            # Rendering the page below needs the question; an outsider gets
+            # nothing of it.
+            return render(request, 'failure.html',
+                          {'message': 'You are not authorized to view or edit this question!',
+                           'message_class': 'alert-box alert'})
 
         return render(request, 'edit_tossup.html',
             {'tossup': tossup,
@@ -3907,17 +4077,19 @@ def edit_bonus(request, bonus_id):
                 message = 'There was an error with the form: ' + str(form.errors)
                 message_class = 'alert-box warning'
 
-        elif user in qset.writer.all():
+        elif _is_set_member(user, qset):
+            # A writer who isn't the author, or a proofreader: they can see
+            # the question and suggest changes, never save one.
             form = None
             read_only = True
             message = 'You are only authorized to view, not to edit, this question!'
             message_class = 'alert-box warning'
         else:
-            form = None
-            bonus = None
-            read_only = True
-            message = 'You are not authorized to view or edit this question!'
-            message_class = 'alert-box alert'
+            # Rendering the page below needs the question; an outsider gets
+            # nothing of it.
+            return render(request, 'failure.html',
+                          {'message': 'You are not authorized to view or edit this question!',
+                           'message_class': 'alert-box alert'})
 
         return render(request, 'edit_bonus.html',
             {'bonus': bonus,
@@ -3995,10 +4167,13 @@ def delete_writer(request):
         qset_id = request.POST['qset_id']
         qset = QuestionSet.objects.get(id=qset_id)
         writer_id = request.POST['writer_id']
-        writer = qset.writer.get(id=writer_id)
+        # The tab's Remove link serves proofreaders as well as writers.
+        writer = (qset.writer.filter(id=writer_id).first()
+                  or qset.proofreader.get(id=writer_id))
         role = get_role_no_owner(user, qset)
         if role == "editor":
             qset.writer.remove(writer)
+            qset.proofreader.remove(writer)
             # If they're still in a role group attached as writer, the group
             # re-grants access; otherwise they're fully removed.
             reconcile_group_roles(qset)
@@ -4142,7 +4317,7 @@ def post_comment(request):
 
     qset = obj.question_set
     user = request.user.writer
-    if user not in qset.writer.all() and user not in qset.editor.all() and not qset.is_owner(user):
+    if not _is_set_member(user, qset):
         return HttpResponse(json.dumps({'success': False, 'message': 'You are not authorized to comment on this set.'}))
 
     from django.contrib.sites.models import Site
@@ -4188,7 +4363,7 @@ def reply_to_comment(request):
         qset_writers = qset.writer.all()
         qset_editors = qset.editor.all()
 
-        if user not in qset_writers and user not in qset_editors and not qset.is_owner(user):
+        if not _is_set_member(user, qset):
             message = 'You are not authorized to comment on this set.'
             message_class = 'alert-box warning'
             return HttpResponse(json.dumps({'message': message, 'message_class': message_class}))
@@ -4242,7 +4417,7 @@ def add_anchored_comment(request):
         qset = question.question_set
         user = request.user.writer
 
-        if user not in qset.writer.all() and user not in qset.editor.all() and not qset.is_owner(user):
+        if not _is_set_member(user, qset):
             message = 'You are not authorized to comment on this set.'
             message_class = 'alert-box warning'
             return HttpResponse(json.dumps({'message': message, 'message_class': message_class}))
@@ -4295,7 +4470,7 @@ def add_question_comment(request):
 
         qset = question.question_set
         user = request.user.writer
-        if user not in qset.writer.all() and user not in qset.editor.all() and not qset.is_owner(user):
+        if not _is_set_member(user, qset):
             return HttpResponse(json.dumps({'message': 'You are not authorized to comment on this set.', 'message_class': 'alert-box warning'}))
 
         from django.contrib.sites.models import Site
@@ -5850,7 +6025,8 @@ def search(request, passed_qset_id=None):
     if passed_qset_id is not None:
         passed_q_set = QuestionSet.objects.get(id=passed_qset_id)
 
-    question_sets = QuestionSet.objects.filter(Q(writer=user) | Q(editor=user) | Q(owner=user)).distinct()
+    question_sets = QuestionSet.objects.filter(
+        Q(writer=user) | Q(editor=user) | Q(owner=user) | Q(co_owners=user) | Q(proofreader=user)).distinct()
 
     if request.method == 'GET':
         categories_by_set, all_categories = _search_category_choices(question_sets)
@@ -5889,7 +6065,7 @@ def search(request, passed_qset_id=None):
             if 'qsub.search_all' in search_models:
                 search_all_selected = "checked"
 
-            if user in qset.writer.all() or user in qset.editor.all() or qset.is_owner(user):
+            if _is_set_member(user, qset):
                 # Postgres full-text search (icontains on SQLite) over the
                 # maintained search fields, scoped to the relevant set(s).
                 if search_all_selected == 'checked':
@@ -5966,7 +6142,7 @@ def _quick_search_scope(user, qset_param):
     QuestionSet ids the user may search; `selected_value` is 'all' or the chosen
     id as a string. Only sets the user can access are ever included."""
     accessible = list(QuestionSet.objects.filter(
-        Q(writer=user) | Q(editor=user) | Q(owner=user) | Q(co_owners=user)
+        Q(writer=user) | Q(editor=user) | Q(owner=user) | Q(co_owners=user) | Q(proofreader=user)
     ).distinct().values_list('id', flat=True))
     if qset_param and qset_param != 'all':
         try:
@@ -5990,7 +6166,7 @@ def quick_search(request, passed_qset_id=None):
     multi = len(scope_ids) != 1  # spanning multiple sets: qualify facets by set
 
     accessible = QuestionSet.objects.filter(
-        Q(writer=user) | Q(editor=user) | Q(owner=user) | Q(co_owners=user)
+        Q(writer=user) | Q(editor=user) | Q(owner=user) | Q(co_owners=user) | Q(proofreader=user)
     ).distinct().order_by('-date', 'name')
 
     packets = (Packet.objects.filter(question_set_id__in=scope_ids)
@@ -6043,7 +6219,7 @@ def quick_search_results(request):
     if not scope_ids:
         return JsonResponse({'results': [], 'truncated': False})
 
-    norm_q = strip_special_chars((request.GET.get('q') or '').strip())
+    norm_q = search_text(request.GET.get('q') or '')
     category = (request.GET.get('category') or '').strip()
     packet_id = request.GET.get('packet') or ''
     writer_id = request.GET.get('writer') or ''
@@ -8422,7 +8598,7 @@ def bulk_change_author(request, qset_id):
         new_author = Writer.objects.get(id=new_author_id)
 
         new_author_role = get_role_no_owner(new_author, qset)
-        if (new_author_role == 'none'):
+        if new_author_role in ('none', 'proofreader'):
             message = 'Could not change author to ' + str(new_author)
             return HttpResponseRedirect('/failure.html/')
 
@@ -8697,12 +8873,12 @@ def contributor(request, qset_id, writer_id):
     bonuses = []
 
     
-    if (writer not in qset_editors and not qset.is_owner(writer) and writer not in qset.writer.all()):
+    if (not _is_set_member(writer, qset)):
         return render(request, 'failure.html',
             {'message': 'The specified contributor is not in this set',
              'message_class': 'alert-box alert'})
         
-    if user not in qset_editors and not qset.is_owner(user) and user not in qset.writer.all():
+    if not _is_set_member(user, qset):
         return render(request, 'failure.html',
             {'message': 'You are not authorized to view this set',
              'message_class': 'alert-box alert'})
@@ -9112,7 +9288,7 @@ def packet_grid(request, qset_id):
     user = request.user.writer
     qset = QuestionSet.objects.get(id=qset_id)
 
-    if not qset.is_owner(user) and user not in qset.editor.all() and user not in qset.writer.all():
+    if not _is_set_member(user, qset):
         return render(request, 'failure.html',
                                  {'message': 'You are not authorized to view this set!',
                                   'message_class': 'alert-box alert'})
@@ -9587,7 +9763,7 @@ def packet_revision(request, packet_id):
         return HttpResponse(json.dumps({'error': 'not found'}), status=404)
     user = request.user.writer
     qset = packet.question_set
-    if not qset.is_owner(user) and user not in qset.editor.all() and user not in qset.writer.all():
+    if not _is_set_member(user, qset):
         return HttpResponse(json.dumps({'error': 'forbidden'}), status=403)
     return HttpResponse(json.dumps({'revision': _packet_revision(packet),
                                     'questions': _packet_question_revisions(packet)}))
@@ -9705,7 +9881,7 @@ def view_packet(request, packet_id):
     packet = Packet.objects.get(id=packet_id)
     qset = packet.question_set
 
-    if not qset.is_owner(user) and user not in qset.editor.all() and user not in qset.writer.all():
+    if not _is_set_member(user, qset):
         return render(request, 'failure.html',
                                  {'message': 'You are not authorized to view this packet!',
                                   'message_class': 'alert-box alert'})
@@ -9941,7 +10117,7 @@ def _packet_mp3_params(request, packet_id):
     user = request.user.writer
     packet = Packet.objects.get(id=packet_id)
     qset = packet.question_set
-    if not qset.is_owner(user) and user not in qset.editor.all() and user not in qset.writer.all():
+    if not _is_set_member(user, qset):
         return render(request, 'failure.html',
                                  {'message': 'You are not authorized to view this packet!',
                                   'message_class': 'alert-box alert'})
@@ -10058,12 +10234,7 @@ def _swap_search_norm(text):
     drop tags and QEMS markup characters, strip diacritics, collapse whitespace,
     casefold. Makes "marc jacobs" match an answer stored as "Marc _Jacobs_" and
     "republique" match "République"."""
-    t = html.unescape(text or '')
-    t = re.sub(r'<[^>]+>', '', t)
-    t = t.replace('\\P', '').replace('_', '').replace('~', '')
-    t = unicodedata.normalize('NFKD', t)
-    t = ''.join(ch for ch in t if not unicodedata.combining(ch))
-    return re.sub(r'\s+', ' ', t).casefold().strip()
+    return search_text(text).casefold()
 
 
 def _swap_search_candidates(model, qset, question_type, search, exclude_id=None):
@@ -10478,7 +10649,7 @@ def packet_grid_state(request, qset_id):
     """
     user = request.user.writer
     qset = QuestionSet.objects.get(id=qset_id)
-    if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+    if not _is_set_member(user, qset):
         return JsonResponse({'ok': False, 'error': 'Not authorized for this set.'}, status=403)
 
     packets = sorted_packets(qset)
@@ -10525,7 +10696,7 @@ def packet_grid_log(request, qset_id):
     """Show the history of packet-grid changes for a set."""
     user = request.user.writer
     qset = QuestionSet.objects.get(id=qset_id)
-    if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+    if not _is_set_member(user, qset):
         return render(request, 'failure.html',
                       {'message': 'You are not authorized to view this set!',
                        'message_class': 'alert-box alert'})
@@ -10925,7 +11096,7 @@ def activity(request, qset_id):
     made to questions you wrote or edited."""
     user = request.user.writer
     qset = QuestionSet.objects.get(id=qset_id)
-    if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+    if not _is_set_member(user, qset):
         return render(request, 'failure.html',
                       {'message': 'You are not authorized to view this set!',
                        'message_class': 'alert-box alert'})
@@ -10988,10 +11159,11 @@ def set_members(request, qset_id):
     @mention autocomplete."""
     user = request.user.writer
     qset = QuestionSet.objects.get(id=qset_id)
-    if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+    if not _is_set_member(user, qset):
         return HttpResponse(json.dumps({'members': []}))
     by_name = {}
-    for w in list(qset.all_owners()) + list(qset.editor.all()) + list(qset.writer.all()):
+    for w in (list(qset.all_owners()) + list(qset.editor.all()) + list(qset.writer.all())
+              + list(qset.proofreader.all())):
         u = w.user
         name = '{0} {1}'.format(u.first_name, u.last_name).strip() or u.username
         by_name[u.username] = name
@@ -11013,7 +11185,7 @@ def resolve_comment(request):
         return HttpResponse(json.dumps({'success': False, 'message': 'Comment not found'}))
     target = comment.content_object
     qset = getattr(target, 'question_set', None)
-    if qset is None or not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+    if qset is None or not _is_set_member(user, qset):
         return HttpResponse(json.dumps({'success': False, 'message': 'You are not authorized.'}))
     res, created = CommentResolution.objects.get_or_create(
         comment=comment, defaults={'resolved': True, 'resolved_by': user})
@@ -11047,7 +11219,7 @@ def edit_comment(request):
         return HttpResponse(json.dumps({'success': False, 'message': 'A comment cannot be empty.'}))
     target = comment.content_object
     qset = getattr(target, 'question_set', None)
-    if qset is None or not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+    if qset is None or not _is_set_member(user, qset):
         return HttpResponse(json.dumps({'success': False, 'message': 'You are not authorized.'}))
     if comment.user_id != request.user.id:
         return HttpResponse(json.dumps({'success': False,
@@ -11219,7 +11391,7 @@ def style_check(request, qset_id):
     from . import style_checker
     user = request.user.writer
     qset = QuestionSet.objects.get(id=qset_id)
-    if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+    if not _is_set_member(user, qset):
         return render(request, 'failure.html',
                       {'message': 'You are not authorized to view this set!',
                        'message_class': 'alert-box alert'})
@@ -11322,7 +11494,7 @@ def packet_issues(request, packet_id):
     user = request.user.writer
     packet = Packet.objects.get(id=packet_id)
     qset = packet.question_set
-    if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+    if not _is_set_member(user, qset):
         return HttpResponse(json.dumps({'issues': {}}))
     full = _question_issue_map(qset)
     keys = set()
@@ -11342,7 +11514,7 @@ def packet_style_issues(request, packet_id):
     user = request.user.writer
     packet = Packet.objects.get(id=packet_id)
     qset = packet.question_set
-    if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+    if not _is_set_member(user, qset):
         return HttpResponse(json.dumps({'issues': {}}))
     guide = request.GET.get('guide', style_checker.DEFAULT_GUIDE)
     if guide not in style_checker.guide_keys():
@@ -11816,7 +11988,7 @@ def style_ignored(request, qset_id):
     from . import style_checker
     user = request.user.writer
     qset = QuestionSet.objects.get(id=qset_id)
-    if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+    if not _is_set_member(user, qset):
         return render(request, 'failure.html',
                       {'message': 'You are not authorized to view this set!',
                        'message_class': 'alert-box alert'})
@@ -11894,7 +12066,7 @@ def question_repeats(request):
     if question is None:
         return HttpResponse(json.dumps({'ok': False, 'error': 'No such question'}), status=404)
     qset = question.question_set
-    if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+    if not _is_set_member(user, qset):
         return HttpResponse(json.dumps({'ok': False, 'error': 'Not authorized'}), status=403)
 
     matches = _post_submit_dup_matches(qset, question, qtype)
@@ -11919,7 +12091,7 @@ def question_style_issues(request):
     if question is None:
         return HttpResponse(json.dumps({'ok': False, 'error': 'No such question'}), status=404)
     qset = question.question_set
-    if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+    if not _is_set_member(user, qset):
         return HttpResponse(json.dumps({'ok': False, 'error': 'Not authorized'}), status=403)
 
     guide = request.GET.get('guide', style_checker.DEFAULT_GUIDE)
@@ -12292,7 +12464,7 @@ def tags_for_category(request, qset_id):
         qset = QuestionSet.objects.get(id=int(qset_id))
     except (ValueError, QuestionSet.DoesNotExist):
         return HttpResponse(json.dumps({'html': ''}), content_type='application/json')
-    if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+    if not _is_set_member(user, qset):
         return HttpResponse(json.dumps({'html': ''}), content_type='application/json')
 
     entry = None
@@ -12320,7 +12492,7 @@ def export_category_tags(request, qset_id):
     from . import tag_importer
     user = request.user.writer
     qset = QuestionSet.objects.get(id=qset_id)
-    if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+    if not _is_set_member(user, qset):
         return render(request, 'failure.html',
                       {'message': 'You are not authorized to view this set!',
                        'message_class': 'alert-box alert'})
@@ -12913,7 +13085,7 @@ def category_problems(request, qset_id):
     to a valid category. Any member can view; owners/editors can reassign."""
     user = request.user.writer
     qset = QuestionSet.objects.get(id=qset_id)
-    if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+    if not _is_set_member(user, qset):
         return render(request, 'failure.html',
                       {'message': 'You are not authorized to view this set!',
                        'message_class': 'alert-box alert'})
@@ -13022,8 +13194,7 @@ def _category_comment_context(request, qset, path, include_children=False):
         'cat_comment_path': path,
         'cat_comment_qset': qset,
         'cat_comment_user': user,
-        'can_comment_on_category': (qset.is_owner(user) or user in qset.editor.all()
-                                    or user in qset.writer.all()),
+        'can_comment_on_category': _is_set_member(user, qset),
     }
 
 
@@ -13042,7 +13213,7 @@ def category_comment(request, qset_id):
         return render(request, 'failure.html',
                       {'message': 'That set no longer exists.',
                        'message_class': 'alert-box alert'})
-    if not (qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all()):
+    if not _is_set_member(user, qset):
         return render(request, 'failure.html',
                       {'message': 'You are not authorized to comment on this set!',
                        'message_class': 'alert-box alert'})
@@ -13153,7 +13324,7 @@ def category_tags(request, qset_id):
     user = request.user.writer
     qset = QuestionSet.objects.get(id=qset_id)
 
-    if not qset.is_owner(user) and user not in qset.editor.all() and user not in qset.writer.all():
+    if not _is_set_member(user, qset):
         return render(request, 'failure.html',
                                  {'message': 'You are not authorized to view this set!',
                                   'message_class': 'alert-box alert'})
@@ -13461,7 +13632,7 @@ def category_tags(request, qset_id):
 def _member_or_403(request, qset):
     """Return the writer if they belong to the set, else None."""
     user = request.user.writer
-    if qset.is_owner(user) or user in qset.editor.all() or user in qset.writer.all():
+    if _is_set_member(user, qset):
         return user
     return None
 

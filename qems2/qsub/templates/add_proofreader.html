@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block header %}
+{% include "header.html" %}
+{% endblock %}
+
+{% block title %}Add Proofreader - QEMS3{% endblock %}
+
+{% block content %}
+{% load static %}
+
+<h3 class="page-header">Add Proofreaders to {{ qset.name }}</h3>
+<p>Proofreaders can read every question in the set, comment on them and suggest edits.
+They can't edit a question directly or write questions of their own; an editor or the
+question's author takes or turns down each suggestion.</p>
+{% if message %}<div class="alert-box success">{{ message }}</div>{% endif %}
+<form action="" method="post">
+    {% csrf_token %}
+    <div class="row">
+        <div class="small-8 small-centered columns">
+            <table class="tablesorter table-striped table-hover">
+                <thead>
+                <tr>
+                    <th>Available People</th>
+                    <th>Add as Proofreader?</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for writer in available_writers %}
+                <tr>
+                    <td>{{ writer|verbose_username }}</td>
+                    <td><input type="checkbox" value="{{ writer.id }}" name="proofreaders_to_add"></td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <input type="submit" value="Add Proofreaders" class="button primary right" />
+    <a href="/edit_question_set/{{ qset.id }}/" class="button secondary">Back to the set</a>
+</form>
+
+{% endblock %}

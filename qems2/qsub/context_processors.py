@@ -87,7 +87,8 @@ def nav(request):
            'nav_support_on': bool((getattr(settings, 'SUPPORT_EMAIL', '') or '').strip())}
 
     sets = (QuestionSet.objects
-            .filter(Q(owner=writer) | Q(co_owners=writer) | Q(editor=writer) | Q(writer=writer))
+            .filter(Q(owner=writer) | Q(co_owners=writer) | Q(editor=writer) | Q(writer=writer)
+                    | Q(proofreader=writer))
             .distinct().order_by('-date', 'name'))
     ctx['nav_sets'] = sets
 
@@ -135,7 +136,11 @@ def nav(request):
     if active is not None:
         is_editor = active.is_owner(writer) or writer in active.editor.all()
         ctx['nav_is_editor'] = is_editor
-        ctx['nav_role'] = 'Editor' if is_editor else 'Writer'
+        # A proofreader reads, comments and suggests; they don't write, so the
+        # sidebar offers them no "new question" buttons.
+        is_proofreader = not is_editor and active.is_proofreader(writer)
+        ctx['nav_is_proofreader'] = is_proofreader
+        ctx['nav_role'] = 'Editor' if is_editor else 'Proofreader' if is_proofreader else 'Writer'
         ctx['nav_first_packet'] = (active.packet_set.order_by('id')
                                    .values_list('id', flat=True).first())
         try:

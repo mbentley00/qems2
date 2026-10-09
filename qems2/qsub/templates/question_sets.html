@@ -53,6 +53,10 @@
                 <a href="/category_overview/{{ q.id }}/">Categories</a>
                 <a href="/packet_grid/{{ q.id }}/">Packets</a>
                 <a href="/import_set/?target={{ q.id }}">Import</a>
+            {% elif c.is_proofreader %}
+                <a href="/view_all_questions/{{ q.id }}/">Questions</a>
+                <a href="/packet_grid/{{ q.id }}/">Packets</a>
+                <a href="/view_all_comments/{{ q.id }}/">Comments</a>
             {% else %}
                 <a href="/edit_question_set/{{ q.id }}/">My questions</a>
                 <a href="/add_tossups/{{ q.id }}/">Add a tossup</a>

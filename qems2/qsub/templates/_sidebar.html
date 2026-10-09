@@ -21,6 +21,7 @@
         </div>
     </div>
 
+    {% if not nav_is_proofreader %}
     <div class="app-newbtns">
         <a class="app-btn app-btn-primary" href="/add_tossups/{{ nav_active.id }}/"><i class="fa fa-plus"></i> Tossup</a>
         <a class="app-btn app-btn-ghost" href="/add_bonuses/{{ nav_active.id }}/ACF-style bonus"><i class="fa fa-plus"></i> Bonus</a>
@@ -28,6 +29,7 @@
 
     <a class="app-nav-item{% if '/type_questions/' in request.path %} active{% endif %}" href="/type_questions/{{ nav_active.id }}/">
         <i class="fa fa-keyboard"></i> New Question (Type)</a>
+    {% endif %}
 
     <div class="app-nav-section">Workspace</div>
     <a class="app-nav-item{% if '/edit_question_set/' in request.path %} active{% endif %}" href="/edit_question_set/{{ nav_active.id }}/">

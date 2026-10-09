@@ -267,7 +267,7 @@ class TossupForm(forms.ModelForm):
                 print('Non-existent question set!')
                 self.fields['category'] = forms.ModelChoiceField(queryset=DistributionEntry.objects.none(), empty_label=None)
 
-        if role and role == 'writer':
+        if role in ('writer', 'proofreader'):
             # if this tossup is being submitted by a writer we don't need to show them the edited/locked checkboxes
             self.fields['locked'].widget.attrs['readonly'] = 'readonly'
             self.fields['locked'].widget.attrs['style'] = 'display:none'
@@ -372,7 +372,7 @@ class BonusForm(forms.ModelForm):
             self.fields['part3_text'].widget.attrs['style'] = 'display:none'
             self.fields['part3_answer'].widget.attrs['style'] = 'display:none'
 
-        if role and role == 'writer':
+        if role in ('writer', 'proofreader'):
             # if this bonus is being submitted by a writer we don't need to show them the edited/locked checkboxes
             self.fields['locked'].widget.attrs['readonly'] = 'readonly'
             self.fields['locked'].widget.attrs['style'] = 'display:none'
