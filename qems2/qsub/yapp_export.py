@@ -53,6 +53,8 @@ words, and are buzzable. Only the parenthesized guide itself is non-word text.
 import html as _html
 import re as _re
 
+from .utils import escape_unpaired_underscores
+
 #: Value of the top-level ``version`` field on a YAPP2 packet. Minor bumps only
 #: add optional fields, and readers match on the ``yapp2/`` prefix, so raising
 #: this doesn't strand anything that read the previous version.
@@ -80,6 +82,9 @@ def qems_to_yapp_html(text, anchors=False):
     YAPP requires."""
     if not text:
         return ''
+    # An underscore with no partner (~TK_119~) is literal, as it is in the
+    # editor; left as a marker it underlined the rest of the question.
+    text = escape_unpaired_underscores(text)
 
     out = []
     ital = ul = prompt = sup = sub = bold = pg = False

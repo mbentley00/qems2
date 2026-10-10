@@ -6730,6 +6730,8 @@ def add_qems_formatted_runs(paragraph, text, bold=False, is_answer=False, smart_
     # the quotes are visible to the test.
     if quoted_guides:
         text = escape_unquoted_parens(text)
+    # An underscore with no partner prints as itself (see the helper).
+    text = escape_unpaired_underscores(text)
 
     allow_underlines = True
     allow_parens = True
@@ -6824,6 +6826,15 @@ def add_qems_formatted_runs(paragraph, text, bold=False, is_answer=False, smart_
             power_flag = False
             index += 3
             prev2, prev = prev, ")"
+            continue
+
+        # \_ and \~ are the literal characters, not markup (as on the web).
+        if c in ("_", "~") and prev == "\\" and prev2 != "\\":
+            if buf.endswith("\\"):
+                buf = buf[:-1]
+            buf += c
+            index += 1
+            prev2, prev = prev, c
             continue
 
         # Tildes → italic toggle

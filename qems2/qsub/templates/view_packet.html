@@ -14,7 +14,8 @@
 {% if qset %}<script>window.QEMS_QSET_ID = {{ qset.id }};</script>{% endif %}
 {% if not read_only %}<script>window.QEMS_CAN_STRIKE = true;</script>{% endif %}
 
-<div id="packet-changed-banner" class="alert-box warning" style="display:none; position:sticky; top:0; z-index:50;">
+{# Under the top bar (z-index 50), so its search results drop down over this. #}
+<div id="packet-changed-banner" class="alert-box warning" style="display:none; position:sticky; top:0; z-index:40;">
     This packet has changed since you opened it (someone edited a question or its order).
     <a href="#" id="packet-changed-reload" class="button tiny" style="margin:0 0 0 0.5rem;">Reload</a>
     <a href="#" id="packet-changed-dismiss" class="right" style="margin:0;">Dismiss</a>
@@ -349,7 +350,8 @@ html[data-theme="dark"] .doc-swap-btn { background:#123243; color:#7fc7e8; }
    around without scrolling the document. Hidden until asked for. */
 .swap-panel { display: none; position: fixed; top: 60px; right: 0; bottom: 0; width: 330px;
     background: #fff; border-left: 1px solid #ddd; box-shadow: -2px 0 10px rgba(0,0,0,0.10);
-    z-index: 60; font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; }
+    /* Under the top bar (50), whose search results drop down over it. */
+    z-index: 49; font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; }
 .swap-panel.open { display: flex; flex-direction: column; }
 .swap-panel-head { padding: 10px 14px; border-bottom: 1px solid #eee; position: relative; }
 .swap-panel-hint { color: #8a8f9c; font-size: 11px; margin-top: 4px; }

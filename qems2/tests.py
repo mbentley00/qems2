@@ -6050,7 +6050,12 @@ class YappHtmlConversionTests(TestCase):
         self.assertEqual(self._c(r'a \~ b'), 'a ~ b')
 
     def test_unclosed_markup_is_closed(self):
-        self.assertEqual(self._c('_France'), '<b><u>France</u></b>')
+        self.assertEqual(self._c('~France'), '<em>France</em>')
+
+    def test_an_underscore_with_no_partner_is_literal(self):
+        # As the editor shows it; underlining to the end of the field is what
+        # turned a whole MODAQ question underlined (UnpairedUnderscoreTests).
+        self.assertEqual(self._c('_France'), '_France')
 
 
 class YappJsonExportTests(TestCase):
@@ -9908,7 +9913,8 @@ class ExportSectionHeadingTests(TestCase):
 
 class ExportedPdfMatchesWordTests(TestCase):
     """The PDF and the Word export are meant to be the same document: Times on
-    half-inch margins, guides set apart, and questions kept whole."""
+    half-inch margins (Liberation Serif, drawn to Times New Roman's metrics),
+    guides set apart, and questions kept whole."""
 
     def setUp(self):
         import io as _io
@@ -9928,11 +9934,11 @@ class ExportedPdfMatchesWordTests(TestCase):
         self.packet = Packet.objects.create(
             question_set=self.qset, packet_name='Packet 1', created_by=self.owner)
         # Long enough that five of them cross a page, with a guide, a note and
-        # a character Times cannot encode in the first.
+        # characters the body face has no glyph for in the first.
         filler = 'Filler clue text that goes on for a while. ' * 20
         for n in range(1, 6):
             extra = ('The architect \\PEero Saarinen\\P ("arrow SAH-ree-nen") built it, '
-                     '\\Nread slowly\\N, and \u03b1 appears. ') if n == 1 else ''
+                     '\\Nread slowly\\N, and \u03b1 \u2200 \u5bcc\u58eb\u5c71 appear. ') if n == 1 else ''
             Tossup.objects.create(
                 author=self.owner, question_set=self.qset, packet=self.packet,
                 question_type=self.acf_tu, category=self.de, question_number=n,
@@ -9958,18 +9964,24 @@ class ExportedPdfMatchesWordTests(TestCase):
                 out.add(str(value.get_object().get('/BaseFont')))
         return out
 
-    def test_the_body_is_set_in_times(self):
+    def test_the_body_is_set_in_times_metrics(self):
         fonts = self._fonts(self._pdf())
-        self.assertTrue(any('Times' in f for f in fonts), fonts)
+        self.assertTrue(any(f.endswith('+LiberationSerif') for f in fonts), fonts)
 
     def test_a_pronunciation_guide_is_set_apart_in_a_sans_face(self):
         fonts = self._fonts(self._pdf())
-        self.assertTrue(any('Helvetica' in f for f in fonts), fonts)
+        self.assertTrue(any('LiberationSans' in f for f in fonts), fonts)
 
-    def test_a_character_times_cannot_carry_falls_back_rather_than_failing(self):
+    def test_a_character_the_body_face_lacks_falls_back_rather_than_failing(self):
         reader = self._pdf()
-        self.assertIn('\u03b1', '\n'.join(p.extract_text() or '' for p in reader.pages))
-        self.assertTrue(any('DejaVu' in f for f in self._fonts(reader)), self._fonts(reader))
+        text = '\n'.join(p.extract_text() or '' for p in reader.pages)
+        # Greek is in the body face itself; a rarer symbol takes DejaVu, and
+        # kanji the Japanese face.
+        for ch in ('\u03b1', '\u2200','\u5bcc\u58eb\u5c71'):
+            self.assertIn(ch, text)
+        fonts = self._fonts(reader)
+        self.assertTrue(any('DejaVu' in f for f in fonts), fonts)
+        self.assertTrue(any('NotoSerifJP' in f for f in fonts), fonts)
 
     def test_no_question_is_split_across_a_page(self):
         reader = self._pdf()
@@ -10007,10 +10019,42 @@ class ExportedPdfMatchesWordTests(TestCase):
             pe._tossup(bound, tu, 1, opts)
             self.assertGreaterEqual(bound.total(), pdf.get_y() - y0)
 
+    def test_a_word_is_never_split_where_its_colour_or_face_changes(self):
+        """fpdf wrapped one run at a time, so a run whose first word didn't fit
+        the rest of the line was split letter by letter: "Ferrucci / o
+        Busoni" for a teal guided name, "Dvo / řák" around a fallback letter."""
+        import io as _io
+        from pypdf import PdfReader
+        from qems2.qsub import pdf_export as pe
+        for n in range(45):
+            pdf = pe._new_pdf()
+            pdf.add_page()
+            pe._write_text(pdf, 'ab ' * n + 'in memory of ', pe._SERIF, 'B', pe.SIZE)
+            pe._write_text(pdf, 'Ferruccio Busoni', pe._SERIF, 'B', pe.SIZE, pe.PG_TEAL)
+            pe._write_text(pdf, ' ("fair-ROO-choh") and Dvo', pe._SANS, '', pe.SIZE, pe.GUIDE_GREY)
+            pe._write_text(pdf, 'řák富士山', pe._SERIF, 'BU', pe.SIZE)
+            pe._write_text(pdf, ', so on.', pe._SERIF, '', pe.SIZE)
+            pe._ln(pdf, pe.LINE_H)
+            text = PdfReader(_io.BytesIO(bytes(pdf.output()))).pages[0].extract_text()
+            words = set(text.split())
+            for word in ('Ferruccio', 'Busoni', 'Dvořák富士山,'):
+                self.assertIn(word, words, 'padding {0}: {1!r}'.format(n, text))
+
+    def test_a_word_wider_than_the_line_still_breaks(self):
+        from qems2.qsub import pdf_export as pe
+        piece = ('x' * 400, pe._SERIF, '', pe.SIZE, pe.BLACK)
+        lines = pe._layout([piece], pe._width, 500, 500)
+        self.assertGreater(len(lines), 1)
+        self.assertEqual(''.join(p[0] for line in lines for p in line), 'x' * 400)
+        for line in lines:
+            self.assertLessEqual(sum(pe._width(p) for p in line), 500 + pe._EPS)
+
     def test_a_packet_needing_no_fallback_does_not_embed_it(self):
+        # Czech, Polish and romanised Japanese are all in the body face.
         Tossup.objects.filter(question_set=self.qset).update(
-            tossup_text='Plain clue text. For 10 points, name it.')
-        self.assertFalse(any('DejaVu' in f for f in self._fonts(self._pdf())))
+            tossup_text='Dvořák, Łódź, Ōsaka. For 10 points, name it.')
+        fonts = self._fonts(self._pdf())
+        self.assertFalse(any('DejaVu' in f or 'Noto' in f for f in fonts), fonts)
 
 
 class EditPacketTitleTests(TestCase):
@@ -11161,7 +11205,6 @@ class QuestionNoteMarkupTests(TestCase):
 
         class FakePdf:
             def __init__(self):
-                self.runs = []
                 self._style = ''
                 self._family = ''
                 self._color = (0, 0, 0)
@@ -11172,8 +11215,10 @@ class QuestionNoteMarkupTests(TestCase):
             def set_text_color(self, r, g, b):
                 self._color = (r, g, b)
 
-            def write(self, height, text):
-                self.runs.append((self._style, text, self._family, self._color))
+            @property
+            def runs(self):
+                # (text, family, style, size, colour, line height) per run
+                return [(st, t, fam, col) for t, fam, st, _sz, col, _h in self._qems_buf]
 
         pdf = FakePdf()
         _RunWriter(pdf).feed(
@@ -11192,7 +11237,6 @@ class QuestionNoteMarkupTests(TestCase):
 
         class FakePdf:
             def __init__(self):
-                self.runs = []
                 self._family, self._color = '', BLACK
 
             def set_font(self, name, style, size):
@@ -11201,8 +11245,9 @@ class QuestionNoteMarkupTests(TestCase):
             def set_text_color(self, r, g, b):
                 self._color = (r, g, b)
 
-            def write(self, height, text):
-                self.runs.append((text, self._family, self._color))
+            @property
+            def runs(self):
+                return [(t, fam, col) for t, fam, _st, _sz, col, _h in self._qems_buf]
 
         pdf = FakePdf()
         _RunWriter(pdf).feed(
@@ -11222,7 +11267,6 @@ class QuestionNoteMarkupTests(TestCase):
 
         class FakePdf:
             def __init__(self):
-                self.runs = []
                 self._style = ''
 
             def set_font(self, name, style, size):
@@ -11231,8 +11275,9 @@ class QuestionNoteMarkupTests(TestCase):
             def set_text_color(self, r, g, b):
                 pass
 
-            def write(self, height, text):
-                self.runs.append((self._style, text))
+            @property
+            def runs(self):
+                return [(st, t) for t, _fam, st, _sz, _col, _h in self._qems_buf]
 
         pdf = FakePdf()
         _RunWriter(pdf).feed(
@@ -18028,3 +18073,53 @@ class HomeCardsTests(TestCase):
         body = self.client.get('/question_sets/').content.decode()
         self.assertIn('/set_distribution/{0}/'.format(self.qset.id), body)
         self.assertIn('Not started', body)
+
+
+class UnpairedUnderscoreTests(TestCase):
+    """An underscore with no partner (~TK_119~) is the literal character, as
+    the rich editor shows it. Every renderer used to open an underline there
+    that never closed, so a YAPP export underlined the rest of the question in
+    MODAQ."""
+
+    TEXT = 'his (*) ~TK_119~, based on Astro Boy. For 10 points, name _Invader_.'
+
+    def test_the_helper_escapes_the_word_internal_one(self):
+        from qems2.qsub.utils import escape_unpaired_underscores as esc
+        self.assertEqual(esc(self.TEXT), self.TEXT.replace('TK_119', 'TK\\_119'))
+        self.assertEqual(esc('a ~TK_119~ b'), 'a ~TK\\_119~ b')
+        # Paired, already escaped, or an even count: left alone.
+        for text in ('_Invader_ or __Slama__', 'TK\\_119 and _x_', 'snake_case_name', ''):
+            self.assertEqual(esc(text), text)
+        # No word-internal candidate: the last one is the leftover.
+        self.assertEqual(esc('_a_ and _b'), '_a_ and \\_b')
+        self.assertEqual(esc('__a__ x__'), '__a__ x\\_\\_')
+
+    def test_web_view(self):
+        html = get_formatted_question_html(self.TEXT, True, True, False, True)
+        self.assertIn('<i>TK_119</i>, based on Astro Boy', html)
+        self.assertIn('<u><b>Invader</b></u>', html)
+
+    def test_yapp(self):
+        from qems2.qsub.yapp_export import qems_to_yapp_html
+        html = qems_to_yapp_html(self.TEXT, anchors=True)
+        self.assertIn('<em>TK_119</em>, based on Astro Boy', html)
+        self.assertIn('<b><u>Invader</u></b>', html)
+
+    def test_word_export(self):
+        import docx
+        from qems2.qsub.views import add_qems_formatted_runs
+        for text in (self.TEXT, self.TEXT.replace('TK_119', 'TK\\_119')):
+            p = docx.Document().add_paragraph()
+            add_qems_formatted_runs(p, text)
+            runs = [(r.text, bool(r.underline)) for r in p.runs if r.text]
+            self.assertIn(('TK_119', False), runs)
+            self.assertIn(('Invader', True), runs)
+            self.assertNotIn('\\', ''.join(t for t, _u in runs))
+
+    def test_word_export_honours_escaped_tildes(self):
+        import docx
+        from qems2.qsub.views import add_qems_formatted_runs
+        p = docx.Document().add_paragraph()
+        add_qems_formatted_runs(p, 'a \\~tilde\\~ b')
+        self.assertEqual(p.text, 'a ~tilde~ b')
+        self.assertFalse(any(r.italic for r in p.runs))

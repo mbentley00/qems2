@@ -6,17 +6,28 @@ so this file deliberately mirrors the docx writer in views.py: Times New Roman
 sans-serif pronunciation guides, and a question that never breaks across a
 page.
 
-Type is set in the PDF core Times face rather than an embedded one, which is
-what gives the two formats the same shape on the page; core fonts can only
-carry cp1252, so any run with a character outside it (Greek, Cyrillic, longer
-diacritics) is set in the bundled DejaVu Serif instead. That keeps the fallback
-to the few words that need it rather than the whole packet.
+Type is set in the bundled Liberation Serif, which is drawn to Times New
+Roman's metrics -- the same shape on the page as the Word export -- and,
+unlike the PDF core Times, carries real glyphs for ř, ō, Greek and Cyrillic.
+Guides are in Liberation Sans (Helvetica's metrics). A character the face
+lacks falls back, for that character alone, to DejaVu Serif and then to Noto
+Serif JP (kanji and kana; converted to TrueType outlines, since fpdf draws a
+CFF font's glyphs blank).
+
+Line breaking is done here rather than by fpdf: a paragraph's runs (bold, a
+guide's teal target word, a fallback character) are gathered first and broken
+only at spaces. fpdf's own write() wraps one run at a time, and when the first
+word of a run didn't fit the rest of a line it split that word letter by
+letter ("Ferrucci / o Busoni").
 
 Kept separate from the python-docx exporter in views.py; the export view calls
 build_packetized_pdf() and streams the bytes.
 """
 
+import copy
 import os
+import re
+import unicodedata
 from html.parser import HTMLParser
 
 from fpdf import FPDF
@@ -26,20 +37,41 @@ from .utils import get_formatted_question_html
 
 _FONT_DIR = os.path.join(os.path.dirname(__file__), 'static', 'fonts')
 
-#: The body face. "Times" is one of the PDF core fonts, so it needs no
-#: embedding and a reader shows it in Times New Roman -- the same face, and the
-#: same metrics, as the Word export asks for.
-_SERIF = 'Times'
+#: The body face: Times New Roman's metrics, so the PDF has the Word export's
+#: line breaks and page count.
+_SERIF = 'LiberationSerif'
 #: Pronunciation guides, matching the docx's sans-serif aside.
-_SANS = 'Helvetica'
-#: What a run falls back to when Times cannot encode it.
+_SANS = 'LiberationSans'
+#: What a character falls back to when the face it is in has no glyph for it,
+#: in order.
 _UNICODE = 'DejaVuSerif'
-_UNICODE_FILES = {
-    '': 'DejaVuSerif.ttf',
-    'B': 'DejaVuSerif-Bold.ttf',
-    'I': 'DejaVuSerif-Italic.ttf',
-    'BI': 'DejaVuSerif-BoldItalic.ttf',
+_CJK = 'NotoSerifJP'
+_FALLBACKS = (_UNICODE, _CJK)
+_FONT_FILES = {
+    _SERIF: {
+        '': 'LiberationSerif-Regular.ttf',
+        'B': 'LiberationSerif-Bold.ttf',
+        'I': 'LiberationSerif-Italic.ttf',
+        'BI': 'LiberationSerif-BoldItalic.ttf',
+    },
+    _SANS: {
+        '': 'LiberationSans-Regular.ttf',
+        'B': 'LiberationSans-Bold.ttf',
+        'I': 'LiberationSans-Italic.ttf',
+        'BI': 'LiberationSans-BoldItalic.ttf',
+    },
+    _UNICODE: {
+        '': 'DejaVuSerif.ttf',
+        'B': 'DejaVuSerif-Bold.ttf',
+        'I': 'DejaVuSerif-Italic.ttf',
+        'BI': 'DejaVuSerif-BoldItalic.ttf',
+    },
+    # One weight only: the font is large, and a packet's Japanese is a name
+    # or a title, not a bolded clue.
+    _CJK: dict.fromkeys(('', 'B', 'I', 'BI'), 'NotoSerifJP-Regular.ttf'),
 }
+
+_FAMILIES = {name.lower(): name for name in _FONT_FILES}
 
 #: Matching new_docx() in views.py.
 SIZE = 12
@@ -58,62 +90,313 @@ NOTE_GREY = (0x55, 0x55, 0x55)
 #: The word a guide is about, matching the web view's .pg-target.
 PG_TEAL = (0x0B, 0x72, 0x85)
 
+#: Characters that print nothing and would only confuse the layout: a soft
+#: hyphen, zero-width spaces and joiners, a byte-order mark.
+_INVISIBLE = dict.fromkeys(map(ord, '­​‌‍⁠﻿'))
+#: Where a line may break. Deliberately not \s, which would also break at a
+#: no-break space.
+_BREAKS = re.compile(r'([ \t\r\n]+)')
+#: Slack for float rounding when deciding whether a word fits.
+_EPS = 0.01
+
 
 def _safe(v):
     return '' if v is None else str(v)
 
 
-def _encodable(text):
-    try:
-        text.encode('cp1252')
-        return True
-    except UnicodeEncodeError:
-        return False
+_cmaps = {}
 
 
-def _runs_by_font(text):
-    """Split text into (chunk, needs_fallback) pieces.
+def _cmap(family):
+    """The code points every style of `family` has a glyph for."""
+    cmap = _cmaps.get(family)
+    if cmap is None:
+        from fontTools.ttLib import TTFont
+        sets = []
+        for fname in set(_FONT_FILES[family].values()):
+            font = TTFont(os.path.join(_FONT_DIR, fname), lazy=True)
+            try:
+                sets.append(set(font.getBestCmap()))
+            finally:
+                font.close()
+        cmap = _cmaps[family] = frozenset.intersection(*map(frozenset, sets))
+    return cmap
 
-    A single Greek word in a clue shouldn't drag the packet out of Times, so
-    the split is per character-run rather than per field.
+
+def _covers(family, text):
+    cmap = _cmap(family)
+    return all(ord(ch) in cmap or ch in ' \t\r\n' for ch in text)
+
+
+def _face_for(ch, family):
+    """`family` if it has a glyph for ch, else the first fallback that does
+    (and `family` again if none does: a blank box beats a crash)."""
+    if ord(ch) in _cmap(family) or ch in ' \t\r\n':
+        return family
+    for fallback in _FALLBACKS:
+        if ord(ch) in _cmap(fallback):
+            return fallback
+    return family
+
+
+def _runs_by_font(text, family):
+    """Split text into (chunk, family) pieces: `family` wherever it has the
+    glyph, a fallback face where only that does.
+
+    A single Greek word in a clue shouldn't drag the packet out of the body
+    face, so the split is per character-run rather than per field.
     """
+    if _covers(family, text):
+        return [(text, family)]
     out = []
     buf = []
     cur = None
     for ch in text:
-        need = not _encodable(ch)
-        if cur is not None and need != cur:
+        fam = _face_for(ch, family)
+        if cur is not None and fam != cur:
             out.append((''.join(buf), cur))
             buf = []
-        cur = need
+        cur = fam
         buf.append(ch)
     if buf:
         out.append((''.join(buf), cur))
     return out
 
 
-def _set_font(pdf, family, style, size):
-    """set_font, registering the DejaVu fallback the first time a run needs it.
+#: (family, style) -> a TTFFont parsed once per process, which each document
+#: gets its own copy of (see _add_font).
+_parsed = {}
 
-    Most packets never need it, and parsing the four TTF files costs real time
-    in a set export that builds one PDF per packet.
+
+def _add_font(pdf, family, style, path):
+    """pdf.add_font, without parsing the file again for every document.
+
+    A set export builds a PDF per packet plus a scratch document per fifty
+    questions, and fpdf's add_font reads every glyph of the file each time --
+    with six faces that was most of the export's run time. The parsed font is
+    kept, and each document gets a copy with its own subset (which glyphs it
+    used) and, if it will be written out, its own handle on the file: writing
+    a PDF cuts the font down to that subset in place.
     """
-    if family == _UNICODE and hasattr(pdf, 'add_font') and not getattr(pdf, '_qems_unicode', False):
-        for st, fname in _UNICODE_FILES.items():
-            pdf.add_font(_UNICODE, st, os.path.join(_FONT_DIR, fname))
-        pdf._qems_unicode = True
+    try:
+        from fontTools.ttLib import TTFont
+        from fpdf.fonts import SubsetMap
+        template = _template(family, style)
+        # TTFFont.__deepcopy__ shares the parsed tables and copies the rest.
+        font = copy.deepcopy(template)
+        font.i = len(pdf.fonts) + 1
+        font.subset = SubsetMap(font)
+        font.missing_glyphs = []
+        font.biggest_size_pt = 0
+        if not getattr(pdf, '_qems_scratch', False):
+            font.ttfont = TTFont(path, recalcTimestamp=False, lazy=True)
+        pdf.fonts[font.fontkey] = font
+    except Exception:
+        # fpdf's internals moved under us: parse it the slow way.
+        pdf.fonts.pop('{0}{1}'.format(family.lower(), style), None)
+        pdf.add_font(family, style, path)
+
+
+def _set_font(pdf, family, style, size):
+    """set_font, registering a bundled face the first time a run needs it.
+
+    Most packets never need the fallbacks, and an unused face shouldn't be
+    embedded."""
+    # fpdf reports a family back lowercased (pdf.font_family).
+    family = _FAMILIES.get(family.lower(), family)
+    if family in _FONT_FILES and hasattr(pdf, 'add_font'):
+        loaded = getattr(pdf, '_qems_fonts', None)
+        if loaded is None:
+            loaded = pdf._qems_fonts = set()
+        if family not in loaded:
+            for st, fname in _FONT_FILES[family].items():
+                _add_font(pdf, family, st, os.path.join(_FONT_DIR, fname))
+            loaded.add(family)
     pdf.set_font(family, style, size)
 
 
 def _write_text(pdf, text, family, style, size, color=BLACK, line_h=LINE_H):
-    """One formatted run, in the body face where it can be and the fallback
-    where it can't."""
+    """Add one formatted run to the paragraph being built on `pdf`.
+
+    Nothing is drawn until the paragraph ends (_ln), because where a line can
+    break depends on the runs after this one: a word can carry on into the
+    next run with no space between them."""
     if not text:
         return
-    pdf.set_text_color(*color)
-    for chunk, fallback in _runs_by_font(text):
-        _set_font(pdf, _UNICODE if fallback else family, style, size)
-        pdf.write(line_h, chunk)
+    text = unicodedata.normalize('NFC', text).translate(_INVISIBLE)
+    if not text:
+        return
+    buf = getattr(pdf, '_qems_buf', None)
+    if buf is None:
+        buf = pdf._qems_buf = []
+    buf.append((text, family, style, size, color, line_h))
+
+
+def _ln(pdf, h):
+    """End the paragraph being built, then move down `h`."""
+    _flush(pdf)
+    pdf.ln(h)
+
+
+def _template(family, style):
+    """The once-parsed TTFFont for a bundled face (see _add_font)."""
+    style = style.replace('U', '')
+    font = _parsed.get((family, style))
+    if font is None:
+        scratch = FPDF(unit='pt')
+        scratch.add_font(family, style, os.path.join(_FONT_DIR, _FONT_FILES[family][style]))
+        font = _parsed[(family, style)] = scratch.fonts[
+            '{0}{1}'.format(family.lower(), style)]
+    return font
+
+
+def _width(piece):
+    """A piece's width in points: what fpdf's get_string_width gives (the
+    glyphs' advance widths, at no extra spacing), read straight from the font.
+    get_string_width builds fpdf's whole styled-fragment machinery for each
+    call, and the layout measures every word."""
+    text, family, style, size, _color = piece
+    cw = _template(family, style).cw
+    return sum(cw[ord(ch)] for ch in text) * size * 0.001
+
+
+def _flush(target):
+    """Lay out and draw the runs gathered since the paragraph began."""
+    buf = getattr(target, '_qems_buf', None)
+    if not buf:
+        return
+    target._qems_buf = []
+    pieces = []
+    for text, family, style, size, color, _h in buf:
+        for chunk, fam in _runs_by_font(text, family):
+            pieces.append((chunk, fam, style, size, color))
+    line_h = max(entry[5] for entry in buf)
+    widths = {}
+
+    def width_of(piece):
+        w = widths.get(piece)
+        if w is None:
+            w = widths[piece] = _width(piece)
+        return w
+
+    if isinstance(target, _Bound):
+        indent, full = target.x, target.width
+    else:
+        indent, full = target.get_x() - target.l_margin, target.epw
+    lines = _layout(pieces, width_of, full - indent, full)
+    if isinstance(target, _Bound):
+        target.add_lines(lines, line_h, width_of)
+    else:
+        _draw(target, lines, line_h, width_of)
+
+
+def _tokens(pieces):
+    """('word' | 'space' | 'newline', [piece, ...]) in order. A word's pieces
+    are every run it touches, so a word half in one style and half in another
+    (or with one fallback letter) stays one word."""
+    out = []
+    for text, *rest in pieces:
+        for seg in _BREAKS.split(text):
+            if not seg:
+                continue
+            if _BREAKS.fullmatch(seg):
+                if '\n' in seg:
+                    out.extend(('newline', []) for _ in range(seg.count('\n')))
+                elif out and out[-1][0] == 'space':
+                    out[-1][1].append((seg, *rest))
+                else:
+                    out.append(('space', [(seg, *rest)]))
+            elif out and out[-1][0] == 'word':
+                out[-1][1].append((seg, *rest))
+            else:
+                out.append(('word', [(seg, *rest)]))
+    return out
+
+
+def _layout(pieces, width_of, first, full):
+    """Break a paragraph's pieces into lines, at spaces only.
+
+    `first` is the room left on the line the paragraph starts on, `full` a
+    whole line's width. A word too wide for a line of its own is the one thing
+    split between letters. Returns a list of lines, each a list of pieces; the
+    spaces a line breaks at are dropped.
+    """
+    lines = [[]]
+    state = {'used': 0.0, 'avail': first}
+    pending, pending_w = [], 0.0
+
+    def new_line():
+        lines.append([])
+        state['used'], state['avail'] = 0.0, full
+
+    for kind, parts in _tokens(pieces):
+        if kind == 'newline':
+            new_line()
+            pending, pending_w = [], 0.0
+            continue
+        if kind == 'space':
+            if lines[-1]:   # a space starting a line isn't printed
+                pending.extend(parts)
+                pending_w += sum(width_of(p) for p in parts)
+            continue
+        w = sum(width_of(p) for p in parts)
+        if lines[-1] and state['used'] + pending_w + w > state['avail'] + _EPS:
+            new_line()
+        elif (not lines[-1] and w > state['avail'] + _EPS
+              and state['avail'] < full - _EPS):
+            # Partway along a line the word doesn't fit on: start a new one.
+            new_line()
+        if lines[-1]:
+            lines[-1].extend(pending)
+            state['used'] += pending_w
+        pending, pending_w = [], 0.0
+        if w <= state['avail'] + _EPS:
+            lines[-1].extend(parts)
+            state['used'] += w
+            continue
+        # Wider than a whole line: break it wherever the line runs out.
+        for text, *rest in parts:
+            chunk = ''
+            for ch in text:
+                cw = width_of((ch, *rest))
+                if (chunk or lines[-1]) and state['used'] + cw > state['avail'] + _EPS:
+                    if chunk:
+                        lines[-1].append((chunk, *rest))
+                    chunk = ''
+                    new_line()
+                chunk += ch
+                state['used'] += cw
+            if chunk:
+                lines[-1].append((chunk, *rest))
+    while len(lines) > 1 and not lines[-1]:
+        lines.pop()
+    return lines
+
+
+def _merged(line):
+    """A line's pieces with neighbours of the same face and colour joined, so
+    an underline or a word isn't drawn in slivers."""
+    out = []
+    for piece in line:
+        if out and out[-1][1:] == piece[1:]:
+            out[-1] = (out[-1][0] + piece[0],) + piece[1:]
+        else:
+            out.append(piece)
+    return out
+
+
+def _draw(pdf, lines, h, width_of):
+    for i, line in enumerate(lines):
+        if i:
+            pdf.ln(h)
+        for piece in _merged(line):
+            text, family, style, size, color = piece
+            _set_font(pdf, family, style, size)
+            pdf.set_text_color(*color)
+            # A cell never wraps, and the width is the one the layout used.
+            # (A zero width would mean "to the right margin".)
+            pdf.cell(max(width_of(piece), _EPS), h, text,
+                     new_x=XPos.RIGHT, new_y=YPos.TOP)
     pdf.set_text_color(*BLACK)
 
 
@@ -257,7 +540,7 @@ def _write_meta(pdf, meta):
     same document."""
     if not meta:
         return
-    pdf.ln(LINE_H)
+    _ln(pdf, LINE_H)
     _write_text(pdf, meta, _SERIF, '', SIZE)
 
 
@@ -272,12 +555,21 @@ def _quoted_guides(question):
 
 
 def _heading(pdf, text, size, space_before=0, space_after=0, center=True):
+    _flush(pdf)
     if space_before:
         pdf.ln(space_before)
     pdf.set_text_color(*BLACK)
-    _set_font(pdf, _SERIF if _encodable(text) else _UNICODE, 'B', size)
-    pdf.cell(0, size + 2, text, align='C' if center else 'L',
-             new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    text = unicodedata.normalize('NFC', text).translate(_INVISIBLE)
+    family = _SERIF
+    if not _covers(_SERIF, text):
+        # One face for the whole heading: the first that has every glyph, or
+        # else whichever the most characters need.
+        family = next((f for f in _FALLBACKS if _covers(f, text)), None) or max(
+            _FALLBACKS, key=lambda f: sum(_face_for(ch, _SERIF) == f for ch in text))
+    _set_font(pdf, family, 'B', size)
+    # multi_cell, so a long set name wraps rather than running off the page.
+    pdf.multi_cell(0, size + 2, text, align='C' if center else 'L',
+                   new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     if space_after:
         pdf.ln(space_after)
 
@@ -289,13 +581,13 @@ def _tossup(pdf, tossup, num, opts):
                 all_power=tossup.is_all_power(),
                 allow_superpower=tossup.superpower_enabled(),
                 quoted_guides=quoted)
-    pdf.ln(LINE_H)
+    _ln(pdf, LINE_H)
     # Not bolded, matching the Word export: the label is scaffolding, and
     # bolding it drew the eye away from the underlined answer beside it.
     _write_text(pdf, 'ANSWER: ', _SERIF, '', SIZE)
     _write_qems(pdf, tossup.tossup_answer, is_answer=True, quoted_guides=quoted)
     _write_meta(pdf, _meta_line(tossup, opts))
-    pdf.ln(LINE_H + GAP)
+    _ln(pdf, LINE_H + GAP)
 
 
 def _bonus(pdf, bonus, num, opts):
@@ -308,14 +600,14 @@ def _bonus(pdf, bonus, num, opts):
             continue
         answer = getattr(bonus, 'part{0}_answer'.format(i), '') or ''
         diff = getattr(bonus, 'part{0}_difficulty'.format(i), '') or ''
-        pdf.ln(LINE_H)
+        _ln(pdf, LINE_H)
         _write_text(pdf, '[10{0}] '.format(diff), _SERIF, 'B', SIZE)
         _write_qems(pdf, text, quoted_guides=quoted)
-        pdf.ln(LINE_H)
+        _ln(pdf, LINE_H)
         _write_text(pdf, 'ANSWER: ', _SERIF, '', SIZE)
         _write_qems(pdf, answer, is_answer=True, quoted_guides=quoted)
     _write_meta(pdf, _meta_line(bonus, opts))
-    pdf.ln(LINE_H + GAP)
+    _ln(pdf, LINE_H + GAP)
 
 
 def _atomic(pdf, render):
@@ -356,37 +648,19 @@ def _atomic(pdf, render):
 
 
 class _Bound:
-    """Stands in for the document to put an upper bound on a block's height
-    without laying any text out.
+    """Stands in for the document to measure a block's height without drawing
+    anything.
 
-    Widths are measured for real (in the probe's fonts), and a wrapped line can
-    fall short of the full width by no more than the longest word in its
-    paragraph, so a paragraph of total width W wraps at most W // (width -
-    longest word) times; each wrap moves down a line, and the ln() after the
-    paragraph is counted as it comes. `indent` is how far along its line the
-    block starts. One spare line on top covers rounding.
+    Paragraphs go through the same _layout the real document uses, measured
+    in the probe's fonts, so the line count is the real one; `indent` is how
+    far along its line the block starts. One spare line on top covers rounding.
     """
 
     def __init__(self, probe, indent=0):
         self.probe = probe
         self.width = probe.epw
         self.height = 0
-        self._para()
-        self.para_w = max(indent, 0)
-
-    def _para(self):
-        self.para_w = self.longest = self.line_h = 0
-        self.extra_lines = 0
-
-    def _close(self):
-        if self.para_w or self.extra_lines:
-            avail = self.width - self.longest
-            if avail <= 0:
-                wraps = 10 ** 6   # a word wider than the page: never "fits"
-            else:
-                wraps = int(self.para_w // avail) + self.extra_lines
-            self.height += wraps * self.line_h
-        self._para()
+        self.x = max(indent, 0)
 
     def set_font(self, family, style, size):
         _set_font(self.probe, family, style, size)
@@ -394,25 +668,24 @@ class _Bound:
     def set_text_color(self, *rgb):
         pass
 
-    def write(self, h, text):
-        self.line_h = max(self.line_h, h)
-        self.extra_lines += text.count('\n')
-        width_of = self.probe.get_string_width
-        self.para_w += width_of(text)
-        space = width_of(' ')
-        for word in text.split():
-            self.longest = max(self.longest, width_of(word) + space)
+    def add_lines(self, lines, h, width_of):
+        self.height += (len(lines) - 1) * h
+        last = sum(width_of(p) for p in lines[-1])
+        self.x = (self.x if len(lines) == 1 else 0) + last
 
     def ln(self, h=None):
-        self._close()
+        _flush(self)
         self.height += self.probe.font_size if h is None else h
+        self.x = 0
 
-    def cell(self, w=None, h=None, *args, **kwargs):
-        self._close()
-        self.height += h or 0
+    def multi_cell(self, w, h, text, *args, **kwargs):
+        # A heading: generous, since it is only ever a line or two.
+        n = int(self.probe.get_string_width(text) // (self.width * 0.75)) + 1
+        self.height += n * h
+        self.x = 0
 
     def total(self):
-        self._close()
+        _flush(self)
         return self.height + LINE_H
 
 
@@ -423,9 +696,9 @@ _PROBE_RUNS = 50
 
 def _new_pdf():
     pdf = FPDF(unit='pt', format='letter')
-    # Curly quotes and dashes are cp1252, not latin-1, and a packet is full of
-    # them; without this every one of them would take the fallback face.
-    pdf.core_fonts_encoding = 'cp1252'
+    # Text is placed in cells exactly as wide as _layout measured it, so they
+    # carry no padding of their own.
+    pdf.c_margin = 0
     pdf.set_margins(MARGIN, MARGIN, MARGIN)
     pdf.set_auto_page_break(True, margin=MARGIN)
     return pdf
@@ -437,6 +710,7 @@ def _probe(pdf):
     probe = getattr(pdf, '_qems_probe', None)
     if probe is None or probe._qems_runs >= _PROBE_RUNS:
         probe = _new_pdf()
+        probe._qems_scratch = True   # never written out
         probe._qems_runs = 0
         pdf._qems_probe = probe
     probe._qems_runs += 1
@@ -476,8 +750,8 @@ def _credits(pdf, writer_names, editor_names):
             continue
         _write_text(pdf, '{0}: '.format(label), _SERIF, 'B', SIZE)
         _write_text(pdf, ', '.join(names), _SERIF, '', SIZE)
-        pdf.ln(LINE_H)
-    pdf.ln(GAP)
+        _ln(pdf, LINE_H)
+    _ln(pdf, GAP)
 
 
 def _text_block(pdf, text):
@@ -486,8 +760,8 @@ def _text_block(pdf, text):
     for line in (text or '').splitlines():
         if line.strip():
             _write_text(pdf, line, _SERIF, '', SIZE)
-        pdf.ln(LINE_H)
-    pdf.ln(GAP)
+        _ln(pdf, LINE_H)
+    _ln(pdf, GAP)
 
 
 def _careful_notes(pdf, tossups, bonuses):
@@ -509,7 +783,7 @@ def _careful_notes(pdf, tossups, bonuses):
     if not flagged:
         return
     _write_text(pdf, 'Moderator \u2014 read these answer lines carefully:', _SERIF, 'B', SIZE)
-    pdf.ln(LINE_H)
+    _ln(pdf, LINE_H)
     for label, num, question, answers in flagged:
         quoted = _quoted_guides(question)
         _write_text(pdf, '{0} {1}: '.format(label, num if num else '?'), _SERIF, 'B', SIZE)
@@ -517,8 +791,8 @@ def _careful_notes(pdf, tossups, bonuses):
             if i:
                 _write_text(pdf, ' / ', _SERIF, '', SIZE)
             _write_qems(pdf, answer, is_answer=True, quoted_guides=quoted)
-        pdf.ln(LINE_H)
-    pdf.ln(GAP)
+        _ln(pdf, LINE_H)
+    _ln(pdf, GAP)
 
 
 def build_packetized_pdf(set_name, groups, opts, credits=None, front_matter=None):
@@ -571,5 +845,6 @@ def build_packetized_pdf(set_name, groups, opts, credits=None, front_matter=None
             _section(pdf, 'Tossups' if both else None, _numbered(tossups), _tossup, opts)
             _section(pdf, 'Bonuses' if both else None, _numbered(bonuses), _bonus, opts)
 
+    _flush(pdf)
     out = pdf.output()
     return bytes(out)

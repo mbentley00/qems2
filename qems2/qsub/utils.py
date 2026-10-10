@@ -311,6 +311,8 @@ def get_formatted_question_html(line, allowUnderlines, allowParens, allowNewLine
     # literal parens it is.
     if guidesRequireQuotes and allowParens:
         line = escape_unquoted_parens(line)
+    if allowUnderlines:
+        line = escape_unpaired_underscores(line)
     italicsFlag = False
     parensFlag = False
     underlineFlag = False
@@ -771,6 +773,51 @@ def parenthetical_has_quotes(inner):
     """True if the text inside a parenthetical carries a quotation mark, i.e. it
     reads as a respelling — ``("DID-er-OW")`` — rather than an aside."""
     return any(ch in (inner or '') for ch in _GUIDE_QUOTE_CHARS)
+
+
+def escape_unpaired_underscores(line):
+    """Escape an underline marker that has no partner, so it prints as the
+    literal underscore it is (``~TK_119~``, a variable name) rather than
+    underlining everything after it.
+
+    This is how the rich editor already shows it -- it pairs ``_x_`` and
+    ``__x__`` and leaves a leftover underscore alone -- so the saved view and
+    every export now agree with what the writer saw. Singles pair with singles
+    and doubles with doubles; when a kind has an odd count, the leftover is
+    the first one inside a word (letters or digits on both sides, as in
+    ``TK_119`` -- an underline marker sits at a word's edge), else the last.
+    Escaped characters (``\\_``, ``\\\\``) are skipped."""
+    if not line or '_' not in line:
+        return line
+    singles, doubles = [], []
+    i, n = 0, len(line)
+    while i < n:
+        c = line[i]
+        if c == '\\':
+            i += 2
+            continue
+        if c == '_':
+            if line[i + 1:i + 2] == '_':
+                doubles.append(i)
+                i += 2
+                continue
+            singles.append(i)
+        i += 1
+    def leftover(marks, width):
+        for pos in marks:
+            if (pos > 0 and line[pos - 1].isalnum()
+                    and line[pos + width:pos + width + 1].isalnum()):
+                return pos
+        return marks[-1]
+
+    lone = []
+    if len(singles) % 2:
+        lone.append((leftover(singles, 1), 1))
+    if len(doubles) % 2:
+        lone.append((leftover(doubles, 2), 2))
+    for pos, width in sorted(lone, reverse=True):
+        line = line[:pos] + '\\_' * width + line[pos + width:]
+    return line
 
 
 def escape_unquoted_parens(line):
