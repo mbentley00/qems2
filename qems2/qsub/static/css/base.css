@@ -1563,6 +1563,20 @@ html[data-theme="dark"] .rich-editor { background: var(--qx-elevate); color: var
 html[data-theme="dark"] .app-content input::placeholder,
 html[data-theme="dark"] .app-content textarea::placeholder { color: var(--qx-muted); }
 
+/* The tab row is a flex row (app.min.css), so every cell is as tall as the
+   tallest -- but the grey is on the link inside, which kept its own height:
+   when a long label ("Writers and Editors") wrapped to two lines, its tab
+   stood taller than "Settings" beside it. The link fills its cell, with the
+   label centred. (app.min.css aligns the cell's contents to the baseline,
+   which is what kept the link short.) */
+.app-content dl.tabs > dd,
+.app-content dl.tabs > .tab-title { display: flex; align-items: stretch; }
+.app-content dl.tabs > dd > a,
+.app-content dl.tabs > .tab-title > a {
+    display: flex; align-items: center; justify-content: center;
+    width: 100%; text-align: center;
+}
+
 /* Foundation tabs */
 html[data-theme="dark"] .app-content .tabs dd > a,
 html[data-theme="dark"] .app-content .tabs .tab-title > a { background: var(--qx-elevate); color: var(--qx-ink); }
