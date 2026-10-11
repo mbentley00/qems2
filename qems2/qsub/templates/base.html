@@ -166,6 +166,27 @@
             }
         });
 
+        // Ctrl/Cmd+S clicks the page's save button: the first enabled one
+        // marked data-ctrl-s (on edit pages Save comes before Save as
+        // Suggested Changes). A click, not form.submit(), so the page's own
+        // submit handlers and the button's name/value still go with it.
+        // Pages with no such button keep the browser's Save Page.
+        var ctrlSBusy = false;
+        document.addEventListener('keydown', function (e) {
+            if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) { return; }
+            if (e.key !== 's' && e.key !== 'S') { return; }
+            var btns = document.querySelectorAll('[data-ctrl-s]'), btn = null;
+            for (var i = 0; i < btns.length; i++) {
+                if (!btns[i].disabled && btns[i].offsetParent !== null) { btn = btns[i]; break; }
+            }
+            if (!btn) { return; }
+            e.preventDefault();
+            if (e.repeat || ctrlSBusy) { return; }
+            ctrlSBusy = true;
+            setTimeout(function () { ctrlSBusy = false; }, 1500);
+            btn.click();
+        });
+
         // Top search: live answer-line preview as you type; Enter submits the
         // full text search (question text) via the form's normal GET to /search/.
         var sForm = document.getElementById('app-search-form'),

@@ -119,9 +119,9 @@ button in the question panel brings it back.
     {% endcomment %}
     <div class="qedit-save">
         {% if not read_only %}
-        <input type="submit" id="submit-bonus" value="Save" class="button primary qmeta-save" />
+        <input type="submit" id="submit-bonus" value="Save" class="button primary qmeta-save" title="Ctrl+S" data-ctrl-s />
         {% endif %}
-        {% if can_suggest %}<button type="submit" name="save_as_suggestion" value="1" class="button secondary" title="Save your edits as proposed changes for the author or an editor to review — the question itself isn't changed yet.">Save as Suggested Changes</button>{% endif %}
+        {% if can_suggest %}<button type="submit" name="save_as_suggestion" value="1" class="button secondary" data-ctrl-s title="Save your edits as proposed changes for the author or an editor to review — the question itself isn't changed yet.">Save as Suggested Changes</button>{% endif %}
     </div>
     {% endif %}
     {% if not read_only %}
