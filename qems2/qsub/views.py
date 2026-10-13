@@ -4222,7 +4222,9 @@ def delete_set(request):
     if request.method == 'POST':
         qset_id = request.POST['qset_id']
         qset = QuestionSet.objects.get(id=qset_id)
-        if qset.is_owner(user) or user in qset.editor.all():
+        # Owners and co-owners only: it takes every question, comment and
+        # packet with it, so an editor can't do it.
+        if qset.is_owner(user):
             from .set_importer import delete_question_set
             delete_question_set(qset)
             cache.clear()

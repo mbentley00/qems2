@@ -18123,3 +18123,55 @@ class UnpairedUnderscoreTests(TestCase):
         add_qems_formatted_runs(p, 'a \\~tilde\\~ b')
         self.assertEqual(p.text, 'a ~tilde~ b')
         self.assertFalse(any(r.italic for r in p.runs))
+
+
+class DeleteSetPermissionTests(TestCase):
+    """Only the owner and co-owners can delete a set -- not its editors."""
+
+    def setUp(self):
+        from datetime import timedelta
+        mk = lambda name: User.objects.create_user(name, password='pw', email=name + '@t.com')
+        users = [mk(n) for n in ('ds_owner', 'ds_coowner', 'ds_editor', 'ds_writer')]
+        for u in users:
+            u.date_joined = timezone.now() - timedelta(days=3); u.save()
+        self.owner, self.coowner, self.editor, self.writer = (Writer.objects.get(user=u) for u in users)
+
+    def _new_set(self):
+        # Its own distribution: deleting a set deletes an unshared one.
+        dist = Distribution.objects.create(name='DS dist', acf_tossup_per_period_count=20,
+                                           acf_bonus_per_period_count=20, vhsl_bonus_per_period_count=0)
+        qset = QuestionSet.objects.create(name='DS set', date=timezone.now(), host='h',
+                                          owner=self.owner, num_packets=1, distribution=dist)
+        qset.co_owners.add(self.coowner)
+        qset.editor.add(self.owner, self.coowner, self.editor)
+        qset.writer.add(self.writer)
+        return qset
+
+    def _delete_as(self, username, qset):
+        self.client.logout()
+        self.client.login(username=username, password='pw')
+        return json.loads(self.client.post('/delete_set/', {'qset_id': qset.id}).content)
+
+    def test_an_editor_cannot_delete_the_set(self):
+        qset = self._new_set()
+        self.assertIn('not authorized', self._delete_as('ds_editor', qset)['message'])
+        self.assertTrue(QuestionSet.objects.filter(id=qset.id).exists())
+
+    def test_a_writer_cannot_delete_the_set(self):
+        qset = self._new_set()
+        self._delete_as('ds_writer', qset)
+        self.assertTrue(QuestionSet.objects.filter(id=qset.id).exists())
+
+    def test_the_owner_and_a_co_owner_can_delete_it(self):
+        for name in ('ds_owner', 'ds_coowner'):
+            qset = self._new_set()
+            self.assertEqual(self._delete_as(name, qset)['message'], 'Set deleted')
+            self.assertFalse(QuestionSet.objects.filter(id=qset.id).exists())
+
+    def test_only_owners_see_the_delete_link(self):
+        qset = self._new_set()
+        for name, shown in (('ds_owner', True), ('ds_coowner', True), ('ds_editor', False)):
+            self.client.logout()
+            self.client.login(username=name, password='pw')
+            html = self.client.get('/edit_question_set/%d/' % qset.id).content.decode()
+            self.assertEqual('Delete this set' in html, shown, name)

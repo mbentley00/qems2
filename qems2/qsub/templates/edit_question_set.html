@@ -407,7 +407,7 @@
             </div>
         {% endif %}
 
-        {% if role == "editor" %}
+        {% if qset|is_set_owner:user %}
             <div class="set-actions-group set-actions-danger">
                 <span class="set-actions-label">Careful</span>
                 <a href="/delete_set/{{ qset.id }}" class="delete_set" value="{{ qset.id }}">Delete this set</a>
