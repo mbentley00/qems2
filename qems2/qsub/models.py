@@ -156,6 +156,11 @@ class Writer (models.Model):
     news_nudge_count = models.PositiveSmallIntegerField(default=0)
     news_nudge_started = models.DateTimeField(null=True, blank=True)
 
+    # The set this person last moved a question to. The edit page's Move set
+    # menu lists it first: moves tend to come in runs to the same place.
+    last_move_set = models.ForeignKey('QuestionSet', null=True, blank=True,
+                                      on_delete=models.SET_NULL, related_name='+')
+
     def get_real_name(self):
         return '{0!s} {1!s} '.format(self.user.first_name, self.user.last_name)
         

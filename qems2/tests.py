@@ -14592,6 +14592,25 @@ class MovedQuestionTagTests(TestCase):
         # What the menu posts is exactly what lands on the confirm step.
         self.assertTemplateUsed(self._confirm_page(), 'move_question_confirm.html')
 
+    def test_the_menu_lists_the_last_destination_first(self):
+        early = QuestionSet.objects.create(
+            name='MQT 0', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        early.editor.add(self.owner)
+        other = Tossup.objects.create(
+            question_set=self.a, question_type=self.acf, category=self.de, author=self.owner,
+            tossup_text='Another. (*) end.', tossup_answer='_Y_',
+            created_date=timezone.now(), last_changed_date=timezone.now())
+
+        def order():
+            body = self.client.get('/edit_tossup/{0}/'.format(other.id)).content.decode()
+            panel = body[body.index('qmove-panel'):]
+            return [int(i) for i in re.findall(r'data-set="(\d+)"', panel[:panel.index('</div>')])]
+
+        self.assertEqual(order(), [early.id, self.b.id])   # by name until a move
+        self._move()
+        self.assertEqual(order(), [self.b.id, early.id])
+
     def test_the_confirmation_checks_the_destination_for_repeats(self):
         """A question that repeats nothing where it was written can repeat
         something where it is going, and after the move it is too late to find
@@ -17412,6 +17431,16 @@ class PerPacketDistributionTests(TestCase):
         self.assertEqual(self._totals(self.qset)['Trash'], (0, 0))
         # The shared template the set started from is untouched.
         self.assertEqual(self.dist.distributionentry_set.count(), 8)
+
+    def test_tossup_only_set_has_no_bonuses_to_mismatch(self):
+        self._switch()
+        # The set still stores 20 bonuses per packet (the form default).
+        self.qset.tossups_per_packet, self.qset.bonuses_per_packet = 20, 20
+        self.qset.tossups_only = True
+        self.qset.save()
+        url = '/set_distribution/{0}/paste/'.format(self.qset.id)
+        resp = self.client.post(url, {'text': '10/0 Literature\n10/0 Science\n', 'action': 'review'})
+        self.assertNotContains(resp, 'but a packet in this')
 
     def test_rows_cannot_ask_for_more_than_their_category(self):
         from qems2.qsub.distribution_views import _lines_from_post

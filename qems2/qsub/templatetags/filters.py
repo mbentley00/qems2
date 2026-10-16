@@ -269,12 +269,15 @@ def answer_no_formatting(line):
 def move_destinations(writer, qset):
     """The sets a question in `qset` can be moved to by `writer`: the ones they
     edit, by name, without this one or any that are archived -- the same list
-    the move page offers, so the edit page can offer it without the stop."""
+    the move page offers, so the edit page can offer it without the stop.
+    The set they last moved a question to comes first."""
     try:
-        return (writer.question_set_editor.exclude(id=qset.id)
-                .exclude(archived=True).order_by('name'))
+        sets = list(writer.question_set_editor.exclude(id=qset.id)
+                    .exclude(archived=True).order_by('name'))
     except AttributeError:
         return []
+    last = writer.last_move_set_id
+    return sorted(sets, key=lambda s: s.id != last)
 
 
 @register.filter(name='without_alternates')

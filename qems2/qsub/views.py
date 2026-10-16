@@ -6542,6 +6542,8 @@ def move_tossup(request, q_set_id, tossup_id):
                         return render(request, 'move_question_confirm.html', ctx)
 
                     _apply_move(tossup, 'tossup', dest_qset, request.POST)
+                    user.last_move_set = dest_qset
+                    user.save(update_fields=['last_move_set'])
                     ctx = _move_success_context(tossup, 'tossup', q_set, dest_qset)
                     ctx['user'] = user
                     return render(request, 'move_question_success.html', ctx)
@@ -6651,6 +6653,8 @@ def move_bonus(request, q_set_id, bonus_id):
                         return render(request, 'move_question_confirm.html', ctx)
 
                     _apply_move(bonus, 'bonus', dest_qset, request.POST)
+                    user.last_move_set = dest_qset
+                    user.save(update_fields=['last_move_set'])
                     ctx = _move_success_context(bonus, 'bonus', q_set, dest_qset)
                     ctx['user'] = user
                     return render(request, 'move_question_success.html', ctx)

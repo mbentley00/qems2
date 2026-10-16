@@ -383,8 +383,11 @@ def set_distribution_paste(request, qset_id):
            'has_lines': qset.distribution_lines.exists(),
            'new_set': request.GET.get('new') == '1' or request.POST.get('new') == '1'}
     if request.method == 'POST' and text.strip():
+        # A tossup-only set still stores a bonus count (the form's default),
+        # but its packets carry no bonuses.
         parsed = dl.parse_announcement(text, dl.catalog(qset),
-                                       packet_size=(qset.tossups_per_packet, qset.bonuses_per_packet))
+                                       packet_size=(qset.tossups_per_packet,
+                                                    0 if qset.tossups_only else qset.bonuses_per_packet))
         impact = dl.paste_impact(qset, parsed)
         confirmed = request.POST.get('confirm_replace') == '1'
         if request.POST.get('action') == 'accept' and parsed['blocks'] and impact and not confirmed:

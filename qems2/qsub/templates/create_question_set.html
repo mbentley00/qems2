@@ -135,7 +135,7 @@
                 {{ form.max_acf_tossup_length }}{{ form.max_acf_tossup_length.errors }}
                 <small>Characters. Over-length questions are flagged, not blocked.</small>
             </div>
-            <div class="cqs-field">
+            <div class="cqs-field cqs-bonus-only">
                 <label for="{{ form.max_acf_bonus_length.id_for_label }}">Max Bonus Length</label>
                 {{ form.max_acf_bonus_length }}{{ form.max_acf_bonus_length.errors }}
                 <small>Characters, counted across the whole bonus.</small>
@@ -214,7 +214,8 @@
 .cqs-pair label.cqs-tu-only { color: #2b2f3a; font-weight: 600; margin-left: 6px; }
 .cqs-pair label.cqs-tu-only input { width: auto; height: auto; margin: 0; }
 /* A tossup-only set has no bonuses to count. */
-.cqs-no-bonuses .cqs-pair label:has(input[name$="_bs"]) { display: none; }
+.cqs-no-bonuses .cqs-pair label:has(input[name$="_bs"]),
+.cqs-no-bonuses .cqs-bonus-only { display: none; }
 .cqs-heading-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .cqs-req { color: #b3261e; font-weight: 700; }
 .cqs-req-legend { color: #8a8f9c; font-size: 0.8rem; }

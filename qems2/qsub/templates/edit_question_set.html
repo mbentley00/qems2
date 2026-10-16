@@ -143,6 +143,7 @@
         html[data-theme="dark"] .set-credits { border-top-color: var(--qx-border); }
         .set-info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 24px; margin-bottom: 20px; }
         .set-info-field { display: flex; flex-direction: column; gap: 6px; }
+        .set-info-field[hidden] { display: none; }
         .set-info-field > label { font-weight: 600; font-size: 0.82rem; color: #565b66; margin: 0; }
         .set-info-field input, .set-info-field select { margin: 0; height: 42px; width: 100%; }
         .set-info-checks { display: flex; flex-direction: column; gap: 14px;
@@ -257,6 +258,10 @@
             var $tossupsOnly = $setForm.find('[name="tossups_only"]');
             var wasChecked = $tossupsOnly.is(':checked');
             var bonusCount = {{ qset.bonus_set.count }};
+            // A tossup-only set has no bonus length to cap.
+            $tossupsOnly.on('change', function () {
+                $('#set-max-bonus-length').prop('hidden', $tossupsOnly.is(':checked'));
+            });
             $setForm.on('submit', function (e) {
                 if ($tossupsOnly.is(':checked') && !wasChecked && bonusCount > 0) {
                     if (!confirm('This tournament has ' + bonusCount + ' bonus(es). Marking it tossup-only hides bonus '
@@ -485,7 +490,7 @@
             <div class="set-sub-panel" data-panel="writing" hidden>
             <div class="set-info-grid">
                 <div class="set-info-field"><label for="{{ form.max_acf_tossup_length.id_for_label }}">Max Tossup Length</label>{{ form.max_acf_tossup_length }}</div>
-                <div class="set-info-field"><label for="{{ form.max_acf_bonus_length.id_for_label }}">Max Bonus Length</label>{{ form.max_acf_bonus_length }}</div>
+                <div class="set-info-field" id="set-max-bonus-length"{% if qset.tossups_only %} hidden{% endif %}><label for="{{ form.max_acf_bonus_length.id_for_label }}">Max Bonus Length</label>{{ form.max_acf_bonus_length }}</div>
             </div>
             <div class="set-info-checks">
                 <label class="set-info-check">{{ form.char_count_ignores_pronunciation_guides }}

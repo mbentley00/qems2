@@ -2406,12 +2406,12 @@ body.app-authed a.qmeta-packet-link:hover { color: var(--qx-primary); }
 .qmeta-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 10px 14px;
     border-top: 1px solid var(--qx-border); border-radius: 0 0 14px 14px; background: #fafafc; }
 body.app-authed a.qmeta-btn, .qmeta-btn { display: inline-flex; align-items: center; gap: 8px; box-sizing: border-box;
-    height: 40px; margin: 0; padding: 0 12px; border: 1px solid transparent; border-radius: 9px;
-    background: none; color: #565b66; font-family: var(--qx-sans); font-size: .95rem; line-height: 1;
+    height: 40px; margin: 0; padding: 0 12px; border: 1px solid var(--qx-border); border-radius: 9px;
+    background: var(--qx-card); color: var(--qx-ink); font-family: var(--qx-sans); font-size: .95rem; line-height: 1;
     white-space: nowrap; cursor: pointer; }
-body.app-authed a.qmeta-btn:hover, .qmeta-btn:hover, .qmeta-btn:focus { background: #f0f0f5; color: var(--qx-ink); outline: none; }
-.qmeta-btn.qmeta-btn-boxed, .qmeta-btn.qmeta-btn-boxed:hover, .qmeta-btn.qmeta-btn-boxed:focus {
-    border-color: var(--qx-border); background: var(--qx-card); color: var(--qx-ink); }
+/* Boxed, so the actions read as buttons rather than more of the tags above them. */
+body.app-authed a.qmeta-btn:hover, .qmeta-btn:hover, .qmeta-btn:focus { background: #f0f0f5; border-color: #c9cad3;
+    color: var(--qx-ink); outline: none; }
 .qmeta-status-summary { color: var(--qx-muted); font-size: .9rem; }
 .qmenu-caret { font-size: .7rem; color: var(--qx-muted); }
 
@@ -2436,7 +2436,9 @@ html[data-theme="dark"] .qmeta-inline select:hover, html[data-theme="dark"] .qme
 html[data-theme="dark"] body.app-authed a.qmeta-btn:hover, html[data-theme="dark"] .qmeta-btn:hover,
 html[data-theme="dark"] body.app-authed a.qmenu-item:hover, html[data-theme="dark"] .qmenu-check:hover { background: var(--qx-hover); }
 html[data-theme="dark"] .qmeta-inline select, html[data-theme="dark"] .qmeta-inline input { color: var(--qx-ink); background-color: transparent; }
-html[data-theme="dark"] body.app-authed a.qmeta-btn, html[data-theme="dark"] .qmeta-btn { color: var(--qx-muted); }
+html[data-theme="dark"] body.app-authed a.qmeta-btn, html[data-theme="dark"] .qmeta-btn { color: var(--qx-ink); }
+html[data-theme="dark"] body.app-authed a.qmeta-btn:hover, html[data-theme="dark"] .qmeta-btn:hover,
+html[data-theme="dark"] .qmeta-btn:focus { border-color: var(--qx-muted); }
 html[data-theme="dark"] body.app-authed a.qmenu-danger { color: #f08c8c; }
 /* The set page's Submit Changes, set off from the packet-credit buttons above it. */
 .set-save { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--qx-border); }
