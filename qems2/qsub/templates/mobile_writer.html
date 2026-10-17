@@ -1,0 +1,25 @@
+{% load static %}<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#5b21b6">
+    <title>Write · {{ qset.name }}</title>
+    <link rel="stylesheet" href="{% static 'css/mobile_writer.css' %}?v=1">
+    <script>try{if(localStorage.getItem('qx_theme')==='dark'){document.documentElement.setAttribute('data-theme','dark');}}catch(e){}</script>
+</head>
+<body>
+{% csrf_token %}
+{{ config|json_script:"mw-config" }}
+{% comment %}
+Everything below #mw-app is drawn by mobile_writer.js from its own state: the
+steps are one page so that work in progress survives moving between them (and,
+through localStorage, the phone putting the tab to sleep).
+{% endcomment %}
+<div class="mw" id="mw-app">
+    <div class="mw-body"><div class="mw-busy"><span class="mw-spin"></span>Loading…</div></div>
+</div>
+<noscript><p style="padding: 16px">The phone writer needs JavaScript.</p></noscript>
+<script src="{% static 'js/mobile_writer.js' %}?v=1"></script>
+</body>
+</html>

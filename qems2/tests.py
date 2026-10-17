@@ -18204,3 +18204,172 @@ class DeleteSetPermissionTests(TestCase):
             self.client.login(username=name, password='pw')
             html = self.client.get('/edit_question_set/%d/' % qset.id).content.decode()
             self.assertEqual('Delete this set' in html, shown, name)
+
+
+class MobileWriterTests(TestCase):
+    """The phone writer (/m/write/): admin-only, quotes held to their sources,
+    and a draft that saves as an ordinary question. Claude and QB Reader are
+    stubbed; what is tested is what the app does with their answers."""
+
+    def setUp(self):
+        from qems2.qsub.utils import ACF_STYLE_BONUS
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        self.au = User.objects.create_user('mw_admin', password='pw', email='mwa@t.com', is_superuser=True)
+        self.admin = Writer.objects.get(user=self.au)
+        self.pu = User.objects.create_user('mw_plain', password='pw', email='mwp@t.com')
+        self.plain = Writer.objects.get(user=self.pu)
+        self.dist = Distribution.objects.create(name='MW dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='Fine Arts', subcategory='Painting', min_tossups=1, min_bonuses=1)
+        self.qset = QuestionSet.objects.create(
+            name='MW Set', date=timezone.now(), host='h', address='', owner=self.admin,
+            num_packets=1, distribution=self.dist)
+        self.qset.editor.add(self.plain)
+        SetWideDistributionEntry.objects.create(question_set=self.qset, dist_entry=self.de,
+                                                num_tossups=6, num_bonuses=6)
+        self.base = '/m/write/{0}/'.format(self.qset.id)
+        self.tossup = {'sentences': ['This painter was sketched by Anthony van Dyck in Palermo.',
+                                     'This artist drew her brother bitten by a crayfish.',
+                                     'For 10 points, name this painter of ~The Chess Game~.'],
+                       'power_after': 2, 'answer': '_Sofonisba Anguissola_'}
+
+    def _post(self, path, data):
+        return self.client.post(self.base + path + '/', json.dumps(data), content_type='application/json')
+
+    def test_only_site_admins_on_the_set_get_in(self):
+        self.client.login(username='mw_plain', password='pw')
+        self.assertEqual(self.client.get('/m/write/').status_code, 404)
+        self.assertEqual(self.client.get(self.base).status_code, 404)
+        self.assertEqual(self._post('save', {'kind': 'tossup', 'question': self.tossup}).status_code, 404)
+        self.assertEqual(Tossup.objects.count(), 0)
+
+        User.objects.create_user('mw_other', password='pw', email='mwo@t.com', is_superuser=True)
+        self.client.login(username='mw_other', password='pw')
+        self.assertEqual(self.client.get(self.base).status_code, 404)   # admin, but not on this set
+
+        self.client.login(username='mw_admin', password='pw')
+        resp = self.client.get(self.base)
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'mw-config')
+        self.assertContains(self.client.get('/m/write/'), 'MW Set')
+
+    def test_a_quote_counts_only_if_it_is_in_the_source_word_for_word(self):
+        from qems2.qsub import mobile_writer as mw
+        sources = [{'text': 'Van Dyck noted that her “eyesight” had weakened,\nbut her mind was sharp.'}]
+        self.assertEqual(mw.verify_quote('noted that her "eyesight" had weakened, but', sources), 0)
+        self.assertIsNone(mw.verify_quote('noted that her eyesight had failed', sources))
+        self.assertIsNone(mw.verify_quote('her', sources))   # too short to mean anything
+
+    def test_extracted_clues_lose_quotes_that_are_not_in_the_transcription(self):
+        from qems2.qsub import mobile_writer as mw
+        canned = {'topic': 'Sofonisba Anguissola',
+                  'transcriptions': [{'label': 'Screenshot 1', 'text': 'She painted The Chess Game in 1555.'}],
+                  'clues': [{'text': 'Painted The Chess Game', 'quote': 'She painted The Chess Game',
+                             'source': 0, 'search': 'Chess Game'},
+                            {'text': 'Visited by Van Dyck', 'quote': 'Van Dyck visited her in Palermo',
+                             'source': 0, 'search': 'Van Dyck'}]}
+        with mock.patch.object(mw, '_call', return_value=canned):
+            out = mw.extract_clues([('image/png', 'xx')])
+        self.assertEqual(out['clues'][0]['quote'], 'She painted The Chess Game')
+        self.assertEqual(out['clues'][0]['source'], 0)
+        self.assertEqual(out['clues'][1]['quote'], '')       # made up: dropped
+        self.assertIsNone(out['clues'][1]['source'])
+
+    def test_lookup_keeps_only_verbatim_quotes(self):
+        from qems2.qsub import mobile_writer as mw
+        canned = {'quotes': [{'source': 0, 'quote': 'The painting is now in Poznan.', 'key': 'Poznan',
+                              'clue': 'A painting by this artist is in Poznan.'},
+                             {'source': 0, 'quote': 'It was bought by Napoleon.', 'key': 'Napoleon',
+                              'clue': 'x'}],
+                  'answer': ''}
+        self.client.login(username='mw_admin', password='pw')
+        with mock.patch.object(mw, '_call', return_value=canned), \
+                mock.patch.object(mw, 'wikipedia_source', return_value=None):
+            data = self._post('lookup', {'topic': 'Anguissola', 'focus': 'The Chess Game',
+                                         'sources': [{'label': 'Shot',
+                                                      'text': 'The painting is now in Poznan. It hangs there.'}]}).json()
+        self.assertTrue(data['ok'])
+        self.assertEqual([q['quote'] for q in data['quotes']], ['The painting is now in Poznan.'])
+        self.assertEqual(data['quotes'][0]['label'], 'Shot')
+
+    def test_drafts_are_held_to_the_question_shape(self):
+        from qems2.qsub import mobile_writer as mw
+        canned = {'sentences': ['First clue. (*)', 'For 10 points, name this.'], 'power_after': 9,
+                  'answer': '_X_'}
+        self.client.login(username='mw_admin', password='pw')
+        with mock.patch.object(mw, '_call', return_value=canned):
+            q = self._post('draft', {'kind': 'tossup', 'answer': '_X_', 'clues': ['a']}).json()['question']
+        self.assertEqual(q['sentences'][0], 'First clue.')   # the (*) is placed, never written
+        self.assertEqual(q['power_after'], 1)                # can't come after the giveaway
+        self.assertEqual(mw.question_text('tossup', q), 'First clue. (*) For 10 points, name this.')
+
+    def test_a_writer_error_comes_back_as_a_message(self):
+        from qems2.qsub import mobile_writer as mw
+        self.client.login(username='mw_admin', password='pw')
+        with mock.patch.object(mw, '_call', side_effect=mw.WriterError('Claude declined this request.')):
+            resp = self._post('revise', {'kind': 'tossup', 'question': self.tossup, 'instruction': 'Harder'})
+        self.assertEqual(resp.status_code, 502)
+        self.assertEqual(resp.json()['error'], 'Claude declined this request.')
+
+    def test_check_counts_and_finds_a_repeated_answer(self):
+        Tossup.objects.create(question_set=self.qset, category=self.de, author=self.admin,
+                              tossup_text='Old one.', tossup_answer='_Sofonisba Anguissola_',
+                              created_date=timezone.now(), last_changed_date=timezone.now())
+        self.client.login(username='mw_admin', password='pw')
+        data = self._post('check', {'kind': 'tossup', 'question': self.tossup, 'category_id': self.de.id}).json()
+        self.assertTrue(data['ok'])
+        self.assertGreater(data['chars'], 100)
+        self.assertEqual(data['limit'], self.qset.max_acf_tossup_length)
+        self.assertEqual(len(data['repeats']), 1)
+
+    def test_save_makes_an_ordinary_question(self):
+        self.client.login(username='mw_admin', password='pw')
+        data = self._post('save', {'kind': 'tossup', 'question': self.tossup, 'category_id': self.de.id}).json()
+        tu = Tossup.objects.get(id=data['id'])
+        self.assertEqual(data['url'], '/edit_tossup/{0}/'.format(tu.id))
+        self.assertIn('crayfish. (*) For 10 points', tu.tossup_text)
+        self.assertEqual(tu.tossup_answer, '_Sofonisba Anguissola_')
+        self.assertEqual((tu.category, tu.author, tu.question_set), (self.de, self.admin, self.qset))
+        self.assertEqual(tu.question_type.question_type, ACF_STYLE_TOSSUP)
+
+        bonus = {'leadin': 'Answer these about a painter.',
+                 'parts': [{'text': 'Name her.', 'answer': '_A_', 'difficulty': 'e'},
+                           {'text': 'Name him.', 'answer': '_B_', 'difficulty': 'm'},
+                           {'text': 'Name it.', 'answer': '_C_', 'difficulty': 'h'}]}
+        data = self._post('save', {'kind': 'bonus', 'question': bonus, 'category_id': self.de.id}).json()
+        b = Bonus.objects.get(id=data['id'])
+        self.assertEqual((b.part3_answer, b.part2_difficulty), ('_C_', 'm'))
+
+    def test_save_refuses_what_the_set_would_not_take(self):
+        self.client.login(username='mw_admin', password='pw')
+        resp = self._post('save', {'kind': 'tossup', 'question': self.tossup})   # no category
+        self.assertEqual(resp.status_code, 400)
+        self.qset.tossups_only = True
+        self.qset.save()
+        bonus = {'leadin': 'L', 'parts': [{'text': 't', 'answer': 'a', 'difficulty': 'e'}] * 3}
+        resp = self._post('save', {'kind': 'bonus', 'question': bonus, 'category_id': self.de.id})
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(Tossup.objects.count() + Bonus.objects.count(), 0)
+
+    def test_related_searches_the_set_and_qb_reader(self):
+        from qems2.qsub import mobile_writer as mw
+        tu = Tossup(question_set=self.qset, category=self.de, author=self.admin,
+                    tossup_text='A Cremonese painter named Anguissola.', tossup_answer='_Someone_')
+        tu.save_question(edit_type=QUESTION_CREATE, changer=self.admin)
+        self.client.login(username='mw_admin', password='pw')
+        canned = {'tossups': {'count': 2, 'questionArray': [
+                      {'question_sanitized': 'She painted her sisters at a chess game.',
+                       'answer_sanitized': 'Anguissola', 'set': {'name': '2020 ACF Fall'}},
+                      {'question_sanitized': 'She drew a boy bitten by a crayfish.',
+                       'answer_sanitized': 'Anguissola', 'set': {'name': '2021 ACF Fall'}}]},
+                  'bonuses': {'count': 0, 'questionArray': []}}
+        with mock.patch.object(mw, '_qbreader_query', return_value=canned):
+            data = self._post('related', {'answer': '_Anguissola_ [accept Sofonisba]',
+                                          'terms': ['Chess Game 1555', 'Michelangelo weeping boy']}).json()
+        self.assertEqual(data['answer'], 'Anguissola')
+        self.assertEqual(len(data['set_hits']), 1)
+        qb = data['qbreader']
+        self.assertEqual((qb['tossups'], qb['searched'], qb['items'][0]['set']), (2, 2, '2020 ACF Fall'))
+        # Counted among the past questions on this answer, matching most of a clue's words.
+        self.assertEqual([c['count'] for c in qb['clue_counts']], [1, 0])

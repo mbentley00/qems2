@@ -1,0 +1,34 @@
+{% load static %}<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#5b21b6">
+    <title>Write a question</title>
+    <link rel="stylesheet" href="{% static 'css/mobile_writer.css' %}?v=1">
+    <script>try{if(localStorage.getItem('qx_theme')==='dark'){document.documentElement.setAttribute('data-theme','dark');}}catch(e){}</script>
+</head>
+<body>
+<div class="mw">
+    <div class="mw-top">
+        <a class="mw-icon-btn" href="/" aria-label="Back to QEMS">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"></path></svg>
+        </a>
+        <div class="mw-top-text">
+            <span class="mw-kicker">QEMS3 · Phone writer</span>
+            <span class="mw-title">Write for which set?</span>
+        </div>
+    </div>
+    <div class="mw-body">
+        {% for s in sets %}
+        <a class="mw-card mw-set" href="/m/write/{{ s.id }}/">
+            <strong>{{ s.name }}</strong>
+            <span class="mw-note">{{ s.date }}{% if s.tossups_only %} · tossups only{% endif %}</span>
+        </a>
+        {% empty %}
+        <p class="mw-note">You aren't on any set you can write for.</p>
+        {% endfor %}
+    </div>
+</div>
+</body>
+</html>

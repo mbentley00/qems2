@@ -178,6 +178,10 @@ AI_ANSWER_MODEL = os.environ.get('AI_ANSWER_MODEL', 'claude-sonnet-5')
 # claude-sonnet-5 here or in the app settings if the cost of a whole-set run
 # matters more than the hit rate.
 AI_TAG_MODEL = os.environ.get('AI_TAG_MODEL', 'claude-opus-5')
+# The phone writer (/m/write/) reads screenshots, drafts and revises whole
+# questions and pulls quotes out of sources -- writing work where a weaker model
+# shows -- so it uses the current Opus.
+AI_WRITER_MODEL = os.environ.get('AI_WRITER_MODEL', 'claude-opus-5-5')
 
 #SECRET_KEY = '%&amp;5&amp;wmrx-g8zpk8=m*kttzkxfy^38ziedy$1kf-4uwme8bksba'
 

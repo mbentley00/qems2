@@ -6,6 +6,7 @@ from qems2.qsub.api import api_ping, api_buzzes, api_bonus_results, api_comments
 from qems2.qsub import distribution_views
 from qems2.qsub import news_views
 from qems2.qsub import category_merge_views
+from qems2.qsub import mobile_writer_views as mwv
 
 import django
 
@@ -194,6 +195,17 @@ urlpatterns = [
     # Site news (news_views.py).
     re_path(r'^news/$', news_views.news),
     re_path(r'^news/dismiss/$', news_views.dismiss_news),
+    # The phone writer (mobile_writer_views.py), site admins only.
+    re_path(r'^m/write/$', mwv.writer_home),
+    re_path(r'^m/write/(?P<qset_id>[0-9]+)/$', mwv.writer_page),
+    re_path(r'^m/write/(?P<qset_id>[0-9]+)/extract/$', mwv.writer_extract),
+    re_path(r'^m/write/(?P<qset_id>[0-9]+)/plan/$', mwv.writer_plan),
+    re_path(r'^m/write/(?P<qset_id>[0-9]+)/related/$', mwv.writer_related),
+    re_path(r'^m/write/(?P<qset_id>[0-9]+)/draft/$', mwv.writer_draft),
+    re_path(r'^m/write/(?P<qset_id>[0-9]+)/revise/$', mwv.writer_revise),
+    re_path(r'^m/write/(?P<qset_id>[0-9]+)/lookup/$', mwv.writer_lookup),
+    re_path(r'^m/write/(?P<qset_id>[0-9]+)/check/$', mwv.writer_check),
+    re_path(r'^m/write/(?P<qset_id>[0-9]+)/save/$', mwv.writer_save),
     # The per-packet distribution (distribution_views.py).
     re_path(r'^set_distribution/(?P<qset_id>[0-9]+)/$', distribution_views.set_distribution),
     re_path(r'^set_distribution/(?P<qset_id>[0-9]+)/paste/$', distribution_views.set_distribution_paste),
