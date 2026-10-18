@@ -271,7 +271,10 @@ html[data-theme="dark"] .rich-editor-toolbar a.rich-editor-btn.rich-editor-note 
    category pages and the search results, which show the same columns in the
    same order -- whatever the set asked for. */
 .qtable-tag { display: inline-block; background: #eef2f7; color: #2b2f3a; border-radius: 9px;
-    padding: 0 7px; margin: 0 3px 2px 0; font-size: 0.75rem; white-space: nowrap; }
+    padding: 0 7px; margin: 0 3px 2px 0; font-size: 0.75rem; white-space: nowrap;
+    text-decoration: none; }
+a.qtable-tag:hover, a.qtable-tag:focus { background: #dfe3f7; color: #4b3bb0; text-decoration: underline; }
+html[data-theme="dark"] a.qtable-tag:hover, html[data-theme="dark"] a.qtable-tag:focus { color: #c3b3f5; }
 .qtable-none { color: #b0b4c0; }
 .qtable-length { text-align: right; font-variant-numeric: tabular-nums; }
 html[data-theme="dark"] .qtable-tag { background: var(--qx-elevate); color: var(--qx-text); }

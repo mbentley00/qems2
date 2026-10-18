@@ -4003,6 +4003,17 @@ class SearchResultColumnTests(TestCase):
                                .format(self.qset.id)).content.decode()
         self.assertIn('For 10 points, name him', body)
 
+    def test_a_tag_in_the_table_links_to_the_tag_s_questions(self):
+        tag = CategoryTag.objects.create(question_set=self.qset, name='Roman', category_path='')
+        self.tu.category_tags.add(tag)
+        self.qset.question_table_columns = 'answer,tags'
+        self.qset.save()
+        page = self.client.get('/categories/{0}/{1}/'.format(
+            self.qset.id, self.entry.id)).content.decode()
+        href = '/category_tags/{0}/tag/{1}/'.format(self.qset.id, tag.id)
+        self.assertIn('<a class="qtable-tag" href="{0}"'.format(href), page)
+        self.assertContains(self.client.get(href), 'Julius Caesar')
+
 
 class SearchNewTabPreferenceTests(TestCase):
     """Where the top-bar search lands, and who decides."""
