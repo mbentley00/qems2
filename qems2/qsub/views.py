@@ -1608,6 +1608,10 @@ def edit_question_set(request, qset_id):
                                            'set_pct_progress_bar': '{0:0.0f}%'.format(set_pct_complete),
                                            'tu_needed': tu_needed,
                                            'bs_needed': bs_needed,
+                                           'tu_written': total_tu_req - tu_needed,
+                                           'bs_written': total_bs_req - bs_needed,
+                                           'total_tu_req': total_tu_req,
+                                           'total_bs_req': total_bs_req,
                                            'tossups': tossups,
                                            'bonuses': bonuses,
                                            'packets': sorted_packets(qset, with_counts=True),
@@ -1683,6 +1687,13 @@ def edit_question_set(request, qset_id):
                                'set_pct_progress_bar': '{0:0.0f}%'.format(set_pct_complete),
                                'tu_needed': tu_needed,
                                'bs_needed': bs_needed,
+                               # Written counts toward the requirement (extras
+                               # beyond a category's quota don't count), so
+                               # written + needed always adds up to the total.
+                               'tu_written': total_tu_req - tu_needed,
+                               'bs_written': total_bs_req - bs_needed,
+                               'total_tu_req': total_tu_req,
+                               'total_bs_req': total_bs_req,
                                'upload_form': QuestionUploadForm(),
                                'tossups': tossups,
                                'bonuses': bonuses,

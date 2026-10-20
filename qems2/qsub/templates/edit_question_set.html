@@ -78,8 +78,13 @@
                     <span class="meter text-center" style="width:{{ set_pct_progress_bar }}"></span>
                 </div>
             </div>
-            <strong>Set Completion Status: {{ set_pct_complete}} &ndash; <a href="/questions_remaining/{{ qset.id }}">{{ tu_needed }} tossups needed{% if not qset.tossups_only %}, {{ bs_needed }} bonuses needed{% endif %}</a></strong>
-            <br><a href="/category_overview/{{ qset.id }}">Category Overview</a> &middot; <a href="/category_tags/{{ qset.id }}">Category Tags</a>
+            <strong>Set Completion Status: {{ set_pct_complete}}</strong>
+            <div class="set-written-summary">
+                <span><strong>{{ tu_written }}</strong> of {{ total_tu_req }} tossups written</span>
+                {% if not qset.tossups_only %}<span><strong>{{ bs_written }}</strong> of {{ total_bs_req }} bonuses written</span>{% endif %}
+                <a href="/questions_remaining/{{ qset.id }}">{{ tu_needed }} tossup{{ tu_needed|pluralize }}{% if not qset.tossups_only %} and {{ bs_needed }} bonus{{ bs_needed|pluralize:"es" }}{% endif %} still needed</a>
+            </div>
+            <a href="/category_overview/{{ qset.id }}">Category Overview</a> &middot; <a href="/category_tags/{{ qset.id }}">Category Tags</a>
         </div>
 
         <table class="tablesorter table-striped table-hover" id="set-status-table">
@@ -87,10 +92,12 @@
                 <tr>
                     <th>Category</th>
                     <th>Overall Completion</th>
-                    <th>Tossups Remaining</th>
+                    <th>Tossups Written</th>
                     <th>Tossup Completion</th>
-                    <th>Bonuses Remaining</th>
+                    {% if not qset.tossups_only %}
+                    <th>Bonuses Written</th>
                     <th>Bonus Completion</th>
+                    {% endif %}
                 </tr>
             </thead>
             <tbody>
@@ -102,23 +109,29 @@
                     <td>
                         {{ entry|overall_percent }}
                     </td>
-                    <td>
-                        {{ entry|tossups_remaining }}
+                    <td data-sort-value="{{ entry.tu_in_cat }}">
+                        {{ entry|written_of_required:"tu" }}
                     </td>
                     <td>
                         {{ entry.tu_in_cat|check_mark_if_100_pct:entry.tu_req }} {{ entry.tu_in_cat|percent:entry.tu_req }}
                     </td>
-                    <td>
-                        {{ entry|bonuses_remaining }}
+                    {% if not qset.tossups_only %}
+                    <td data-sort-value="{{ entry.bs_in_cat }}">
+                        {{ entry|written_of_required:"bs" }}
                     </td>
                     <td>
                         {{ entry.bs_in_cat|check_mark_if_100_pct:entry.bs_req }} {{ entry.bs_in_cat|percent:entry.bs_req }}
                     </td>
+                    {% endif %}
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
         <style>
+        .set-written-summary { display: flex; flex-wrap: wrap; justify-content: center;
+            gap: 4px 18px; margin: 4px 0 6px; }
+        .set-status-of { color: #8a8f9c; }
+        html[data-theme="dark"] .set-status-of { color: var(--qx-muted, #9aa0ac); }
         /* Full content width, like the completion panel and category table above
            it — a narrower max-width made the card look misaligned. */
         .set-info-card { background: #fff; border: 1px solid #e9e9ef; border-radius: 12px;
