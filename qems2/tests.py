@@ -17115,6 +17115,23 @@ class PerPacketDistributionTests(TestCase):
         self.assertTrue(flat['flat'])
         self.assertEqual(parsed['mismatch']['pasted'], '10.25 / 10.25')
 
+    def test_bare_count_means_no_bonuses_when_packets_have_none(self):
+        known = {'History': set(), 'Science': {'Biology'}}
+        text = '5/0 History\n\n5 Science\n    2 Biology\n    3 Other Science\n'
+        def counts(parsed):
+            return [(b['tu'], b['bs'], [(c['tu'], c['bs']) for c in b['children']])
+                    for b in parsed['blocks']]
+        # One line says "/0" and none gives bonuses: "5" is 5/0.
+        self.assertEqual(counts(dl.parse_announcement(text, known)),
+                         [(5, 0, []), (5, 0, [(2, 0), (3, 0)])])
+        # A tossup-only set: bare counts are tossups even with no "/0" anywhere.
+        only = dl.parse_announcement('5 History\n5 Science\n', known, packet_size=(10, 0))
+        self.assertEqual([(b['tu'], b['bs']) for b in only['blocks']], [(5, 0), (5, 0)])
+        self.assertIsNone(only['mismatch'])
+        # Otherwise a bare count is still tossups and bonuses.
+        both = dl.parse_announcement('5/0 History\n5/5 Literature\n5 Science\n', known)
+        self.assertEqual([(b['tu'], b['bs']) for b in both['blocks']], [(5, 0), (5, 5), (5, 5)])
+
     # --- the tree: links and per-packet rules ---------------------------------
 
     def _rework(self, line_name, items=None, **fields):

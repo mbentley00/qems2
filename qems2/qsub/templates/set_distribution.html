@@ -443,8 +443,16 @@ $(function () {
             bs += num($(this).find('.sd-line-bs').val());
         });
         var stu = num($('#sd-size-tu').val()), sbs = num($('#sd-size-bs').val());
-        var ok = Math.abs(tu - stu) < 0.001 && Math.abs(bs - sbs) < 0.001;
+        // A tossup-only set's packets carry no bonuses, whatever the B box says.
+        var tossupsOnly = {{ qset.tossups_only|yesno:"true,false" }};
+        var ok = Math.abs(tu - stu) < 0.001 && (tossupsOnly || Math.abs(bs - sbs) < 0.001);
         $('#sd-foot').toggleClass('bad', !ok);
+        if (tossupsOnly) {
+            $('#sd-sum').text(ok
+                ? fmt(tu) + ' of ' + fmt(stu) + ' tossups per packet are assigned'
+                : 'The categories come to ' + fmt(tu) + ' tossups per packet; a packet is ' + fmt(stu));
+            return;
+        }
         $('#sd-sum').text(ok
             ? fmt(tu) + ' of ' + fmt(stu) + ' tossups and ' + fmt(bs) + ' of ' + fmt(sbs) + ' bonuses per packet are assigned'
             : 'The categories come to ' + fmt(tu) + ' / ' + fmt(bs) + ' per packet; a packet is ' + fmt(stu) + ' / ' + fmt(sbs));

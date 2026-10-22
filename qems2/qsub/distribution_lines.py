@@ -1081,7 +1081,7 @@ def parse_announcement(text, known, packet_size=None):
             continue
         try:
             tu = to_decimal(m.group('tu'))
-            bs = to_decimal(m.group('bs')) if m.group('bs') else tu
+            bs = to_decimal(m.group('bs')) if m.group('bs') else None   # filled in below
         except ValueError:
             unread.append(raw.strip())
             continue
@@ -1090,6 +1090,16 @@ def parse_announcement(text, known, packet_size=None):
                           'nested': bool(m.group('indent')) or bool(m.group('bullet')),
                           'colon': m.group('name').rstrip().endswith(':'),
                           'para': para, 'text': raw.strip()})
+
+    # A bare count ("5 Science") is that many tossups and bonuses, unless the
+    # packets carry no bonuses: the set is tossup-only, or every line that
+    # does give a bonus count gives 0 ("5/0 History").
+    given = [ln['bs'] for ln in raw_lines if ln['bs'] is not None]
+    no_bonuses = ((packet_size is not None and not packet_size[1])
+                  or (given and not any(given)))
+    for ln in raw_lines:
+        if ln['bs'] is None:
+            ln['bs'] = ZERO if no_bonuses else ln['tu']
 
     # Structure comes only from what the text shows, never from names:
     #  - an indented or bulleted line belongs to the line above it;
