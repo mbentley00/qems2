@@ -8933,7 +8933,7 @@ def contributor(request, qset_id, writer_id):
 # Auto-packetization views
 #########################################################################
 
-from .packetizer import auto_packetize, build_quota_dict, get_path_parts
+from .packetizer import auto_packetize, build_quota_dict, get_path_parts, _order_within_packet
 from django.db import transaction
 from decimal import Decimal, InvalidOperation
 
@@ -9659,11 +9659,41 @@ def assign_unpacketized(request):
 
     prior = []
     placed = 0
+    rnd = random.Random()
+
+    def mixed(questions):
+        """Questions taken a category at a time (History, Science, ...,
+        History, ...), so each packet gets a spread of categories rather than
+        the order they were written in."""
+        by_top = defaultdict(list)
+        for q in questions:
+            parts = get_path_parts(q.category)
+            by_top[parts[:1]].append((q, parts))
+        groups = list(by_top.values())
+        for g in groups:
+            rnd.shuffle(g)
+        rnd.shuffle(groups)
+        groups.sort(key=len, reverse=True)
+        out = []
+        for i in range(max((len(g) for g in groups), default=0)):
+            out.extend(g[i] for g in groups if i < len(g))
+        return out
+
+    def place(qtype, packet, slots, items):
+        """Put items into a packet's open slots, ordered like the packetizer
+        orders a packet: categories spread out, none twice in a row."""
+        nonlocal placed
+        for n, (q, parts) in zip(slots, _order_within_packet(items, rnd)):
+            prior.append({'qtype': qtype, 'id': q.id, 'packet_id': None, 'number': None})
+            q.packet = packet
+            q.question_number = n
+            q.save()
+            placed += 1
 
     def fill_existing(model, per_packet, qtype, packets):
         """Fill empty slots in existing packets; return questions left over."""
-        nonlocal placed
-        unassigned = list(model.objects.filter(question_set=qset, packet=None).order_by('id'))
+        unassigned = mixed(model.objects.filter(question_set=qset, packet=None)
+                           .select_related('category').order_by('id'))
         if not unassigned:
             return []
         occupied = defaultdict(set)
@@ -9672,33 +9702,16 @@ def assign_unpacketized(request):
                 occupied[q.packet_id].add(q.question_number)
         qi = 0
         for p in packets:
-            for n in range(1, per_packet + 1):
-                if qi >= len(unassigned):
-                    return []
-                if n not in occupied[p.id]:
-                    q = unassigned[qi]
-                    qi += 1
-                    prior.append({'qtype': qtype, 'id': q.id, 'packet_id': None, 'number': None})
-                    q.packet = p
-                    q.question_number = n
-                    q.save()
-                    placed += 1
+            slots = [n for n in range(1, per_packet + 1) if n not in occupied[p.id]]
+            take = unassigned[qi:qi + len(slots)]
+            qi += len(take)
+            place(qtype, p, slots, take)
         return unassigned[qi:]
 
     def fill_new(model, per_packet, qtype, leftovers, new_packets):
-        nonlocal placed
-        qi = 0
-        for p in new_packets:
-            for n in range(1, per_packet + 1):
-                if qi >= len(leftovers):
-                    return
-                q = leftovers[qi]
-                qi += 1
-                prior.append({'qtype': qtype, 'id': q.id, 'packet_id': None, 'number': None})
-                q.packet = p
-                q.question_number = n
-                q.save()
-                placed += 1
+        for i, p in enumerate(new_packets):
+            place(qtype, p, range(1, per_packet + 1),
+                  leftovers[i * per_packet:(i + 1) * per_packet])
 
     with transaction.atomic():
         existing = sorted(qset.packet_set.exclude(packet_name=EXTRAS_PACKET_NAME),

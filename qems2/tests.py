@@ -2135,6 +2135,29 @@ class UnpacketizedAssignmentTests(TestCase):
         self.placed.refresh_from_db()
         self.assertEqual(self.placed.question_number, 1)
 
+    def test_assign_spreads_categories_not_written_order(self):
+        # Written four History then four Science: placed alternating, not in
+        # the order they were written.
+        self.qset.tossups_per_packet = 9
+        self.qset.save()
+        hist = DistributionEntry.objects.create(distribution=self.dist, category='History', subcategory='')
+        sci = DistributionEntry.objects.create(distribution=self.dist, category='Science', subcategory='')
+        for i in range(4):
+            q = self._tu('h%d' % i); q.category = hist; q.save()
+        for i in range(4):
+            q = self._tu('s%d' % i); q.category = sci; q.save()
+        self.placed.category = sci; self.placed.save()     # slot 1 stays put
+        for _ in range(5):
+            Tossup.objects.filter(question_set=self.qset).exclude(id=self.placed.id).update(
+                packet=None, question_number=None)
+            resp = self.client.post('/assign_unpacketized/', {'qset_id': self.qset.id})
+            self.assertTrue(json.loads(resp.content)['success'])
+            new = list(Tossup.objects.filter(packet=self.p1, question_number__gt=1)
+                       .order_by('question_number').select_related('category'))
+            self.assertEqual([q.question_number for q in new], list(range(2, 10)))
+            tops = [q.category.category for q in new]
+            self.assertFalse(any(a == b for a, b in zip(tops, tops[1:])), tops)
+
     def test_assign_noop_when_nothing_unpacketized(self):
         resp = self.client.post('/assign_unpacketized/', {'qset_id': self.qset.id})
         data = json.loads(resp.content)
