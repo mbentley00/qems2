@@ -45,6 +45,9 @@ brief:
 * an optional top-level ``"readingOrder"`` (1.1) says the packet is read
   interlaced — tossup, bonus, tossup, bonus — rather than all tossups then all
   bonuses. It only points at the canonical arrays; it never moves a question.
+* an optional per-question ``"tags"`` (1.2) lists the question's tags as
+  ``{"group", "name"}`` objects, so a reader needn't parse them out of
+  ``metadata``.
 
 ``<pg>`` marks question *words*, not a guide: they are read aloud, count as
 words, and are buzzable. Only the parenthesized guide itself is non-word text.
@@ -58,8 +61,28 @@ from .utils import escape_unpaired_underscores
 #: Value of the top-level ``version`` field on a YAPP2 packet. Minor bumps only
 #: add optional fields, and readers match on the ``yapp2/`` prefix, so raising
 #: this doesn't strand anything that read the previous version.
-#: 1.1 added ``readingOrder``.
-YAPP2_VERSION = 'yapp2/1.1'
+#: 1.1 added ``readingOrder``; 1.2 added per-question ``tags``.
+YAPP2_VERSION = 'yapp2/1.2'
+
+
+def _tag_name(tag):
+    return tag['name'] if isinstance(tag, dict) else tag
+
+
+def _tags_field(tags):
+    """YAPP2 ``tags``: ``{"group", "name"}`` per tag, ``group`` left out for an
+    ungrouped tag. A bare name (a caller that only knows names) is ungrouped."""
+    out = []
+    for tag in tags or ():
+        if isinstance(tag, dict):
+            item = {}
+            if (tag.get('group') or '').strip():
+                item['group'] = tag['group'].strip()
+            item['name'] = tag['name']
+            out.append(item)
+        else:
+            out.append({'name': tag})
+    return out
 
 
 # QEMS markup (see utils.get_formatted_question_html) mapped to YAPP's HTML tags:
@@ -196,7 +219,7 @@ def _metadata(question, tags=None):
     else:
         head = cat or author
     if tags:
-        return '{0} [{1}]'.format(head, ', '.join(tags)).strip()
+        return '{0} [{1}]'.format(head, ', '.join(_tag_name(t) for t in tags)).strip()
     return head
 
 
@@ -284,6 +307,8 @@ def tossup_to_yapp(tossup, number, version=1, tags=None):
     }
     if version < 2:
         return node
+    if tags:
+        node['tags'] = _tags_field(tags)
     return _anchored(node, {
         'question': (node['question'],
                      bold_power_region(qems_to_yapp_html(text, anchors=True) + tail)),
@@ -322,6 +347,8 @@ def bonus_to_yapp(bonus, number, version=1, tags=None):
         node['difficultyModifiers'] = diffs
     if version < 2:
         return node
+    if tags:
+        node['tags'] = _tags_field(tags)
     return _anchored(node, {
         'leadin': (node['leadin'], qems_to_yapp_html(leadin, anchors=True)),
         'parts': (parts, a_parts),
@@ -359,8 +386,10 @@ def packet_to_yapp(tossups, bonuses, version=1, name=None, interlace=False,
     reorders — the questions themselves are untouched, so a reader that ignores
     it still gets the whole packet.
 
-    ``tag_names`` maps ('tossup'|'bonus', id) to the category tag names to print
-    after the metadata; leave it out for a set that keeps its tags to itself."""
+    ``tag_names`` maps ('tossup'|'bonus', id) to the question's category tags,
+    each a name or a ``{'group', 'name'}`` dict: printed after the metadata, and
+    in YAPP2 also written as the question's ``tags``. Leave it out for a set
+    that keeps its tags to itself."""
 
     def _tags(kind, question):
         # Everything else here works on anything shaped like a question, not

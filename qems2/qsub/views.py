@@ -7031,7 +7031,7 @@ def export_question(request, question_type, question_id, output_format):
     name = (question.packet.packet_name if question.packet else qset.name) or None
     payload = yapp_export.packet_to_yapp(
         tossups, bonuses, version=version, name=name if version >= 2 else None,
-        tag_names=(_tag_names_by_question(qset, for_output=True)
+        tag_names=(_tag_names_by_question(qset, for_output=True, with_groups=True)
                    if qset.export_category_tags else {}))
 
     # Name the file after the answerline, so a folder of these is readable.
@@ -7774,7 +7774,7 @@ def export_question_set(request, qset_id, output_format):
                 yapp_show_tags = (request.GET.get('ctags') == '1'
                                   if request.GET.get('opts') == '1'
                                   else qset.export_category_tags)
-                yapp_tag_names = (_tag_names_by_question(qset, for_output=True)
+                yapp_tag_names = (_tag_names_by_question(qset, for_output=True, with_groups=True)
                                   if yapp_show_tags else {})
 
                 def _packet_sort_key(pk):
@@ -9250,22 +9250,25 @@ def _tag_count_label(tag, p):
                                 q) if x is not None)
 
 
-def _tag_names_by_question(qset, for_output=False):
+def _tag_names_by_question(qset, for_output=False, with_groups=False):
     """{('tossup'|'bonus', question id): [tag names]} for every tagged question
     of the set, in the tags' own order. One query per type rather than one per
     cell; the names alone, since a grid cell has no room for the axis.
 
     ``for_output`` narrows it to the tags an exported packet may print (see
-    CategoryTag.show_in_output); the working pages pass nothing and see all."""
+    CategoryTag.show_in_output); the working pages pass nothing and see all.
+    ``with_groups`` gives ``{'group', 'name'}`` dicts instead of bare names, for
+    YAPP2's per-question ``tags``."""
     out = {}
     tags = CategoryTag.objects.filter(question_set=qset)
     if for_output:
         tags = tags.filter(show_in_output=True)
     for tag in tags:
+        item = {'group': tag.group_name or '', 'name': tag.name} if with_groups else tag.name
         for tid in tag.tossups.filter(question_set=qset).values_list('id', flat=True):
-            out.setdefault(('tossup', tid), []).append(tag.name)
+            out.setdefault(('tossup', tid), []).append(item)
         for bid in tag.bonuses.filter(question_set=qset).values_list('id', flat=True):
-            out.setdefault(('bonus', bid), []).append(tag.name)
+            out.setdefault(('bonus', bid), []).append(item)
     return out
 
 

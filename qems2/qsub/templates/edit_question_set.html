@@ -417,6 +417,12 @@
                 <a href="/import_packets/?target={{ qset.id }}">Import packets</a>
             </div>
         {% endif %}
+        {% if request.user.is_superuser %}
+            <div class="set-actions-group">
+                <span class="set-actions-label">Admin</span>
+                <a href="/full_export/{{ qset.id }}/" title="A zip of everything belonging to this set: settings, distribution, packets, every question with its history, tags, comments and replies, playtest results, and who has which role. For keeping, not for reading.">Full archive (.zip)</a>
+            </div>
+        {% endif %}
 
         {% if qset|is_set_owner:user %}
             <div class="set-actions-group set-actions-owner">

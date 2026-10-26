@@ -7,9 +7,10 @@ and consumed by the MODAQ reader.
 It exists to carry things plain YAPP cannot:
 
 - **which words a pronunciation guide covers** (1.0), and
-- **the order a packet is read in** when tossups and bonuses interlace (1.1).
+- **the order a packet is read in** when tossups and bonuses interlace (1.1), and
+- **each question's tags** as data rather than as text in `metadata` (1.2).
 
-Version: **`yapp2/1.1`**.
+Version: **`yapp2/1.2`**.
 
 ## The problem
 
@@ -38,7 +39,7 @@ would have them, and the anchored variants live beside them.
 
 ```json
 {
-  "version": "yapp2/1.1",
+  "version": "yapp2/1.2",
   "name": "Round 1",
   "readingOrder": [
     {"type": "tossup", "index": 0},
@@ -49,7 +50,8 @@ would have them, and the anchored variants live beside them.
       "number": 1,
       "question": "Denis Diderot (\"DID-er-OW\") edited this work.",
       "answer": "<b><u>Encyclopédie</u></b>",
-      "metadata": "A Writer, Literature - European",
+      "metadata": "A Writer, Literature - European [Novel]",
+      "tags": [{"group": "Genre", "name": "Novel"}],
       "anchored": {
         "question": "Denis <pg>Diderot</pg> (\"DID-er-OW\") edited this work."
       }
@@ -70,12 +72,12 @@ would have them, and the anchored variants live beside them.
 }
 ```
 
-Everything except `version`, `readingOrder` and `anchored` is unchanged from YAPP.
+Everything except `version`, `readingOrder`, `tags` and `anchored` is unchanged from YAPP.
 
 ### `version`
 
 A string, `"yapp2/<major>.<minor>"`. Its absence means the file is plain YAPP, and a
-reader must then ignore `anchored` and `readingOrder` entirely — a file that omits the
+reader must then ignore `anchored`, `readingOrder` and `tags` entirely — a file that omits the
 marker has not promised that its canonical fields are tag-free, so trusting `anchored`
 there risks rendering a tag the file never declared.
 
@@ -119,6 +121,30 @@ Why an explicit list rather than an `"interlaced": true` flag: real packets aren
 always strictly alternating (tiebreakers at the end, a bonus-less lightning round), and
 a list describes any arrangement while a boolean describes one. The alternating case is
 just the common shape of it.
+
+### `tags`
+
+*Added in 1.2.* Optional, per question (tossup or bonus). The question's tags, as an
+array of objects:
+
+```json
+"tags": [
+  {"group": "Era", "name": "1900-Present"},
+  {"name": "Women writers"}
+]
+```
+
+- `name` (string, required) is the tag itself.
+- `group` (string, optional) is the axis the tag belongs to, when the producer groups
+  its tags ("Era", "Region"). Omit it for an ungrouped tag rather than writing `""`.
+- Order is the producer's own tag order; a reader should keep it.
+- Omit `tags` entirely for a question with none.
+
+A producer that prints tags in `metadata` as well (QEMS appends `[Tag, Tag]`) still
+writes `tags`: `metadata` is display text for plain YAPP readers, while `tags` is what a
+YAPP2 reader should use for filtering, grouping or showing tags itself. A reader that
+finds `tags` malformed (not an array, or an entry without a string `name`) must ignore
+the field for that question.
 
 ### `anchored`
 
@@ -188,12 +214,13 @@ if version starts with "yapp2/":
         for each field:
             use anchored[field] if present (and, for arrays, the same length)
             else use the canonical field
+        use tags if it is a well-formed array, else treat the question as untagged
     if readingOrder is present and covers every question exactly once:
         present the questions in that order
     else:
         present all tossups, then all bonuses
 else:
-    read as plain YAPP; ignore anchored and readingOrder
+    read as plain YAPP; ignore anchored, readingOrder and tags
 ```
 
 Because the two forms differ only by `<pg>`, a reader that understands the tag loses
@@ -204,14 +231,17 @@ nothing by always preferring the anchored text.
 - **QEMS** (producer): `qems2/qsub/yapp_export.py` writes it; `qems2/qsub/packet_set_importer.py`
   reads it back, mapping `<pg>` to QEMS's own `\P` markers. Exported from a set's page
   via "Export Packetized YAPP2 JSON", or from the export options form with
-  "Interlace tossups and bonuses" ticked to get a `readingOrder`.
+  "Interlace tossups and bonuses" ticked to get a `readingOrder`. `tags` carries the
+  set's category tags (only those marked to appear in exports, and only when the export's
+  "Category tags" option is on).
 - **MODAQ** (consumer): `src/parser/FormattedTextParser.ts` parses `<pg>` into
   `IFormattedText.pronunciationTarget`; `src/components/PacketLoaderController.ts`
   prefers the `anchored` fields and validates `readingOrder` (keeping it only when it
   covers every question exactly once); `src/state/CustomExport.ts` writes both back out.
   MODAQ already plays a packet interlaced — a tossup, then its bonus — so `readingOrder`
   does not change how a game runs there; it is kept so a load/export round trip doesn't
-  silently drop it. That repo carries a copy of this document.
+  silently drop it. MODAQ does not read `tags` yet; it ignores the field. That repo carries a copy of this
+  document.
 
 ## Why not other approaches
 

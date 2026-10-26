@@ -6,6 +6,7 @@ from qems2.qsub.api import api_ping, api_buzzes, api_bonus_results, api_comments
 from qems2.qsub import distribution_views
 from qems2.qsub import news_views
 from qems2.qsub import category_merge_views
+from qems2.qsub import full_export_views
 from qems2.qsub import mobile_writer_views as mwv
 
 import django
@@ -157,6 +158,8 @@ urlpatterns = [
     re_path(r'^top_category/(?P<qset_id>[0-9]+)/(?P<category_name>[^/]+)/$', top_category),
     re_path(r'^category_doc/(?P<qset_id>[0-9]+)/(?P<category_id>[0-9]+)/$', category_document),
     re_path(r'^category_doc_top/(?P<qset_id>[0-9]+)/(?P<category_name>[^/]+)/$', category_document),
+    # Everything belonging to a set, for keeping (site admins only).
+    re_path(r'^full_export/(?P<qset_id>[0-9]+)/$', full_export_views.full_export_set),
     re_path(r'^export_question_set/(?P<qset_id>[0-9]+)/(?P<output_format>.+)/$', export_question_set),
     # One question as a one-question YAPP/YAPP2 packet, straight from its edit page.
     re_path(r'^export_question/(?P<question_type>tossup|bonus)/(?P<question_id>[0-9]+)/(?P<output_format>yapp-json|yapp2-json)/$', export_question),

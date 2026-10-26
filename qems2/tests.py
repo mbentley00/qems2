@@ -6370,6 +6370,30 @@ class Yapp2ExportViewTests(TestCase):
         self.assertNotIn('<pg>', t['question'])
         self.assertIn('<pg>Diderot</pg>', t['anchored']['question'])
 
+    def test_yapp2_writes_tags_as_data(self):
+        tu = Tossup.objects.get(question_set=self.qset)
+        era = CategoryTag.objects.create(question_set=self.qset, category_path='Literature',
+                                         group_name='Era', name='18th Century')
+        loose = CategoryTag.objects.create(question_set=self.qset, category_path='Literature',
+                                           name='Philosophes')
+        hidden = CategoryTag.objects.create(question_set=self.qset, category_path='Literature',
+                                            name='Internal', show_in_output=False)
+        for tag in (era, loose, hidden):
+            tag.tossups.add(tu)
+        t = self._payload('yapp2-json')['tossups'][0]
+        self.assertEqual(sorted(t['tags'], key=lambda x: x['name']),
+                         [{'group': 'Era', 'name': '18th Century'}, {'name': 'Philosophes'}])
+        self.assertIn('18th Century', t['metadata'])
+        self.assertNotIn('Internal', t['metadata'])
+        # Plain YAPP keeps them in metadata only.
+        v1 = self._payload('yapp-json')['tossups'][0]
+        self.assertNotIn('tags', v1)
+        self.assertIn('18th Century', v1['metadata'])
+        # The export form's Category tags box, unticked, leaves them out.
+        resp = self.client.get('/export_question_set/{0}/yapp2-json/?opts=1'.format(self.qset.id))
+        zf = self._zip.ZipFile(self._io.BytesIO(resp.content))
+        self.assertNotIn('tags', self._json.loads(zf.read('Packet 1.json'))['tossups'][0])
+
     def test_yapp1_route_is_unchanged(self):
         data = self._payload('yapp-json')
         self.assertNotIn('version', data)
@@ -18424,3 +18448,92 @@ class MobileWriterTests(TestCase):
         self.assertEqual((qb['tossups'], qb['searched'], qb['items'][0]['set']), (2, 2, '2020 ACF Fall'))
         # Counted among the past questions on this answer, matching most of a clue's words.
         self.assertEqual([c['count'] for c in qb['clue_counts']], [1, 0])
+
+
+class FullSetArchiveTests(TestCase):
+    """/full_export/<set>/: a zip of everything belonging to one set, for site
+    admins only, with secrets and personal contact details left out."""
+
+    def setUp(self):
+        import zipfile as _zip
+        from django.contrib.contenttypes.models import ContentType
+        from django.contrib.sites.models import Site
+        from django_comments.models import Comment
+        self._zip = _zip
+        self.admin_user = User.objects.create_superuser('fa_admin', 'a@test.com', 'pw')
+        self.admin = Writer.objects.get(user=self.admin_user)
+        owner_user = User.objects.create_user('fa_owner', password='pw', email='o@test.com')
+        self.owner = Writer.objects.get(user=owner_user)
+        dist = Distribution.objects.create(name='fa dist')
+        de = DistributionEntry.objects.create(distribution=dist, category='History', subcategory='Europe')
+        self.qset = QuestionSet.objects.create(
+            name='FA Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=dist)
+        self.owner.question_set_editor.add(self.qset)
+        self.other = QuestionSet.objects.create(
+            name='Other', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=dist)
+        packet = Packet.objects.create(question_set=self.qset, packet_name='Packet 1', created_by=self.owner)
+        hist = QuestionHistory.objects.create()
+        self.tu = Tossup.objects.create(
+            author=self.owner, question_set=self.qset, packet=packet, category=de,
+            question_history=hist, tossup_text='Stem (*) end.', tossup_answer='_Answer_',
+            created_date=datetime.now(), last_changed_date=datetime.now(), question_number=1)
+        TossupHistory.objects.create(
+            question_history=hist, tossup_text='Old stem (*) end.', tossup_answer='_Answer_',
+            changer=self.owner, change_date=timezone.now())
+        Tossup.objects.create(
+            author=self.owner, question_set=self.other, tossup_text='Elsewhere.',
+            tossup_answer='_No_', created_date=datetime.now(), last_changed_date=datetime.now())
+        tag = CategoryTag.objects.create(question_set=self.qset, category_path='History',
+                                         group_name='Era', name='Renaissance')
+        tag.tossups.add(self.tu)
+        Comment.objects.create(
+            content_type=ContentType.objects.get_for_model(Tossup), object_pk=str(self.tu.id),
+            site=Site.objects.get_current(), user=owner_user, comment='Check the date',
+            user_email='secret@test.com', ip_address='10.0.0.1', is_public=True, is_removed=False)
+        Comment.objects.create(
+            content_type=ContentType.objects.get_for_model(Packet), object_pk=str(packet.id),
+            site=Site.objects.get_current(), user=owner_user, comment='Packet runs long',
+            is_public=True, is_removed=False)
+        SetApiKey.objects.create(question_set=self.qset, key='SUPERSECRETKEY', created_by=self.owner)
+
+    def _archive(self):
+        self.client.login(username='fa_admin', password='pw')
+        resp = self.client.get('/full_export/{0}/'.format(self.qset.id))
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp['Content-Type'], 'application/zip')
+        return self._zip.ZipFile(io.BytesIO(resp.content))
+
+    def test_only_site_admins(self):
+        self.client.login(username='fa_owner', password='pw')
+        self.assertEqual(self.client.get('/full_export/{0}/'.format(self.qset.id)).status_code, 403)
+
+    def test_archive_holds_the_set_and_nothing_else(self):
+        zf = self._archive()
+        def rows(label):
+            return json.loads(zf.read('data/{0}.json'.format(label)))
+        manifest = json.loads(zf.read('manifest.json'))
+        self.assertEqual(manifest['set'], {'id': self.qset.id, 'name': 'FA Set'})
+        self.assertEqual([r['pk'] for r in rows('qsub.tossup')], [self.tu.id])
+        self.assertEqual(rows('qsub.tossuphistory')[0]['fields']['tossup_text'], 'Old stem (*) end.')
+        self.assertEqual(rows('qsub.questionhistory')[0]['pk'], self.tu.question_history_id)
+        self.assertEqual(rows('qsub.categorytag')[0]['fields']['tossups'], [self.tu.id])
+        self.assertEqual(rows('qsub.distributionentry')[0]['fields']['subcategory'], 'Europe')
+        comments = sorted(rows('django_comments.comment'), key=lambda r: r['pk'])
+        self.assertEqual([c['fields']['comment'] for c in comments], ['Check the date', 'Packet runs long'])
+        comment = comments[0]['fields']
+        self.assertIsNone(comment['user_email'])
+        self.assertIsNone(comment['ip_address'])
+        self.assertEqual([r['pk'] for r in rows('qsub.questionset')], [self.qset.id])
+        names = zf.namelist()
+        self.assertNotIn('data/qsub.setapikey.json', names)
+        self.assertNotIn('data/qsub.writer.json', names)
+        everything = b''.join(zf.read(n) for n in names)
+        self.assertNotIn(b'SUPERSECRETKEY', everything)
+        self.assertNotIn(b'Elsewhere.', everything)
+        self.assertNotIn(b'secret@test.com', everything)
+        owner = [p for p in json.loads(zf.read('people.json')) if p['username'] == 'fa_owner'][0]
+        self.assertEqual(owner['roles_in_set'], ['owner', 'editor'])
+        packet = json.loads(zf.read('readable/Packet 1.json'))
+        self.assertEqual(packet['tossups'][0]['tags'], [{'group': 'Era', 'name': 'Renaissance'}])
