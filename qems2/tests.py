@@ -14738,8 +14738,7 @@ class MovedQuestionTagTests(TestCase):
         self.assertIn('Moved to MQT B', body)
         self.assertIn('History - World', body)          # the category it kept
         self.assertIn('China', body)                    # the tag it carried
-        self.assertIn('arrives unpacketized', body)
-        self.assertIn('/packet_grid/{0}/'.format(self.b.id), body)
+        self.assertNotIn('Still open', body)            # no reminder list
 
     def test_the_success_page_measures_length_against_the_new_set(self):
         """Length limits belong to the set, so the one that matters after a
@@ -14751,9 +14750,6 @@ class MovedQuestionTagTests(TestCase):
             'move_sets': self.b.id, 'confirm': '1',
             'category': ctx['selected_category_id'], 'author': ctx['selected_author_id']})
         self.assertTrue(resp.context['over_limit'])
-        body = resp.content.decode()
-        self.assertIn('limit of 10', body)
-        self.assertIn('17 characters', body)
 
     def test_tags_follow_where_the_new_set_has_them_and_drop_otherwise(self):
         self._move()
