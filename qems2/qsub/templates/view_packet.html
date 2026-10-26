@@ -92,7 +92,8 @@
     <div class="doc-toolbar-group">
         <a href="?order=separate" class="button tiny {% if order == 'separate' %}primary{% else %}secondary{% endif %}">Tossups then Bonuses</a>
         <a href="?order=interleaved" class="button tiny {% if order == 'interleaved' %}primary{% else %}secondary{% endif %}">Interleaved</a>
-        {% if comment_count %}<a href="#" id="toggle-comments" class="button tiny secondary"><i class="fa fa-comment"></i> Comments ({{ comment_count }})</a><a href="#" id="toggle-resolved" class="button tiny secondary" title="Hide comments that have been marked resolved"><i class="fa fa-check"></i> Hide Resolved</a>{% endif %}
+        {# Always rendered (hidden at 0) so adding or deleting a comment can update them in place. #}
+        <a href="#" id="toggle-comments" class="button tiny secondary"{% if not comment_count %} style="display:none"{% endif %}><i class="fa fa-comment"></i> Comments (<span class="doc-comment-count">{{ comment_count|default:0 }}</span>)</a><a href="#" id="toggle-resolved" class="button tiny secondary" title="Hide comments that have been marked resolved"{% if not comment_count %} style="display:none"{% endif %}><i class="fa fa-check"></i> Hide Resolved</a>
         <a href="#" id="toggle-issues" class="button tiny secondary" title="Show repeat-checker issues for each question"><i class="fa fa-triangle-exclamation"></i> Repeat Issues</a>
         <a href="#" id="toggle-style" class="button tiny secondary" title="Show style-check issues for each question"><i class="fa fa-spell-check"></i> Style Issues</a>
         <a href="#" id="toggle-pg-above" class="button tiny secondary" title="Show annotated pronunciation guides above the words they cover instead of inline"><i class="fa fa-arrow-up"></i> PGs Above</a>
@@ -866,9 +867,21 @@ $(function() {
     function refreshDocComments(done) {
         var $gutter = $('#doc-gutter');
         $.get(window.location.pathname + window.location.search, function(html) {
-            var $fresh = $(html).find('#doc-gutter').first();
+            var $page = $(html);
+            var $fresh = $page.find('#doc-gutter').first();
             if (!$fresh.length) { location.reload(); return; }
             $gutter.html($fresh.html());
+            // Keep the toolbar in step: the count, and no comment buttons or
+            // empty margin once the last comment is gone.
+            var count = parseInt($page.find('#toggle-comments .doc-comment-count').text(), 10) || 0;
+            $('#toggle-comments .doc-comment-count').text(count);
+            $('#toggle-comments, #toggle-resolved').toggle(count > 0);
+            if (!$gutter.find('.doc-comment-card').length) {
+                $gutter.removeClass('open').css('min-height', '');
+                $('#toggle-comments').removeClass('primary').addClass('secondary');
+                if (typeof done === 'function') { done(); }
+                return;
+            }
             if (!$gutter.hasClass('open')) {
                 $gutter.addClass('open');
                 $('#toggle-comments').removeClass('secondary').addClass('primary');
@@ -1071,6 +1084,12 @@ $(function() {
         // Only intercept inside the document page (leave the OS menu elsewhere).
         if (!$(e.target).closest('.doc-page').length) return;
         if ($(e.target).closest('.doc-comment-box, #doc-context-menu').length) return;
+        // Text being edited keeps the browser's menu: its spelling and grammar
+        // suggestions, cut/copy/paste.
+        if (e.target.isContentEditable || $(e.target).closest('textarea, input, select, [contenteditable]').length) {
+            $ctxMenu.hide();
+            return;
+        }
 
         // Comment-on-selection item: only when a real selection sits in a question.
         pendingCtxAnchor = null;
