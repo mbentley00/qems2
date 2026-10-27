@@ -24,11 +24,9 @@
             {% if check_summary %}
             <div class="tq-check-summary">
                 {% if check_summary.style or check_summary.repeat %}
-                The style and repeat checks ran on these questions:
                 <strong>{{ check_summary.style }} style suggestion{{ check_summary.style|pluralize }}</strong>
                 and <strong>{{ check_summary.repeat }} possible repeat{{ check_summary.repeat|pluralize }}</strong>,
-                listed under each question. "Back to Editing" takes you back to the text to fix them;
-                submitting as is commits them unchanged.
+                listed under each question.
                 {% else %}
                 The style and repeat checks ran on these questions and flagged nothing.
                 {% endif %}
@@ -53,10 +51,8 @@
 
             {% if category_errors %}
             <div class="alert-box warning" id="tq-category-warning">
-                <strong>Some questions have no category.</strong> Every question needs one
-                from this set's distribution. Pick one below on each question marked
-                <em>no category</em> &mdash; or go back and add a
-                {Category - Subcategory} tag to the answer line.
+                <strong>Some questions have no category.</strong> Pick one on each question marked
+                <em>no category</em>.
             </div>
             {% endif %}
 

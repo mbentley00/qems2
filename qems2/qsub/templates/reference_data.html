@@ -10,9 +10,8 @@
 
 <h3 class="page-header">Reference Data</h3>
 <p class="refdata-intro">
-    The pronunciation dictionary and standard answer lines the style checker reads. Both ship as
-    generated data files; corrections you save here are stored separately and layered on top, so
-    they survive a rebuild of the bundled data.
+    The pronunciation dictionary and standard answer lines the style checker reads. Corrections
+    you save here are kept when the bundled data is rebuilt.
     {% if override_count %}<strong>{{ override_count }}</strong> correction{{ override_count|pluralize }} in this dataset.{% endif %}
 </p>
 

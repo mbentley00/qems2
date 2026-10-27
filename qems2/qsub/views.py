@@ -4591,7 +4591,7 @@ def add_packets(request, qset_id):
                         message = 'Your {0} packet(s) with the base name {1} have been created.'.format(num_packets, name_base)
                         message_class = 'alert-box success'
                 else:
-                    message = 'You must enter either the name for an individual packet or a base name and the number of packets to create!'
+                    message = 'Enter a packet name, or a base name and a number of packets.'
                     message_class = 'alert-box warning'
 
             else:
@@ -4626,9 +4626,13 @@ def delete_packet(request):
         packet = Packet.objects.get(id=packet_id)
         qset = packet.question_set
         if qset.is_owner(user):
+            # The questions outlive the packet: they go back to unpacketized.
+            moved = (Tossup.objects.filter(packet=packet).update(packet=None, question_number=None)
+                     + Bonus.objects.filter(packet=packet).update(packet=None, question_number=None))
             packet.delete()
             cache.clear()
-            message = 'Packet deleted'
+            message = ('Packet deleted. Its {0} question{1} moved to unpacketized.'.format(moved, '' if moved == 1 else 's')
+                       if moved else 'Packet deleted.')
             message_class = 'alert-box success'
             read_only = False
         else:
@@ -5534,8 +5538,8 @@ def upload_questions(request, qset_id):
                 return render(request, 'upload_preview.html',
                 {'tossups': uploaded_tossups,
                 'bonuses': uploaded_bonuses,
-                'message': mark_safe('Please verify that this data is correct. Hitting "Submit" will upload these questions '\
-                'If you see any mistakes in the submissions, please correct them in the <strong><em>original file</em></strong> and reupload.'),
+                'message': mark_safe('Check these questions before you submit. To fix a mistake, correct the '\
+                '<strong><em>original file</em></strong> and upload it again.'),
                 'message_class': 'alert-box warning',
                 'qset': qset})
             else:
@@ -5612,8 +5616,7 @@ def type_questions(request, qset_id=None):
                                           'bonus_errors': bonus_errors,
                                           'category_errors': category_errors,
                                           'check_summary': check_summary,
-                                          'message': 'Please verify that these questions have been correctly parsed. Hitting "Submit" will '\
-                                          'commit these questions to the database. If you see any mistakes, hit "Cancel" and correct your mistakes.',
+                                          'message': 'Check that these questions parsed correctly. To fix a mistake, hit "Back to Editing".',
                                           'qset': qset,
                                           'user': user})
             else:
@@ -5674,8 +5677,7 @@ def type_questions_edit(request, question_type, question_id):
                                           'bonuses': bonuses,
                                           'tossup_errors': tossup_errors,
                                           'bonus_errors': bonus_errors,
-                                          'message': 'Please verify that these questions have been correctly parsed. Hitting "Submit" will '\
-                                          'commit these questions to the database. If you see any mistakes, hit "Cancel" and correct your mistakes.',
+                                          'message': 'Check that these questions parsed correctly. To fix a mistake, hit "Back to Editing".',
                                           'qset': qset,
                                           'user': user})
             else:
@@ -5886,10 +5888,9 @@ def complete_upload(request):
                         bs_num + 1, _answer_preview(request.POST.get('bonus-answer1-{0}'.format(bs_num), ''))))
             if missing:
                 return render(request, 'failure.html', {
-                    'message': 'Nothing was submitted. These questions have no valid '
+                    'message': 'Nothing was submitted. These questions need a '
                                '{Category - Subcategory} tag from this set\'s distribution: '
-                               + '; '.join(missing)
-                               + '. Go back, add the tags, and submit again.',
+                               + '; '.join(missing) + '.',
                     'message_class': 'alert-box alert'})
 
         new_tossups = []
@@ -6559,7 +6560,7 @@ def move_tossup(request, q_set_id, tossup_id):
                     ctx['user'] = user
                     return render(request, 'move_question_success.html', ctx)
                 else:
-                    message = 'There was an error with your submission.  Hit the back button and make sure you selected a valid question set to move to.'
+                    message = "Couldn't move the question. Go back and pick a valid set."
                     message_class = 'alert-box warning'
 
                     return render(request, 'move_tossup.html',
@@ -6570,7 +6571,7 @@ def move_tossup(request, q_set_id, tossup_id):
                                          'message': message,
                                          'message_class': message_class})
             else:
-                message = 'There was an error moving your question.  Hit the back button and make sure you selected a valid question set to move to.'
+                message = "Couldn't move the question. Go back and pick a valid set."
                 message_class = 'alert-box warning'
                 q_set = []
                 return render(request, 'move_tossup.html',
@@ -6670,7 +6671,7 @@ def move_bonus(request, q_set_id, bonus_id):
                     ctx['user'] = user
                     return render(request, 'move_question_success.html', ctx)
                 else:
-                    message = 'There was an error with your submission.  Hit the back button and make sure you selected a valid question set to move to.'
+                    message = "Couldn't move the question. Go back and pick a valid set."
                     message_class = 'alert-box warning'
 
                     return render(request, 'move_bonus.html',
@@ -6681,7 +6682,7 @@ def move_bonus(request, q_set_id, bonus_id):
                                          'message': message,
                                          'message_class': message_class})
             else:
-                message = 'There was an error moving your question.  Hit the back button and make sure you selected a valid question set to move to.'
+                message = "Couldn't move the question. Go back and pick a valid set."
                 message_class = 'alert-box warning'
                 q_set = []
                 return render(request, 'move_bonus.html',
@@ -7304,7 +7305,6 @@ def export_question_set(request, qset_id, output_format):
                     writer_names, editor_names = _set_contributors()
                     if not writer_names and not editor_names:
                         return
-                    document.add_heading('Credits', level=2)
                     if writer_names:
                         p = document.add_paragraph()
                         p.paragraph_format.space_after = Pt(2)

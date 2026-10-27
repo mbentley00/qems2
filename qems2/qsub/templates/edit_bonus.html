@@ -73,8 +73,8 @@ button in the question panel brings it back.
     {% if form %}
     <div class="qpane" data-pane="edit">
         {% if read_only and can_suggest %}
-        <div class="alert-box info" style="margin-bottom:8px;">You can't edit this question directly, but you can
-        edit the text below and <strong>Save as Suggested Changes</strong> for the author or an editor to review.</div>
+        <div class="alert-box info" style="margin-bottom:8px;">You can't edit this question directly. Your edits are
+        saved as suggestions for the author or an editor.</div>
         {% endif %}
         {% comment %}
         One card, one toolbar: rich_editor.js moves each field's toolbar into

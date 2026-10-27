@@ -744,7 +744,6 @@ def _section(pdf, label, items, draw, opts):
 def _credits(pdf, writer_names, editor_names):
     if not writer_names and not editor_names:
         return
-    _heading(pdf, 'Credits', HEAD_SIZE, space_before=6, space_after=4)
     for label, names in (('Writers', writer_names), ('Editors', editor_names)):
         if not names:
             continue

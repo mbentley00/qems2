@@ -406,8 +406,8 @@ def set_distribution_paste(request, qset_id):
                 'replaced' if impact else 'written', len(parsed['blocks']),
                 ', {0} old categor{1} removed'.format(deleted, 'y' if deleted == 1 else 'ies') if deleted else ''))
             if missing:
-                messages.warning(request, 'Not on this set, so not tagged as subject editors: {0}. '
-                                          'Add them to the set, then tag them from Writers & Editors.'
+                messages.warning(request, 'Not tagged as subject editors because they aren\'t on '
+                                          'this set: {0}. Add them first.'
                                  .format(', '.join(missing)))
             return HttpResponseRedirect('/set_distribution/{0}/'.format(qset.id))
         ctx['parsed'] = parsed
@@ -497,8 +497,7 @@ def revert_distribution(request, qset_id):
         return _deny(request, 'Only the set\'s owner can do that.')
     if dl.restore_legacy(qset):
         cache.clear()
-        messages.success(request, '{0} is back on its old set totals and packetizer quotas. Its '
-                                  'per-packet lines are kept if you switch again.'.format(qset.name))
+        messages.success(request, '{0} is back on its old set totals and quotas.'.format(qset.name))
         return HttpResponseRedirect('/question_set_distribution/{0}'.format(qset.id))
     messages.error(request, 'There is nothing to go back to: this set started on a per-packet '
                             'distribution.')

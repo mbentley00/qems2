@@ -16,7 +16,6 @@
 
 <dl class="tabs" data-tab>
     <dd class="active"><a href="#set-wide-distribution">Set-Wide Distro</a></dd>
-    <dd><a href="#tiebreak-distribution">Tiebreaker Distro</a></dd>
 </dl>
 
 {% block tab_group_2 %}
@@ -25,23 +24,16 @@
 
 {% if messages %}{% for message in messages %}<div class="alert-box {% if message.tags == 'error' %}alert{% else %}{{ message.tags }}{% endif %}">{{ message }}</div>{% endfor %}{% endif %}
 <div class="alert-box info radius">
-    <strong>There is a per-packet distribution for this set waiting to be reviewed.</strong>
-    One page saying what every packet holds, with the category overview, writers&rsquo; targets and the packetizer
-    all reading it &mdash; worked out from the totals below.
+    <strong>A per-packet distribution for this set is ready to review.</strong>
+    It's worked out from the totals below.
     <a href="/switch_distribution/{{ qset.id }}/">See what it would be</a>{% if not read_only %} and switch when you&rsquo;re ready{% endif %}.
 </div>
 <div class="tabs-content">
     <div class="content active" id="set-wide-distribution">
         <div class="alert-box warning radius">
             <i class="fa fa-exclamation-triangle"></i>
-            The set-wide distribution controls the total number of questions of each kind that your set
-            will contain. It is distinct from the "template" distribution; you cannot change the categories
-            this way, only the <em>total</em> number of questions in those categories that will appear in
-            this set. For example, if the ACF distribution calls for a minimum of 1 and a maximum of 2
-            social science questions per packet, and you have 10 packets in your set, then any number
-            between 10 and 20 social science questions might appear in your set unless you restrict it here,
-            e.g. by setting the maximum allowed number of such questions to 15. Setting these values is
-            crucial for the packet-level and set-level verification algorithms to work, so don't skip this section!
+            Set the <em>total</em> number of questions in each category for the whole set. The set and
+            packet checks use these totals.
         </div>
         <form action="/edit_set_distribution/{{ qset.id }}/" method="POST">
             {% csrf_token %}
@@ -73,14 +65,6 @@
             {% endif %}
             {{ set_distro_formset.management_form }}
         </form>
-    </div>
-    <div class="content" id="tiebreak-distribution">
-        <div class="alert-box warning radius">
-            <i class="fa fa-exclamation-triangle"></i>
-            The tiebreaker distribution isn't working right now.  Use the primary distribution to control how many
-            total questions you need the in set and packetize accordingly.  A major refactoring will redo how distribution
-            entry works in the future, at which point tiebreaker distributions and packetization will be fully functional.
-        </div>
     </div>
 </div>
 

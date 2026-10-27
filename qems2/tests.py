@@ -1990,7 +1990,7 @@ class PacketizedWordExportTests(TestCase):
         zf = self._zip_opts(comments='1', writers='1', editors='1', ids='1', credits='1')
         full = self._p2_text(zf)
         name = self.owner.get_real_name().strip()
-        self.assertIn('Credits', full)
+        self.assertNotIn('Credits', full)   # names only, no heading
         self.assertIn('Writers:', full)
         self.assertIn('Editors:', full)   # tu_p2 is edited by the owner
         self.assertIn(name, full)
@@ -1998,7 +1998,7 @@ class PacketizedWordExportTests(TestCase):
     def test_credits_only_on_first_packet(self):
         zf = self._zip_opts(credits='1')
         p10 = '\n'.join(p.text for p in self._doc(zf, 'Packet 10.docx').paragraphs)
-        self.assertNotIn('Credits', p10)
+        self.assertNotIn('Writers:', p10)
 
     def _pdf_zip(self, **params):
         import io as _io, zipfile as _zip
@@ -2054,7 +2054,7 @@ class PacketizedWordExportTests(TestCase):
         self.assertEqual(len(doc.comments), 1)
         full = '\n'.join(p.text for p in doc.paragraphs)
         self.assertIn('~{0}~'.format(self.tu_p2.id), full)
-        self.assertNotIn('Credits', full)   # credits off by default
+        self.assertNotIn('Writers:', full)   # credits off by default
 
 
 class QuestionSetSettingsSaveTests(TestCase):
@@ -2672,7 +2672,7 @@ class AccountAgeAndDistributionPermissionTests(TestCase):
         self.client.login(username='new_u', password='pw')
         resp = self.client.get('/create_question_set/')
         self.assertNotContains(resp, '2 days after sign-up')
-        self.assertContains(resp, 'provisionally')
+        self.assertContains(resp, 'an admin has to approve this set')
 
     def test_old_account_can_reach_create_question_set(self):
         self.client.login(username='old_u', password='pw')
@@ -8584,8 +8584,8 @@ class PostSubmitFlowTests(TestCase):
         # Submit is on the page but disabled: the category can be supplied here
         # now, so the button has something to wait for.
         self.assertIn('id="tq-submit"', body)
-        self.assertIn('id="tq-submit" value="Submit"\n                           disabled',
-                      body.replace('\r\n', '\n'))
+        button = re.search(r'<input[^>]*id="tq-submit"[^>]*>', body).group(0)
+        self.assertIn('disabled', button)
         self.assertIn('have no category', body)
 
     def test_the_preview_offers_a_category_picker_for_an_untagged_question(self):
@@ -18533,3 +18533,40 @@ class FullSetArchiveTests(TestCase):
         self.assertEqual(owner['roles_in_set'], ['owner', 'editor'])
         packet = json.loads(zf.read('readable/Packet 1.json'))
         self.assertEqual(packet['tossups'][0]['tags'], [{'group': 'Era', 'name': 'Renaissance'}])
+
+
+class DeletePacketKeepsQuestionsTests(TestCase):
+    """Deleting a packet sends its questions back to unpacketized; it never
+    deletes them."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        acf_tu = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+        self.ou = User.objects.create_user('dp_owner', password='pw', email='dp@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        dist = Distribution.objects.create(name='DP dist')
+        de = DistributionEntry.objects.create(distribution=dist, category='History',
+                                              subcategory='World', min_tossups=1, min_bonuses=0)
+        self.qset = QuestionSet.objects.create(
+            name='DP Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=dist)
+        self.packet = Packet.objects.create(question_set=self.qset, packet_name='Packet 1',
+                                            created_by=self.owner)
+        self.tu = Tossup.objects.create(
+            author=self.owner, question_set=self.qset, packet=self.packet,
+            question_type=acf_tu, category=de, tossup_text='Clue. (*) End.',
+            tossup_answer='_Rome_', created_date=datetime.now(),
+            last_changed_date=datetime.now(), question_number=3)
+        self.client.login(username='dp_owner', password='pw')
+
+    def test_delete_packet_view_keeps_questions(self):
+        r = self.client.post('/delete_packet/', {'packet_id': self.packet.id})
+        self.assertIn('moved to unpacketized', json.loads(r.content)['message'])
+        self.assertFalse(Packet.objects.filter(id=self.packet.id).exists())
+        tu = Tossup.objects.get(id=self.tu.id)
+        self.assertIsNone(tu.packet_id)
+        self.assertIsNone(tu.question_number)
+
+    def test_deleting_packet_row_directly_keeps_questions(self):
+        self.packet.delete()
+        self.assertIsNone(Tossup.objects.get(id=self.tu.id).packet_id)

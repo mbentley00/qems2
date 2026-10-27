@@ -12,8 +12,7 @@
 {% if invalid %}
     <h3 class="page-header">This join link isn't valid</h3>
     <div class="alert-box alert">
-        This link is no longer active. It may have been regenerated or turned off by the
-        set's owner &mdash; ask them for a current link.
+        This link no longer works. Ask the set's owner for a current one.
     </div>
     <p><a href="/question_sets/" class="button small secondary">Your question sets</a></p>
 {% else %}
@@ -34,9 +33,8 @@
         <p><a href="/edit_question_set/{{ qset.id }}/" class="button small primary">Go to set</a></p>
     {% elif unavailable %}
         <div class="alert-box info">
-            <strong>{{ qset.name }}</strong> isn't taking members yet &mdash; it's a new set
-            still waiting on a site administrator's approval. The link is fine; try it again
-            once the owner tells you the set has been approved.
+            <strong>{{ qset.name }}</strong> isn't taking members yet. It's waiting for an
+            admin's approval. Try this link again once it's approved.
         </div>
         <p><a href="/question_sets/" class="button small secondary">Your question sets</a></p>
     {% elif requested %}
@@ -55,8 +53,7 @@
         <p><a href="/question_sets/" class="button small secondary">Your question sets</a></p>
     {% else %}
         <div class="panel">
-            <p>Following this link doesn't add you to the set &mdash; it lets you ask for access.
-            An owner has to approve your request before you can see or write questions.</p>
+            <p>An owner has to approve your request before you can see or write questions.</p>
             <form action="" method="post">
                 {% csrf_token %}
                 <label>Message for the owner <span style="color:#888;">(optional)</span>

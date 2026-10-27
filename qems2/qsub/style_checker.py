@@ -463,8 +463,8 @@ def _pg_possessive_issues(label, raw, field, require_quotes=False):
         fix = None
         if fix_pg_possessive(text, idx) != text:
             fix = {'field': field, 'op': 'pg_possessive', 'idx': idx}
-        message = ('{0}: pronunciation guide {1} splits the possessive "{2}" — keep the '
-                   'possessive on the word and respell the guide to cover it'.format(
+        message = ('{0}: pronunciation guide {1} splits the possessive "{2}". Keep the '
+                   'possessive on the word and respell the guide'.format(
                        label, m.group(0), pm.group(0)))
         issues.append(_issue_at(WARNING, message, 'pg_possessive',
                                 '{0}|{1}|{2}'.format(label, idx, m.group(0)), fix, text, m))
@@ -869,9 +869,8 @@ def _mixed_identifier_issues(label, raw):
         if other in forms and stem not in reported:
             reported.add(stem)
             first = forms[other].group(0)
-            message = ('{0}: the answer cue switches number — "{1}" and "{2}" '
-                       'both refer to the answer; pick one and use it '
-                       'throughout'.format(label, first, m.group(0)))
+            message = ('{0}: the answer cue switches between "{1}" and "{2}". '
+                       'Use one throughout'.format(label, first, m.group(0)))
             issues.append(_issue_at(WARNING, message, 'mixed_identifier',
                                     '{0}|{1}'.format(label, stem), None, text, m))
         forms.setdefault(det, m)
@@ -931,9 +930,8 @@ def _gendered_identifier_issues(label, raw, sentences=3):
         neutral = '{0} {1}'.format(m.group(1), _GENDERED_CUES[m.group(2).lower()])
         if m.group(1)[0].isupper():
             neutral = neutral[0].upper() + neutral[1:]
-        message = ('{0}: "{1}" in the first {2} sentences; prefer a gender-neutral cue such as '
-                   '"{3}" so the opening clues do not give away the answer\'s gender'
-                   .format(label, cue, sentences, neutral))
+        message = ('{0}: "{1}" in the first {2} sentences gives away the answer\'s gender. '
+                   'Try "{3}"'.format(label, cue, sentences, neutral))
         issues.append(_issue_at(INFO, message, 'gendered_identifier',
                                 '{0}|{1}'.format(label, key), None, head, m))
     return issues
@@ -954,8 +952,8 @@ def _singular_they_issues(label, raw):
     m = _THEY_RE.search(text)
     if not m:
         return []
-    message = ('{0}: "{1}" with a singular answer cue reads as a singular "they"; '
-               'repeat the cue instead ("this person", "that person") or recast the sentence'
+    message = ('{0}: "{1}" with a singular answer cue reads as a singular "they". '
+               'Repeat the cue ("this person") or recast the sentence'
                .format(label, m.group(0)))
     return [_issue_at(WARNING, message, 'singular_they',
                       '{0}|{1}'.format(label, m.group(0).lower()), None, text, m)]

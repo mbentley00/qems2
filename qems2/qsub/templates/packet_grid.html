@@ -24,9 +24,8 @@
 
 {% if not read_only %}
 <div class="panel radius clearfix">
-    Drag a question onto another cell to swap the two questions (or onto an empty cell to move it).
-    Drag an unpacketized question (below) onto a cell to place it; drag a cell question onto the
-    unpacketized panel to remove it from its packet. Rows beyond the per-packet count are tiebreakers.
+    Drag a question onto another cell to swap them, or onto an empty cell to move it.
+    Drag to or from the unpacketized panel to place or unplace a question. Rows past the per-packet count are tiebreakers.
     <span class="right">
         <form method="post" action="/add_packet/{{ qset.id }}/" style="display:inline; margin:0;">
             {% csrf_token %}
@@ -65,8 +64,7 @@
             <button type="button" id="unp-toggle" class="button tiny secondary" style="margin-bottom:0;">Hide</button>
         </span>
     </div>
-    <p class="unp-help">These questions aren't in any packet (newly written questions land here). They
-    won't appear in any packet or export until placed.{% if not read_only %} Drag one onto a grid cell, or use
+    <p class="unp-help">These aren't in any packet or export yet.{% if not read_only %} Drag one onto a grid cell, or use
     <em>Assign unpacketized to packets</em> above.{% endif %}</p>
     <div id="unp-body">
         <div class="unp-section">
@@ -108,7 +106,7 @@
 {% if unplaced_tu or unplaced_bs %}
 <div class="panel radius unplaced-panel" id="unplaced-panel">
     <strong><i class="fa fa-triangle-exclamation"></i> Not shown in the grid below</strong>
-    <p class="unp-help">These questions are in a packet but can't be placed in the numbered grid, so they'd otherwise be hidden. Fix the question number (open the question, or drag it onto an empty slot) so it appears.</p>
+    <p class="unp-help">These are in a packet but their question number doesn't fit the grid. Open one or drag it onto an empty slot to fix it.</p>
     {% for q in unplaced_tu %}
     <div class="unplaced-item">
         <a href="{{ q.edit_url }}" target="_blank" rel="noopener">{{ q.answer }}</a>
@@ -660,9 +658,7 @@ $(function() {
 
     // Warn before the destructive re-packetize (overwrites all assignments).
     $('.repacketize-link').on('click', function(e) {
-        if (!confirm('Re-packetize will OVERWRITE every existing packet assignment '
-            + 'for this set and re-deal all questions from scratch. This cannot be '
-            + 'easily undone. Continue?')) {
+        if (!confirm('Re-packetize every question? Your current packets will be replaced. To place only unpacketized questions, cancel and use Assign unpacketized to packets.')) {
             e.preventDefault();
         }
     });

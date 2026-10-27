@@ -17,9 +17,8 @@
 
 {% if messages %}{% for message in messages %}<div class="{{ message.tags }}">{{ message }}</div>{% endfor %}{% endif %}
 
-<p class="home-note">Everyone in the group you pick gets the role you choose on
-<strong>{{ qset.name }}</strong>, and it keeps up with the group: people added to the group later
-get the role too, and people removed lose it (unless they were also added to this set directly).</p>
+<p class="home-note">Everyone in the group gets this role on <strong>{{ qset.name }}</strong>.
+People removed from the group lose it unless they were added to this set directly.</p>
 
 <form method="post" action="/attach_role_group/{{ qset.id }}/" class="arg-form">
     {% csrf_token %}

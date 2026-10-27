@@ -19,17 +19,12 @@
     </div>
 {% endif %}
 
-<p>Upload a <strong>.tsv</strong> or <strong>.csv</strong> file in the format produced by
-a set's <em>Export</em> action. All tossups, bonuses, comments (including threaded replies),
-category tags and the category distribution come across, and the questions are added to the
-search index.{% if is_admin %} Unknown commenters become inactive placeholder accounts so attribution is
+<p>Upload a <strong>.tsv</strong> or <strong>.csv</strong> file from a set's <em>Export</em>
+action. Questions, comments, category tags and the distribution all come across.{% if is_admin %} Unknown commenters become inactive placeholder accounts so attribution is
 preserved.{% endif %}</p>
 
 <p>Name a <strong>new set</strong>, or choose an <strong>existing set</strong> to add the
-questions to &mdash; which is how an archive too big for one upload arrives in several,
-without leaving a set behind per file. Adding to a set changes nothing that is already in
-it: categories are matched to the ones it has and only genuinely new ones are created, and
-its quotas, packets and name are left alone.</p>
+questions to. Adding never changes what's already in a set. Only new categories are created.</p>
 
 <form action="" method="post" enctype="multipart/form-data">
     {% csrf_token %}
@@ -52,9 +47,8 @@ its quotas, packets and name are left alone.</p>
             </label>
             {% endif %}
             {% if not is_admin %}
-            <p class="import-note">No accounts are made by your import. An author or commenter is matched
-                only to someone already on the set; anyone else is credited by name: their questions are
-                yours, with &ldquo;credit to&rdquo; set to them.</p>
+            <p class="import-note">Authors not already on the set are credited by name. Their questions
+                become yours, with &ldquo;credit to&rdquo; set to them.</p>
             {% endif %}
             {% if form.target_set.errors %}{{ form.target_set.errors }}{% endif %}
             <label>TSV or CSV file

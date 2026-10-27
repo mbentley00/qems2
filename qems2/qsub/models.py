@@ -1733,7 +1733,8 @@ class QuestionHistory(models.Model):
     pass
 
 class Tossup (models.Model):
-    packet = models.ForeignKey(Packet, on_delete=models.CASCADE, null=True)
+    # SET_NULL: deleting a packet sends its questions back to unpacketized.
+    packet = models.ForeignKey(Packet, on_delete=models.SET_NULL, null=True)
     question_set = models.ForeignKey(QuestionSet, on_delete=models.CASCADE)
     tossup_text = models.TextField()
     tossup_answer = models.TextField()
@@ -1937,9 +1938,8 @@ class Tossup (models.Model):
 
         if (not does_answerline_have_underlines(self.tossup_answer)):
             raise InvalidTossup('answer', self.tossup_answer, self.question_number,
-                                reason='The answer line has no underlined portion. Mark '
-                                       'the required part(s) of the answer with underscores, '
-                                       'e.g. "_hole_s".')
+                                reason='The answer line has no underlined portion. Wrap '
+                                       'the required part in underscores, like "_hole_s".')
 
         return True
 
@@ -2034,7 +2034,8 @@ class Tossup (models.Model):
         return get_tossup_type_from_question_type(self.question_type)
 
 class Bonus(models.Model):
-    packet = models.ForeignKey(Packet, on_delete=models.CASCADE, null=True)
+    # SET_NULL: deleting a packet sends its questions back to unpacketized.
+    packet = models.ForeignKey(Packet, on_delete=models.SET_NULL, null=True)
     question_set = models.ForeignKey(QuestionSet, on_delete=models.CASCADE)
     period = models.ForeignKey(Period, on_delete=models.CASCADE, null=True)
 

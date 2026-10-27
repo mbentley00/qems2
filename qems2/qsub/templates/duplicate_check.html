@@ -26,9 +26,6 @@ it off.
     <div class="small-12 columns">
         <div class="panel callout radius">
             <h5 style="margin-top:0;">Duplicate and repeat checks are off for this set</h5>
-            <p>These reads every question in the set and compares them with each other, so
-            what they cost grows with the set &mdash; and on an archive, an answer appearing
-            twice is usually the point rather than a fault.</p>
             {% if not read_only %}
             <p style="margin-bottom:0;">Turn them back on with <strong>Run duplicate and repeat
             checks</strong> on the
@@ -57,8 +54,7 @@ it off.
                 <li><span class="label alert">{{ topic_critical }} Critical</span>
                     <span class="label warning">{{ topic_warning }} Warning</span>
                     <span class="label">{{ topic_info }} Info</span>
-                    &mdash; Different answer lines covering the same specific topic: one answer contained in another,
-                    a shared distinctive term, or an answer appearing in another question's text.
+                    &middot; Different answer lines on the same topic.
                     <a href="#topic-repeats">Jump to list</a></li>
             </ul>
             {% if internal_issues %}
@@ -158,7 +154,7 @@ it off.
 
 {% if topic_truncated %}
     <div class="row"><div class="small-12 columns">
-        <div class="panel callout"><p>Showing the {{ topic_shown }} highest-severity topic repeats of {{ topic_total }} total. Resolve these (or tighten the set) to surface the rest.</p></div>
+        <div class="panel callout"><p>Showing the {{ topic_shown }} most severe topic repeats of {{ topic_total }}. Resolve these to see the rest.</p></div>
     </div></div>
 {% endif %}
 

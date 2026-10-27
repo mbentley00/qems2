@@ -67,8 +67,7 @@ set, not the one being left.
 {% if dest_repeats %}
 <div class="alert-box warning radius mv-repeats">
     <strong>{{ dest_qset.name }} already has {{ dest_repeats|length }} question{{ dest_repeats|length|pluralize }}
-    on this answer.</strong> Moving it there would make a repeat. Go back and think
-    again, or move it anyway and fix one of them.
+    on this answer.</strong> Moving it there makes a repeat.
     <ul>
     {% autoescape off %}
     {% for m in dest_repeats %}
@@ -122,8 +121,7 @@ the same thing.</p>
 
     <div class="mv-row">
         <div class="mv-label">Author
-            <small>Kept as it is unless you change it. An author who does not
-            write for {{ dest_qset.name }} still shows on the question.</small></div>
+            <small>An author not on {{ dest_qset.name }} still shows on the question.</small></div>
         <div class="mv-field">
             <select name="author">
                 <option value="">No author</option>
@@ -139,9 +137,7 @@ the same thing.</p>
 
     <div class="mv-row">
         <div class="mv-label">Category tags
-            <small>Tags belong to a set. One with the same name on the same
-            category path in {{ dest_qset.name }} is ticked; the rest are gone
-            unless {{ dest_qset.name }} has something to put in their place.</small></div>
+            <small>Tags with a match in {{ dest_qset.name }} carry over. The rest are dropped.</small></div>
         <div class="mv-field">
             {% if dropped_tags %}
             <p class="mv-note mv-warn">Not in {{ dest_qset.name }}:

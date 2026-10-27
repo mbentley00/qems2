@@ -18,17 +18,17 @@
 
 {% if debris_count %}
 <div class="alert-box warning">
-    This set's distribution carries <strong>{{ debris_count }}</strong> categor{{ debris_count|pluralize:"y,ies" }}
-    left behind by an import &mdash; another set's names, with its question ids and editors on them.
-    <a href="/tidy_categories/{{ qset.id }}/">Tidy them up</a> to put those questions back into your own categories.
+    This set's distribution has <strong>{{ debris_count }}</strong> categor{{ debris_count|pluralize:"y,ies" }}
+    left behind by an import.
+    <a href="/tidy_categories/{{ qset.id }}/">Tidy them up</a> to move those questions into your own categories.
 </div>
 {% endif %}
 
 {% if not problems %}
 <div class="alert-box success">Every question has a valid category from this set's distribution. Nice work!</div>
 {% else %}
-<p class="cp-intro">These <strong>{{ problems|length }}</strong> question(s) have no category, or a category that
-isn't part of this set's current distribution (e.g. from before a distribution change).
+<p class="cp-intro">These <strong>{{ problems|length }}</strong> question(s) have no category, or one that
+isn't in this set's current distribution.
 {% if can_assign %}Select questions and assign them a category below.{% endif %}</p>
 
 <form method="post" action="">

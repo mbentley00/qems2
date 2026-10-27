@@ -32,16 +32,13 @@
    members; what's held back is everything that reaches strangers. {% endcomment %}
 {% if qset.awaiting_approval %}
 <div class="alert-box warning">
-    <strong>This set is waiting for approval.</strong> It was created by a new account, so a
-    site administrator has been emailed to review it. You can write, edit and packetize as
-    normal in the meantime &mdash; but the set won't appear in the public set list and its
-    join links won't work until it's approved.
+    <strong>This set is waiting for approval.</strong> An admin has been emailed. Until they
+    approve it, the set isn't in the public list and join links don't work.
 </div>
 {% elif qset.approval_declined %}
 <div class="alert-box alert">
-    <strong>This set wasn't approved.</strong> You can still work in it, but it stays out of
-    the public set list and its join links stay closed. Contact the site administrator if you
-    think this was a mistake.
+    <strong>This set wasn't approved.</strong> It's hidden from the public list and join links
+    don't work. Contact the site admin if this is a mistake.
 </div>
 {% endif %}
 
@@ -277,9 +274,8 @@
             });
             $setForm.on('submit', function (e) {
                 if ($tossupsOnly.is(':checked') && !wasChecked && bonusCount > 0) {
-                    if (!confirm('This tournament has ' + bonusCount + ' bonus(es). Marking it tossup-only hides bonus '
-                        + 'requirements and the bonus list, but does NOT delete the bonuses (uncheck this option to bring '
-                        + 'them back). Continue?')) {
+                    if (!confirm('This set has ' + bonusCount + ' bonus(es). Tossup-only hides them but '
+                        + 'doesn\'t delete them. Continue?')) {
                         e.preventDefault();
                     }
                 }
@@ -388,13 +384,13 @@
             <form method="get" action="/export_question_set/{{ qset.id }}/docx-packetized/" class="set-export-form">
                 <input type="hidden" name="opts" value="1">
                 <span class="set-export-head">Packetized</span> include:
-                <label style="display:inline-block; margin:0 10px;"><input type="checkbox" name="comments" value="1" checked> Open comments</label>
+                <label style="display:inline-block; margin:0 10px;"><input type="checkbox" name="comments" value="1"> Open comments</label>
                 <label style="display:inline-block; margin:0 10px;"><input type="checkbox" name="writers" value="1" checked> Writer names</label>
                 <label style="display:inline-block; margin:0 10px;"><input type="checkbox" name="editors" value="1" checked> Editor names</label>
                 <label style="display:inline-block; margin:0 10px;"><input type="checkbox" name="ids" value="1" checked> Question IDs</label>
                 <label style="display:inline-block; margin:0 10px;"><input type="checkbox" name="credits" value="1"> Credits page</label>
                 <label style="display:inline-block; margin:0 10px;" title="Print each question's category tags after its attribution line. Starts from the set's own setting; tags marked &quot;not in exports&quot; stay out either way."><input type="checkbox" name="ctags" value="1"{% if qset.export_category_tags %} checked{% endif %}> Category tags</label>
-                <label style="display:inline-block; margin:0 10px;" title="Convert straight quotes and apostrophes to typographic &#8220;smart&#8221; ones in the exported document"><input type="checkbox" name="smartq" value="1"> Smart quotes</label>
+                <label style="display:inline-block; margin:0 10px;" title="Convert straight quotes and apostrophes to typographic &#8220;smart&#8221; ones in the exported document"><input type="checkbox" name="smartq" value="1" checked> Smart quotes</label>
                 <label style="display:inline-block; margin:0 10px;" title="Print tossup 1, bonus 1, tossup 2, bonus 2 &hellip; the order they're read, instead of all tossups then all bonuses"><input type="checkbox" name="interlace" value="1"> Interlace tossups and bonuses</label>
                 <button type="submit" class="button tiny primary" style="margin:0 0 0 6px;">Word</button>
                 <button type="submit" class="button tiny primary" style="margin:0 0 0 4px;" formaction="/export_question_set/{{ qset.id }}/pdf/" title="A zip with one PDF per packet">PDF</button>
@@ -470,7 +466,7 @@
             <div class="set-info-checks">
                 <label class="set-info-check">{{ form.public }}
                     <span>Public (listed for everyone)
-                        <small>Anyone can see this set is being written and request to join (which emails you). It grants no access by itself.</small></span></label>
+                        <small>Anyone can see this set and ask to join. Requests email you.</small></span></label>
                 {% if qset|is_set_owner:user %}
                 {% comment %}
                 The owner's, not an editor's: putting a set away is a decision
@@ -482,7 +478,7 @@
                 <input type="hidden" name="archived_shown" value="1">
                 <label class="set-info-check">{{ form.archived }}
                     <span>Archived (done with, but kept)
-                        <small>Everything here keeps working. The set stops being offered when someone picks where to move a question, and moves to its own heading on the home page.</small></span></label>
+                        <small>Moves to its own heading on the home page and stops being offered as a move target.</small></span></label>
                 {% endif %}
                 {% comment %}
                 Swatches rather than a colour input: the point is telling two
@@ -516,27 +512,26 @@
                     <span>Character counts ignore pronunciation guides</span></label>
                 <label class="set-info-check">{{ form.guides_require_quotes }}
                     <span>Only quoted parentheses are pronunciation guides
-                        <small>On: <code>("DID-er-OW")</code> is a guide, but <code>(a plain aside)</code> is ordinary text — read normally, counted in the length, and left alone by the \P rules.</small></span></label>
+                        <small>On: <code>("DID-er-OW")</code> is a guide. <code>(a plain aside)</code> is ordinary text.</small></span></label>
                 <label class="set-info-check">{{ form.tossups_only }}
                     <span>Tossup-only tournament (no bonuses)
                         <small>Hides bonus requirements; existing bonuses are never deleted.</small></span></label>
                 <label class="set-info-check">{{ form.enable_superpower }}
                     <span>Enable superpowers (20-point <code>(+)</code> mark)
-                        <small>Lets tossups carry a 20-point superpower mark before the 15-point power. Off: a stray (+) is plain text and never scores 20.</small></span></label>
+                        <small>Off: (+) is plain text.</small></span></label>
                 <label class="set-info-check">{{ form.structured_answers }}
                     <span>Structured answer lines
-                        <small>Records an answer as a primary answer plus its accepts and directed prompts, editable as fields. The printed line is unchanged, and answers typed or pasted as prose are parsed into structure as best they can be.</small></span></label>
+                        <small>Edit answers as fields: main answer, accepts and prompts. The printed line doesn't change.</small></span></label>
                 <label class="set-info-check">{{ form.enable_duplicate_checks }}
                     <span>Run duplicate and repeat checks
-                        <small>They compare every question with every other, so they slow down on a big set. Turn off for an archive.</small></span></label>
+                        <small>Slow on big sets. Turn off for an archive.</small></span></label>
             </div>
             </div>
             <div class="set-sub-panel" data-panel="workflow" hidden>
             <div class="set-info-checks set-info-checks-top">
                 <label class="set-info-check">{{ form.skip_type_questions_preview }}
                     <span>Submit typed questions without the confirmation screen
-                        <small>On <a href="/type_questions/{{ qset.id }}/">Type Questions</a>, a batch that parsed cleanly is saved
-                            straight away. The screen still appears when something didn&rsquo;t parse or has no category.</small></span></label>
+                        <small>On <a href="/type_questions/{{ qset.id }}/">Type Questions</a>, a clean batch saves right away. Problems still show the screen.</small></span></label>
                 <label class="set-info-check">{{ form.warn_missing_category_tags }}
                     <span>Ask before submitting questions with no category tag
                         <small>On <a href="/type_questions/{{ qset.id }}/">Type Questions</a>. Off for a set that doesn&rsquo;t use tags.</small></span></label>
@@ -560,29 +555,27 @@
                 </div>
                 <label class="set-info-check">{{ form.question_table_random_order }}
                     <span>Shuffle the question tables
-                        <small>A different order every visit, so the questions at the end of a long category get looked at as often as the ones at the top. Off: newest first, as the database returns them.</small></span></label>
+                        <small>Random order each visit. Off: newest first.</small></span></label>
             </div>
             </div>
             <div class="set-sub-panel" data-panel="discord" hidden>
             <div class="set-info-checks set-info-checks-top">
                 <label class="set-info-check">{{ form.discord_show_first_clue }}
                     <span>Discord copy leaves a question's opening readable
-                        <small>A tossup's first sentence, and a bonus's leadin and first part, are shown unspoilered &mdash; never an answer &mdash; so a playtest channel can see what a question is about without opening it.</small></span></label>
+                        <small>A tossup's first sentence and a bonus's leadin and first part aren't spoilered. Answers always are.</small></span></label>
                 <label class="set-info-num">{{ form.discord_spoiler_chunk_max }}
                     <span>Longest Discord spoiler, in characters
-                        <small>Long sentences are cut at clause breaks until each piece fits. Shorter gives finer spoilers;
-                            longer keeps clues whole. Default 160, range 40&ndash;600.</small></span></label>
+                        <small>Longer sentences are split at clause breaks. Default 160, range 40 to 600.</small></span></label>
                 <label class="set-info-check">{{ form.discord_bold_power_run }}
                     <span>Bold the power region as one run
-                        <small>One <code>**&hellip;**</code> around all of the power&rsquo;s spoilers instead of one per spoiler.
-                            Discord has mis-rendered this before, so check a copied question in your channel first.</small></span></label>
+                        <small>One <code>**&hellip;**</code> around all the power&rsquo;s spoilers. Discord sometimes renders this wrong. Test it in your channel first.</small></span></label>
             </div>
             </div>
             <div class="set-sub-panel" data-panel="exports" hidden>
             <div class="set-info-checks set-info-checks-top">
                 <label class="set-info-check">{{ form.export_category_tags }}
                     <span>Print category tags in exported packets
-                        <small>Adds each question's category tags after its attribution line in Word, PDF and YAPP output. Off: exports carry no tags. A single tag can be kept out on the <a href="/category_tags/{{ qset.id }}/">Category Tags</a> page; the document view always shows them.</small></span></label>
+                        <small>Tags go after the attribution line in Word, PDF and YAPP. Hide single tags on the <a href="/category_tags/{{ qset.id }}/">Category Tags</a> page.</small></span></label>
             </div>
             {% if qset|is_set_owner:user %}
             {% comment %}
@@ -609,8 +602,7 @@
                         <small>Empty: only the first packet is credited.</small>
                     </div>
                 </div>
-                <p class="set-credits-intro">Click to put a name list in, filled in when the
-                    packets are exported &mdash; so a set that gains a writer needs no rewrite.</p>
+                <p class="set-credits-intro">Click to insert a name list. It's filled in at export.</p>
                 <div class="set-credits-tokens">
                     {% for token, label, help in credit_tokens %}
                     <button type="button" class="button tiny secondary set-credit-token"
@@ -697,8 +689,7 @@
                 <h5 style="margin-top:0;">Role groups
                     <a href="/role_groups/" class="button tiny secondary right" style="margin:0;">Manage role groups</a>
                 </h5>
-                <p class="home-note" style="margin-bottom:6px">Attach a group (e.g. <em>PACE Editor</em>) so all its
-                members get a role here. Membership changes to the group take effect on this set automatically.</p>
+                <p class="home-note" style="margin-bottom:6px">Everyone in an attached group gets its role here.</p>
                 {% if attached_role_groups %}
                 <ul class="no-bullet" style="margin-left:0;">
                     {% for a in attached_role_groups %}
@@ -767,9 +758,7 @@
 
             <div class="panel radius">
                 <h5 style="margin-top:0;">Join link</h5>
-                <p class="home-note" style="margin-bottom:6px">Share this link with people who should be on the set.
-                Anyone logged in who opens it can <em>request</em> access &mdash; the link never grants a role on
-                its own, so every request still waits for your approval here.</p>
+                <p class="home-note" style="margin-bottom:6px">Anyone who opens this link can ask to join. You approve each request here.</p>
 
                 {% if join_link %}
                 <div class="join-link-row">
@@ -977,7 +966,7 @@
             <p><a href="#tossups">Jump to tossups</a></p>        
             <div id="bonuses">
                 {% if not qset.tossups_only or qset.bonus_set.exists %}
-                {% if qset.tossups_only %}<div class="alert-box warning">This is a tossup-only tournament, but it still has these bonuses. They are kept (not deleted) and still appear in packets/exports. Uncheck "Tossup-Only Tournament" above to manage them normally.</div>{% endif %}
+                {% if qset.tossups_only %}<div class="alert-box warning">This set is tossup-only, but these bonuses still appear in packets and exports.</div>{% endif %}
                 <div class="panel header radius text-center"><strong>Bonuses</strong></div>
                 <table class="tablesorter table-striped table-hover" id="bonus-table">
                     <thead>

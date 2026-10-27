@@ -10,9 +10,8 @@
 {% load static %}
 
 <h3 class="page-header">Add Proofreaders to {{ qset.name }}</h3>
-<p>Proofreaders can read every question in the set, comment on them and suggest edits.
-They can't edit a question directly or write questions of their own; an editor or the
-question's author takes or turns down each suggestion.</p>
+<p>Proofreaders can read, comment on and suggest edits to every question. They can't
+edit or write questions.</p>
 {% if message %}<div class="alert-box success">{{ message }}</div>{% endif %}
 <form action="" method="post">
     {% csrf_token %}

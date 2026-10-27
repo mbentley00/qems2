@@ -128,7 +128,7 @@ $(function () {
 
     $('.delete_tossup').click(function(e) {
         e.preventDefault();
-        var result = confirm("You are about to delete this tossup! If you do so, you will not be able to recover it! Are you ABSOLUTELY SURE you want to do that?!");
+        var result = confirm("Delete this tossup? This can't be undone.");
         if (result == true) {
             var qset_id = $(this).attr('qset-id');
             $.post('/delete_tossup/', {tossup_id: $(this).attr('value')}, function (response) {
@@ -153,7 +153,7 @@ $(function () {
 
     $('.delete_bonus').click(function(e) {
         e.preventDefault();
-        var result = confirm("You are about to delete this bonus! If you do so, you will not be able to recover it! Are you ABSOLUTELY SURE you want to do that?!");
+        var result = confirm("Delete this bonus? This can't be undone.");
         if (result == true) {
             var qset_id = $(this).attr('qset-id');
             $.post('/delete_bonus/', {bonus_id: $(this).attr('value')}, function (response) {
@@ -178,7 +178,7 @@ $(function () {
 
     $('.delete_packet').click(function(e) {
         e.preventDefault();
-        var result = confirm("You are about to delete this packet! If you do so, you will not be able to recover it! 99% of the time this is a terrible idea and you should not do it! Are you ABSOLUTELY SURE you want to do that?!");
+        var result = confirm("Delete this packet? Its questions are kept and go back to unpacketized.");
         if (result == true) {
             var $row = $(this).closest('tr');
             $.post('/delete_packet/', {packet_id: $(this).attr('value')}, function (response) {

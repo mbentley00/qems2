@@ -238,8 +238,8 @@ document.addEventListener('DOMContentLoaded', function () {
     <div class="swap-panel-head">
         <strong>{{ packet.packet_name }}</strong>
         <a href="#" class="swap-panel-close" title="Close">&times;</a>
-        <div class="swap-panel-hint">Click a question, then click the one to trade places with it.
-        Use <i class="fa fa-right-left"></i> to swap with a question in another packet.</div>
+        <div class="swap-panel-hint">Click two questions to swap them.
+        <i class="fa fa-right-left"></i> swaps with another packet.</div>
     </div>
     <div class="swap-panel-body">
         <div class="swap-panel-section">Tossups</div>
@@ -1339,8 +1339,8 @@ $(function() {
     // ---- Mode toggle: Comment (select text) vs Reorder (drag) ----
     var HINTS = {
         comment: 'Comment mode: select text and right-click to comment (or use the per-question Comment tag). Right-click toggles mode.',
-        reorder: 'Reorder mode: drag a question onto another to swap their positions (the two trade numbers; the rest of the packet stays put). Right-click toggles mode.',
-        edit: 'Edit mode: click a question to edit it here. Changes are yours alone until you press <strong>Commit</strong> on that question; <strong>Discard</strong> puts it back. If someone else saves the question while you are working on it, you are warned before anything of theirs is overwritten.'
+        reorder: 'Reorder mode: drag a question onto another to swap them. Right-click toggles mode.',
+        edit: 'Click a question to edit it. <strong>Commit</strong> saves it.'
     };
     var MODE_KEY = 'qemsDocMode';
     function setMode(mode) {

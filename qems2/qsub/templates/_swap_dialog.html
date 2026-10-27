@@ -56,7 +56,7 @@ $(function () {
                     var post;
                     if (cand.unpacketized) {
                         if (!swapSource.packetId) {
-                            alert('This question is not in a packet, so there is no slot to swap into. Pick a packetized question instead.');
+                            alert('Neither question is in a packet. Pick one that is.');
                             return;
                         }
                         post = { question_type: swapSource.qtype, question_id: cand.id,

@@ -391,14 +391,12 @@ class DistributionForm(forms.ModelForm):
 
     public = forms.BooleanField(
         required=False, label='Publicly viewable',
-        help_text=('Anyone can find this distribution when creating a set, see its '
-                   'categories, and make a copy. Editing stays with you and the '
-                   'people on your sets.'))
+        help_text=('Anyone creating a set can see and copy it. Only you and your sets\' '
+                   'people can edit it.'))
 
     archived = forms.BooleanField(
         required=False, label='Archived',
-        help_text=('Keeps it working on the sets that use it, and takes it out of '
-                   'the list offered when someone creates a set.'))
+        help_text='Hidden when creating a set. Sets already using it keep it.')
 
     class Meta:
         model = Distribution

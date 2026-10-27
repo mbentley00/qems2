@@ -820,8 +820,8 @@ $(function () {
                 } else if (cmd === 'note') {
                     active = inNote;
                     $(this).attr('title', inNote
-                        ? 'This is a note to the moderator/players — click to unmark it and count it toward the length again'
-                        : 'Mark a note to the moderator or players, such as "Note to players: description acceptable." It is read aloud but never counts toward the question length.');
+                        ? 'Note to the moderator or players. Click to unmark it and count it toward length again.'
+                        : 'Mark a note to the moderator or players. Notes don\'t count toward length.');
                 } else {
                     try { active = document.queryCommandState(cmd); } catch (e) { active = false; }
                     if (cmd === 'bold' && active && currentSpan('q-power') && !inRealBold()) {

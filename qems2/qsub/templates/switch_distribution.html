@@ -18,8 +18,8 @@
 
 <h3 class="page-header sw-title">Switch to a per-packet distribution</h3>
 <p class="sw-lede">Each category&rsquo;s count per packet, worked out from this set&rsquo;s current totals across
-    {{ proposal.num_packets }} packets. Adjust any of them and the totals update as you go. Questions stay where
-    they are, and you can switch back from the Distribution page.
+    {{ proposal.num_packets }} packets. Questions stay where they are. You can switch back from the
+    Distribution page.
     {% if not is_owner %}Only the set&rsquo;s owner can switch it.{% endif %}</p>
 
 <form method="post" action="/switch_distribution/{{ qset.id }}/" id="sw-form"
@@ -73,7 +73,7 @@
 <label class="sw-check">
     <input type="checkbox" name="tiebreak_as_extras" value="1">
     <span>Keep the old tiebreak numbers as extras ({{ proposal.tiebreak_tu }} / {{ proposal.tiebreak_bs }})
-        <span class="sw-note">They were never placed in a packet; as extras they count toward what the set needs.</span></span>
+        <span class="sw-note">Extras count toward what the set needs.</span></span>
 </label>
 {% endif %}
 
@@ -165,7 +165,7 @@ $(function () {
         var fewer = [lessTu && lessTu + ' tossup' + (lessTu === 1 ? '' : 's'), lessBs && lessBs + ' bonus' + (lessBs === 1 ? '' : 'es')]
             .filter(Boolean).join(' and ');
         $('#sw-dropped').prop('hidden', !fewer).text(fewer ? 'The packets hold ' + fewer + ' fewer than the set asks for now. ' +
-            'No questions are deleted: after switching, keep room for them as extras or tiebreakers on the Distribution page.' : '');
+            'No questions are deleted. After switching, you can keep room for them as extras or tiebreakers on the Distribution page.' : '');
         var fits = Math.abs(ppTu - sizeTu) < 0.001 && Math.abs(ppBs - sizeBs) < 0.001;
         $('#sw-fit').toggleClass('bad', !fits).text(fits ? 'fills every packet exactly' :
             (ppTu > sizeTu || ppBs > sizeBs ? 'more than a packet holds' : 'leaves room in every packet'));

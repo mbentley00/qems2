@@ -18,15 +18,11 @@
 {% if message %}<div class="{{ message_class }}">{{ message }}</div>{% endif %}
 
 <div class="panel radius">
-    <p>An import used to invent a category for every name it found in a packet, so a set
-    could end up with its own distribution plus a shadow one carrying another set's names
-    &mdash; and, where the packet put everything on one metadata line, its question ids and
-    editors too. Each leftover below is matched to the nearest of <strong>your</strong>
-    {{ keep_count }} categories; <strong>change any of them in the dropdown</strong> before
+    <p>Each leftover category below is matched to the nearest of <strong>your</strong>
+    {{ keep_count }} categories. <strong>Change any of them in the dropdown</strong> before
     applying.</p>
-    <p class="home-note">Questions are only moved within this set. A leftover category is
-    deleted once nothing anywhere uses it &mdash; a distribution can be shared, and another
-    set's questions are not this page's business.</p>
+    <p class="home-note">Questions only move within this set. A leftover category is
+    deleted once nothing uses it.</p>
 </div>
 
 {% if plan %}
@@ -88,13 +84,9 @@ have to come back to fix it.
 {% endcomment %}
 <h4 class="page-header tidy-authors-head">Credit the original writers</h4>
 <div class="panel radius">
-    <p>An import before August 2026 credited every question to whoever pressed Import.
-    The packets name their writers, so upload the same files again and each question here
-    is matched back to its entry by its text and credited to the writer named in it.
-    Nothing else about the questions changes.</p>
-    <p class="home-note">A writer with an account here is matched by name; anyone else gets
-    the same inactive placeholder account the set importer makes, so the credit is real
-    rather than lost.</p>
+    <p>Upload the imported packet files again. Each question is credited to the writer
+    the packet names.</p>
+    <p class="home-note">Writers without an account here get an inactive placeholder account.</p>
     <form method="post" action="" enctype="multipart/form-data" class="tidy-authors">
         {% csrf_token %}
         <input type="hidden" name="action" value="authors">

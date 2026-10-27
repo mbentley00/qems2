@@ -13,10 +13,8 @@
 {% if message %}<div class="{{ message_class }}">{{ message }}</div>{% endif %}
 {% if needs_approval %}
 <div class="alert-box info">
-    Your account is less than two days old, so this set will be created provisionally and a
-    site administrator will be emailed to approve it. You can start writing straight away;
-    until it's approved the set just won't appear in the public set list and its join links
-    won't work.
+    Your account is new, so an admin has to approve this set. Until then it isn't in the
+    public list and join links don't work. You can start writing now.
 </div>
 {% endif %}
 
@@ -154,13 +152,13 @@
                     <small>A ("pruh-nun-see-AY-shun") guide doesn't eat into the length limit.</small></span></label>
             <label class="cqs-check">{{ form.guides_require_quotes }}
                 <span>Only quoted parentheses are pronunciation guides
-                    <small>On: <code>("DID-er-OW")</code> is a guide, but <code>(a plain aside)</code> is ordinary text — read normally, counted in the length, and left alone by the \P rules.</small></span></label>
+                    <small>On: <code>("DID-er-OW")</code> is a guide. <code>(a plain aside)</code> is ordinary text.</small></span></label>
             <label class="cqs-check">{{ form.structured_answers }}
                 <span>Structured answer lines
-                    <small>Records an answer as a primary answer plus its accepts and directed prompts, editable as fields. The printed line is unchanged.</small></span></label>
+                    <small>Edit answers as fields: main answer, accepts and prompts. The printed line doesn't change.</small></span></label>
             <label class="cqs-check">{{ form.public }}
                 <span>Public (listed for everyone)
-                    <small>Anyone can see this set is being written and request to join (which emails you). It grants no access by itself.</small></span></label>
+                    <small>Anyone can see this set and ask to join. Requests email you.</small></span></label>
         </div>
     </div>
 

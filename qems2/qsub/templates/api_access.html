@@ -24,8 +24,8 @@
 {% endif %}
 
 <p>
-    This key lets the Cliff Discord bot record buzzes, bonus results, and comments to <strong>{{ qset.name }}</strong>.
-    Treat it like a password because anyone with it can write playtest data to this set. Regenerating immediately revokes the old key.
+    This key lets the Cliff Discord bot write playtest data to <strong>{{ qset.name }}</strong>.
+    Anyone with it can do the same. Regenerating revokes the old key.
 </p>
 
 <div class="panel radius">
@@ -61,9 +61,8 @@
 
 <div class="panel callout radius"><strong>Adding the Discord bot to your playtest server</strong></div>
 <p>
-    Cliff, the playtest bot, reads the <code>T |</code> / <code>B |</code>
-    question threads on a Discord server (set up with the separate Botero bot) and posts the feedback, buzz points and
-    bonus results to this set. Linking a server takes three steps.
+    Cliff reads the <code>T |</code> / <code>B |</code> question threads on a Discord server
+    (set up with the Botero bot) and posts feedback, buzz points and bonus results to this set.
 </p>
 <ol class="bot-steps">
     <li>
@@ -77,28 +76,24 @@
         </figure>
     </li>
     <li>
-        <strong>Make sure it can see the playtest channels.</strong> A server-level
-        permission is overridden by private channels or categories. If your
-        playtest channels are restricted to a role, give the bot that role:
-        right-click <strong>Cliff</strong> in the member list, open <strong>Roles</strong>,
-        and tick the role your playtest channels are open to (here, <em>Bot</em>).
-        Or add the bot directly to those channels with <em>View Channel</em> and
-        <em>Read Message History</em>.
+        <strong>Make sure it can see the playtest channels.</strong> If they're
+        restricted to a role, right-click <strong>Cliff</strong> in the member list, open
+        <strong>Roles</strong>, and tick that role (here, <em>Bot</em>). Or add the bot to
+        those channels with <em>View Channel</em> and <em>Read Message History</em>.
         <figure class="bot-figure">
             <img src="{% static 'images/discord/bot_role.png' %}" alt="Cliff's right-click menu in the member list with Roles opened and the Bot role ticked">
             <figcaption>Right-click Cliff in the member list &rarr; Roles &rarr; tick the role that can see the playtest channels</figcaption>
         </figure>
     </li>
     <li>
-        <strong>Find your server's ID.</strong> The bot asks for it when you link the server.
-        Discord only shows IDs with Developer Mode on: open <em>User Settings</em> (the gear
+        <strong>Copy your server's ID.</strong> Open <em>User Settings</em> (the gear
         by your name), search for &ldquo;developer&rdquo;, and switch on <strong>Developer Mode</strong>.
         <figure class="bot-figure">
             <img src="{% static 'images/discord/developer_mode.png' %}" alt="Discord user settings with &quot;developer&quot; typed in the search box and the Developer Mode switch turned on">
             <figcaption>User Settings &rarr; search &ldquo;developer&rdquo; &rarr; Developer Mode on</figcaption>
         </figure>
         Then right-click the server's icon in the server list and choose
-        <strong>Copy Server Info &rarr; Copy Server ID</strong>. The ID is a long number, now on your clipboard.
+        <strong>Copy Server Info &rarr; Copy Server ID</strong>.
         <figure class="bot-figure">
             <img src="{% static 'images/discord/copy_server_id.png' %}" alt="The server's right-click menu, with Copy Server Info opened and Copy Server ID highlighted">
             <figcaption>Right-click the server &rarr; Copy Server Info &rarr; Copy Server ID</figcaption>
@@ -106,69 +101,53 @@
     </li>
     <li>
         <strong>Link the server to this set.</strong> Generate the key above, then
-        open a direct message with <strong>Cliff</strong> and send "<code>add</code>". It asks
-        first for the server ID you just copied, then for this set's key, and checks the
-        key against QEMS before saving.
+        DM <strong>Cliff</strong> "<code>add</code>". It asks for the server ID, then for this set's key.
         <figure class="bot-figure">
             <img src="{% static 'images/discord/link_add.png' %}" alt="A direct message with Cliff: the user sends add, Cliff asks for the server ID and then for the QEMS API key">
             <figcaption>DM Cliff <code>add</code>, paste the server ID, then paste the key from this page</figcaption>
         </figure>
-        <code>test</code> confirms the connection; <code>autosync live</code> makes it
-        sync on its own a few minutes after playtesting goes quiet, or @mention it in
-        any channel to sync right away. <code>help</code> lists everything it understands.
+        Then DM it <code>test</code> to check the connection.
     </li>
 </ol>
 
 <div class="panel callout radius"><strong>Using the bot</strong></div>
 <h5>Syncing manually</h5>
 <p>
-    <strong>@mention Cliff in any channel of a linked server</strong> to sync that server right
-    away: it reads the playtest question threads and posts the feedback summaries, buzz
-    points and bonus results to this set. A sync takes a few minutes on a big server;
-    mentioning it again while one is running just tells you it's already at work.
-    Everything else is a <strong>direct message</strong> to the bot:
+    <strong>@mention Cliff in any channel of a linked server</strong> to sync that server now.
+    A sync can take a few minutes. Everything else is a <strong>direct message</strong> to the bot:
 </p>
 <ul class="bot-commands">
     <li><code>add</code> &mdash; link a server to a QEMS set (walks you through the server ID and this page's key)</li>
     <li><code>list</code> &mdash; the servers currently linked and their autosync mode</li>
-    <li><code>test</code> &mdash; check the connection; <code>test <em>answer</em></code> posts a sample comment to that question so you can watch it land in QEMS</li>
+    <li><code>test</code> &mdash; check the connection. <code>test <em>answer</em></code> posts a sample comment to that question.</li>
     <li><code>autosync live</code> / <code>autosync nightly</code> / <code>autosync off</code> &mdash; see below</li>
     <li><code>remove <em>server id</em></code> &mdash; unlink a server</li>
     <li><code>help</code> &mdash; everything it understands</li>
 </ul>
 <p>
-    Mentioning Cliff with the word <code>debug</code> (e.g. <code>@Cliff debug</code>) runs a
-    read-only diagnostic: it reports which threads the scanner can see and what it extracted,
-    without posting anything &mdash; the first thing to try when a sync "found nothing".
+    <code>@Cliff debug</code> shows which threads the bot can see and what it found, without posting anything.
 </p>
 
 <h5>How automatic syncing works</h5>
 <p>
-    <code>autosync live</code> watches the server and syncs once it has been
-    <strong>quiet for about 10 minutes</strong> &mdash; playtest activity comes in bursts, so
-    this syncs once per session rather than once per message. <code>autosync nightly</code>
-    syncs once a day instead. Autosync never runs while a manual sync is in flight, and the
-    schedule survives the bot restarting. <code>autosync</code> alone (in a DM) shows the
-    current mode per server.
+    <code>autosync live</code> syncs once the server has been <strong>quiet for about 10 minutes</strong>.
+    <code>autosync nightly</code> syncs once a day. <code>autosync</code> alone shows each server's mode.
 </p>
 
 <h5>If comments seem to be missing after a sync</h5>
 <ul class="bot-commands">
     <li><strong>Thread names.</strong> Only threads named like <code>T | ...</code> / <code>B | ...</code>
-        (or ending <code>| T1</code>, <code>| B2</code>) are read as questions; anything else is skipped.</li>
+        (or ending <code>| T1</code>, <code>| B2</code>) are read as questions.</li>
     <li><strong>Unmatched questions.</strong> Comments attach to a question by its <em>answer line</em>.
-        If the question isn't in this set yet &mdash; or its answer changed since the thread was
-        named &mdash; the item comes back "unmatched" and is retried on a later sync; the sync
-        report in Discord lists a sample of unmatched answers.</li>
-    <li><strong>Already synced.</strong> A thread whose feedback hasn't changed since the last
-        sync is skipped on purpose, so re-syncing doesn't duplicate comments. New messages in
-        the thread make it eligible again.</li>
+        If the question isn't in this set or its answer has changed, the item is retried on a later
+        sync. The sync report in Discord lists some unmatched answers.</li>
+    <li><strong>Already synced.</strong> A thread with no new messages since the last sync is skipped.</li>
     <li><strong>Very short messages.</strong> Trivially short remarks ("lol", "+1") are filtered
         out of the feedback summary.</li>
-    <li><strong>Permissions.</strong> A channel the bot can't see (see step 2 above) contributes
-        nothing &mdash; <code>@Cliff debug</code> shows exactly which channels it can read.</li>
-    <li><strong>Bot attribution.</strong> Comments posted by the sync appear in QEMS under the
-        bot's name, not the playtester's; the summary credits playtesters in its text.</li>
+    <li><strong>Permissions.</strong> Channels the bot can't see are skipped (see step 2).
+        <code>@Cliff debug</code> shows which ones it can read.</li>
+    <li><strong>Bot attribution.</strong> Synced comments appear under the bot's name. The
+        summary text credits the playtesters.</li>
 </ul>
 
 <style>

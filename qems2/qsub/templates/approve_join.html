@@ -30,8 +30,7 @@ question is being asked.
     {% endcomment %}
     <div class="alert-box success">
         {{ requester|verbose_username }}'s request to join <strong>{{ qset.name }}</strong>
-        has been declined. They haven't been emailed about it, and nothing stops
-        them asking again.
+        has been declined. They aren't emailed and can ask again.
     </div>
     <p><a href="/edit_question_set/{{ qset.id }}/" class="button small secondary">Go to set</a></p>
 {% elif already %}

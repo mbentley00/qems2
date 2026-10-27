@@ -573,7 +573,26 @@ def _order_within_packet(items, rnd):
                 break
         if clean:
             break
+    if any(_top_of(a) == _top_of(b) for a, b in zip(ordered, ordered[1:])):
+        ordered = _interleave(ordered)
     return ordered
+
+
+def _interleave(ordered):
+    """No two neighbors from the same top category, whenever that is possible:
+    each step takes the category with the most left (not the one just used),
+    ties going to whichever comes first in ``ordered``. Each category keeps
+    its own order, so the quarter spread above mostly survives."""
+    queues = {}
+    for pos, item in enumerate(ordered):
+        queues.setdefault(_top_of(item), []).append((pos, item))
+    out, prev = [], None
+    while len(out) < len(ordered):
+        choices = [t for t in queues if queues[t] and t != prev] or [prev]
+        top = min(choices, key=lambda t: (-len(queues[t]), queues[t][0][0]))
+        out.append(queues[top].pop(0)[1])
+        prev = top
+    return out
 
 def _offset_bonuses(tossups, bonuses, rnd):
     """Avoid a bonus sharing its position's top category with the tossup at

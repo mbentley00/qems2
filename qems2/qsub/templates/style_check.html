@@ -415,10 +415,7 @@ $(function () {
             post('/dismiss_style_issue/', li, '', function () { refreshQuestion(qtype, qid); });
         } else if (action === 'dismiss-all') {
             var what = li.data('describe') || 'this suggestion';
-            if (!confirm('Ignore ' + what + ' everywhere in this set?\n\n' +
-                         'This hides only that suggestion — every other example of the ' +
-                         'same rule keeps being flagged. You can take it back from ' +
-                         '"what\'s ignored for this set".')) {
+            if (!confirm('Ignore ' + what + ' in this whole set?')) {
                 btn.css('pointer-events', ''); return;
             }
             post('/dismiss_style_issue/', li, '', function () {
@@ -482,10 +479,7 @@ $(function () {
                           .filter(function (d, i, all) { return d && all.indexOf(d) === i; });
             var shown = what.slice(0, 6).map(function (d) { return '  • ' + d; }).join('\n');
             if (what.length > 6) { shown += '\n  • …and ' + (what.length - 6) + ' more'; }
-            if (!confirm('Ignore these everywhere in this set?\n\n' + shown +
-                         '\n\nEach one hides only that suggestion — the rest of the same ' +
-                         'rule keeps being flagged. You can take them back from ' +
-                         '"what\'s ignored for this set".')) { return; }
+            if (!confirm('Ignore these in this whole set?\n\n' + shown)) { return; }
         }
         $('.bulk-action').prop('disabled', true);
         var errors = [];

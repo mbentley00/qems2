@@ -186,9 +186,8 @@ $(function () {
         // drifted from that, replacing it would quietly drop those edits.
         var current = $field.val() || '';
         if (current !== (r.old_text || '') && current !== (r.text || '')) {
-            if (!confirm('The fix was applied to the saved question, but this field has '
-                       + 'unsaved changes. Replace what\'s in the box with the fixed '
-                       + 'text? (your unsaved changes to this field would be lost)')) {
+            if (!confirm('The fix was saved, but this field has unsaved changes. '
+                       + 'Replace them with the fixed text?')) {
                 load();
                 return;
             }

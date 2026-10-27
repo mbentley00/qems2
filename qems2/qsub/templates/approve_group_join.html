@@ -15,8 +15,7 @@
 {% if added %}
     <div class="alert-box success">
         {{ requester|verbose_username }} has been added to the role group
-        <strong>{{ group.name }}</strong>. They've been emailed to let them know, and
-        they now hold the group's role on every set it's attached to.
+        <strong>{{ group.name }}</strong> and emailed.
     </div>
     <p><a href="/role_groups/" class="button small secondary">Go to Role Groups</a></p>
 {% elif already %}
@@ -28,8 +27,8 @@
 {% else %}
     <div class="panel">
         <p><strong>{{ requester|verbose_username }}</strong> has requested to join the role group
-        <strong>{{ group.name }}</strong>. Members automatically get the group's role on every
-        question set it's attached to.</p>
+        <strong>{{ group.name }}</strong>. Members get the group's role on every set it's
+        attached to.</p>
         <form action="" method="post">
             {% csrf_token %}
             <button type="submit" class="button primary">Approve &amp; add to group</button>

@@ -19,8 +19,7 @@
     </div>
 {% endif %}
 
-<p>Upload one or more packet files. A new tournament is created with one packet per file
-(named after the file). Three formats are supported:</p>
+<p>Each file becomes a packet named after the file. Supported formats:</p>
 <ul>
     <li><strong>.json</strong> &mdash; the JSON from
         <a href="https://github.com/alopezlago/YetAnotherPacketParser" target="_blank">YetAnotherPacketParser</a>
@@ -30,8 +29,7 @@
         ACF layout (numbered tossups + <code>ANSWER:</code> lines, numbered bonuses with
         <code>[10]</code> parts). Real packets vary, so use the JSON export when you have it.</li>
 </ul>
-<p>Questions that can't be parsed are skipped and listed below with a reason, so you can fix
-them by hand afterward.</p>
+<p>Questions that can't be parsed are skipped and listed with a reason.</p>
 
 <form action="" method="post" enctype="multipart/form-data">
     {% csrf_token %}
@@ -54,9 +52,8 @@ them by hand afterward.</p>
             </label>
             {% endif %}
             {% if not is_admin %}
-            <p class="import-note">No accounts are made by your import. An author or commenter is matched
-                only to someone already on the set; anyone else is credited by name: their questions are
-                yours, with &ldquo;credit to&rdquo; set to them.</p>
+            <p class="import-note">Importing doesn't create accounts. Authors who aren't on the set are
+                credited by name, and their questions are yours.</p>
             {% endif %}
             {% if form.target_set.errors %}{{ form.target_set.errors }}{% endif %}
             <label style="margin-top:1rem;">Packet files (.json, .docx, or .pdf) &mdash; select multiple

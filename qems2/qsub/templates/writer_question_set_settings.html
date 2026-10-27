@@ -40,10 +40,8 @@
             {{ form.name.errors }}
         {% endif %}
     </div>
-    <p class="wqs-note">The first two columns email you. The last one is quieter:
-    it adds anyone's new or changed questions in that category to your
-    <a href="/activity/{{ qset.id }}/">My Activity</a> page for this set, with no
-    mail at all. Nothing is followed unless you tick it.</p>
+    <p class="wqs-note">The first two columns email you. The last one lists new or changed
+    questions on your <a href="/activity/{{ qset.id }}/">My Activity</a> page, with no email.</p>
     <table class="table-striped table-hover" id="distribution-table">
         <thead>
         <th>Category</th>

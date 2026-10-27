@@ -10,9 +10,8 @@
 
 <h3 class="page-header">Old Distributions</h3>
 <div class="alert-box warning old-dist-warning">
-    <strong>These distributions are deprecated.</strong> You now set a distribution when you
-    <a href="/create_question_set/">create a new set</a>, and each set keeps its own, edited on its Distribution
-    page. These stay only so an existing set, or a new one, can still start from them.
+    <strong>These distributions are deprecated.</strong> Set a distribution when you
+    <a href="/create_question_set/">create a new set</a>, and edit it on the set's Distribution page.
 </div>
 <style>
 .old-dist-warning { margin: 0 0 14px; }
@@ -53,7 +52,7 @@ before changing anything, and the owner is who may archive or delete it.
                     <span class="dist-nodelete" title="{{ dist.blockers|join:' ' }}">Can't delete</span>
                     {% else %}
                     <form method="post" action="/delete_distribution/{{ dist.id }}/" style="display:inline;"
-                          onsubmit="return confirm('Delete the distribution \'{{ dist.name|escapejs }}\' and all of its categories? Nothing is built on it, so nothing else goes with it. This cannot be undone.');">
+                          onsubmit="return confirm('Delete the distribution \'{{ dist.name|escapejs }}\' and all of its categories? This cannot be undone.');">
                         {% csrf_token %}
                         <button type="submit" class="button tiny alert">Delete</button>
                     </form>

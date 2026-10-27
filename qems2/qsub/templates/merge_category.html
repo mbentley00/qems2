@@ -40,7 +40,7 @@
         <li>Its counts in the distribution, totals and packetizer quotas are added to the parent&rsquo;s.</li>
         {% if plan.shared %}<li>Other sets use this set&rsquo;s categories, so this set gets its own copy first. Theirs stay as they are.</li>{% endif %}
     </ul>
-    <p class="mc-warn">{{ leaf }} itself is removed. This can&rsquo;t be undone from here: to split it out again, make the category again and move questions back.</p>
+    <p class="mc-warn">{{ leaf }} itself is removed. This can&rsquo;t be undone.</p>
 
     <label class="mc-confirm"><input type="checkbox" name="confirm" value="1"> Merge {{ leaf }} and move its questions</label>
     <div class="mc-actions">

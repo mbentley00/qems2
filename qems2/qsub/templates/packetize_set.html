@@ -66,12 +66,9 @@
 {% endif %}
 
 <div class="panel radius">
-    <p>Auto-packetization assigns <strong>every</strong> tossup and bonus in the set to a packet,
-    <strong>overwriting any existing packet assignments</strong>.  Each packet follows the per-packet
-    quotas below; questions beyond the regular per-packet counts become tiebreakers, which are exempt
-    from the maximums.  Fractional values are allowed: a minimum/maximum of 1.5 tossups and 1.5 bonuses
-    means each packet gets 3 questions total from that category &mdash; sometimes 2 tossups and 1 bonus,
-    sometimes the reverse.</p>
+    <p>Packetizing puts every question in a packet and <strong>replaces the current packets</strong>.
+    Questions past the regular counts become tiebreakers, which ignore the maximums.
+    Fractions work. 1.5 tossups and 1.5 bonuses gives each packet 3 from that category, split either way.</p>
 </div>
 
 <form action="" method="post" id="packetize-form">
@@ -98,9 +95,7 @@
 
     {% if qset.per_packet_distribution %}
     <div class="alert-box info">
-        This set&rsquo;s quotas come from its <a href="/set_distribution/{{ qset.id }}/">Distribution page</a>: each category&rsquo;s
-        per-packet count is its category&rsquo;s minimum and maximum, a sub-category row caps that sub-category, and a combined category
-        caps its categories together. Change them there; the table below is what the packetizer will use.
+        This set&rsquo;s quotas come from its <a href="/set_distribution/{{ qset.id }}/">Distribution page</a>. Change them there.
     </div>
     {% endif %}
     <table class="table-striped table-hover" id="packetize-table"{% if qset.per_packet_distribution %} data-readonly="1"{% endif %}>
@@ -152,7 +147,7 @@
     </table>
 
     <input type="submit" value="Packetize" class="button primary right"
-           onclick="return confirm('WARNING: Re-packetizing OVERWRITES every existing packet assignment and re-deals all questions from scratch. Any manual packet arrangement will be lost and this cannot be easily undone.\n\nIf you only want to place unpacketized questions without disturbing existing packets, cancel and use “Assign unpacketized to packets” on the packet grid instead.\n\nContinue with a full re-packetize?');" />
+           onclick="return confirm('Re-packetize every question? Your current packets will be replaced. To place only unpacketized questions, cancel and use Assign unpacketized to packets on the packet grid.');" />
 </form>
 
 <style>

@@ -39,7 +39,7 @@
                     <span class="tq-counts-summary" id="tq-counts-summary">Start typing to see counts.</span>
                 </div>
                 <ul class="tq-counts-list" id="tq-counts-list"></ul>
-                <p class="tq-counts-note">Limits for this set: {{ qset.max_acf_tossup_length }} per tossup,
+                <p class="tq-counts-note">Limits: {{ qset.max_acf_tossup_length }} per tossup,
                 {{ qset.max_acf_bonus_length }} per bonus (leadin and parts together).
                 {% if qset.char_count_ignores_pronunciation_guides %}Pronunciation guides don't count.{% endif %}</p>
             </div>
@@ -87,8 +87,8 @@
     </div>
     <div id="examples" class="content">
         <h4>Instructions:</h4>
-        <p>Type questions into the box on the type questions tab. Questions must be formatted properly or the parser will reject them.</p>
-        <p>You can tag your question with a category by adding {Category - Subcategory} to the end of any answer line.</p>
+        <p>Type questions on the Type Questions tab, formatted as shown below.</p>
+        <p>Add {Category - Subcategory} to the end of an answer line to set its category.</p>
         <p>You may type multiple questions (including both tossups and bonuses) at once.</p>
         {% include "formatting_guide.html" %}
         {% include "example_questions.html" %}        
@@ -196,8 +196,8 @@ $(function () {
             var html = (data && data.html) || '';
             if (!$.trim(html)) { $slot.hide().empty(); return; }
             $slot.html('<div class="tq-cat-tags-head">Tags in ' + $('<i>').text(path).html() +
-                       ' &mdash; ticking one applies it to every question you write in this ' +
-                       'category, and you can change it per question on the preview</div>' + html).show();
+                       '. Ticking one applies it to every question you write in this ' +
+                       'category.</div>' + html).show();
             var picked = tagPicks[shownEntryId] || [];
             $slot.find('input[type=checkbox]').each(function () {
                 // Named for the edit pages, where this partial posts; here the
