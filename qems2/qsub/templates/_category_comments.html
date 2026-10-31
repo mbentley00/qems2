@@ -61,7 +61,7 @@ an optional `comment_return` for where the form should come back to.
         {% csrf_token %}
         <input type="hidden" name="category_path" value="{{ cat_comment_path }}">
         <input type="hidden" name="next" value="{{ comment_return|default:request.get_full_path }}">
-        <textarea name="comment" rows="2" placeholder="A note about this category — what's covered, what to avoid, who's on it&hellip;"></textarea>
+        <textarea name="comment" rows="2" aria-label="Note on this category"></textarea>
         <button type="submit" class="button small secondary">Add note</button>
     </form>
     {% endif %}

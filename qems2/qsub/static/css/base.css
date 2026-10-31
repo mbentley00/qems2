@@ -270,9 +270,12 @@ html[data-theme="dark"] .rich-editor-toolbar a.rich-editor-btn.rich-editor-note 
 /* The cells of a question table (_question_table_cells.html). Shared by the
    category pages and the search results, which show the same columns in the
    same order -- whatever the set asked for. */
-.qtable-tag { display: inline-block; background: #eef2f7; color: #2b2f3a; border-radius: 9px;
-    padding: 0 7px; margin: 0 3px 2px 0; font-size: 0.75rem; white-space: nowrap;
-    text-decoration: none; }
+/* Long tag names ("Hist / Middle East and African History") wrap inside the
+   pill rather than stretching the column. */
+.qtable-tags { min-width: 9em; max-width: 13em; }
+.qtable-tag { display: inline-block; max-width: 100%; background: #eef2f7; color: #2b2f3a;
+    border-radius: 9px; padding: 0 7px; margin: 0 3px 2px 0; font-size: 0.75rem;
+    white-space: normal; overflow-wrap: break-word; line-height: 1.4; text-decoration: none; }
 a.qtable-tag:hover, a.qtable-tag:focus { background: #dfe3f7; color: #4b3bb0; text-decoration: underline; }
 html[data-theme="dark"] a.qtable-tag:hover, html[data-theme="dark"] a.qtable-tag:focus { color: #c3b3f5; }
 .qtable-none { color: #b0b4c0; }

@@ -196,17 +196,18 @@ def bonuses_remaining(entry):
 
 @register.filter(name='written_of_required')
 def written_of_required(entry, kind):
-    """'21 of 50 · 29 left' for one category row; kind is 'tu' or 'bs'."""
+    """'21 of 50 · 29 left' for one category row, with the number left (or
+    extra) in bold; kind is 'tu' or 'bs'."""
     written = entry.get(kind + '_in_cat') or 0
     required = entry.get(kind + '_req') or 0
     diff = required - written
     if diff > 0:
-        note = '&middot; {0} left'.format(diff)
+        note = ' &middot; <strong>{0}</strong> left'.format(diff)
     elif diff < 0:
-        note = '&middot; {0} extra'.format(-diff)
+        note = ' &middot; <strong>{0}</strong> extra'.format(-diff)
     else:
         note = ''
-    return mark_safe('<strong>{0}</strong> <span class="set-status-of">of {1} {2}</span>'.format(
+    return mark_safe('<span class="set-status-of">{0} of {1}{2}</span>'.format(
         written, required, note))
 
 @register.filter(name='overall_percent')
