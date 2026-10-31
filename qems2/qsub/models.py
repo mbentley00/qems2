@@ -557,6 +557,12 @@ class QuestionSet (models.Model):
     # way and is fixed on the preview itself.
     warn_missing_category_tags = models.BooleanField(default=True)
 
+    # Superuser-only: run an AI review (grammar, style, fact check) on every
+    # newly submitted question, in the background. Off by default; it costs
+    # API money per question. Kept out of QuestionSetForm so only a superuser
+    # can turn it on (edit_question_set saves it separately). See ai_review.py.
+    ai_auto_review = models.BooleanField(default=False)
+
     class Admin: pass
 
     def is_owner(self, writer):
@@ -903,8 +909,13 @@ class AIGrammarFinding(models.Model):
     question_type = models.CharField(max_length=10)  # 'tossup' | 'bonus'
     question_id = models.PositiveIntegerField()
     # 'grammar' (a grammar/spelling fix) or 'answer' (a suggested alternate
-    # acceptable/promptable answer to add to the answer line).
+    # acceptable/promptable answer to add to the answer line). The automatic
+    # review of new submissions also writes 'style' and 'fact', and 'error'
+    # when the review itself failed.
     kind = models.CharField(max_length=10, default='grammar')
+    # 'manual' (the whole-set AI check button) or 'auto' (the per-submission
+    # review). Rerunning the manual check replaces only manual findings.
+    source = models.CharField(max_length=10, default='manual')
     severity = models.CharField(max_length=10, default='warning')  # 'error' | 'warning' | 'info'
     excerpt = models.TextField(blank=True, default='')
     suggestion = models.TextField(blank=True, default='')

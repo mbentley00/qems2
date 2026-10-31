@@ -348,3 +348,110 @@ def grammar_check_questions(items, model=None, answer_items=None):
             return findings, error
         findings.extend(batch_findings)
     return findings, None
+
+
+# --- automatic review of new submissions -----------------------------------
+
+_REVIEW_SCHEMA = {
+    'type': 'object',
+    'properties': {
+        'findings': {
+            'type': 'array',
+            'items': {
+                'type': 'object',
+                'properties': {
+                    'ref': {'type': 'string',
+                            'description': 'The exact ref label of the question this applies to.'},
+                    'kind': {'type': 'string', 'enum': ['grammar', 'style', 'fact']},
+                    'severity': {'type': 'string', 'enum': ['error', 'warning']},
+                    'excerpt': {'type': 'string',
+                                'description': 'The exact text the finding is about, copied '
+                                               'verbatim from the question. Empty only when the '
+                                               'finding is about the question as a whole.'},
+                    'suggestion': {'type': 'string',
+                                   'description': 'Replacement text for the excerpt, or a short '
+                                                  'concrete fix. Empty if there is no single fix.'},
+                    'explanation': {'type': 'string',
+                                    'description': 'One or two sentences: what is wrong and why.'},
+                },
+                'required': ['ref', 'kind', 'severity', 'excerpt', 'suggestion', 'explanation'],
+                'additionalProperties': False,
+            },
+        },
+    },
+    'required': ['findings'],
+    'additionalProperties': False,
+}
+
+_REVIEW_SYSTEM = (
+    "You are an experienced quizbowl editor reviewing newly submitted questions "
+    "for a set. Each question is given with a ref label, its text, and its "
+    "ANSWER line(s). Tossups are pyramidal: clues run from hardest to easiest, "
+    "ending with a giveaway. Bonuses have a leadin and three parts. Answer lines "
+    "use QEMS markup: _underscores_ mark the words a player must say, ~tildes~ "
+    "mark titles of works; neither is an error.\n\n"
+    "Review each question on three axes and report findings under the matching "
+    "kind:\n"
+    "- grammar: genuine grammar, spelling, punctuation and word-level errors "
+    "(wrong homophone, doubled or missing words). Not matters of taste.\n"
+    "- style: problems an editor would fix -- clues out of pyramidal order, an "
+    "early clue that gives the answer away, a tossup that does not uniquely "
+    "identify its answer until too late or at all, a clue that fits another "
+    "answer too, an answer line missing an obvious accept or prompt, awkward "
+    "or confusing phrasing, a bonus part that is far harder or easier than its "
+    "neighbours suggest.\n"
+    "- fact: a clue that is factually wrong, or that you have specific reason to "
+    "doubt (wrong date, wrong person, wrong work, misattributed quote). Use "
+    "'error' when you are confident the clue is wrong and 'warning' when it is "
+    "doubtful and an editor should verify it. Never flag a clue merely because "
+    "it is obscure or you do not recognise it.\n\n"
+    "Report only things worth an editor's time. Most good questions need few "
+    "or no findings, and returning nothing for a question is a normal outcome. "
+    "Copy the text a finding is about verbatim into 'excerpt' and set 'ref' to "
+    "the question's exact ref label."
+)
+
+
+def review_questions(items, model=None):
+    """Grammar, style and fact review of newly submitted questions.
+
+    `items` is a list of {'ref': str, 'text': str}, text keeping the answer
+    line markup. One request per batch, on settings.AI_REVIEW_MODEL (Sonnet).
+    Returns (findings, error); each finding is a dict of ref/kind/severity/
+    excerpt/suggestion/explanation. On a mid-run failure, whatever was gathered
+    so far comes back alongside the error.
+    """
+    client = _client()
+    if client is None:
+        return [], 'AI features are not configured (no API key).'
+    if not items:
+        return [], None
+    review_model = model or getattr(settings, 'AI_REVIEW_MODEL', None) or settings.AI_DEFAULT_MODEL
+
+    findings = []
+    for start in range(0, len(items), _BATCH_SIZE):
+        batch = items[start:start + _BATCH_SIZE]
+        body = '\n\n'.join('[{0}]\n{1}'.format(it['ref'], it['text']) for it in batch)
+        try:
+            # fallbacks="default": if a safety classifier declines (fact
+            # checks touch history, science, medicine...), the API reruns the
+            # request on a fallback model inside the same call.
+            resp = client.beta.messages.create(
+                model=review_model, max_tokens=16000, system=_REVIEW_SYSTEM,
+                betas=['server-side-fallback-2026-07-01'], fallbacks='default',
+                messages=[{'role': 'user', 'content': 'Review these newly submitted '
+                                                      'questions:\n\n' + body}],
+                output_config={'format': {'type': 'json_schema', 'schema': _REVIEW_SCHEMA}})
+        except Exception as ex:
+            return findings, 'The AI review failed: {0}'.format(ex)
+        if resp.stop_reason == 'refusal':
+            return findings, 'The AI declined to review this question.'
+        if resp.stop_reason == 'max_tokens':
+            return findings, 'The AI review ran out of room before finishing.'
+        text = next((b.text for b in resp.content if getattr(b, 'type', '') == 'text'), '')
+        try:
+            data = json.loads(text)
+        except (ValueError, TypeError):
+            return findings, 'The AI returned an unexpected response.'
+        findings.extend(data.get('findings', []))
+    return findings, None

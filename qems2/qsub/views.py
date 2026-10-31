@@ -32,6 +32,7 @@ from .forms import *
 from .model_utils import *
 from .utils import *
 from .packet_parser import parse_packet_data
+from . import ai_review
 from . import answer_structure
 from . import category_mapper
 from . import distribution_lines
@@ -1556,6 +1557,9 @@ def edit_question_set(request, qset_id):
                     qset.distribution_id = previous_distribution_id
                     saved_message += (' The distribution was not changed: this set\'s categories '
                                       'are edited on its Distribution page.')
+                if _ai_available(request.user):
+                    # Not on QuestionSetForm, so an owner or editor can't set it.
+                    qset.ai_auto_review = request.POST.get('ai_auto_review') == 'on'
                 qset.save()
                 if qset.per_packet_distribution and previous_packets != qset.num_packets:
                     distribution_lines.derive(qset)
@@ -1596,6 +1600,7 @@ def edit_question_set(request, qset_id):
                 return render(request, 'edit_question_set.html',
                                           {'form': form,
                                            'qset': qset,
+                                           'can_ai_auto_review': _ai_available(request.user),
                                            'favicon_colors': QuestionSet.FAVICON_COLORS,
                                            'credit_tokens': QuestionSet.CREDIT_TOKENS,
                                            'user': user,
@@ -1676,6 +1681,7 @@ def edit_question_set(request, qset_id):
     return render(request, 'edit_question_set.html',
                               {'form': form,
                                'user': user,
+                               'can_ai_auto_review': _ai_available(request.user),
                                'favicon_colors': QuestionSet.FAVICON_COLORS,
                                'credit_tokens': QuestionSet.CREDIT_TOKENS,
                                'editors': [ed for ed in qset_editors if ed != qset.owner],
@@ -3238,6 +3244,7 @@ def add_tossups(request, qset_id, packet_id=None):
                         tossup.question_number = _next_question_number(Tossup, packet_id)
 
                     tossup.save_question(edit_type=QUESTION_CREATE, changer=user)
+                    ai_review.queue_review(qset, tossups=[tossup], writer=user)
                     # Tags ticked on the add page, so a question arrives tagged
                     # rather than needing a second visit to its edit page.
                     save_tag_selection(request, qset, tossup, tossup.category, is_tossup=True)
@@ -3360,6 +3367,7 @@ def add_bonuses(request, qset_id, bonus_type, packet_id=None):
                 try:
                     bonus.is_valid()
                     bonus.save_question(edit_type=QUESTION_CREATE, changer=user)
+                    ai_review.queue_review(qset, bonuses=[bonus], writer=user)
                     save_tag_selection(request, qset, bonus, bonus.category, is_tossup=False)
                     cache.clear()
                     # As with tossups: land on the new question with its checks.
@@ -5792,6 +5800,8 @@ def _typed_questions_done(request, qset_id, new_tossups, new_bonuses):
     repeat checks, the same as Add a Tossup does; a batch goes back to the set
     with a link to each question it made."""
     cache.clear()
+    ai_review.queue_review(QuestionSet.objects.get(id=qset_id), new_tossups, new_bonuses,
+                           writer=request.user.writer)
     if len(new_tossups) + len(new_bonuses) == 1:
         only = (new_tossups or new_bonuses)[0]
         kind = 'tossup' if new_tossups else 'bonus'
@@ -11619,7 +11629,8 @@ def _ai_grammar_findings_json(qset):
     for f in found:
         ref = '{0}-{1}'.format(f.question_type, f.question_id)
         meta = refs.get(ref, {})
-        entry = {'id': f.id, 'kind': f.kind, 'severity': f.severity, 'excerpt': f.excerpt,
+        entry = {'id': f.id, 'kind': f.kind, 'source': f.source,
+                 'severity': f.severity, 'excerpt': f.excerpt,
                  'suggestion': f.suggestion, 'explanation': f.explanation,
                  'edit_url': meta.get('edit_url', ''),
                  'label': meta.get('label', ref)}
@@ -11674,7 +11685,7 @@ def ai_grammar_check(request, qset_id):
     # Rerun replaces the whole set's findings. Persist the fresh ones, mapping
     # each back to its question via the ref label.
     with transaction.atomic():
-        qset.ai_grammar_findings.all().delete()
+        qset.ai_grammar_findings.filter(source='manual').delete()
         for f in findings:
             ref = f.get('ref', '')
             if '-' not in ref:
@@ -11692,6 +11703,12 @@ def ai_grammar_check(request, qset_id):
     out = _ai_grammar_findings_json(qset)
     return HttpResponse(json.dumps({'ok': True, 'findings': out,
                                     'checked': len(items)}))
+
+
+def _ai_available(user):
+    """Admin, and an API key configured."""
+    from . import ai
+    return _is_ai_user(user) and ai.ai_enabled()
 
 
 def _ai_tags_available(user):

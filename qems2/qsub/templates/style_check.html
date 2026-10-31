@@ -49,7 +49,7 @@
 {% if is_ai_user %}
 <div id="ai-grammar-panel" style="display:none; margin: 0 0 18px;">
     <div class="panel radius">
-        <strong>AI review: grammar &amp; alternate answers</strong> <span class="sc-guide-note">(admin only &middot; Haiku)</span>
+        <strong>AI review</strong> <span class="sc-guide-note">(admin only &middot; the AI check button runs grammar &amp; alternate answers{% if qset.ai_auto_review %}; new submissions are also reviewed automatically for grammar, style and facts{% endif %})</span>
         <div id="ai-grammar-status" class="sc-guide-note" style="margin-top:6px;">Running&hellip;</div>
         <ul id="ai-grammar-results" class="ai-grammar-list"></ul>
     </div>
@@ -261,6 +261,10 @@ which question is wrong, this tells you what the whole set still owes.
            font-weight:bold; color:#fff; vertical-align:middle; }
 .ai-kind-grammar { background:#d4870c; }
 .ai-kind-answer { background:#1565c0; }
+.ai-kind-style { background:#6a1b9a; }
+.ai-kind-fact { background:#c0392b; }
+.ai-kind-error { background:#555; }
+.ai-auto { font-size:0.68rem; color:#8a8f94; }
 .ai-grammar-dismiss { flex:0 0 auto; cursor:pointer; color:#bdc1c5; font-size:0.78rem; white-space:nowrap; }
 .ai-grammar-list li:hover .ai-grammar-dismiss { color:#8a8f94; }
 .ai-grammar-dismiss:hover { color:#c0392b; text-decoration:underline; }
@@ -543,10 +547,26 @@ $(function () {
                 body = '<span class="ai-kind ai-kind-answer">Alt answer</span> ' + loc
                     + ': <span class="ai-alt-ans">' + sug + '</span>'
                     + (f.explanation ? ' <span class="sc-guide-note">' + esc(f.explanation) + '</span>' : '');
+            } else if (f.kind === 'error') {
+                // The automatic review of a submission failed.
+                body = '<span class="ai-kind ai-kind-error">Review failed</span> ' + loc
+                    + ': <span class="sc-guide-note">' + esc(f.explanation) + '</span>';
+            } else if (f.kind === 'style' || f.kind === 'fact') {
+                // From the automatic review: the excerpt is the passage in
+                // question, and there may be no single replacement.
+                body = '<span class="ai-kind ai-kind-' + f.kind + '">'
+                    + (f.kind === 'fact' ? (f.severity === 'error' ? 'Fact: likely wrong' : 'Fact: verify') : 'Style')
+                    + '</span> ' + loc + ': '
+                    + (f.excerpt ? '&ldquo;' + esc(f.excerpt) + '&rdquo; ' : '')
+                    + (f.suggestion ? '&rarr; <strong>' + esc(f.suggestion) + '</strong> ' : '')
+                    + (f.explanation ? '<span class="sc-guide-note">' + esc(f.explanation) + '</span>' : '');
             } else {
                 body = '<span class="ai-kind ai-kind-grammar">Grammar</span> ' + loc
                     + ': <del>' + esc(f.excerpt) + '</del> &rarr; <strong>' + esc(f.suggestion) + '</strong>'
                     + (f.explanation ? ' <span class="sc-guide-note">' + esc(f.explanation) + '</span>' : '');
+            }
+            if (f.source === 'auto') {
+                body += ' <span class="ai-auto" title="From the automatic review of new submissions">auto</span>';
             }
             $li.append('<span class="ai-grammar-msg">' + body + '</span>');
             $li.append('<a class="ai-grammar-dismiss" title="Dismiss this suggestion">dismiss</a>');
@@ -557,16 +577,20 @@ $(function () {
     function setStatus(text) { $('#ai-grammar-status').text(text); }
 
     function counts() {
-        var g = 0, a = 0;
-        findings.forEach(function (f) { if (f.kind === 'answer') { a++; } else { g++; } });
-        return g + ' grammar, ' + a + ' alt-answer suggestion(s)';
+        var n = {grammar: 0, answer: 0, style: 0, fact: 0, error: 0};
+        findings.forEach(function (f) { n[f.kind in n ? f.kind : 'grammar']++; });
+        var parts = [n.grammar + ' grammar', n.answer + ' alt-answer'];
+        if (n.style) { parts.push(n.style + ' style'); }
+        if (n.fact) { parts.push(n.fact + ' fact-check'); }
+        if (n.error) { parts.push(n.error + ' failed review(s)'); }
+        return parts.join(', ') + ' suggestion(s)';
     }
 
     function summarize() {
         if (!findings.length) {
             setStatus('Nothing suggested. Rerun to check again after edits.');
         } else {
-            setStatus(counts() + '. These stay until dismissed or you rerun the check.');
+            setStatus(counts() + '. These stay until dismissed; rerunning the AI check replaces only its own grammar and alt-answer results.');
         }
     }
 

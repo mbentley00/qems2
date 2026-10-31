@@ -17,6 +17,7 @@ from django.http import JsonResponse, Http404
 from django.shortcuts import render, get_object_or_404
 
 from . import ai
+from . import ai_review
 from . import mobile_writer as mw
 from .models import (QuestionSet, DistributionEntry, SetWideDistributionEntry, Tossup, Bonus,
                      QuestionType)
@@ -313,4 +314,8 @@ def writer_save(request, qset):
     if obj.category is None:
         return _error('Pick a category from this set.')
     obj.save_question(edit_type=QUESTION_CREATE, changer=writer)
+    if kind == 'tossup':
+        ai_review.queue_review(qset, tossups=[obj], writer=writer)
+    else:
+        ai_review.queue_review(qset, bonuses=[obj], writer=writer)
     return JsonResponse({'ok': True, 'id': obj.id, 'url': '/edit_{0}/{1}/'.format(kind, obj.id)})

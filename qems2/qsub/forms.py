@@ -73,7 +73,9 @@ class QuestionSetForm(forms.ModelForm):
                    'approval_status', 'approval_date',
                    'per_packet_distribution', 'tiebreak_tossups_per_packet',
                    'tiebreak_bonuses_per_packet', 'extra_tossups', 'extra_bonuses',
-                   'legacy_requirements']
+                   'legacy_requirements',
+                   # Superuser-only; saved separately in edit_question_set.
+                   'ai_auto_review']
 
     def clean_question_table_columns(self):
         """Only keys the model knows, in its own order. The value is a list the

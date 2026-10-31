@@ -18570,3 +18570,106 @@ class DeletePacketKeepsQuestionsTests(TestCase):
     def test_deleting_packet_row_directly_keeps_questions(self):
         self.packet.delete()
         self.assertIsNone(Tossup.objects.get(id=self.tu.id).packet_id)
+
+
+class AIAutoReviewTests(TestCase):
+    """The superuser-only per-set setting that reviews every new submission
+    (grammar, style, fact) in the background and stores the findings."""
+
+    def setUp(self):
+        self.admin = User.objects.create_superuser('admin', 'admin@t.com', 'pw')
+        self.owner = Writer.objects.get(user=self.admin)
+        self.dist = Distribution.objects.create(name='auto dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='Literature', subcategory='European')
+        self.qset = QuestionSet.objects.create(
+            name='Auto Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist, tossups_per_packet=1, bonuses_per_packet=1)
+        self.tu = Tossup.objects.create(
+            author=self.owner, question_set=self.qset,
+            tossup_text='This play was wrote in 1950 by Goethe.', tossup_answer='_Faust_',
+            category=self.de, created_date=datetime.now(), last_changed_date=datetime.now())
+
+    def _queue(self):
+        from unittest import mock
+        from qems2.qsub import ai_review
+        with mock.patch('qems2.qsub.ai.ai_enabled', return_value=True), \
+             mock.patch('qems2.qsub.ai_review._start') as start, \
+             self.captureOnCommitCallbacks(execute=True):
+            ai_review.queue_review(self.qset, tossups=[self.tu], writer=self.owner)
+        return start
+
+    def test_off_by_default_and_does_nothing(self):
+        self.assertFalse(self.qset.ai_auto_review)
+        self.assertFalse(self._queue().called)
+
+    def test_on_queues_after_commit(self):
+        self.qset.ai_auto_review = True
+        self.qset.save()
+        start = self._queue()
+        start.assert_called_once_with(self.qset.id, [('tossup', self.tu.id)], self.owner.id)
+
+    def test_run_review_stores_checked_findings(self):
+        from unittest import mock
+        from qems2.qsub import ai_review
+        ref = 'tossup-{0}'.format(self.tu.id)
+        fake = [
+            {'ref': ref, 'kind': 'grammar', 'severity': 'error', 'excerpt': 'was wrote',
+             'suggestion': 'was written', 'explanation': 'participle'},
+            {'ref': ref, 'kind': 'fact', 'severity': 'error', 'excerpt': 'in 1950',
+             'suggestion': '', 'explanation': 'Faust predates 1950.'},
+            {'ref': 'tossup-999999', 'kind': 'style', 'severity': 'warning', 'excerpt': '',
+             'suggestion': '', 'explanation': 'not a question in this submission'},
+            {'ref': ref, 'kind': 'answer', 'severity': 'warning', 'excerpt': '',
+             'suggestion': '', 'explanation': 'kind the review never asks for'},
+        ]
+        with mock.patch('qems2.qsub.ai.review_questions', return_value=(fake, None)) as m:
+            stored = ai_review.run_review(self.qset.id, [('tossup', self.tu.id)], self.owner.id)
+        self.assertEqual(stored, 2)
+        # The reviewer sees the question with its answer line, markup kept.
+        self.assertIn('ANSWER: _Faust_', m.call_args[0][0][0]['text'])
+        kinds = sorted(AIGrammarFinding.objects.values_list('kind', flat=True))
+        self.assertEqual(kinds, ['fact', 'grammar'])
+        self.assertTrue(all(f.source == 'auto' for f in AIGrammarFinding.objects.all()))
+
+    def test_failed_review_is_stored_as_error(self):
+        from unittest import mock
+        from qems2.qsub import ai_review
+        with mock.patch('qems2.qsub.ai.review_questions', return_value=([], 'boom')):
+            ai_review.run_review(self.qset.id, [('tossup', self.tu.id)], self.owner.id)
+        f = AIGrammarFinding.objects.get()
+        self.assertEqual(f.kind, 'error')
+        self.assertIn('boom', f.explanation)
+
+    def test_manual_rerun_keeps_auto_findings(self):
+        from unittest import mock
+        AIGrammarFinding.objects.create(
+            question_set=self.qset, question_type='tossup', question_id=self.tu.id,
+            kind='fact', source='auto', explanation='keep me')
+        AIGrammarFinding.objects.create(
+            question_set=self.qset, question_type='tossup', question_id=self.tu.id,
+            kind='grammar', source='manual', explanation='replace me')
+        self.client.login(username='admin', password='pw')
+        with mock.patch('qems2.qsub.ai.ai_enabled', return_value=True), \
+             mock.patch('qems2.qsub.ai.grammar_check_questions', return_value=([], None)):
+            self.client.post('/ai_grammar_check/%d/' % self.qset.id)
+        self.assertEqual(list(AIGrammarFinding.objects.values_list('explanation', flat=True)),
+                         ['keep me'])
+
+    def test_setting_not_on_the_owner_form(self):
+        from qems2.qsub.forms import QuestionSetForm
+        self.assertNotIn('ai_auto_review', QuestionSetForm(writer=self.owner).fields)
+
+    def test_checkbox_only_shown_to_superuser(self):
+        from unittest import mock
+        with mock.patch('qems2.qsub.ai.ai_enabled', return_value=True):
+            self.client.login(username='admin', password='pw')
+            body = self.client.get('/edit_question_set/%d/' % self.qset.id).content.decode()
+            self.assertIn('name="ai_auto_review"', body)
+            plain = User.objects.create_user('plainowner', password='pw', email='po@t.com')
+            self.qset.owner = Writer.objects.get(user=plain)
+            self.qset.save()
+            self.client.logout()
+            self.client.login(username='plainowner', password='pw')
+            body = self.client.get('/edit_question_set/%d/' % self.qset.id).content.decode()
+            self.assertNotIn('name="ai_auto_review"', body)

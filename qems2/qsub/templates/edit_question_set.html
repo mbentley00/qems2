@@ -535,6 +535,11 @@
                 <label class="set-info-check">{{ form.warn_missing_category_tags }}
                     <span>Ask before submitting questions with no category tag
                         <small>On <a href="/type_questions/{{ qset.id }}/">Type Questions</a>. Off for a set that doesn&rsquo;t use tags.</small></span></label>
+                {% if can_ai_auto_review %}
+                <label class="set-info-check"><input type="checkbox" name="ai_auto_review"{% if qset.ai_auto_review %} checked{% endif %}>
+                    <span>AI review every new submission (grammar, style, fact check)
+                        <small>Admin only. Runs Claude Sonnet in the background on each question as it&rsquo;s submitted; results appear on the <a href="/style_check/{{ qset.id }}/">Style Check</a> page. Costs API usage per question.</small></span></label>
+                {% endif %}
                 {% comment %}
                 What the category question tables show. A set writing to a
                 length limit wants the length column; one that never marks a

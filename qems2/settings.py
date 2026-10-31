@@ -182,6 +182,9 @@ AI_TAG_MODEL = os.environ.get('AI_TAG_MODEL', 'claude-opus-5')
 # questions and pulls quotes out of sources -- writing work where a weaker model
 # shows -- so it uses the current Opus.
 AI_WRITER_MODEL = os.environ.get('AI_WRITER_MODEL', 'claude-opus-5-5')
+# The automatic grammar/style/fact review of new submissions (a per-set,
+# superuser-only setting) runs on the current Sonnet.
+AI_REVIEW_MODEL = os.environ.get('AI_REVIEW_MODEL', 'claude-sonnet-5-5')
 
 #SECRET_KEY = '%&amp;5&amp;wmrx-g8zpk8=m*kttzkxfy^38ziedy$1kf-4uwme8bksba'
 
