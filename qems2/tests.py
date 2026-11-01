@@ -15737,6 +15737,30 @@ class CategoryCommentTests(TestCase):
             self.qset.id, self.de.id)).content.decode()
         self.assertIn('Nothing more on Sibelius please', body)
 
+    def test_a_note_on_a_category_without_subcategory_sticks(self):
+        # str() of such an entry is "Literature - "; the form used to post
+        # that, the view trimmed it, and the page never found the note again.
+        lit = DistributionEntry.objects.create(
+            distribution=self.dist, category='Literature', subcategory='',
+            min_tossups=1, min_bonuses=1)
+        SetWideDistributionEntry.objects.create(
+            question_set=self.qset, dist_entry=lit, num_tossups=2, num_bonuses=2)
+        page = '/categories/{0}/{1}/'.format(self.qset.id, lit.id)
+        body = self.client.get(page).content.decode()
+        posted = re.search(r'name="category_path" value="([^"]*)"', body).group(1)
+        self.assertEqual(posted, 'Literature')
+        self._add('Literature note', path=posted, nxt=page)
+        self.assertIn('Literature note', self.client.get(page).content.decode())
+        doc = '/category_doc/{0}/{1}/'.format(self.qset.id, lit.id)
+        self.assertIn('Literature note', self.client.get(doc).content.decode())
+
+    def test_migration_rekeys_notes_saved_under_the_trimmed_path(self):
+        import importlib
+        mig = importlib.import_module('qems2.qsub.migrations.0081_fix_category_comment_paths')
+        self.assertEqual(mig.clean('Literature -'), 'Literature')
+        self.assertEqual(mig.clean('Literature - '), 'Literature')
+        self.assertEqual(mig.clean('History - World'), 'History - World')
+
     def test_a_top_level_document_view_shows_its_subcategories_notes(self):
         self._add('Audio note')
         CategoryComment.objects.create(question_set=self.qset, category_path='Fine Arts',

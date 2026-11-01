@@ -1776,8 +1776,11 @@ def categories(request, qset_id, category_id):
     # are defined and where questions get tagged; this page links to it rather
     # than growing a second copy of that view. The count is what makes the link
     # worth following (or tells you the category has none yet).
+    # entry_path, not str(): a category with no subcategory prints as
+    # "Literature - ", while tags and notes are keyed "Literature".
+    cat_path = distribution_lines.entry_path(category_object)
     tag_count = CategoryTag.objects.filter(
-        question_set=qset, category_path=str(category_object)).count()
+        question_set=qset, category_path=cat_path).count()
 
     return render(request, 'categories.html',
         dict({
@@ -1790,7 +1793,7 @@ def categories(request, qset_id, category_id):
         'message': message,
         'tag_count': tag_count,
         'category': category_object},
-        **_category_comment_context(request, qset, str(category_object) if category_object else '')))
+        **_category_comment_context(request, qset, cat_path)))
 
 @login_required
 def top_category(request, qset_id, category_name):
@@ -1844,7 +1847,8 @@ def category_document(request, qset_id, category_id=None, category_name=None):
 
     if category_id is not None:
         cat = DistributionEntry.objects.get(id=category_id)
-        title = str(cat)
+        # Also the notes key, so "Literature", never str()'s "Literature - "
+        title = distribution_lines.entry_path(cat)
         tu_qs = Tossup.objects.filter(question_set=qset, category=cat)
         bs_qs = Bonus.objects.filter(question_set=qset, category=cat)
     else:
