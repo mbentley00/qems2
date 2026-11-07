@@ -307,22 +307,206 @@ $(function () {
         }
         var out = text, changed = 0;
         for (var i = guides.length - 1; i >= 0; i--) {
-            var g = guides[i];
-            var n = guideWordCount(g[1]);
-            if (!n) { continue; }
-            var head = out.slice(0, g.index), tail = out.slice(g.index);
-            var trimmed = head.replace(/\s+$/, '');
-            var trailing = head.slice(trimmed.length);
-            if (endsWithPgTarget(trimmed)) { continue; }  // already marked
-            var words = trimmed.split(' ');
-            if (words.length < n) { continue; }
-            var target = words.slice(words.length - n).join(' ');
-            if (!target.trim() || target.indexOf('\\P') !== -1) { continue; }
-            var rest = words.slice(0, words.length - n).join(' ');
-            out = (rest ? rest + ' ' : '') + '\\P' + target + '\\P' + trailing + tail;
-            changed++;
+            var marked = markGuideAt(out, guides[i].index);
+            if (marked !== out) { out = marked; changed++; }
         }
         return {text: out, changed: changed};
+    }
+
+    /**
+     * Mark the word(s) in front of the guide whose "(" is at `at`, guessing how
+     * many from the guide's word count. Returns `text` unchanged when it is
+     * already marked or there aren't enough words.
+     * Mirrors style_checker.mark_pg_target on the server.
+     */
+    function markGuideAt(text, at) {
+        var close = text.indexOf(')', at);
+        if (close === -1) { return text; }
+        var n = guideWordCount(text.slice(at + 1, close));
+        if (!n) { return text; }
+        var head = text.slice(0, at), tail = text.slice(at);
+        var trimmed = head.replace(/\s+$/, '');
+        var trailing = head.slice(trimmed.length);
+        if (endsWithPgTarget(trimmed)) { return text; }  // already marked
+        var words = trimmed.split(' ');
+        if (words.length < n) { return text; }
+        var target = words.slice(words.length - n).join(' ');
+        if (!target.trim() || target.indexOf('\\P') !== -1) { return text; }
+        var rest = words.slice(0, words.length - n).join(' ');
+        return (rest ? rest + ' ' : '') + '\\P' + target + '\\P' + trailing + tail;
+    }
+
+    // Offsets of the unescaped \P markers, paired open/close.
+    function pgPairs(text) {
+        var re = /\\P/g, m, marks = [], pairs = [];
+        while ((m = re.exec(text)) !== null) {
+            if (m.index > 0 && text.charAt(m.index - 1) === '\\') { continue; }
+            marks.push(m.index);
+        }
+        for (var i = 0; i + 1 < marks.length; i += 2) { pairs.push([marks[i], marks[i + 1]]); }
+        return pairs;
+    }
+
+    // Every parenthetical that could be a guide, as {start, end} (end exclusive).
+    // The PG button is the writer saying "this is a guide", so the set's
+    // quotes rule doesn't apply here; power marks and empty parens never are.
+    function guideSpans(text) {
+        var re = /\(([^()]*)\)/g, m, out = [];
+        while ((m = re.exec(text)) !== null) {
+            if (m.index > 0 && text.charAt(m.index - 1) === '\\') { continue; }
+            if (isPowerMark(m[1]) || !m[1].trim()) { continue; }
+            out.push({start: m.index, end: m.index + m[0].length});
+        }
+        return out;
+    }
+
+    // A letter of a word (not markup: _ and ~ are QEMS formatting).
+    var PG_WORD_CHAR = /[\p{L}\p{N}'’\-]/u;
+
+    function countToken(s, tok) { return s.split(tok).length - 1; }
+
+    // Pull [ts, te) in to the word(s) themselves: no edge whitespace, no
+    // trailing ",;:!?" (or a sentence's "." -- an initial's "G." keeps its
+    // dot), and no formatting marker whose partner lies outside the range,
+    // so the mark nests inside ~italics~ rather than across them.
+    function trimPgTerm(text, ts, te) {
+        for (var guard = 0; guard < 200 && te > ts; guard++) {
+            var region = text.slice(ts, te);
+            var m;
+            if (/^\s/.test(region)) { ts++; continue; }
+            if (/\s$/.test(region)) { te--; continue; }
+            if (/^[,;:]/.test(region)) { ts++; continue; }
+            if (/[,;:!?]$/.test(region)) { te--; continue; }
+            if ((m = /\((?:\*|\+)\)$/.exec(region))) { te -= m[0].length; continue; }
+            if (/\.$/.test(region) && !/(^|[^\p{L}])\p{Lu}\.$/u.test(region)) { te--; continue; }
+            if ((m = /(\\[SsBN]|[~_])$/.exec(region)) && text.charAt(te - m[1].length - 1) !== '\\' &&
+                    countToken(region, m[1]) % 2) { te -= m[1].length; continue; }
+            if ((m = /^(\\[SsBN]|[~_])/.exec(region)) && countToken(region, m[1]) % 2) {
+                ts += m[1].length; continue;
+            }
+            break;
+        }
+        return [ts, te];
+    }
+
+    // Grow a range that starts or ends inside a word out to the whole word.
+    function snapToWords(text, ts, te) {
+        if (te <= ts) { return [ts, te]; }
+        while (ts > 0 && PG_WORD_CHAR.test(text.charAt(ts - 1))) { ts--; }
+        while (te < text.length && PG_WORD_CHAR.test(text.charAt(te))) { te++; }
+        return [ts, te];
+    }
+
+    function wrapRange(text, ts, te) {
+        return text.slice(0, ts) + '\\P' + text.slice(ts, te) + '\\P' + text.slice(te);
+    }
+
+    /**
+     * What the PG button does, worked out on the markup. [s, e) is the
+     * selection (s === e for a bare caret). Returns the new markup.
+     *
+     *  - Caret inside a mark: the mark comes off (PG is a toggle).
+     *  - Caret inside a guide: its word(s) are marked, guessed from the guide.
+     *  - Any marks the selection touches are lifted first, so re-marking or
+     *    narrowing a mark never nests or leaves half a pair behind.
+     *  - A selection reaching into a guide covers the whole guide.
+     *  - Each guide in the selection marks the word(s) selected in front of it,
+     *    or -- with only the guide selected -- the word(s) its respelling covers.
+     *  - No guide: the selected word(s) are marked.
+     * Punctuation, spaces and half-selected words at the edges are tidied
+     * either way, so a sloppy selection marks what was meant.
+     */
+    function applyPgButton(text, s, e) {
+        var collapsed = s === e;
+        var pairs = pgPairs(text);
+        var lifted = false;
+        for (var i = pairs.length - 1; i >= 0; i--) {
+            var a = pairs[i][0], b = pairs[i][1];
+            var hit = collapsed ? (a < s && s <= b) : (a < e && b + 2 > s);
+            if (!hit) { continue; }
+            text = text.slice(0, b) + text.slice(b + 2);
+            text = text.slice(0, a) + text.slice(a + 2);
+            [b, a].forEach(function (p) {
+                if (p < s) { s = Math.max(p, s - 2); }
+                if (p < e) { e = Math.max(p, e - 2); }
+            });
+            lifted = true;
+        }
+        if (collapsed) {
+            if (lifted) { return text; }
+            var g0 = guideSpans(text).filter(function (g) { return g.start < s && s < g.end; })[0];
+            if (g0) { return markGuideAt(text, g0.start); }
+            // A bare caret in a word marks that word.
+            var w = [s, s];
+            while (w[0] > 0 && PG_WORD_CHAR.test(text.charAt(w[0] - 1))) { w[0]--; }
+            while (w[1] < text.length && PG_WORD_CHAR.test(text.charAt(w[1]))) { w[1]++; }
+            return w[1] > w[0] ? wrapRange(text, w[0], w[1]) : text;
+        }
+        var guides = guideSpans(text);
+        guides.forEach(function (g) {
+            if (g.start < e && g.end > s) { s = Math.min(s, g.start); e = Math.max(e, g.end); }
+        });
+        var inSel = guides.filter(function (g) { return g.start >= s && g.end <= e; });
+        if (!inSel.length) {
+            var t = trimPgTerm(text, s, e);
+            t = snapToWords(text, t[0], t[1]);
+            return t[1] > t[0] ? wrapRange(text, t[0], t[1]) : text;
+        }
+        // Right to left, so the guides still to do keep their offsets. The
+        // first guide marks what was selected in front of it; a later one
+        // can't know where its words start ("... and Teller"), so it guesses
+        // from its respelling, as PG auto does.
+        for (var k = inSel.length - 1; k >= 0; k--) {
+            var g = inSel[k];
+            var term = [0, 0];
+            if (k === 0) {
+                term = trimPgTerm(text, s, g.start);
+                term = snapToWords(text, term[0], term[1]);
+            }
+            if (term[1] > term[0] && /[\p{L}\p{N}]/u.test(text.slice(term[0], term[1]))) {
+                text = wrapRange(text, term[0], term[1]);
+            } else {
+                text = markGuideAt(text, g.start);
+            }
+        }
+        return text;
+    }
+
+    function isPowerMark(inner) {
+        var s = (inner || '').trim();
+        return s === '*' || s === '+';
+    }
+
+    /**
+     * Move an anchor off a guide and onto its word(s): \PFisher ("FISCHER")\P
+     * becomes \PFisher\P ("FISCHER"), and \P("FISCHER")\P on its own lifts off
+     * the guide and marks the word(s) in front of it. Pairs are walked right to
+     * left so the ones still to do keep their offsets.
+     * Mirrors utils.repair_pg_anchors on the server.
+     */
+    function repairPgAnchors(text) {
+        if (!text || text.indexOf('\\P') === -1) { return text; }
+        var re = /\\P/g, m, marks = [];
+        while ((m = re.exec(text)) !== null) {
+            if (m.index > 0 && text.charAt(m.index - 1) === '\\') { continue; }
+            marks.push(m.index);
+        }
+        for (var i = (marks.length - marks.length % 2) - 2; i >= 0; i -= 2) {
+            var open = marks[i], close = marks[i + 1];
+            var inner = text.slice(open + 2, close);
+            // Words, the guide, and any punctuation that got swept in after it.
+            var g = inner.match(/^([\s\S]*?\S)?(\s*)(\([^()]*\))([,;:.!?]*\s*)$/);
+            if (!g || isPowerMark(g[3].slice(1, -1)) || !g[3].slice(1, -1).trim()) { continue; }
+            if (g[1] && g[1].indexOf('(') !== -1) { continue; }
+            var before = text.slice(0, open), after = g[4] + text.slice(close + 2);
+            if (g[1]) {
+                text = before + '\\P' + g[1] + '\\P' + (g[2] || ' ') + g[3] + after;
+                continue;
+            }
+            if (before.trim()) { before = before.replace(/\s+$/, '') + ' '; }
+            text = markGuideAt(before + g[3] + after, before.length);
+        }
+        return text;
     }
 
     // Expose the converter for other scripts (e.g. rich_editor.js)
@@ -331,6 +515,10 @@ $(function () {
         isRichHtml: function (html) { return isRichHtml(html); },
         cleanPastedQems: cleanPastedQems,
         autoMarkPgTargets: autoMarkPgTargets,
+        markGuideAt: markGuideAt,
+        applyPgButton: applyPgButton,
+        repairPgAnchors: repairPgAnchors,
+        isPowerMark: isPowerMark,
         parenIsGuide: parenIsGuide,
         guidesRequireQuotes: guidesRequireQuotes
     };

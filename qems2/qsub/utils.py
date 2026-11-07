@@ -309,6 +309,7 @@ def get_formatted_question_html(line, allowUnderlines, allowParens, allowNewLine
     # With the set option on, a parenthetical with no quotation marks in it isn't
     # a guide; escaping it here makes the rest of the parse render it as the
     # literal parens it is.
+    line = repair_pg_anchors(line)
     if guidesRequireQuotes and allowParens:
         line = escape_unquoted_parens(line)
     if allowUnderlines:
@@ -844,9 +845,81 @@ def escape_unquoted_parens(line):
             return match.group(0)
         if parenthetical_has_quotes(inner):
             return match.group(0)
+        # A parenthetical right after a marked target is a guide whatever it
+        # looks like: the writer said so by anchoring the word in front of it,
+        # as in \Pembargo\P (EM-bar-GO).
+        if ends_with_pg_target(match.string[:match.start()]):
+            return match.group(0)
         return '\\(' + inner + '\\)'
 
     return _UNESCAPED_PAREN_RE.sub(_escape, line)
+
+
+def ends_with_pg_target(head):
+    """True if `head` (the text in front of a guide) ends with a closing ``\\P``.
+
+    Closing markup may sit between the marked word and its guide — a target
+    inside italics reads ``~Death of the \\PDauphin\\P~ ("DOFF-in")`` — so any
+    trailing italic/underline characters and ``\\S``/``\\s``/``\\B`` tokens are
+    stepped over before looking for the marker."""
+    head = (head or '').rstrip()
+    while head:
+        if head.endswith('\\P'):
+            return True
+        if head[-1] in ('_', '~'):
+            head = head[:-1].rstrip()
+        elif head[-2:] in ('\\S', '\\s', '\\B'):
+            head = head[:-2].rstrip()
+        else:
+            return False
+    return False
+
+
+# An unescaped \P marker.
+_PG_MARK_RE = re.compile(r'(?<!\\)\\P')
+# What a \P...\P pair holds when the guide got caught in it: optional word(s),
+# then a parenthetical at the very end.
+_PG_INNER_WITH_GUIDE_RE = re.compile(r'^(.*?\S)?(\s*)(\([^()]*\))([,;:.!?]*\s*)$', re.S)
+
+
+def repair_pg_anchors(text):
+    """Move a pronunciation-guide anchor off the guide and onto the word(s).
+
+    The anchor (``\\P...\\P``) is the spoken word a guide belongs to. Marking
+    the guide itself -- ``Fisher \\P("FISCHER")\\P`` -- or the word together
+    with its guide -- ``\\Pembargo (EM-bar-GO)\\P`` -- leaves the edit page and
+    the printed packet disagreeing about what is what, so both are put right:
+    the guide comes out of the mark, and a guide that was marked on its own
+    gets its word(s) marked instead, guessed from its word count."""
+    if not text or '\\P' not in text:
+        return text
+    from .style_checker import mark_pg_target, _guide_matches
+    marks = [m.start() for m in _PG_MARK_RE.finditer(text)]
+    pairs = [(marks[i], marks[i + 1]) for i in range(0, len(marks) - 1, 2)]
+    # Right to left, so the pairs still to do keep their offsets.
+    for open_at, close_at in reversed(pairs):
+        inner = text[open_at + 2:close_at]
+        m = _PG_INNER_WITH_GUIDE_RE.match(inner)
+        if not m or m.group(3)[1:-1].strip() in ('', '*', '+'):
+            continue
+        # Punctuation swept in after the guide (",") goes back outside.
+        words, gap, guide = m.group(1), m.group(2), m.group(3)
+        if words and '(' in words:
+            continue
+        before, after = text[:open_at], m.group(4) + text[close_at + 2:]
+        if words:
+            text = before + '\\P' + words + '\\P' + (gap or ' ') + guide + after
+            continue
+        # Only the guide was marked: lift the marks off it and mark the
+        # word(s) in front of it instead.
+        before = before.rstrip() + ' ' if before.strip() else before
+        text = before + guide + after
+        guide_at = len(before)
+        idx = next((i for i, g in enumerate(_guide_matches(text))
+                    if g.start() == guide_at), None)
+        if idx is not None:
+            text = mark_pg_target(text, idx)
+    return text
 
 
 def escape_answer_note_parens(answer):

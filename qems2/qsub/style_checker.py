@@ -20,7 +20,7 @@ present) is applied server-side by apply_fix(); it is never sent by the client.
 import re
 from html import escape as _escape
 
-from .utils import strip_markup, parenthetical_has_quotes
+from .utils import strip_markup, parenthetical_has_quotes, ends_with_pg_target
 from .pron_dict import suggest_guide_matches, context_snippet, guide_opener_at
 
 ERROR = 'error'
@@ -344,8 +344,10 @@ def _guide_matches(text):
 
 def _not_a_guide(match, require_quotes):
     """True when a set requiring quoted respellings would read this parenthetical
-    as ordinary text rather than a guide."""
-    return require_quotes and not parenthetical_has_quotes(match.group(1))
+    as ordinary text rather than a guide. One right after a marked target is a
+    guide either way (see utils.escape_unquoted_parens)."""
+    return (require_quotes and not parenthetical_has_quotes(match.group(1))
+            and not ends_with_pg_target(match.string[:match.start()]))
 
 
 def guide_word_count(inner):
@@ -354,26 +356,6 @@ def guide_word_count(inner):
     words of "Jean-Paul Sartre". Returns 0 when there's nothing to count."""
     stripped = (inner or '').strip().strip('"“”\'’')
     return len(stripped.split())
-
-
-def ends_with_pg_target(head):
-    """True if `head` (the text in front of a guide) ends with a closing ``\\P``.
-
-    Closing markup may sit between the marked word and its guide — a target
-    inside italics reads ``~Death of the \\PDauphin\\P~ ("DOFF-in")`` — so any
-    trailing italic/underline characters and ``\\S``/``\\s``/``\\B`` tokens are
-    stepped over before looking for the marker."""
-    head = (head or '').rstrip()
-    while head:
-        if head.endswith('\\P'):
-            return True
-        if head[-1] in ('_', '~'):
-            head = head[:-1].rstrip()
-        elif head[-2:] in ('\\S', '\\s', '\\B'):
-            head = head[:-2].rstrip()
-        else:
-            return False
-    return False
 
 
 def mark_pg_target(text, guide_index):

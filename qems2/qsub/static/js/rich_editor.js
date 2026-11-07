@@ -29,7 +29,10 @@ $(function () {
     // One line of QEMS markup -> minimal display HTML
     // (mirrors get_formatted_question_html)
     function qemsLineToHtml(line) {
-        var html = escapeHtml(line || '');
+        // An anchor caught around its own guide is put right before display,
+        // the same repair the server makes on save, so what shows here is what
+        // the Proof tab and the packet will show.
+        var html = escapeHtml(window.QemsMarkup.repairPgAnchors(line || ''));
         // Protect escaped literals (\_ and \~) so they don't become markup.
         html = html.replace(/\\_/g, '@@QXUS@@').replace(/\\~/g, '@@QXTI@@');
         html = html.replace(/__([^_]+)__/g, '<u>$1</u>');
@@ -47,16 +50,29 @@ $(function () {
         // guide itself is greyed whenever the pair is complete, so "anchored"
         // is something you can see rather than infer: amber word, grey guide.
         // Closing markup may sit between the two (~...\PDauphin\P~ ("DOFF-in")),
-        // so the gap allows closing tags as well as spaces.
+        // so the gap allows closing tags as well as spaces. A parenthetical
+        // right after a marked word is its guide whether or not the set wants
+        // quotes -- marking the word is what says so (utils.escape_unquoted_parens).
         html = html.replace(
             /\\P([\s\S]+?)\\P((?:<\/[a-z]+>|\s)*)(\(([^()]*)\))?/g,
             function (all, term, gap, guide, inner) {
                 var marked = '<span class="pg-target">' + term + '</span>';
                 gap = gap || '';
-                if (guide && window.QemsMarkup.parenIsGuide(stripTags(inner))) {
+                if (guide && !window.QemsMarkup.isPowerMark(stripTags(inner))) {
                     return marked + gap + '<span class="pg-guide">' + guide + '</span>';
                 }
                 return marked + gap + (guide || '');
+            });
+        // A guide with no marked word is still a guide, and the Proof tab and
+        // the packet grey it, so it greys here too (by the set's quotes rule:
+        // an unmarked aside is not one). The orange word is what says a guide
+        // is anchored.
+        html = html.replace(/(<span class="pg-guide">)?(\\)?\(([^()]*)\)/g,
+            function (all, already, escaped, inner) {
+                if (already || escaped || !window.QemsMarkup.parenIsGuide(stripTags(inner))) {
+                    return all;
+                }
+                return '<span class="pg-guide">(' + inner + ')</span>';
             });
         html = html.replace(/@@QXUS@@/g, '\\_').replace(/@@QXTI@@/g, '\\~');
         return html;
@@ -397,54 +413,6 @@ $(function () {
             sel.addRange(range);
         }
 
-        function rangeHtml(range) {
-            var box = document.createElement('div');
-            box.appendChild(range.cloneContents());
-            return box.innerHTML;
-        }
-
-        // Drop the mark around the caret. Goes through execCommand on a range
-        // covering the span so the native undo stack stays intact. The guide
-        // beside it loses its grey at the same time — the grey means "this pair
-        // is anchored", so it must not outlive the anchor.
-        function unmarkPgTarget(span) {
-            var inner = span.innerHTML;
-            ungreyGuideAfter(span);
-            selectNode(span);
-            document.execCommand('insertHTML', false, inner);
-            syncDown();
-        }
-
-        // Unwrap the .pg-guide span that follows `node` (skipping whitespace and
-        // the closing markup a target inside italics leaves behind).
-        function ungreyGuideAfter(node) {
-            var next = node.nextSibling;
-            while (next) {
-                if (next.nodeType === 3 && !next.nodeValue.trim()) { next = next.nextSibling; continue; }
-                if (next.nodeType === 1 && $(next).hasClass('pg-guide')) {
-                    $(next).replaceWith(next.innerHTML);
-                }
-                return;
-            }
-        }
-
-        // Narrow an existing mark to just the selected word(s): rebuild the
-        // span's contents with the selection marked and the rest plain.
-        function remarkInside(span, range) {
-            var pre = document.createRange();
-            pre.setStart(span, 0);
-            pre.setEnd(range.startContainer, range.startOffset);
-            var post = document.createRange();
-            post.setStart(range.endContainer, range.endOffset);
-            post.setEnd(span, span.childNodes.length);
-            var html = rangeHtml(pre) +
-                '<span class="pg-target">' + rangeHtml(range) + '</span>' +
-                rangeHtml(post);
-            selectNode(span);
-            document.execCommand('insertHTML', false, html);
-            syncDown();
-        }
-
         // Mark the target of every not-yet-marked guide in this field, guessing
         // each target from the guide's word count. Mirrors the server's
         // style_checker.mark_pg_target.
@@ -456,45 +424,80 @@ $(function () {
             if (opts.onSync) { opts.onSync(); }
         }
 
-        // Wrap the selected word(s) in a pronunciation-guide target span
-        // (\Pword\P). The user is expected to select the term together with its
-        // following ("...") guide; the trailing parenthetical is left outside
-        // the span so only the spoken word(s) get marked. If the selection has
-        // no trailing guide, the whole selection is wrapped.
-        //
-        // A mark is never a dead end: with the caret inside one and nothing
-        // selected this removes it, and selecting part of a mark moves the mark
-        // onto just that part.
+        // Placeholder characters (Unicode private use) that ride through the
+        // HTML-to-markup conversion to say where the selection was.
+        var SEL_START = String.fromCharCode(0xE000), SEL_END = String.fromCharCode(0xE001);
+
+        // The PG button. Select the word(s) and their guide -- or just the
+        // word, or just the guide -- and the word(s) are marked (\Pword\P) with
+        // the guide left outside. With the caret inside a mark and nothing
+        // selected, it removes the mark; selecting part of a mark moves the
+        // mark onto that part. The decisions are made on the markup by
+        // QemsMarkup.applyPgButton (it tidies sloppy edges, half-selected
+        // words and swept-in punctuation), and the editor is then redrawn from
+        // the result, so what shows is exactly what the Proof tab will show.
         function wrapPgTarget() {
-            var span = currentPgTarget();
-            if (span) {
-                var sel = window.getSelection();
-                if (!sel || !sel.rangeCount || sel.isCollapsed) { unmarkPgTarget(span); }
-                else { remarkInside(span, sel.getRangeAt(0)); }
-                return;
+            var sel = window.getSelection();
+            if (!sel || !sel.rangeCount) { return; }
+            var range = sel.getRangeAt(0);
+            if (!$editor[0].contains(range.commonAncestorContainer)) { return; }
+            var caret = caretOffsets();
+            // Drop the placeholders in as text nodes (end first, so the start
+            // position is still valid), read the markup, then find them.
+            var collapsed = range.collapsed;
+            var endMark = document.createTextNode(SEL_END);
+            var startMark = document.createTextNode(SEL_START);
+            if (!collapsed) {
+                var tail = range.cloneRange();
+                tail.collapse(false);
+                tail.insertNode(endMark);
             }
-            var html = selectionHtml();
-            if (!html) { return; }
-            // Peel any pg-target/pg-guide markers already inside the selection so
-            // we don't nest spans when re-marking.
-            html = html.replace(/<span class="pg-(?:target|guide)">([\s\S]*?)<\/span>/g, '$1');
-            // Split off a trailing ("...") / (...) guide, keeping it outside the
-            // span — and greying it, since marking the target is exactly what
-            // makes the pair anchored.
-            var m = html.match(/^([\s\S]*?)(\s*\(([^()]*)\)\s*)$/);
-            var termHtml, tail;
-            if (m && m[1].replace(/<[^>]*>/g, '').trim() &&
-                    window.QemsMarkup.parenIsGuide(stripTags(m[3]))) {
-                termHtml = m[1].replace(/\s+$/, '');
-                tail = ' <span class="pg-guide">' + m[2].trim() + '</span>';
-            } else {
-                termHtml = html;
-                tail = '';
+            range.collapse(true);
+            range.insertNode(startMark);
+            var text = htmlToQems($editor[0].innerHTML, multiline);
+            var s = text.indexOf(SEL_START);
+            text = text.replace(SEL_START, '');
+            var e = collapsed ? s : text.indexOf(SEL_END);
+            text = text.replace(SEL_END, '');
+            if (s !== -1 && e !== -1) {
+                text = window.QemsMarkup.applyPgButton(text, s, e);
             }
-            document.execCommand('insertHTML', false,
-                '<span class="pg-target">' + termHtml + '</span>' + tail);
-            syncDown();
+            $ta.val(text);
+            resyncUp();
+            restoreCaret(caret);
+            if (opts.onSync) { opts.onSync(); }
         }
+
+        // Typing at the end of a marked word or of a guide would otherwise go
+        // inside it -- the browser extends the span the caret sits at the end
+        // of -- so "Szilard" + ", who left" became one long orange mark, and
+        // text typed after a guide turned grey. Put the typed text after the
+        // span instead.
+        $editor.on('beforeinput', function (e) {
+            var ev = e.originalEvent;
+            if (!ev || ev.inputType !== 'insertText' || !ev.data) { return; }
+            var sel = window.getSelection();
+            if (!sel || !sel.rangeCount || !sel.isCollapsed) { return; }
+            var r = sel.getRangeAt(0);
+            var span = spanAt(r.startContainer, 'pg-target') || spanAt(r.startContainer, 'pg-guide');
+            if (!span) { return; }
+            var rest = document.createRange();
+            rest.selectNodeContents(span);
+            rest.setStart(r.startContainer, r.startOffset);
+            if (rest.toString().length) { return; }  // not at the span's end
+            e.preventDefault();
+            // A plain space at the end of a line collapses, and the browser then
+            // puts the caret back inside the span; a non-breaking one doesn't
+            // (the markup conversion turns it back into a space).
+            var typed = document.createTextNode(ev.data.replace(/ /g, ' '));
+            span.parentNode.insertBefore(typed, span.nextSibling);
+            var after = document.createRange();
+            after.setStart(typed, typed.length);
+            after.collapse(true);
+            sel.removeAllRanges();
+            sel.addRange(after);
+            syncDown();
+        });
 
         function resyncUp() {
             $editor.html(qemsToHtml($ta.val(), multiline));

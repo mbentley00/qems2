@@ -5136,6 +5136,18 @@ class GuidesRequireQuotesTests(TestCase):
         self.assertIn('("BOW-house")', out)          # still a guide
         self.assertIn('\\(his first\\)', out)        # now literal parens
 
+    def test_an_anchored_unquoted_guide_is_still_a_guide(self):
+        """Marking the word is the writer saying the parenthetical after it is
+        its guide, so a set that wants quotes still reads it as one."""
+        from qems2.qsub.utils import escape_unquoted_parens, get_formatted_question_html
+        text = 'an \\Pembargo\\P (EM-bar-GO) from (an aside)'
+        self.assertEqual(escape_unquoted_parens(text),
+                         'an \\Pembargo\\P (EM-bar-GO) from \\(an aside\\)')
+        html = get_formatted_question_html(text, True, True, False, False,
+                                           guidesRequireQuotes=True)
+        self.assertIn('<strong class="pronunciation-guide">(EM-bar-GO)</strong>', html)
+        self.assertIn('from (an aside)', html)
+
     def test_escape_never_touches_power_marks(self):
         """A power mark is a scoring mark, not text — escaping it would silently
         turn a powered tossup into an unpowered one."""
@@ -7410,6 +7422,38 @@ class PgAutoMarkTests(TestCase):
     def _mark(self, text):
         from qems2.qsub.style_checker import mark_pg_target
         return mark_pg_target(text, 0)
+
+    def test_repair_moves_an_anchor_off_its_guide(self):
+        from qems2.qsub.utils import repair_pg_anchors
+        # Only the guide marked: the word(s) in front get the mark instead.
+        self.assertEqual(repair_pg_anchors('Carl G. Fisher \\P("FISCHER")\\P, helped'),
+                         'Carl G. \\PFisher\\P ("FISCHER"), helped')
+        self.assertEqual(repair_pg_anchors('Jean-Paul Sartre \\P("zhahn-pohl SAR-truh")\\P'),
+                         '\\PJean-Paul Sartre\\P ("zhahn-pohl SAR-truh")')
+        # Word and guide marked together: the guide comes out.
+        self.assertEqual(repair_pg_anchors('an \\Pembargo (EM-bar-GO)\\P from'),
+                         'an \\Pembargo\\P (EM-bar-GO) from')
+        # ...along with any punctuation swept in after it.
+        self.assertEqual(repair_pg_anchors('Leo \\PSzilard ("SEE-lard"),\\P who'),
+                         'Leo \\PSzilard\\P ("SEE-lard"), who')
+
+    def test_repair_leaves_good_anchors_and_power_alone(self):
+        from qems2.qsub.utils import repair_pg_anchors
+        good = 'the \\PA\\P word ("x") \\PB\\P ("bee") and \\PFoo (*)\\P'
+        self.assertEqual(repair_pg_anchors(good), good)
+
+    def test_a_misplaced_anchor_renders_on_the_word(self):
+        """Questions saved before the repair still print right: the proof view
+        and exports show the word marked and the guide as a guide, as the
+        editor does."""
+        from qems2.qsub.utils import get_formatted_question_html
+        from qems2.qsub.yapp_export import qems_to_yapp_html
+        html = get_formatted_question_html('Carl G. Fisher \\P("FISCHER")\\P, helped',
+                                           True, True, False, False)
+        self.assertIn('<span class="pg-target">Fisher</span> '
+                      '<strong class="pronunciation-guide">("FISCHER")</strong>', html)
+        self.assertIn('<pg>Fisher</pg>',
+                      qems_to_yapp_html('Carl G. Fisher \\P("FISCHER")\\P', anchors=True))
 
     def test_single_word_guide_marks_one_word(self):
         self.assertEqual(self._mark('Denis Diderot ("DID-er-OW") wrote this.'),
@@ -9872,6 +9916,32 @@ class FreeformAuthorTests(TestCase):
             text += '\n'.join(p.extract_text() or ''
                               for p in PdfReader(_io.BytesIO(zf.read(name))).pages)
         self.assertIn('Ada Lovelace', text)
+
+    def test_the_yapp_export_credits_it(self):
+        import io as _io
+        import json as _json
+        import zipfile as _zip
+        self.tu.author_text = 'Ada Lovelace'
+        self.tu.save(update_fields=['author_text'])
+        resp = self.client.get('/export_question_set/{0}/yapp2-json/'.format(self.qset.id))
+        zf = _zip.ZipFile(_io.BytesIO(resp.content))
+        data = _json.loads(zf.read('Packet 1.json').decode('utf-8'))
+        self.assertEqual(data['tossups'][0]['metadata'], 'Ada Lovelace, Science - Biology')
+        self.assertTrue(data['bonuses'][0]['metadata'].startswith('Own Er'))
+
+    def test_the_csv_export_credits_it(self):
+        self.tu.author_text = 'Ada Lovelace'
+        self.tu.save(update_fields=['author_text'])
+        body = self.client.get(
+            '/export_question_set/{0}/csv/'.format(self.qset.id)).content.decode()
+        self.assertIn('Ada Lovelace', body)
+
+    def test_the_credit_tokens_and_writer_list_use_it(self):
+        self.tu.author_text = 'Ada Lovelace'
+        self.tu.save(update_fields=['author_text'])
+        values = self.qset.credit_values(self.packet)
+        self.assertEqual(values['{authors}'], 'Ada Lovelace, Own Er')
+        self.assertEqual(values['{packet_authors}'], 'Ada Lovelace, Own Er')
 
     def test_the_category_table_shows_the_credit(self):
         self.tu.author_text = 'Ada Lovelace'

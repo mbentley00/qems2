@@ -56,7 +56,7 @@ words, and are buzzable. Only the parenthesized guide itself is non-word text.
 import html as _html
 import re as _re
 
-from .utils import escape_unpaired_underscores
+from .utils import escape_unpaired_underscores, repair_pg_anchors
 
 #: Value of the top-level ``version`` field on a YAPP2 packet. Minor bumps only
 #: add optional fields, and readers match on the ``yapp2/`` prefix, so raising
@@ -108,6 +108,8 @@ def qems_to_yapp_html(text, anchors=False):
     # An underscore with no partner (~TK_119~) is literal, as it is in the
     # editor; left as a marker it underlined the rest of the question.
     text = escape_unpaired_underscores(text)
+    # An anchor caught around its own guide goes on the word (see utils).
+    text = repair_pg_anchors(text)
 
     out = []
     ital = ul = prompt = sup = sub = bold = pg = False
@@ -203,12 +205,17 @@ def _metadata(question, tags=None):
     from the question's author and category, as ``Author, Category - Subcategory``,
     followed by ``[Tag, Tag]`` when the set prints its category tags.
     Any piece that is missing is dropped."""
+    # author_real_name() prefers the freeform credit (a question reassigned to
+    # someone outside the set) over the owning account's name.
     author = ''
-    if getattr(question, 'author', None) is not None:
-        try:
-            author = _html.unescape(question.author.get_real_name() or '').strip()
-        except Exception:
-            author = ''
+    try:
+        if hasattr(question, 'author_real_name'):
+            author = question.author_real_name() or ''
+        elif getattr(question, 'author', None) is not None:
+            author = question.author.get_real_name() or ''
+        author = _html.unescape(author).strip()
+    except Exception:
+        author = ''
     cat = ''
     if getattr(question, 'category', None) is not None:
         c = (question.category.category or '').strip()

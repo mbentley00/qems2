@@ -274,15 +274,19 @@ class QuestionSet (models.Model):
 
     @staticmethod
     def _credit_names(writers):
-        """Real names, alphabetically, with the blanks and the duplicates out."""
+        """Real names, alphabetically, with the blanks and the duplicates out.
+        Takes Writers or names already worked out (strings)."""
         seen = set()
         for writer in writers:
             if writer is None:
                 continue
-            try:
-                name = (writer.get_real_name() or '').strip()
-            except Exception:
-                name = str(writer).strip()
+            if isinstance(writer, str):
+                name = writer.strip()
+            else:
+                try:
+                    name = (writer.get_real_name() or '').strip()
+                except Exception:
+                    name = str(writer).strip()
             if name:
                 seen.add(name)
         return sorted(seen, key=lambda n: n.lower())
@@ -292,14 +296,15 @@ class QuestionSet (models.Model):
         questions = (list(self.tossup_set.select_related('author', 'proofreader'))
                      + list(self.bonus_set.select_related('author', 'proofreader')))
         names = self._credit_names
-        packet_authors = ([q.author for q in questions if q.packet_id == packet.id]
+        # Each question's credited name (its freeform credit when it has one).
+        packet_authors = ([q.author_real_name() for q in questions if q.packet_id == packet.id]
                           if packet is not None else [])
         return {
             '{writers}': ', '.join(names(self.writer.all())),
             '{editors}': ', '.join(names(self.editor.all())),
             '{proofreaders}': ', '.join(names(
                 q.proofreader for q in questions if q.proofread and q.proofreader_id)),
-            '{authors}': ', '.join(names(q.author for q in questions)),
+            '{authors}': ', '.join(names(q.author_real_name() for q in questions)),
             '{packet_authors}': ', '.join(names(packet_authors)),
             '{owner}': ', '.join(names([self.owner])),
             '{set}': self.name or '',
@@ -2027,8 +2032,8 @@ class Tossup (models.Model):
             self.proofread_date = timezone.now()
 
         self.tossup_answer = strip_answer_from_answer_line(self.tossup_answer)
-        self.tossup_text = collapse_nested_markup(self.tossup_text)
-        self.tossup_answer = collapse_nested_markup(self.tossup_answer)
+        self.tossup_text = repair_pg_anchors(collapse_nested_markup(self.tossup_text))
+        self.tossup_answer = repair_pg_anchors(collapse_nested_markup(self.tossup_answer))
         tossup_history = TossupHistory()
         tossup_history.tossup_text = self.tossup_text
         tossup_history.tossup_answer = self.tossup_answer
@@ -2477,7 +2482,7 @@ class Bonus(models.Model):
         self.part3_answer = strip_answer_from_answer_line(self.part3_answer)
         for field in ('leadin', 'part1_text', 'part1_answer', 'part2_text', 'part2_answer',
                       'part3_text', 'part3_answer'):
-            setattr(self, field, collapse_nested_markup(getattr(self, field)))
+            setattr(self, field, repair_pg_anchors(collapse_nested_markup(getattr(self, field))))
 
         bonus_history = BonusHistory()
         bonus_history.leadin = self.leadin

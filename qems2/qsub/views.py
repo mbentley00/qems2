@@ -6757,6 +6757,9 @@ def add_qems_formatted_runs(paragraph, text, bold=False, is_answer=False, smart_
     text = html.unescape(text)
     if smart_quotes:
         text = smarten_quotes(text)
+    # An anchor caught around its own guide prints the way the editor shows it
+    # (questions saved before the save-time repair still have them).
+    text = repair_pg_anchors(text)
     # A set may require a guide to carry quotation marks; escaping the rest makes
     # them print as the ordinary parentheses they are. Done after unescaping so
     # the quotes are visible to the test.
@@ -7168,7 +7171,7 @@ def export_question_set(request, qset_id, output_format):
                     if tossup.proofread and tossup.proofreader is not None:
                         proofreader_name = safe_name(tossup.proofreader)
 
-                    csv_writer.writerow([safe_text(tossup.tossup_text), safe_text(tossup.tossup_answer), safe_category(tossup.category), safe_name(tossup.author), tossup.edited, safe_packet(tossup.packet), tossup.question_number, safe_text(comment_string), tossup.id, editor_name, proofreader_name, tossup.read_carefully, safe_text(build_tag_string(tossup))])
+                    csv_writer.writerow([safe_text(tossup.tossup_text), safe_text(tossup.tossup_answer), safe_category(tossup.category), tossup.author_real_name(), tossup.edited, safe_packet(tossup.packet), tossup.question_number, safe_text(comment_string), tossup.id, editor_name, proofreader_name, tossup.read_carefully, safe_text(build_tag_string(tossup))])
 
                 csv_writer.writerow([])
 
@@ -7184,7 +7187,7 @@ def export_question_set(request, qset_id, output_format):
                     if bonus.proofread and bonus.proofreader is not None:
                         proofreader_name = safe_name(bonus.proofreader)
 
-                    csv_writer.writerow([safe_text(bonus.leadin), safe_text(bonus.part1_text), safe_text(bonus.part1_answer), bonus.part1_difficulty, safe_text(bonus.part2_text), safe_text(bonus.part2_answer), bonus.part2_difficulty, safe_text(bonus.part3_text), safe_text(bonus.part3_answer), bonus.part3_difficulty, safe_category(bonus.category), safe_name(bonus.author), bonus.edited, safe_packet(bonus.packet), bonus.question_number, safe_text(comment_string), bonus.id, editor_name, proofreader_name, bonus.read_carefully, safe_text(build_tag_string(bonus))])
+                    csv_writer.writerow([safe_text(bonus.leadin), safe_text(bonus.part1_text), safe_text(bonus.part1_answer), bonus.part1_difficulty, safe_text(bonus.part2_text), safe_text(bonus.part2_answer), bonus.part2_difficulty, safe_text(bonus.part3_text), safe_text(bonus.part3_answer), bonus.part3_difficulty, safe_category(bonus.category), bonus.author_real_name(), bonus.edited, safe_packet(bonus.packet), bonus.question_number, safe_text(comment_string), bonus.id, editor_name, proofreader_name, bonus.read_carefully, safe_text(build_tag_string(bonus))])
 
                 csv_writer.writerow([])
                 entries = qset.setwidedistributionentry_set.all()
@@ -7274,8 +7277,11 @@ def export_question_set(request, qset_id, output_format):
                               list(Bonus.objects.filter(question_set=qset)
                                    .select_related('author', 'editor')))
                     for q in all_qs:
-                        if q.author_id:
-                            writers[q.author_id] = html.unescape(safe_name(q.author)).strip()
+                        # Keyed by name, not account: a freeform credit names
+                        # someone the account does not.
+                        name = html.unescape(q.author_real_name()).strip()
+                        if name:
+                            writers[name] = name
                         if q.edited and q.editor_id:
                             editors[q.editor_id] = html.unescape(safe_name(q.editor)).strip()
                     return (sorted(n for n in writers.values() if n),
@@ -7891,8 +7897,9 @@ def export_question_set(request, qset_id, output_format):
                     writers, editors = {}, {}
                     for q in (list(Tossup.objects.filter(question_set=qset).select_related('author', 'editor')) +
                               list(Bonus.objects.filter(question_set=qset).select_related('author', 'editor'))):
-                        if q.author_id:
-                            writers[q.author_id] = html.unescape(safe_name(q.author)).strip()
+                        name = html.unescape(q.author_real_name()).strip()
+                        if name:
+                            writers[name] = name
                         if q.edited and q.editor_id:
                             editors[q.editor_id] = html.unescape(safe_name(q.editor)).strip()
                     credits = (sorted(n for n in writers.values() if n),
