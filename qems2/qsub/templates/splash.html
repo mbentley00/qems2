@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% load static %}
 
-{% block title %}QEMS3 — Quizbowl Question Management{% endblock %}
+{% block title %}QEMS3: Quizbowl Question Management{% endblock %}
 
 {% block header %}
 <div class="fixed">
@@ -24,62 +24,86 @@
 {% block content %}
 <div class="splash-hero">
     <h1>QEMS3</h1>
-    <p class="splash-tagline">A quizbowl question management system &mdash; write, edit, and
+    <p class="splash-tagline">A quizbowl question management system. Write, edit, and
     packetize tournament question sets, all in one place.</p>
     <p class="splash-cta">
         <a href="/accounts/login/" class="button">Log in</a>
         <a href="/accounts/signup/" class="button secondary">Create an account</a>
     </p>
     <p class="splash-lineage">An evolution of <strong>QEMS2</strong>, originally developed by
-    Jerry Vinokurov &mdash; still available at
+    Jerry Vinokurov and still available at
     <a href="https://qems2.grapesmoker.net/" target="_blank" rel="noopener">qems2.grapesmoker.net</a>.</p>
+</div>
+
+<div class="splash-shots">
+    <h4 class="page-header">See it in action</h4>
+    <p class="splash-shots-note">Screenshots from the 2021 NSC set. Click any image to see it full size.</p>
+    <div class="splash-shots-grid">
+        <figure>
+            <a href="{% static 'images/landing/editor.webp' %}" target="_blank" rel="noopener">
+                <img src="{% static 'images/landing/editor.webp' %}" width="1665" height="1245" loading="lazy"
+                     alt="The question editor: a tossup with grey pronunciation guides, a power mark, and an editor comment beside it.">
+            </a>
+            <figcaption><strong>Write and edit.</strong> A rich editor with power marks, pronunciation guides, and comments side by side.</figcaption>
+        </figure>
+        <figure>
+            <a href="{% static 'images/landing/proof-view.webp' %}" target="_blank" rel="noopener">
+                <img src="{% static 'images/landing/proof-view.webp' %}" width="1665" height="990" loading="lazy"
+                     alt="A packet in document view, formatted for reading aloud.">
+            </a>
+            <figcaption><strong>Proof whole packets.</strong> Read a packet the way a moderator will, and comment as you go.</figcaption>
+        </figure>
+        <figure>
+            <a href="{% static 'images/landing/packet-grid.webp' %}" target="_blank" rel="noopener">
+                <img src="{% static 'images/landing/packet-grid.webp' %}" width="1665" height="990" loading="lazy"
+                     alt="The packet grid: every packet as a column of answer lines and categories, with an unpacketized pool above.">
+            </a>
+            <figcaption><strong>Build packets.</strong> Drag questions between packets, or place them from the unpacketized pool.</figcaption>
+        </figure>
+        <figure>
+            <a href="{% static 'images/landing/category-overview.webp' %}" target="_blank" rel="noopener">
+                <img src="{% static 'images/landing/category-overview.webp' %}" width="1665" height="990" loading="lazy"
+                     alt="Category overview: completion percentages for every category and subcategory in the set.">
+            </a>
+            <figcaption><strong>Track the distribution.</strong> See which categories are done and which still need questions.</figcaption>
+        </figure>
+    </div>
 </div>
 
 <div class="row">
     <div class="large-6 columns">
         <h4 class="page-header">What it does</h4>
         <ul class="square">
-            <li><strong>Write questions</strong> &mdash; ACF-style tossups and bonuses. Paste
+            <li><strong>Write questions:</strong> ACF-style tossups and bonuses. Paste
                 straight from Word or Google Docs.</li>
-            <li><strong>Edit &amp; review</strong> &mdash; comment on questions and answer lines,
+            <li><strong>Edit &amp; review:</strong> comment on questions and answer lines,
                 resolve discussions, lock finished questions, and follow an activity feed.</li>
-            <li><strong>Manage distributions</strong> &mdash; set per-category and per-subcategory
+            <li><strong>Manage distributions:</strong> set per-category and per-subcategory
                 quotas and watch them fill as questions come in.</li>
-            <li><strong>Packetize</strong> &mdash; auto-distribute questions into packets, then
+            <li><strong>Packetize:</strong> auto-distribute questions into packets, then
                 fine-tune with a drag-and-drop packet grid and a document view.</li>
-            <li><strong>Check quality</strong> &mdash; run a duplicate checker and a style checker
+            <li><strong>Check quality:</strong> run a duplicate checker and a style checker
                 before export.</li>
-            <li><strong>Import &amp; export</strong> &mdash; bring in material from TSV, JSON
+            <li><strong>Import &amp; export:</strong> bring in material from TSV, JSON
                 (YAPP/MODAQ), <code>.docx</code>, or PDF, and export polished packets to Word.</li>
         </ul>
     </div>
     <div class="large-6 columns">
         <h4 class="page-header">New in QEMS3</h4>
         <ul class="square">
-            <li><strong>Smarter packetization</strong> &mdash; an unpacketized pool, drag-to-place
+            <li><strong>Smarter packetization:</strong> an unpacketized pool, drag-to-place
                 and swap, natural and custom packet ordering, and per-slot tools on the grid.</li>
-            <li><strong>Polished Word export</strong> &mdash; packets in proper reading format,
+            <li><strong>Polished Word export:</strong> packets in proper reading format,
                 with open comments carried through as Word comments.</li>
-            <li><strong>Packet → MP3</strong> &mdash; generate an audio reading of a packet.</li>
-            <li><strong>Playtesting</strong> &mdash; buzzes and bonus conversion, by hand or from
+            <li><strong>Packet → MP3:</strong> generate an audio reading of a packet.</li>
+            <li><strong>Playtesting:</strong> buzzes and bonus conversion, by hand or from
                 a Discord bot, tied to the question version played.</li>
-            <li><strong>Better editing</strong> &mdash; moderator heads-ups for tricky answer
+            <li><strong>Better editing:</strong> moderator heads-ups for tricky answer
                 lines, packet-level comments, and a cleaner document view.</li>
         </ul>
     </div>
 </div>
 
-<div class="panel radius">
-    <h4 class="page-header" style="margin-top:0;">About quizbowl</h4>
-    <p>New to quizbowl, or looking for the broader community and events?</p>
-    <ul class="square">
-        <li><a href="https://hsquizbowl.org/" target="_blank" rel="noopener">hsquizbowl.org</a>
-            &mdash; the Quizbowl Resource Center forums and community.</li>
-        <li><a href="https://pace-nsc.org/" target="_blank" rel="noopener">pace-nsc.org</a>
-            &mdash; the Partnership for Academic Competition Excellence and the National
-            Scholastic Championship.</li>
-    </ul>
-</div>
 
 <style>
 .splash-hero { text-align: center; padding: 40px 20px 28px; }
@@ -88,5 +112,15 @@
 .splash-cta { margin-bottom: 0.5rem; }
 .splash-cta .button { margin: 0 4px; }
 .splash-lineage { color: #888; font-size: 0.9rem; }
+.splash-shots { max-width: 1200px; margin: 0 auto 2rem; padding: 0 0.9375rem; }
+.splash-shots-note { color: #777; font-size: 0.9rem; margin-bottom: 1rem; }
+.splash-shots-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+.splash-shots-grid figure { margin: 0; }
+.splash-shots-grid img { display: block; width: 100%; height: auto; aspect-ratio: 1665 / 990; object-fit: cover;
+    object-position: top; border: 1px solid #ddd; border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    transition: box-shadow 0.15s; }
+.splash-shots-grid a:hover img { box-shadow: 0 4px 16px rgba(0,0,0,0.18); }
+.splash-shots-grid figcaption { font-size: 0.9rem; color: #555; margin-top: 0.5rem; }
+@media (max-width: 640px) { .splash-shots-grid { grid-template-columns: 1fr; } }
 </style>
 {% endblock %}
