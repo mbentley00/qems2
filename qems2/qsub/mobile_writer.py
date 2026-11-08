@@ -27,7 +27,7 @@ class WriterError(Exception):
     """Something the writer should see in place of a result."""
 
 
-_USER_AGENT = 'QEMS3 question writer (https://qems3.buzz)'
+_USER_AGENT = 'QEMS3 question writer (https://qems3.com)'
 
 # Opus 5.5 can decline a request in a safety category; "default" fallbacks have
 # the API rerun such a request on a model chosen for that category, inside the

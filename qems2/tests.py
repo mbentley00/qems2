@@ -18767,3 +18767,20 @@ class AIAutoReviewTests(TestCase):
             self.client.login(username='plainowner', password='pw')
             body = self.client.get('/edit_question_set/%d/' % self.qset.id).content.decode()
             self.assertNotIn('name="ai_auto_review"', body)
+
+
+@override_settings(REDIRECT_HOSTS=['qems3.buzz', 'www.qems3.com'], BASE_URL='https://qems3.com',
+                   ALLOWED_HOSTS=['qems3.com', 'qems3.buzz', 'www.qems3.com', 'testserver'],
+                   SECURE_SSL_REDIRECT=False)
+class CanonicalHostTests(TestCase):
+    """Alternate domains redirect to BASE_URL so everyone signs in on one domain."""
+
+    def test_alternate_host_redirects_with_path(self):
+        r = self.client.get('/accounts/login/?next=/main/', HTTP_HOST='qems3.buzz')
+        self.assertEqual(r.status_code, 301)
+        self.assertEqual(r['Location'], 'https://qems3.com/accounts/login/?next=/main/')
+
+    def test_main_and_unlisted_hosts_are_served(self):
+        for host in ('qems3.com', 'testserver'):
+            r = self.client.get('/accounts/login/', HTTP_HOST=host)
+            self.assertEqual(r.status_code, 200, host)

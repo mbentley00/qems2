@@ -217,6 +217,7 @@ AUTHENTICATION_BACKENDS = (
 )
 
 MIDDLEWARE = [
+    'qems2.qsub.canonical_host.CanonicalHostMiddleware',
     'django.middleware.common.CommonMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -310,6 +311,10 @@ SUPPORT_EMAIL = os.environ.get('SUPPORT_EMAIL', 'bentley.michael.j@gmail.com')
 # Absolute base URL used to build links in notification emails (no trailing
 # slash). Override per-deployment with the BASE_URL env var.
 BASE_URL = os.environ.get('BASE_URL', 'https://qems2-bbhfewbrfzhyhvbk.westus3-01.azurewebsites.net').rstrip('/')
+
+# Alternate domains that permanently redirect to BASE_URL (comma-separated,
+# e.g. "qems3.buzz,www.qems3.com"). See qsub/canonical_host.py.
+REDIRECT_HOSTS = [h for h in os.environ.get('REDIRECT_HOSTS', '').split(',') if h.strip()]
 
 # Shown in allauth's e-mails ("Hello from ..."), alongside the domain taken
 # from BASE_URL. bootstrap_deploy writes both onto the django.contrib.sites row.
