@@ -1,0 +1,88 @@
+{% load filters %}
+{% comment %}
+The AI review of this one question, on its edit page. Admin-only, and only for
+sets that review submissions. Rows use the style-check panel's classes
+(sc-row, sc-chip, ...), which _style_check_panel.html defines on the same page.
+Include with:
+{% include "_ai_review_panel.html" with question=tossup qtype="tossup" %}
+{% endcomment %}
+{% ai_review_findings question qtype as ai_findings %}
+{% if ai_findings is not None %}
+{% ai_review_state question qtype as ai_state %}
+<div id="ai-review-panel" class="sc-card" data-qtype="{{ qtype }}" data-qid="{{ question.pk }}">
+    <div class="sc-head ai-q-head">
+        <span class="ai-q-title">AI review</span>
+        <span class="sc-count{% if ai_findings %} has-issues{% endif %}" id="ai-q-count">{% if ai_findings %}{{ ai_findings|length }}{% endif %}</span>
+        <span class="ai-q-state">{% if ai_state == 'running' %}Reviewing&hellip;{% elif ai_state == 'none' %}Not reviewed yet{% elif ai_state == 'outdated' %}Reviewed before the last edit{% elif ai_state == 'failed' %}Review failed{% endif %}</span>
+        <span class="sc-links">
+            {% if ai_state != 'running' %}<a href="#" class="ai-q-run">{% if ai_state == 'none' %}Review now{% else %}Review again{% endif %}</a>{% endif %}
+            <a href="/style_check/{{ question.question_set_id }}/" target="_blank" rel="noopener">Whole set &#8599;</a>
+        </span>
+    </div>
+    {% if ai_state == 'done' or ai_state == 'outdated' %}
+    <p class="sc-status ai-q-empty"{% if ai_findings %} hidden{% endif %}>Nothing flagged.</p>
+    {% endif %}
+    <ul class="sc-rows">
+    {% for f in ai_findings %}
+        <li class="sc-row{% if f.severity == 'error' %} sev-error{% endif %}" data-id="{{ f.id }}">
+            <span class="sc-chip">{% if f.kind == 'answer' %}Alt answer{% elif f.kind == 'error' %}Failed{% elif f.kind == 'fact' %}Fact{% elif f.kind == 'style' %}Style{% else %}Grammar{% endif %}</span>
+            <div class="sc-main">
+                <div class="sc-title ai-q-why">{% if f.explanation %}{{ f.explanation }}{% elif f.kind == 'answer' %}Also accept{% else %}Suggested change{% endif %}</div>
+                {% if f.kind == 'answer' %}
+                <div class="sc-detail">{{ f.suggestion_html }}</div>
+                {% elif f.excerpt or f.suggestion %}
+                <div class="sc-detail">{% if f.excerpt %}&ldquo;{{ f.excerpt }}&rdquo;{% endif %}{% if f.excerpt and f.suggestion %} &rarr; {% endif %}{% if f.suggestion %}<mark>{{ f.suggestion }}</mark>{% endif %}</div>
+                {% endif %}
+            </div>
+            <div class="sc-actions"><a href="#" class="sc-dismiss ai-q-dismiss">Dismiss</a></div>
+        </li>
+    {% endfor %}
+    </ul>
+</div>
+
+<style>
+.ai-q-head { padding: 12px 20px; }
+.ai-q-title { color: var(--qx-ink, #20232e); font-size: 1rem; }
+.ai-q-state { color: var(--qx-muted, #8a8f9c); font-size: .9rem; }
+#ai-review-panel .sc-title { font-weight: 500; }
+#ai-review-panel .sc-chip { min-width: 0; width: 90px; }
+</style>
+<script>
+$(function () {
+    var $panel = $('#ai-review-panel');
+    $panel.on('click', '.ai-q-dismiss', function (e) {
+        e.preventDefault();
+        var $a = $(this), $li = $a.closest('.sc-row');
+        $a.text('Dismissing…');
+        $.post('/dismiss_ai_grammar_finding/', {
+            csrfmiddlewaretoken: '{{ csrf_token }}', finding_id: $li.attr('data-id')
+        }, function () {
+            $li.remove();
+            var left = $panel.find('.sc-row').length;
+            $('#ai-q-count').text(left || '').toggleClass('has-issues', left > 0);
+            if (!left) { $panel.find('.ai-q-empty').prop('hidden', false); }
+        }).fail(function () { $a.text('Dismiss'); });
+    });
+    // Swap in the refreshed panel; never reload (it would lose unsaved edits)
+    $panel.on('click', '.ai-q-run', function (e) {
+        e.preventDefault();
+        var $a = $(this);
+        if ($a.data('busy')) { return; }
+        $a.data('busy', true);
+        $panel.find('.ai-q-state').text('Reviewing…');
+        $a.text('');
+        $.post('/ai_review_question/', {
+            csrfmiddlewaretoken: '{{ csrf_token }}',
+            qtype: $panel.attr('data-qtype'), qid: $panel.attr('data-qid')
+        }, null, 'json').done(function (r) {
+            if (r.ok) { $panel.replaceWith(r.html); return; }
+            $panel.find('.ai-q-state').text(r.error || r.message || 'Review failed');
+            $a.text('Review now').data('busy', false);
+        }).fail(function () {
+            $panel.find('.ai-q-state').text('Review failed');
+            $a.text('Review now').data('busy', false);
+        });
+    });
+});
+</script>
+{% endif %}

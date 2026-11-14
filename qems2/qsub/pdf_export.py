@@ -505,8 +505,14 @@ def _meta_line(q, opts):
         parts.append('[{0}]'.format(', '.join(tags)))
     if opts['ids']:
         parts.append('~{0}~'.format(q.id))
-    if opts['editors'] and getattr(q, 'edited', False) and q.editor:
-        ename = _real_name(q.editor)
+    if opts['editors']:
+        # The editor stamp (once edited) and any co-editors
+        getter = getattr(q, 'editor_real_name', None)
+        if callable(getter):
+            import html as _html
+            ename = _html.unescape(getter() or '').strip()
+        else:
+            ename = _real_name(q.editor) if getattr(q, 'edited', False) and q.editor else ''
         if ename:
             parts.append('<Editor: {0}>'.format(ename))
     return ' '.join(p for p in parts if p).strip()

@@ -54,7 +54,6 @@
                     <label><input type="number" min="0" name="tiebreak_tu" value="{{ posted.tiebreak_tu|default:'0' }}"> TU</label>
                     <label><input type="number" min="0" name="tiebreak_bs" value="{{ posted.tiebreak_bs|default:'0' }}"> B</label>
                 </div>
-                <small>Read after a packet&rsquo;s regular questions. Most sets leave this at 0.</small>
             </div>
             <div class="cqs-field">
                 <span class="cqs-label" id="cqs-extras-label">Extra questions in set</span>
@@ -62,7 +61,6 @@
                     <label><input type="number" min="0" name="extras_tu" value="{{ posted.extras_tu|default:'0' }}"> TU</label>
                     <label><input type="number" min="0" name="extras_bs" value="{{ posted.extras_bs|default:'0' }}"> B</label>
                 </div>
-                <small>Spares for a dedicated tiebreaker packet</small>
             </div>
         </div>
     </div>
@@ -73,18 +71,15 @@
         <div class="cqs-sources" role="radiogroup" aria-label="Where the distribution comes from">
             <label class="cqs-source">
                 <input type="radio" name="source" value="copy"{% if src == 'copy' %} checked{% endif %}{% if not copy_sets %} disabled{% endif %}>
-                <span><strong>Copy from existing set</strong>
-                    <small>Distribution, category tags, tiebreaker / extra totals, adjusted to this set&rsquo;s size.{% if not copy_sets %} (You aren&rsquo;t on any set yet.){% endif %}</small></span>
+                <span><strong>Copy from existing set</strong></span>
             </label>
             <label class="cqs-source">
                 <input type="radio" name="source" value="write"{% if src == 'write' or not src %} checked{% endif %}>
-                <span><strong>Create new</strong>
-                    <small>Paste the set announcement (&ldquo;4/4 Literature&rdquo;, then its breakdown), or enter the categories one by one.</small></span>
+                <span><strong>Create new</strong></span>
             </label>
             <label class="cqs-source">
                 <input type="radio" name="source" value="distribution"{% if src == 'distribution' %} checked{% endif %}>
-                <span><strong>Start from an older QEMS2-style distribution</strong>
-                    <small>One of the shared distributions, its per-packet minimums as the lines.</small></span>
+                <span><strong>Older QEMS2-style distribution</strong></span>
             </label>
         </div>
         {% endwith %}
@@ -101,18 +96,17 @@
                     <label class="cqs-check"><input type="checkbox" name="copy_scale" value="1" checked>
                         <span>Scale tag quotas to this set&rsquo;s packets</span></label>
                     <label class="cqs-check"><input type="checkbox" name="copy_extras" value="1">
-                        <span>Also copy its tiebreakers and extras<small>Instead of the numbers above.</small></span></label>
+                        <span>Also copy its tiebreakers and extras</span></label>
                 </div>
             </div>
         </div>
         <div class="cqs-panel" data-source="write">
-            <p class="cqs-note" style="margin:0">You&rsquo;ll set the distribution on the next screen.</p>
         </div>
         <div class="cqs-panel" data-source="distribution">
             <div class="cqs-field">
                 <label for="{{ form.distribution.id_for_label }}">Old distribution</label>
                 {{ form.distribution }}{{ form.distribution.errors }}
-                <small>Its categories are copied into the set. <a href="/edit_distribution/" target="_blank" rel="noopener">Make a new one</a> if none fit.</small>
+                <small><a href="/edit_distribution/" target="_blank" rel="noopener">New distribution</a></small>
             </div>
             {# Filled in by JS from /distribution_preview/<id>/ as the picker changes. #}
             <div class="cqs-dist-preview" id="cqs-dist-preview">
@@ -131,34 +125,27 @@
             <div class="cqs-field">
                 <label for="{{ form.max_acf_tossup_length.id_for_label }}">Max Tossup Length</label>
                 {{ form.max_acf_tossup_length }}{{ form.max_acf_tossup_length.errors }}
-                <small>Characters. Over-length questions are flagged, not blocked.</small>
             </div>
             <div class="cqs-field cqs-bonus-only">
                 <label for="{{ form.max_acf_bonus_length.id_for_label }}">Max Bonus Length</label>
                 {{ form.max_acf_bonus_length }}{{ form.max_acf_bonus_length.errors }}
-                <small>Characters, counted across the whole bonus.</small>
             </div>
         </div>
     </div>
 
     <div class="cqs-card">
         <h4 class="cqs-heading">Set options</h4>
-        <p class="cqs-note">All of these can be changed later from the set's page.</p>
         <div class="cqs-checks">
             <label class="cqs-check">{{ form.enable_superpower }}
-                <span>Enable superpowers (20-point <code>(+)</code> mark)</span></label>
+                <span>Superpowers <code>(+)</code></span></label>
             <label class="cqs-check">{{ form.char_count_ignores_pronunciation_guides }}
-                <span>Character counts ignore pronunciation guides
-                    <small>A ("pruh-nun-see-AY-shun") guide doesn't eat into the length limit.</small></span></label>
+                <span>Character counts ignore pronunciation guides</span></label>
             <label class="cqs-check">{{ form.guides_require_quotes }}
-                <span>Only quoted parentheses are pronunciation guides
-                    <small>On: <code>("DID-er-OW")</code> is a guide. <code>(a plain aside)</code> is ordinary text.</small></span></label>
+                <span>Only quoted parentheses are pronunciation guides</span></label>
             <label class="cqs-check">{{ form.structured_answers }}
-                <span>Structured answer lines
-                    <small>Edit answers as fields: main answer, accepts and prompts. The printed line doesn't change.</small></span></label>
+                <span>Structured answer lines</span></label>
             <label class="cqs-check">{{ form.public }}
-                <span>Public (listed for everyone)
-                    <small>Anyone can see this set and ask to join. Requests email you.</small></span></label>
+                <span>Public</span></label>
         </div>
     </div>
 

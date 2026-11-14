@@ -1412,6 +1412,157 @@ class PronunciationGuideTests(TestCase):
         self.assertIn('pg-context', i['message_html'])
 
 
+class PGNeedModelTests(TestCase):
+    """The local "may need a pronunciation guide" model (qsub.pg_need) and its
+    style-check rule, pg_missing. Relies on the bundled data/pg_need_model.json."""
+
+    TEXT = ('This composer of Il ritorno studied with Pallavicino in Mantua. '
+            'Leopold von Ranke (RAHN-kuh) praised him. They\'re in Act XIII. '
+            'For 10 points, name this composer.')
+
+    def _tossup(self, text, answer='_Monteverdi_'):
+        from types import SimpleNamespace
+        return SimpleNamespace(tossup_text=text, tossup_answer=answer)
+
+    def test_matches_the_training_script(self):
+        # (word, left, right, sentence-initial, italic, probability) from
+        # export_pg_model.py's parity file; the server must score them the same.
+        from qems2.qsub import pg_need
+        cases = [
+            ('American', 'from this South', 'country, as', False, False, 0.0),
+            ('Andante', 'between a lyrical', 'a soft', False, True, 0.0043),
+            ('overactive', 'structure has an', '"superscript Q"', False, False, 0.0155),
+            ('brokerage', 'the assets of', 'firm Voyager', False, False, 0.058),
+            ('Begum', 'Jagjit Singh and', 'Akhtar. It’s', False, False, 0.2038),
+            ('Łukasiewicz', 'this discipline. Jan', 'introduced finite-valued', False, False, 0.9827),
+        ]
+        for word, left, right, sent_init, italic, p in cases:
+            got = pg_need.probability(word, left.split(), right.split(), sent_init, italic)
+            self.assertAlmostEqual(got, p, delta=0.002, msg=word)
+
+    def test_flags_a_hard_name_with_its_position(self):
+        from qems2.qsub import pg_need
+        flags = {w: (s, e) for w, s, e, _p in pg_need.flag_words(self.TEXT)}
+        self.assertIn('Pallavicino', flags)
+        s, e = flags['Pallavicino']
+        self.assertEqual(self.TEXT[s:e], 'Pallavicino')
+
+    def test_skips_guided_words_numerals_and_contractions(self):
+        from qems2.qsub import pg_need
+        flagged = {w for w, _s, _e, _p in pg_need.flag_words(self.TEXT, threshold=0.0)}
+        self.assertNotIn('Ranke', flagged)    # already guided
+        self.assertNotIn('XIII', flagged)
+        self.assertNotIn("They're", flagged)
+
+    def test_each_word_once_and_possessive_dropped(self):
+        from qems2.qsub import pg_need
+        text = ("Pallavicino taught him, and Pallavicino's pupils later met Pallavicino again.")
+        words = [w for w, _s, _e, _p in pg_need.flag_words(text, threshold=0.0)]
+        self.assertEqual(words.count('Pallavicino'), 1)
+        self.assertNotIn("Pallavicino's", words)
+
+    ON = {'+pg_missing'}  # a set that turned the rule on
+
+    def test_style_check_rule_is_a_hint_with_no_fix(self):
+        from qems2.qsub import style_checker
+        issues = [i for i in style_checker.check_tossup(self._tossup(self.TEXT), disabled=self.ON)
+                  if i['code'] == 'pg_missing']
+        hit = [i for i in issues if i['token'] == 'Question|Pallavicino']
+        self.assertEqual(len(hit), 1)
+        self.assertEqual(hit[0]['severity'], style_checker.INFO)
+        self.assertNotIn('fix', hit[0])
+        self.assertIn('<strong>Pallavicino</strong>', hit[0]['message_html'])
+
+    def test_rule_is_off_unless_the_set_turns_it_on(self):
+        from qems2.qsub import style_checker
+        for disabled in (None, set(), {'contractions'}, {'pg_missing'}):
+            issues = style_checker.check_tossup(self._tossup(self.TEXT), disabled=disabled)
+            self.assertFalse([i for i in issues if i['code'] == 'pg_missing'], disabled)
+        issues = style_checker.check_tossup(self._tossup(self.TEXT), disabled={'+pg_missing', 'contractions'})
+        self.assertTrue([i for i in issues if i['code'] == 'pg_missing'])
+        self.assertIn('pg_missing', dict(style_checker.configurable_rules()))
+        self.assertNotIn('pg_missing', dict(style_checker.configurable_rules('generic')))
+
+    def test_settings_form_turns_it_on_and_off(self):
+        from qems2.qsub import style_checker
+        owner_user = User.objects.create_user('pgn_owner', password='pw', email='pgn@test.com')
+        owner = Writer.objects.get(user=owner_user)
+        dist = Distribution.objects.create(name='pgn dist')
+        qset = QuestionSet.objects.create(
+            name='PGN Set', date=timezone.now(), host='h', address='', owner=owner,
+            num_packets=1, distribution=dist, tossups_per_packet=1, bonuses_per_packet=1)
+        self.client.login(username='pgn_owner', password='pw')
+        codes = [c for c, _ in style_checker.configurable_rules()]
+        everything_but = {'rule_' + c: 'on' for c in codes if c != 'pg_missing'}
+
+        page = self.client.get('/style_check/{0}/'.format(qset.id))
+        settings = {r['code']: r['enabled'] for r in page.context['rule_settings']}
+        self.assertFalse(settings['pg_missing'])   # off for a new set
+        self.assertTrue(settings['contractions'])
+
+        self.client.post('/style_check/{0}/'.format(qset.id),
+                         dict(everything_but, action='save_rules', rule_pg_missing='on'))
+        qset.refresh_from_db()
+        self.assertTrue(style_checker.rule_enabled('pg_missing', qset.disabled_style_rule_set()))
+        self.assertTrue(style_checker.rule_enabled('contractions', qset.disabled_style_rule_set()))
+
+        self.client.post('/style_check/{0}/'.format(qset.id), dict(everything_but, action='save_rules'))
+        qset.refresh_from_db()
+        self.assertFalse(style_checker.rule_enabled('pg_missing', qset.disabled_style_rule_set()))
+        self.assertEqual(qset.disabled_style_rules, '')
+
+    def test_set_settings_checkbox_turns_it_on_and_off(self):
+        from qems2.qsub import style_checker
+        owner_user = User.objects.create_user('pgs_owner', password='pw', email='pgs@test.com')
+        owner = Writer.objects.get(user=owner_user)
+        dist = Distribution.objects.create(name='pgs dist')
+        qset = QuestionSet.objects.create(
+            name='PGS Set', date=timezone.now(), host='h', address='', owner=owner,
+            num_packets=1, distribution=dist, tossups_per_packet=1, bonuses_per_packet=1,
+            disabled_style_rules='contractions')
+        self.client.login(username='pgs_owner', password='pw')
+        url = '/edit_question_set/{0}/'.format(qset.id)
+        self.assertIn('name="pg_missing_hint"', self.client.get(url).content.decode())
+        base = {'name': 'PGS Set', 'date': '2026-08-01', 'num_packets': 1,
+                'distribution': dist.id, 'max_acf_tossup_length': 750,
+                'max_acf_bonus_length': 400, 'pg_hint_shown': '1'}
+        self.client.post(url, dict(base, pg_missing_hint='on'))
+        qset.refresh_from_db()
+        self.assertTrue(qset.pg_missing_hint)
+        self.assertIn('contractions', qset.disabled_style_rule_set())   # other rules kept
+        self.assertTrue(style_checker.rule_enabled('pg_missing', qset.disabled_style_rule_set()))
+        self.client.post(url, base)
+        qset.refresh_from_db()
+        self.assertFalse(qset.pg_missing_hint)
+        self.assertIn('contractions', qset.disabled_style_rule_set())
+
+    def test_dictionary_terms_left_to_the_dictionary(self):
+        # Goethe has a verified guide in the pronunciation dictionary; that
+        # suggestion (with the respelling) wins over the model's bare hint.
+        from qems2.qsub import style_checker, pron_dict
+        pron_dict.reset_cache()
+        text = 'The poet Goethe wrote this play. For 10 points, name this play.'
+        codes = {i['code'] for i in style_checker.check_tossup(self._tossup(text), disabled=self.ON)
+                 if 'Goethe' in i['message']}
+        self.assertIn('pronunciation', codes)
+        self.assertNotIn('pg_missing', codes)
+
+    def test_bonus_parts_are_checked(self):
+        from types import SimpleNamespace
+        from qems2.qsub import style_checker
+        b = SimpleNamespace(leadin='For 10 points each, answer these.', part1_text=self.TEXT,
+                            part2_text='', part3_text='', part1_answer='_a_',
+                            part2_answer='', part3_answer='')
+        tokens = {i['token'] for i in style_checker.check_bonus(b, disabled=self.ON)
+                  if i['code'] == 'pg_missing'}
+        self.assertIn('Part 1|Pallavicino', tokens)
+
+    def test_dismissal_names_the_word(self):
+        from qems2.qsub import style_checker
+        d = style_checker.describe_dismissal('pg_missing', 'Question|Pallavicino')
+        self.assertEqual(d['subject'], 'Pallavicino')
+
+
 class StyleCheckFixTests(TestCase):
     """Auto-apply and dismiss of style-check issues (pronunciation guides etc.)."""
 
@@ -2708,6 +2859,34 @@ class AccountAgeAndDistributionPermissionTests(TestCase):
         self.assertEqual(by_cat['Science'].num_bonuses, 0)
         self.assertEqual(by_cat['Literature'].num_tossups, 2)
         self.assertEqual(by_cat['Literature'].num_bonuses, 6)
+
+    def test_new_set_keeps_defaults_for_settings_not_on_the_create_page(self):
+        # A checkbox the page doesn't show posts nothing; that used to save as
+        # "off", so every new set had duplicate checks disabled.
+        self.client.login(username='old_u', password='pw')
+        resp = self.client.post('/create_question_set/', {
+            'name': 'Defaults Check', 'date': '2026-08-01',
+            'distribution': self.my_dist.id, 'num_packets': 2,
+            'max_acf_tossup_length': 750, 'max_acf_bonus_length': 400,
+        })
+        self.assertEqual(resp.status_code, 302)
+        qset = QuestionSet.objects.get(name='Defaults Check')
+        self.assertTrue(qset.enable_duplicate_checks)
+        self.assertTrue(qset.export_category_tags)
+        self.assertTrue(qset.warn_missing_category_tags)
+        self.assertTrue(qset.top_links_auto)
+        # A checkbox the page does show still means what the user ticked
+        self.assertFalse(qset.char_count_ignores_pronunciation_guides)
+
+    def test_create_page_checkbox_list_matches_the_template(self):
+        import re
+        from django.db.models import BooleanField
+        from qems2.qsub.views import CREATE_PAGE_CHECKBOXES
+        self.client.login(username='old_u', password='pw')
+        body = self.client.get('/create_question_set/').content.decode()
+        shown = {f.name for f in QuestionSet._meta.fields if isinstance(f, BooleanField)
+                 and re.search(r'name="{0}"'.format(f.name), body)}
+        self.assertEqual(shown, CREATE_PAGE_CHECKBOXES)
 
     def test_distributions_list_only_shows_own(self):
         self.client.login(username='old_u', password='pw')
@@ -11856,24 +12035,74 @@ class AnswerStructureParseTests(TestCase):
         self.assertEqual(s['prompts'][0]['text'], '__Louis__')
         self.assertEqual(s['prompts'][0]['instruction'], 'which Louis?')
 
-    def test_or_introduces_an_accept(self):
-        s = self._parse('_Louis XIV_ [or _the Sun King_]')
-        self.assertEqual([a['text'] for a in s['accepts']], ['_the Sun King_'])
+    def test_or_introduces_an_alternate(self):
+        """"or" and "accept" are separate groups, as in an answer-fancy list."""
+        s = self._parse('_Louis XIV_ [or _the Sun King_; accept _the King_]')
+        self.assertEqual([a['text'] for a in s['alternates']], ['_the Sun King_'])
+        self.assertEqual([a['text'] for a in s['accepts']], ['_the King_'])
 
-    def test_a_bracketless_or_is_still_an_accept(self):
+    def test_a_bracketless_or_is_still_an_alternate(self):
         """The one unannounced form common enough to read without a keyword."""
         s = self._parse('_Louis XIV_ or _the Sun King_')
         self.assertEqual(s['primary'], '_Louis XIV_')
-        self.assertEqual([a['text'] for a in s['accepts']], ['_the Sun King_'])
+        self.assertEqual([a['text'] for a in s['alternates']], ['_the Sun King_'])
 
     def test_until_is_captured(self):
         s = self._parse('_Louis XIV_ [accept _the King_ until "Sun King" is read]')
-        self.assertEqual(s['accepts'][0]['until'], 'Sun King')
+        self.assertEqual((s['accepts'][0]['when'], s['accepts'][0]['word']), ('until', 'Sun King'))
 
-    def test_a_bonus_part_has_no_until(self):
+    def test_until_read_has_no_word(self):
+        s = self._parse('_lemur_s [prompt on __strepsirrhine__s until read]')
+        self.assertEqual(s['prompts'][0]['text'], '__strepsirrhine__s')
+        self.assertEqual((s['prompts'][0]['when'], s['prompts'][0]['word']), ('until_read', ''))
+
+    def test_after_is_captured(self):
+        s = self._parse('_Northeast Brazil_ [accept _Northeast_ after \u201cBrazil\u201d is read]')
+        self.assertEqual(s['accepts'][0]['text'], '_Northeast_')
+        self.assertEqual((s['accepts'][0]['when'], s['accepts'][0]['word']), ('after', 'Brazil'))
+
+    def test_a_bare_after_without_is_read_is_just_words(self):
+        """"after" is too common a word to read as a window on its own."""
+        s = self._parse('_x_ [accept _treaties_ signed after the war]')
+        self.assertEqual(s['accepts'][0]['text'], '_treaties_ signed after the war')
+        self.assertEqual(s['accepts'][0]['when'], '')
+
+    def test_in_place_of_is_captured(self):
+        s = self._parse('U.S. _Ambassador_ to the _Soviet Union_ '
+                        '[accept _USSR_ or _Russia_ in place of \u201cSoviet Union\u201d]')
+        self.assertEqual(s['accepts'][0]['text'], '_USSR_ or _Russia_')
+        self.assertEqual(s['accepts'][0]['in_place_of'], 'Soviet Union')
+
+    def test_modifiers_come_off_in_any_order(self):
+        s = self._parse('_lemur_s [prompt on __indri__s until read by asking "less specific?"]')
+        self.assertEqual(s['prompts'][0]['text'], '__indri__s')
+        self.assertEqual(s['prompts'][0]['when'], 'until_read')
+        self.assertEqual(s['prompts'][0]['instruction'], 'less specific?')
+        s = self._parse('_L_ [prompt on __K__ by asking "which?" until "Sun" is read]')
+        self.assertEqual(s['prompts'][0]['text'], '__K__')
+        self.assertEqual((s['prompts'][0]['when'], s['prompts'][0]['word']), ('until', 'Sun'))
+        self.assertEqual(s['prompts'][0]['instruction'], 'which?')
+
+    def test_rejects_are_their_own_group(self):
+        s = self._parse('_Karen_ [reject "Burman" or "Bamar"; do not accept _Thai_]')
+        self.assertEqual([r['text'] for r in s['rejects']], ['"Burman" or "Bamar"', '_Thai_'])
+        self.assertEqual(s['unparsed'], [])
+
+    def test_text_after_the_bracket_is_the_note(self):
+        """It used to be dropped outright."""
+        s = self._parse('_Karen_ people [or _Kayin_] (Zoya Phan is named after Zoya.)')
+        self.assertEqual(s['note'], 'Zoya Phan is named after Zoya.')
+        self.assertEqual([a['text'] for a in s['alternates']], ['_Kayin_'])
+
+    def test_a_pronunciation_guide_stays_with_the_answer(self):
+        s = self._parse('Denis \\PDiderot\\P ("DID-er-OW")')
+        self.assertEqual(s['primary'], 'Denis \\PDiderot\\P ("DID-er-OW")')
+        self.assertEqual((s['note'], s['unparsed']), ('', []))
+
+    def test_a_bonus_part_has_no_reading_window(self):
         """There is no shared text for a bonus part to be read up to."""
         s = self._parse('_Paris_ [accept _the City of Light_ until "Seine" is read]', is_tossup=False)
-        self.assertIsNone(s['accepts'][0]['until'])
+        self.assertEqual(s['accepts'][0]['when'], '')
 
     def test_an_antiprompt_is_marked(self):
         s = self._parse('_Paris_ [antiprompt on __France__ by saying be more specific]')
@@ -11881,15 +12110,20 @@ class AnswerStructureParseTests(TestCase):
         self.assertEqual(s['prompts'][0]['instruction'], 'be more specific')
 
     def test_a_clause_it_cannot_place_is_kept_verbatim(self):
-        s = self._parse('_x_ [accept _y_; do not accept "z"]')
-        self.assertEqual(s['unparsed'], ['do not accept "z"'])
+        s = self._parse('_x_ [accept _y_; the two are equivalent]')
+        self.assertEqual(s['unparsed'], ['the two are equivalent'])
 
     def test_a_comma_only_splits_before_a_directive(self):
         """Commas inside one clause are ordinary punctuation."""
         s = self._parse('_France_ [or _French Republic_, accept _Republique francaise_]')
-        self.assertEqual(len(s['accepts']), 2)
+        self.assertEqual((len(s['alternates']), len(s['accepts'])), (1, 1))
         s = self._parse('_x_ [accept _a, b, and c_]')
         self.assertEqual(len(s['accepts']), 1)
+
+    def test_a_comma_or_is_part_of_a_list_not_a_new_clause(self):
+        s = self._parse('_strike_s [accept art _strike_, human _strike_, or general _strike_]')
+        self.assertEqual(len(s['accepts']), 1)
+        self.assertEqual(s['alternates'], [])
 
     def test_a_parenthesized_body_works_too(self):
         s = self._parse('_x_ (prompt on __y__ by asking "which?")')
@@ -11908,7 +12142,9 @@ class AnswerStructureParseTests(TestCase):
 class AnswerStructureFormatTests(TestCase):
     """The printed line a structure produces, and the round trip back."""
 
-    def test_formats_the_conventional_line(self):
+    def test_formats_a_structure_stored_in_the_older_shape(self):
+        """Structures saved before "or"/"reject"/windows existed still load:
+        a bare ``until`` is an "until ... is read" window."""
         from qems2.qsub.answer_structure import format_line
         line = format_line({
             'primary': '_Louis XIV_',
@@ -11931,8 +12167,28 @@ class AnswerStructureFormatTests(TestCase):
                      '_Louis XIV_ [accept _the Sun King_]',
                      '_Louis XIV_ [accept _the King_ until "Sun King" is read]',
                      '_Louis XIV_ [prompt on __Louis__ by asking "which Louis?"]',
-                     '_x_ [accept _y_; do not accept "z"]'):
+                     '_x_ [accept _y_; reject "z"]',
+                     '_x_ [or _y_; accept _z_ in place of "w"; prompt on __v__ until read '
+                     'by asking "which?"; reject "u"] (A note.)',
+                     '_x_ [accept _y_ after "z" is read]'):
             self.assertEqual(format_line(parse_line(line)), line, line)
+
+    def test_groups_print_in_answer_fancy_order(self):
+        from qems2.qsub.answer_structure import format_line
+        line = format_line({'primary': '_a_', 'rejects': [{'text': 'r'}],
+                            'prompts': [{'text': '__p__'}], 'accepts': [{'text': '_c_'}],
+                            'alternates': [{'text': '_b_'}], 'note': '(n)'})
+        self.assertEqual(line, '_a_ [or _b_; accept _c_; prompt on __p__; reject r] (n)')
+
+    def test_breakdown_groups_like_answer_fancy(self):
+        from qems2.qsub.answer_structure import breakdown, parse_line
+        b = breakdown(parse_line('_a_ [or _b_; prompt on __p__ until read by asking "q?"; '
+                                 'antiprompt on __s__; reject r] (n)'))
+        self.assertEqual([g['label'] for g in b['groups']],
+                         ['ANSWER', 'or', 'prompt on', 'antiprompt on', 'reject'])
+        prompt = b['groups'][2]['items'][0]
+        self.assertEqual(prompt['mods'], [('until read', ''), ('by asking', 'q?')])
+        self.assertEqual(b['note'], 'n')
 
     def test_blank_rows_are_dropped_not_printed(self):
         from qems2.qsub.answer_structure import format_line
@@ -12013,7 +12269,7 @@ class StructuredAnswerModelTests(TestCase):
         already in it, with no migration."""
         structure = self.tu.answer_structure()
         self.assertEqual(structure['primary'], '_Louis XIV_')
-        self.assertEqual([a['text'] for a in structure['accepts']], ['_the Sun King_'])
+        self.assertEqual([a['text'] for a in structure['alternates']], ['_the Sun King_'])
         self.assertEqual(structure['prompts'][0]['text'], '__Louis__')
 
     def test_a_stored_structure_is_used_when_it_describes_the_line(self):
@@ -12054,7 +12310,7 @@ class StructuredAnswerModelTests(TestCase):
             part2_text='Name this river.', part2_answer='_Seine_ [prompt on __river__]',
             part3_text='', part3_answer='',
             created_date=datetime.now(), last_changed_date=datetime.now())
-        self.assertEqual([a['text'] for a in bonus.answer_structure(1)['accepts']], ['_Lutetia_'])
+        self.assertEqual([a['text'] for a in bonus.answer_structure(1)['alternates']], ['_Lutetia_'])
         self.assertEqual(bonus.answer_structure(2)['prompts'][0]['text'], '__river__')
         problems = bonus.answer_structure_problems()
         self.assertEqual(len(problems), 1)
@@ -12082,9 +12338,9 @@ class StructuredAnswerPostTests(TestCase):
             'answer_accept_text': ['_the Sun King_', '_the Great_'],
             'answer_accept_until': ['Bourbon', ''],
         }), 'answer')
-        self.assertEqual(structure['accepts'],
-                         [{'text': '_the Sun King_', 'until': 'Bourbon'},
-                          {'text': '_the Great_', 'until': None}])
+        self.assertEqual(
+            [(a['text'], a['when'], a['word']) for a in structure['accepts']],
+            [('_the Sun King_', 'until', 'Bourbon'), ('_the Great_', '', '')])
 
     def test_a_blank_row_is_dropped_without_shifting_the_others(self):
         from qems2.qsub.answer_structure import posted
@@ -12093,7 +12349,8 @@ class StructuredAnswerPostTests(TestCase):
             'answer_accept_text': ['', '_kept_'],
             'answer_accept_until': ['', 'word'],
         }), 'answer')
-        self.assertEqual(structure['accepts'], [{'text': '_kept_', 'until': 'word'}])
+        self.assertEqual([(a['text'], a['word']) for a in structure['accepts']],
+                         [('_kept_', 'word')])
 
     def test_the_antiprompt_selector_is_read(self):
         from qems2.qsub.answer_structure import posted
@@ -12113,7 +12370,26 @@ class StructuredAnswerPostTests(TestCase):
             'part1_accept_text': ['_y_'],
             'part1_accept_until': ['word'],
         }), 'part1', is_tossup=False)
-        self.assertIsNone(structure['accepts'][0]['until'])
+        self.assertEqual(structure['accepts'][0]['when'], '')
+
+    def test_the_new_fields_are_read(self):
+        from qems2.qsub.answer_structure import posted
+        structure = posted(self._post({
+            'answer_primary': '_x_',
+            'answer_or_text': ['_y_'],
+            'answer_or_inplace': ['w'],
+            'answer_prompt_text': ['__a__', '__b__'],
+            'answer_prompt_when': ['until_read', 'after'],
+            'answer_prompt_word': ['ignored', 'Sun'],
+            'answer_prompt_instruction': ['', 'which?'],
+            'answer_reject_text': ['_z_', ''],
+            'answer_note': '(A note.)',
+        }), 'answer')
+        self.assertEqual(structure['alternates'][0]['in_place_of'], 'w')
+        self.assertEqual([(p['when'], p['word']) for p in structure['prompts']],
+                         [('until_read', ''), ('after', 'Sun')])
+        self.assertEqual(structure['rejects'], [{'text': '_z_'}])
+        self.assertEqual(structure['note'], 'A note.')
 
 
 class StructuredAnswerEditorViewTests(TestCase):
@@ -12141,6 +12417,26 @@ class StructuredAnswerEditorViewTests(TestCase):
         body = self.client.get('/edit_tossup/{0}/'.format(self.tu.id)).content.decode()
         self.assertIn('structured-answer', body)
         self.assertIn('answer_primary', body)
+
+    def test_the_editor_has_answer_fancy_groups(self):
+        body = self.client.get('/edit_tossup/{0}/'.format(self.tu.id)).content.decode()
+        for name in ('answer_or_text', 'answer_accept_text', 'answer_prompt_text',
+                     'answer_reject_text', 'answer_note', 'answer_accept_when'):
+            self.assertIn(name, body)
+        self.assertIn('<template class="sa-template">', body)
+
+    def test_saving_new_groups_prints_them(self):
+        self._save(answer_or_text='_Sun King_', answer_accept_text='_the King_',
+                   answer_accept_until='', answer_accept_when='after',
+                   answer_accept_word='Bourbon', answer_reject_text='"Louis XVI"',
+                   answer_note='He revoked an edict.')
+        self.tu.refresh_from_db()
+        self.assertEqual(
+            self.tu.tossup_answer,
+            '_Louis XIV_ [or _Sun King_; accept _the King_ after "Bourbon" is read; '
+            'prompt on __Louis__ by asking "which Louis?"; reject "Louis XVI"] '
+            '(He revoked an edict.)')
+        self.assertEqual(self.tu.answer_structure(), self.tu.tossup_answer_structure)
 
     def test_the_reads_as_line_is_formatted_not_marked_up(self):
         """The writer sees the answer the way it prints, not the underscores
@@ -12189,7 +12485,7 @@ class StructuredAnswerEditorViewTests(TestCase):
         self.tu.refresh_from_db()
         self.assertEqual(self.tu.tossup_answer_structure['prompts'][0]['instruction'],
                          'which Louis?')
-        self.assertEqual(self.tu.tossup_answer_structure['accepts'][0]['until'], 'Bourbon')
+        self.assertEqual(self.tu.tossup_answer_structure['accepts'][0]['word'], 'Bourbon')
 
     def test_the_stored_structure_is_the_one_read_back(self):
         self._save()
@@ -12221,7 +12517,9 @@ class StructuredAnswerUploadPreviewTests(TestCase):
         preview = _structure_preview(
             '_Louis XIV_ [or _the Sun King_; prompt on __Louis__]',
             'This Bourbon king ruled.')
-        self.assertEqual([a['text'] for a in preview['structure']['accepts']], ['_the Sun King_'])
+        self.assertEqual([a['text'] for a in preview['structure']['alternates']], ['_the Sun King_'])
+        self.assertEqual([g['label'] for g in preview['breakdown']['groups']],
+                         ['ANSWER', 'or', 'prompt on'])
         self.assertTrue(preview['interesting'])
         self.assertIn("doesn't say what to ask", ' '.join(preview['problems']))
 
@@ -12949,7 +13247,7 @@ class SuggestionQualityTests(TestCase):
         self.client.login(username='sq_admin', password='pw')
         body = self.client.get('/suggestion_quality/').content.decode()
         self.assertIn('Koch', body)
-        self.assertIn('Pronunciation-guide suggestions', body)
+        self.assertIn('Suggest guides from the pronunciation dictionary', body)
 
     def test_the_page_never_names_the_set(self):
         self._dismiss()
@@ -18784,3 +19082,386 @@ class CanonicalHostTests(TestCase):
         for host in ('qems3.com', 'testserver'):
             r = self.client.get('/accounts/login/', HTTP_HOST=host)
             self.assertEqual(r.status_code, 200, host)
+
+
+class QuestionCoCreditTests(TestCase):
+    """More than one writer or editor on a question: credit only, opt-in, and
+    left alone by every save that doesn't come from its panel."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        self.acf = QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP)
+
+        def writer(username, first, last):
+            u = User.objects.create_user(username, password='pw', email=username + '@t.com',
+                                         first_name=first, last_name=last)
+            return Writer.objects.get(user=u)
+
+        self.owner = writer('cc_owner', 'Olive', 'Owner')
+        self.ed = writer('cc_ed', 'Eddie', 'Editor')
+        self.w1 = writer('cc_w1', 'Ann', 'Alpha')
+        self.w2 = writer('cc_w2', 'Bea', 'Beta')
+        self.dist = Distribution.objects.create(name='cc dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='History', subcategory='European')
+        self.qset = QuestionSet.objects.create(
+            name='CC Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist)
+        self.qset.writer.add(self.w1, self.w2)
+        self.qset.editor.add(self.ed)
+        self.tu = Tossup.objects.create(
+            author=self.w1, question_set=self.qset, question_type=self.acf,
+            tossup_text='This king revoked the Edict of Nantes.', tossup_answer='_Louis XIV_',
+            category=self.de, created_date=timezone.now(), last_changed_date=timezone.now(),
+            question_number=1)
+
+    # --- names ---
+
+    def test_one_author_reads_as_before(self):
+        self.assertEqual(self.tu.author_real_name(), 'Ann Alpha')
+        self.assertFalse(self.tu.has_co_credits())
+
+    def test_co_authors_follow_the_author(self):
+        self.tu.co_authors.add(self.w2, self.ed)
+        self.assertEqual(self.tu.author_names(), ['Ann Alpha', 'Bea Beta', 'Eddie Editor'])
+        self.assertEqual(self.tu.author_real_name(), 'Ann Alpha, Bea Beta, and Eddie Editor')
+        self.assertIn('(cc_w2)', self.tu.author_name())
+
+    def test_a_freeform_credit_stands_in_for_the_author(self):
+        self.tu.author_text = 'Guest Writer'
+        self.tu.co_authors.add(self.w2)
+        self.assertEqual(self.tu.author_real_name(), 'Guest Writer and Bea Beta')
+
+    def test_the_author_is_never_their_own_co_author(self):
+        self.tu.co_authors.add(self.w1, self.w2)
+        self.assertEqual(self.tu.author_names(), ['Ann Alpha', 'Bea Beta'])
+
+    def test_co_editors_join_the_editor_stamp(self):
+        self.tu.edited = True
+        self.tu.editor = self.ed
+        self.tu.save()
+        self.tu.co_editors.add(self.owner)
+        self.assertEqual(self.tu.editor_real_name(), 'Eddie Editor and Olive Owner')
+
+    def test_set_credits_count_each_person(self):
+        self.tu.co_authors.add(self.w2)
+        self.assertEqual(self.qset.credit_values()['{authors}'], 'Ann Alpha, Bea Beta')
+
+    # --- the edit page ---
+
+    def _save(self, user, **extra):
+        self.client.login(username=user, password='pw')
+        data = {'tossup_text': self.tu.tossup_text, 'tossup_answer': self.tu.tossup_answer,
+                'category': self.de.id, 'author': self.tu.author_id,
+                'question_type': self.acf.id}
+        data.update(extra)
+        return self.client.post('/edit_tossup/{0}/'.format(self.tu.id), data)
+
+    def test_the_panel_starts_hidden_behind_more(self):
+        self.client.login(username='cc_ed', password='pw')
+        body = self.client.get('/edit_tossup/{0}/'.format(self.tu.id)).content.decode()
+        self.assertIn('<div class="qcocredit" hidden>', body)
+        self.assertIn('qco-open', body)
+        self.assertIn('Also edited by', body)
+
+    def test_the_panel_shows_once_there_are_co_credits(self):
+        self.tu.co_authors.add(self.w2)
+        self.client.login(username='cc_ed', password='pw')
+        body = self.client.get('/edit_tossup/{0}/'.format(self.tu.id)).content.decode()
+        self.assertIn('<div class="qcocredit">', body)
+        self.assertIn('Ann Alpha (cc_w1) and Bea Beta (cc_w2)', body)
+
+    def test_saving_the_panel_sets_co_credits(self):
+        self._save('cc_ed', co_credit_form='1', co_authors=[self.w2.id],
+                   co_editors=[self.owner.id])
+        self.assertEqual(list(self.tu.co_authors.all()), [self.w2])
+        self.assertEqual(list(self.tu.co_editors.all()), [self.owner])
+
+    def test_unchecking_everything_clears_them(self):
+        self.tu.co_authors.add(self.w2)
+        self._save('cc_ed', co_credit_form='1')
+        self.assertEqual(self.tu.co_authors.count(), 0)
+
+    def test_a_save_without_the_panel_leaves_them_alone(self):
+        self.tu.co_authors.add(self.w2)
+        self._save('cc_ed')
+        self.assertEqual(list(self.tu.co_authors.all()), [self.w2])
+
+    def test_a_writer_can_add_co_writers_but_not_co_editors(self):
+        self._save('cc_w1', co_credit_form='1', co_authors=[self.w2.id],
+                   co_editors=[self.ed.id])
+        self.assertEqual(list(self.tu.co_authors.all()), [self.w2])
+        self.assertEqual(self.tu.co_editors.count(), 0)
+        self.client.login(username='cc_w1', password='pw')
+        body = self.client.get('/edit_tossup/{0}/'.format(self.tu.id)).content.decode()
+        self.assertNotIn('Also edited by', body)
+
+    def test_co_credit_does_not_grant_editing(self):
+        """A co-author who isn't the author account can still only suggest."""
+        self.tu.co_authors.add(self.w2)
+        self._save('cc_w2', co_credit_form='1', tossup_text='Rewritten by w2.')
+        self.tu.refresh_from_db()
+        self.assertEqual(self.tu.tossup_text, 'This king revoked the Edict of Nantes.')
+
+
+class AnswerFancyRenderTests(TestCase):
+    """The proof pane and the document views print a structured set's answer
+    lines as expandable answer-fancy breakdowns; everything else, and every
+    set without structured answers, prints them as before."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        self.ou = User.objects.create_user('af_owner', password='pw', email='af@t.com')
+        self.owner = Writer.objects.get(user=self.ou)
+        self.dist = Distribution.objects.create(name='af dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='History', subcategory='European')
+        self.qset = QuestionSet.objects.create(
+            name='AF Set', date=timezone.now(), host='h', address='', owner=self.owner,
+            num_packets=1, distribution=self.dist, structured_answers=True)
+        self.packet = Packet.objects.create(packet_name='Round 1', question_set=self.qset,
+                                            created_by=self.owner)
+        self.tu = Tossup.objects.create(
+            author=self.owner, question_set=self.qset, packet=self.packet,
+            question_type=QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP),
+            tossup_text='This Bourbon king revoked the Edict of Nantes.',
+            tossup_answer='_Louis XIV_ [or _Sun King_; accept _the King_ after "Bourbon" is read; '
+                          'prompt on __Louis__ by asking "which one?"; reject "Louis XVI"] (A note.)',
+            category=self.de, created_date=timezone.now(), last_changed_date=timezone.now(),
+            question_number=1)
+        self.bonus = Bonus.objects.create(
+            author=self.owner, question_set=self.qset, packet=self.packet,
+            question_type=QuestionType.objects.get(question_type=ACF_STYLE_BONUS),
+            leadin='For 10 points each:', part1_text='Name this city.',
+            part1_answer='_Paris_ [or _Lutetia_]', part2_text='Name this river.',
+            part2_answer='_Seine_', part3_text='Name this tower.', part3_answer='_Eiffel_',
+            category=self.de, created_date=timezone.now(), last_changed_date=timezone.now(),
+            question_number=1)
+
+    def test_a_tossup_breakdown_has_each_group(self):
+        html = self.tu.to_html(fancy_answers=True)
+        self.assertIn('<details class="af">', html)
+        for label in ('ANSWER:', 'or:', 'accept:', 'prompt on:', 'reject:'):
+            self.assertIn('>{0}</dt>'.format(label), html)
+        self.assertIn('<span class="af-directive"> after </span>', html)
+        self.assertIn('<span class="af-ask">\u201cwhich one?\u201d</span>', html)
+        self.assertIn('<p class="af-note">(A note.)</p>', html)
+
+    def test_the_summary_is_the_printed_line(self):
+        html = self.tu.to_html(fancy_answers=True)
+        summary = html.split('<summary>')[1].split('</summary>')[0]
+        self.assertIn('ANSWER: ', summary)
+        self.assertIn('reject', summary)
+
+    def test_a_bare_answer_has_nothing_to_expand(self):
+        html = self.bonus.to_html(fancy_answers=True)
+        self.assertEqual(html.count('<details class="af">'), 1)
+        self.assertIn('<p class="answer">ANSWER: ', html)
+
+    def test_without_the_option_nothing_changes(self):
+        self.assertNotIn('<details', self.tu.to_html())
+        self.assertNotIn('<details', self.bonus.to_html())
+
+    def test_a_set_without_structured_answers_is_unchanged(self):
+        self.qset.structured_answers = False
+        self.qset.save()
+        self.tu.refresh_from_db()
+        self.assertEqual(self.tu.to_html(fancy_answers=True), self.tu.to_html())
+
+    def _get(self, url):
+        self.client.login(username='af_owner', password='pw')
+        return self.client.get(url).content.decode()
+
+    def test_the_proof_pane_shows_it(self):
+        self.assertIn('<details class="af">', self._get('/edit_tossup/{0}/'.format(self.tu.id)))
+        self.assertIn('<details class="af">', self._get('/edit_bonus/{0}/'.format(self.bonus.id)))
+
+    def test_the_packet_document_shows_it(self):
+        body = self._get('/view_packet/{0}/'.format(self.packet.id))
+        self.assertEqual(body.count('<details class="af">'), 2)
+        self.assertIn('af-toggle-all', body)
+
+    def test_the_category_document_shows_it(self):
+        body = self._get('/category_doc/{0}/{1}/'.format(self.qset.id, self.de.id))
+        self.assertEqual(body.count('<details class="af">'), 2)
+
+
+class QuestionAIReviewPanelTests(TestCase):
+    """A question's own AI review findings, on its edit page: admin-only, shown
+    for sets that review submissions or when something is stored."""
+
+    def setUp(self):
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_TOSSUP)
+        QuestionType.objects.get_or_create(question_type=ACF_STYLE_BONUS)
+        self.admin_user = User.objects.create_superuser('air_admin', 'air@t.com', 'pw')
+        self.admin = Writer.objects.get(user=self.admin_user)
+        u = User.objects.create_user('air_w', password='pw', email='w@t.com')
+        self.writer = Writer.objects.get(user=u)
+        self.dist = Distribution.objects.create(name='air dist')
+        self.de = DistributionEntry.objects.create(
+            distribution=self.dist, category='Literature', subcategory='European')
+        self.qset = QuestionSet.objects.create(
+            name='AIR Set', date=timezone.now(), host='h', address='', owner=self.admin,
+            num_packets=1, distribution=self.dist, ai_auto_review=True)
+        self.qset.writer.add(self.writer)
+        self.tu = Tossup.objects.create(
+            author=self.writer, question_set=self.qset,
+            question_type=QuestionType.objects.get(question_type=ACF_STYLE_TOSSUP),
+            tossup_text='This play was wrote in 1950 by Goethe.', tossup_answer='_Faust_',
+            category=self.de, created_date=timezone.now(), last_changed_date=timezone.now())
+        self.bs = Bonus.objects.create(
+            author=self.writer, question_set=self.qset,
+            question_type=QuestionType.objects.get(question_type=ACF_STYLE_BONUS),
+            leadin='For 10 points each:', part1_text='Name this.', part1_answer='_A_',
+            part2_text='Name that.', part2_answer='_B_', part3_text='And this.', part3_answer='_C_',
+            category=self.de, created_date=timezone.now(), last_changed_date=timezone.now())
+
+    def _finding(self, qtype, qid, **kw):
+        fields = dict(question_set=self.qset, question_type=qtype, question_id=qid,
+                      kind='fact', source='auto', severity='error',
+                      excerpt='in 1950 by Goethe', suggestion='',
+                      explanation='Goethe died in 1832.')
+        fields.update(kw)
+        return AIGrammarFinding.objects.create(**fields)
+
+    def _page(self, url, user=None):
+        self.client.force_login(user or self.admin_user)
+        return self.client.get(url).content.decode()
+
+    def test_admin_sees_the_questions_findings(self):
+        self._finding('tossup', self.tu.id)
+        self._finding('tossup', self.tu.id, kind='grammar', severity='warning',
+                      excerpt='was wrote', suggestion='was written', explanation='Past participle.')
+        body = self._page('/edit_tossup/{0}/'.format(self.tu.id))
+        self.assertIn('id="ai-review-panel"', body)
+        self.assertIn('class="sc-row sev-error"', body)   # the likely-wrong fact
+        self.assertIn('<span class="sc-chip">Fact</span>', body)
+        self.assertIn('Goethe died in 1832.', body)
+        self.assertIn('<mark>was written</mark>', body)
+
+    def test_only_this_questions_findings(self):
+        self._finding('bonus', self.bs.id, explanation='About the bonus only.')
+        self._finding('tossup', self.tu.id, explanation='About the tossup only.')
+        body = self._page('/edit_bonus/{0}/'.format(self.bs.id))
+        self.assertIn('About the bonus only.', body)
+        self.assertNotIn('About the tossup only.', body)
+
+    def _run(self, status, **when):
+        from django.utils import timezone as tz
+        run = AIReviewRun.objects.create(question_set=self.qset, question_type='tossup',
+                                         question_id=self.tu.id, status=status)
+        if when:
+            AIReviewRun.objects.filter(id=run.id).update(**when)
+        return run
+
+    def test_never_reviewed_says_so_not_nothing_flagged(self):
+        body = self._page('/edit_tossup/{0}/'.format(self.tu.id))
+        self.assertIn('id="ai-review-panel"', body)
+        self.assertIn('Not reviewed yet', body)
+        self.assertIn('Review now', body)
+        self.assertNotIn('Nothing flagged', body)
+
+    def test_reviewed_clean(self):
+        self._run('done')
+        body = self._page('/edit_tossup/{0}/'.format(self.tu.id))
+        self.assertIn('Nothing flagged.', body)
+        self.assertIn('Review again', body)
+        self.assertNotIn('Not reviewed yet', body)
+
+    def test_running_review(self):
+        self._run('queued')
+        body = self._page('/edit_tossup/{0}/'.format(self.tu.id))
+        self.assertIn('Reviewing&hellip;', body)
+        self.assertNotIn('Nothing flagged', body)
+        self.assertNotIn('class="ai-q-run"', body)
+
+    def test_stale_queued_review_counts_as_not_reviewed(self):
+        self._run('queued', updated_date=timezone.now() - timedelta(hours=1))
+        body = self._page('/edit_tossup/{0}/'.format(self.tu.id))
+        self.assertIn('Not reviewed yet', body)
+
+    def test_edited_since_review(self):
+        self._run('done', updated_date=timezone.now() - timedelta(hours=1))
+        body = self._page('/edit_tossup/{0}/'.format(self.tu.id))
+        self.assertIn('Reviewed before the last edit', body)
+
+    def test_review_now_replaces_auto_findings_and_marks_done(self):
+        from unittest import mock
+        old = self._finding('tossup', self.tu.id, explanation='Old finding.')
+        manual = self._finding('tossup', self.tu.id, source='manual', kind='grammar',
+                               explanation='Manual finding.')
+        new = [{'ref': 'tossup-{0}'.format(self.tu.id), 'kind': 'grammar', 'severity': 'warning',
+                'excerpt': 'was wrote', 'suggestion': 'was written', 'explanation': 'Fresh.'}]
+        self.client.force_login(self.admin_user)
+        with mock.patch('qems2.qsub.ai.ai_enabled', return_value=True), \
+                mock.patch('qems2.qsub.ai.review_questions', return_value=(new, None)):
+            r = self.client.post('/ai_review_question/', {'qtype': 'tossup', 'qid': self.tu.id})
+        data = json.loads(r.content)
+        self.assertTrue(data['ok'])
+        self.assertIn('Fresh.', data['html'])
+        self.assertNotIn('Old finding.', data['html'])
+        self.assertFalse(AIGrammarFinding.objects.filter(id=old.id).exists())
+        self.assertTrue(AIGrammarFinding.objects.filter(id=manual.id).exists())
+        self.assertEqual(AIReviewRun.objects.get(question_type='tossup', question_id=self.tu.id).status,
+                         'done')
+
+    def test_review_now_is_admin_only(self):
+        self.client.force_login(self.writer.user)
+        r = self.client.post('/ai_review_question/', {'qtype': 'tossup', 'qid': self.tu.id})
+        self.assertEqual(r.status_code, 403)
+
+    def test_auto_review_records_its_run(self):
+        from unittest import mock
+        from qems2.qsub import ai_review
+        with mock.patch('qems2.qsub.ai.review_questions', return_value=([], None)):
+            ai_review.run_review(self.qset.id, [('bonus', self.bs.id)])
+        self.assertEqual(AIReviewRun.objects.get(question_type='bonus', question_id=self.bs.id).status,
+                         'done')
+        with mock.patch('qems2.qsub.ai.review_questions', return_value=([], 'API down')):
+            ai_review.run_review(self.qset.id, [('bonus', self.bs.id)])
+        self.assertEqual(AIReviewRun.objects.get(question_type='bonus', question_id=self.bs.id).status,
+                         'failed')
+
+    def test_panel_sits_above_style_check(self):
+        body = self._page('/edit_tossup/{0}/'.format(self.tu.id))
+        self.assertLess(body.index('id="ai-review-panel"'), body.index('id="style-panel"'))
+
+    def test_no_panel_when_set_does_not_review_and_nothing_stored(self):
+        self.qset.ai_auto_review = False
+        self.qset.save()
+        body = self._page('/edit_tossup/{0}/'.format(self.tu.id))
+        self.assertNotIn('id="ai-review-panel"', body)
+
+    def test_no_trace_when_set_does_not_review_even_with_stored_findings(self):
+        # Findings from a manual AI check don't bring the panel back: with the
+        # setting off, nothing on the question page hints at AI review.
+        self.qset.ai_auto_review = False
+        self.qset.save()
+        self._finding('tossup', self.tu.id, source='manual', kind='grammar',
+                      excerpt='was wrote', suggestion='was written')
+        for url in ('/edit_tossup/{0}/'.format(self.tu.id), '/edit_bonus/{0}/'.format(self.bs.id)):
+            body = self._page(url)
+            for trace in ('ai-review-panel', 'ai-q-', 'AI review', 'dismiss_ai_grammar_finding',
+                          'was written'):
+                self.assertNotIn(trace, body, (url, trace))
+
+    def test_hidden_from_non_admins(self):
+        self._finding('tossup', self.tu.id)
+        body = self._page('/edit_tossup/{0}/'.format(self.tu.id), user=self.writer.user)
+        for trace in ('ai-review-panel', 'ai-q-', 'AI review', 'dismiss_ai_grammar_finding',
+                      'Goethe died in 1832.'):
+            self.assertNotIn(trace, body, trace)
+
+    def test_model_text_is_escaped(self):
+        self._finding('tossup', self.tu.id, explanation='<script>alert(1)</script>')
+        body = self._page('/edit_tossup/{0}/'.format(self.tu.id))
+        self.assertNotIn('<script>alert(1)</script>', body)
+        self.assertIn('&lt;script&gt;alert(1)&lt;/script&gt;', body)
+
+    def test_alt_answer_markup_rendered(self):
+        self._finding('tossup', self.tu.id, kind='answer', suggestion='_Urfaust_',
+                      explanation='Early version.')
+        body = self._page('/edit_tossup/{0}/'.format(self.tu.id))
+        self.assertIn('Alt answer', body)
+        self.assertRegex(body, r'<(u|b|strong)[^>]*>\s*Urfaust')

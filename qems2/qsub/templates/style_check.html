@@ -29,10 +29,7 @@
     </form>
 
     <div class="sc-counts">
-        Checked <strong>{{ checked }}</strong>, <strong class="sc-flagged-count">{{ flagged }}</strong> flagged
-        <span class="sc-pill err{% if not counts.error %} zero{% endif %}" title="errors">{{ counts.error }}</span>
-        <span class="sc-pill warn{% if not counts.warning %} zero{% endif %}" title="warnings">{{ counts.warning }}</span>
-        <span class="sc-pill info{% if not counts.info %} zero{% endif %}" title="info">{{ counts.info }}</span>
+        <span class="sc-flagged-count">{{ flagged }}</span> of {{ checked }} question{{ checked|pluralize }} flagged<span class="sc-tally" data-error="{{ counts.error }}" data-warning="{{ counts.warning }}" data-info="{{ counts.info }}"></span>
         {% if dismissed_count %}
         <span class="sc-guide-note">· {{ dismissed_count }} dismissed
             {% if show_dismissed %}<a href="?guide={{ guide }}">hide</a>{% else %}<a href="?guide={{ guide }}&amp;show_dismissed=1">show</a>{% endif %}</span>
@@ -47,12 +44,12 @@
 </div>
 
 {% if is_ai_user %}
-<div id="ai-grammar-panel" style="display:none; margin: 0 0 18px;">
-    <div class="panel radius">
-        <strong>AI review</strong> <span class="sc-guide-note">(admin only &middot; the AI check button runs grammar &amp; alternate answers{% if qset.ai_auto_review %}; new submissions are also reviewed automatically for grammar, style and facts{% endif %})</span>
-        <div id="ai-grammar-status" class="sc-guide-note" style="margin-top:6px;">Running&hellip;</div>
-        <ul id="ai-grammar-results" class="ai-grammar-list"></ul>
+<div id="ai-grammar-panel" class="ai-card" style="display:none;">
+    <div class="ai-card-head">
+        <span class="ai-card-title">AI review</span>
+        <span id="ai-grammar-status" class="ai-card-status">Running&hellip;</span>
     </div>
+    <ul id="ai-grammar-results" class="ai-rows"></ul>
 </div>
 {% endif %}
 
@@ -69,12 +66,9 @@
 <form method="post" action="" id="style-settings-form" class="sc-config" style="display:none;">
     {% csrf_token %}
     <input type="hidden" name="action" value="save_rules">
-    <p class="sc-config-help">Uncheck a rule to stop flagging it for this set (e.g. teams that allow contractions).</p>
-    <div class="row">
+    <div class="sc-rules">
     {% for r in rule_settings %}
-        <div class="small-6 medium-4 columns">
-            <label class="sc-rule"><input type="checkbox" name="rule_{{ r.code }}"{% if r.enabled %} checked{% endif %}> {{ r.label }}</label>
-        </div>
+        <label class="sc-rule"><input type="checkbox" name="rule_{{ r.code }}"{% if r.enabled %} checked{% endif %}><span>{{ r.label }}</span></label>
     {% endfor %}
     </div>
     <button type="submit" class="button tiny primary" style="margin:0;">Save rule settings</button>
@@ -195,10 +189,6 @@ which question is wrong, this tells you what the whole set still owes.
 .sc-inline { display:inline-block; margin:0; }
 .sc-top select { margin:0; height:auto; padding:0.2rem 1.5rem 0.2rem 0.4rem; }
 .sc-counts { color:#555; }
-.sc-pill { display:inline-block; min-width:1.7em; text-align:center; padding:0 0.45em; margin-left:0.15em;
-           border-radius:10px; font-size:0.78rem; font-weight:bold; color:#fff; line-height:1.5; }
-.sc-pill.err { background:#c0392b; } .sc-pill.warn { background:#d4870c; } .sc-pill.info { background:#9aa0a6; }
-.sc-pill.zero { background:#e2e4e6; color:#9aa0a6; }
 .sc-placement { border-left:4px solid #d4870c; background:#fdf6e9; padding:0.6rem 0.9rem;
                 margin:0 0 0.9rem; border-radius:0 3px 3px 0; }
 .sc-placement h5 { margin:0 0 0.4rem; font-size:0.95rem; }
@@ -209,7 +199,9 @@ which question is wrong, this tells you what the whole set still owes.
 
 .sc-config { background:#f7f7f7; border:1px solid #e6e6e6; border-radius:4px; padding:0.6rem 0.8rem; margin-bottom:0.7rem; }
 .sc-config-help { color:#666; font-size:0.85rem; margin-bottom:0.4rem; }
-.sc-rule { font-size:0.85rem; }
+.sc-rules { display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:10px 28px; margin:4px 0 14px; }
+.sc-rule { display:flex; align-items:flex-start; gap:8px; margin:0; font-size:0.9rem; line-height:1.35; }
+.sc-rule input { margin:2px 0 0; flex:0 0 auto; }
 
 .bulk-bar { background:#fff; border:1px solid #dcdcdc; border-radius:4px; padding:0.4rem 0.6rem;
             margin-bottom:0.6rem; display:flex; align-items:center; flex-wrap:wrap; gap:0.4rem; }
@@ -249,25 +241,34 @@ which question is wrong, this tells you what the whole set still owes.
 .pg-context { color:#777; font-style:italic; }
 .pg-context strong { color:#333; font-style:normal; }
 
-.ai-grammar-list { list-style:none; margin:0.5rem 0 0; }
-.ai-grammar-list li { display:flex; align-items:baseline; gap:0.5em; padding:0.25rem 0 0.25rem 0.55em;
-                      border-left:3px solid #d4870c; margin:0 0 0.3rem; font-size:0.88rem; }
-.ai-grammar-list li.ai-sev-error { border-left-color:#c0392b; }
-.ai-grammar-msg { flex:1 1 auto; }
-.ai-grammar-msg del { color:#c0392b; }
-.ai-grammar-msg strong { color:#1c7c3e; }
-.ai-grammar-msg .ai-alt-ans { color:#1c7c3e; }
-.ai-kind { display:inline-block; padding:0 6px; border-radius:9px; font-size:0.68rem;
-           font-weight:bold; color:#fff; vertical-align:middle; }
-.ai-kind-grammar { background:#d4870c; }
-.ai-kind-answer { background:#1565c0; }
-.ai-kind-style { background:#6a1b9a; }
-.ai-kind-fact { background:#c0392b; }
-.ai-kind-error { background:#555; }
-.ai-auto { font-size:0.68rem; color:#8a8f94; }
-.ai-grammar-dismiss { flex:0 0 auto; cursor:pointer; color:#bdc1c5; font-size:0.78rem; white-space:nowrap; }
-.ai-grammar-list li:hover .ai-grammar-dismiss { color:#8a8f94; }
-.ai-grammar-dismiss:hover { color:#c0392b; text-decoration:underline; }
+/* AI review: the same rows as the style check on a question's page */
+.ai-card { margin:0 0 18px; border:1px solid var(--qx-border, #e9e9ef); border-radius:14px;
+           background:var(--qx-card, #fff); box-shadow:0 1px 2px rgba(20,20,40,.04); }
+.ai-card-head { display:flex; align-items:baseline; gap:12px; padding:12px 20px;
+                border-bottom:1px solid var(--qx-border, #e9e9ef); }
+.ai-card-title { color:var(--qx-ink, #20232e); font-size:1rem; }
+.ai-card-status { color:var(--qx-muted, #8a8f9c); font-size:.9rem; }
+.ai-rows { list-style:none; margin:0; }
+.ai-row { display:flex; align-items:center; gap:16px; margin:0; padding:14px 20px;
+          border-top:1px solid var(--qx-border, #e9e9ef); }
+.ai-rows .ai-row:first-child { border-top:none; }
+.ai-chip { flex:0 0 auto; align-self:flex-start; margin-top:2px; padding:3px 10px; border-radius:7px;
+           background:#efeff4; color:#565b66; font-size:.8rem; white-space:nowrap;
+           width:90px; box-sizing:border-box; text-align:center; }
+.ai-row.sev-error .ai-chip { background:#fbe3e1; color:#a32b1f; }
+.ai-main { flex:1 1 auto; min-width:0; }
+.ai-title { color:var(--qx-ink, #20232e); font-weight:500; font-size:.95rem; }
+.ai-detail { margin-top:2px; color:#5c6270; font-family:var(--qx-serif); font-size:1.05rem; line-height:1.55; }
+.ai-detail mark { padding:0 3px; border-radius:3px; background:#fdecd3; color:var(--qx-ink, #20232e); }
+.ai-loc { margin-top:2px; font-size:.85rem; }
+.ai-loc a { color:var(--qx-muted, #8a8f9c); }
+.ai-loc a:hover { color:var(--qx-primary, #6d28d9); }
+.ai-grammar-dismiss { flex:0 0 auto; cursor:pointer; color:var(--qx-muted, #8a8f9c); font-size:.9rem; }
+.ai-grammar-dismiss:hover { color:#c0392b; }
+html[data-theme="dark"] .ai-chip { background:var(--qx-elevate); color:var(--qx-muted); }
+html[data-theme="dark"] .ai-row.sev-error .ai-chip { background:#3a1d1d; color:#f0a8a0; }
+html[data-theme="dark"] .ai-detail { color:var(--qx-muted); }
+html[data-theme="dark"] .ai-detail mark { background:#3a2e12; color:#f0c98a; }
 </style>
 
 <script>
@@ -275,6 +276,12 @@ $(function () {
     var GUIDE = "{{ guide|escapejs }}";
     var SHOW_DISMISSED = {% if show_dismissed %}true{% else %}false{% endif %};
     $('#toggle-style-settings').on('click', function (e) { e.preventDefault(); $('#style-settings-form').toggle(); });
+    // /style_check/<id>/#rules (linked from the set's settings) opens the rules
+    if (location.hash === '#rules') {
+        $('#style-settings-form').show();
+        var top = $('#style-settings-form').offset().top - 90;
+        window.scrollTo(0, Math.max(0, top));
+    }
 
     // The top nav is position:fixed and wraps to a variable height, so pin the
     // sticky bulk-action bar just below it instead of under it (top:0 hid it).
@@ -382,6 +389,19 @@ $(function () {
         recount();
     }
 
+    // "· 2 errors · 3 warnings · 6 notes", leaving out the zeros
+    function tally(counts) {
+        var parts = [];
+        [['error', 'error', 'errors'], ['warning', 'warning', 'warnings'], ['info', 'note', 'notes']]
+            .forEach(function (k) {
+                var n = counts[k[0]];
+                if (n) { parts.push(n + ' ' + (n === 1 ? k[1] : k[2])); }
+            });
+        $('.sc-tally').text(parts.length ? ' · ' + parts.join(' · ') : '');
+    }
+    var $t = $('.sc-tally');
+    tally({error: +$t.data('error') || 0, warning: +$t.data('warning') || 0, info: +$t.data('info') || 0});
+
     // Keep the header tally honest after an in-place change.
     function recount() {
         var counts = {error: 0, warning: 0, info: 0};
@@ -389,9 +409,7 @@ $(function () {
             var cls = this.className.match(/sev-(\w+)/);
             if (cls && counts[cls[1]] !== undefined) { counts[cls[1]]++; }
         });
-        $('.sc-pill.err').text(counts.error).toggleClass('zero', !counts.error);
-        $('.sc-pill.warn').text(counts.warning).toggleClass('zero', !counts.warning);
-        $('.sc-pill.info').text(counts.info).toggleClass('zero', !counts.info);
+        tally(counts);
         $('.sc-flagged-count').text($('.sc-q').length);
         updateCount();
     }
@@ -530,68 +548,43 @@ $(function () {
     var findings = {{ ai_findings_json|safe }};
     function esc(s) { return $('<div>').text(s == null ? '' : s).html(); }
 
+    var CHIP = {answer: 'Alt answer', error: 'Failed', fact: 'Fact', style: 'Style', grammar: 'Grammar'};
+
     function renderFindings() {
         var $list = $('#ai-grammar-results').empty();
         findings.forEach(function (f) {
-            var $li = $('<li></li>').addClass(f.severity === 'error' ? 'ai-sev-error' : '')
+            var $li = $('<li class="ai-row"></li>').toggleClass('sev-error', f.severity === 'error')
                 .attr('data-id', f.id);
-            var loc = f.edit_url
-                ? '<a href="' + esc(f.edit_url) + '" target="_blank" rel="noopener">' + esc(f.label) + '</a>'
-                : esc(f.label);
-            var body;
+            $li.append($('<span class="ai-chip">').text(CHIP[f.kind] || 'Grammar'));
+            var $main = $('<div class="ai-main">').appendTo($li);
+            $('<div class="ai-title">').text(f.explanation
+                || (f.kind === 'answer' ? 'Also accept' : 'Suggested change')).appendTo($main);
+            var detail = '';
             if (f.kind === 'answer') {
-                // A suggested alternate acceptable/promptable answer to add.
-                // suggestion_html carries the answer-line markup already
-                // rendered (underline/bold/italics), escaped server-side.
-                var sug = f.suggestion_html || esc(f.suggestion);
-                body = '<span class="ai-kind ai-kind-answer">Alt answer</span> ' + loc
-                    + ': <span class="ai-alt-ans">' + sug + '</span>'
-                    + (f.explanation ? ' <span class="sc-guide-note">' + esc(f.explanation) + '</span>' : '');
-            } else if (f.kind === 'error') {
-                // The automatic review of a submission failed.
-                body = '<span class="ai-kind ai-kind-error">Review failed</span> ' + loc
-                    + ': <span class="sc-guide-note">' + esc(f.explanation) + '</span>';
-            } else if (f.kind === 'style' || f.kind === 'fact') {
-                // From the automatic review: the excerpt is the passage in
-                // question, and there may be no single replacement.
-                body = '<span class="ai-kind ai-kind-' + f.kind + '">'
-                    + (f.kind === 'fact' ? (f.severity === 'error' ? 'Fact: likely wrong' : 'Fact: verify') : 'Style')
-                    + '</span> ' + loc + ': '
-                    + (f.excerpt ? '&ldquo;' + esc(f.excerpt) + '&rdquo; ' : '')
-                    + (f.suggestion ? '&rarr; <strong>' + esc(f.suggestion) + '</strong> ' : '')
-                    + (f.explanation ? '<span class="sc-guide-note">' + esc(f.explanation) + '</span>' : '');
+                // suggestion_html is the answer-line markup, escaped server-side
+                detail = f.suggestion_html || esc(f.suggestion);
+            } else if (f.excerpt || f.suggestion) {
+                detail = (f.excerpt ? '&ldquo;' + esc(f.excerpt) + '&rdquo;' : '')
+                    + (f.excerpt && f.suggestion ? ' &rarr; ' : '')
+                    + (f.suggestion ? '<mark>' + esc(f.suggestion) + '</mark>' : '');
+            }
+            if (detail) { $('<div class="ai-detail">').html(detail).appendTo($main); }
+            var $loc = $('<div class="ai-loc">').appendTo($main);
+            if (f.edit_url) {
+                $('<a target="_blank" rel="noopener">').attr('href', f.edit_url).text(f.label).appendTo($loc);
             } else {
-                body = '<span class="ai-kind ai-kind-grammar">Grammar</span> ' + loc
-                    + ': <del>' + esc(f.excerpt) + '</del> &rarr; <strong>' + esc(f.suggestion) + '</strong>'
-                    + (f.explanation ? ' <span class="sc-guide-note">' + esc(f.explanation) + '</span>' : '');
+                $loc.text(f.label);
             }
-            if (f.source === 'auto') {
-                body += ' <span class="ai-auto" title="From the automatic review of new submissions">auto</span>';
-            }
-            $li.append('<span class="ai-grammar-msg">' + body + '</span>');
-            $li.append('<a class="ai-grammar-dismiss" title="Dismiss this suggestion">dismiss</a>');
+            $li.append('<a class="ai-grammar-dismiss">Dismiss</a>');
             $list.append($li);
         });
     }
 
     function setStatus(text) { $('#ai-grammar-status').text(text); }
 
-    function counts() {
-        var n = {grammar: 0, answer: 0, style: 0, fact: 0, error: 0};
-        findings.forEach(function (f) { n[f.kind in n ? f.kind : 'grammar']++; });
-        var parts = [n.grammar + ' grammar', n.answer + ' alt-answer'];
-        if (n.style) { parts.push(n.style + ' style'); }
-        if (n.fact) { parts.push(n.fact + ' fact-check'); }
-        if (n.error) { parts.push(n.error + ' failed review(s)'); }
-        return parts.join(', ') + ' suggestion(s)';
-    }
-
     function summarize() {
-        if (!findings.length) {
-            setStatus('Nothing suggested. Rerun to check again after edits.');
-        } else {
-            setStatus(counts() + '. These stay until dismissed; rerunning the AI check replaces only its own grammar and alt-answer results.');
-        }
+        var n = findings.length;
+        setStatus(n ? n + (n === 1 ? ' suggestion' : ' suggestions') : 'Nothing flagged.');
     }
 
     // Show persisted findings from a previous run on page load.
@@ -606,7 +599,7 @@ $(function () {
         var qset = $btn.data('qset');
         $btn.prop('disabled', true);
         $('#ai-grammar-panel').show();
-        setStatus('Running AI check over the whole set… this can take a bit.');
+        setStatus('Running…');
         $('#ai-grammar-results').empty();
         $.post('/ai_grammar_check/' + qset + '/', {
             csrfmiddlewaretoken: '{{ csrf_token }}'
@@ -620,9 +613,7 @@ $(function () {
             findings = resp.findings || [];
             $('.ai-grammar-btn-label').text('Rerun AI check');
             renderFindings();
-            setStatus('Checked ' + resp.checked + ' question(s). '
-                + (findings.length ? counts() + '. These stay until dismissed or you rerun the check.'
-                                   : 'Nothing suggested.'));
+            summarize();
         }).fail(function () {
             $btn.prop('disabled', false);
             setStatus('The AI check request failed.');
@@ -633,7 +624,7 @@ $(function () {
     $('#ai-grammar-results').on('click', '.ai-grammar-dismiss', function () {
         var $li = $(this).closest('li');
         var id = $li.attr('data-id');
-        $(this).text('dismissing…');
+        $(this).text('Dismissing…');
         $.post('/dismiss_ai_grammar_finding/', {
             csrfmiddlewaretoken: '{{ csrf_token }}', finding_id: id
         }, function () {
@@ -641,8 +632,7 @@ $(function () {
             $li.remove();
             summarize();
         }).fail(function () {
-            $li.find('.ai-grammar-dismiss').text('dismiss');
-            setStatus('Could not dismiss that suggestion — try again.');
+            $li.find('.ai-grammar-dismiss').text('Dismiss');
         });
     });
 });

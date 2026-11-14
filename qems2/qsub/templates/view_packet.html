@@ -88,6 +88,17 @@
     <li class="current"><a href="/view_packet/{{ packet.id }}/">Document View</a></li>
 </ul>
 
+{% if qset.structured_answers %}
+<script>
+/* Expand / collapse every answer-fancy breakdown at once. */
+$(document).on('click', '.af-toggle-all', function (e) {
+    e.preventDefault();
+    var open = !$(this).data('open');
+    $('details.af').prop('open', open);
+    $(this).data('open', open).html('<i class="fa fa-list"></i> ' + (open ? 'Collapse answers' : 'Expand answers'));
+});
+</script>
+{% endif %}
 <div class="doc-toolbar">
     <div class="doc-toolbar-group">
         <a href="?order=separate" class="button tiny {% if order == 'separate' %}primary{% else %}secondary{% endif %}">Tossups then Bonuses</a>
@@ -96,6 +107,7 @@
         <a href="#" id="toggle-comments" class="button tiny secondary"{% if not comment_count %} style="display:none"{% endif %}><i class="fa fa-comment"></i> Comments (<span class="doc-comment-count">{{ comment_count|default:0 }}</span>)</a><a href="#" id="toggle-resolved" class="button tiny secondary" title="Hide comments that have been marked resolved"{% if not comment_count %} style="display:none"{% endif %}><i class="fa fa-check"></i> Hide Resolved</a>
         <a href="#" id="toggle-issues" class="button tiny secondary" title="Show repeat-checker issues for each question"><i class="fa fa-triangle-exclamation"></i> Repeat Issues</a>
         <a href="#" id="toggle-style" class="button tiny secondary" title="Show style-check issues for each question"><i class="fa fa-spell-check"></i> Style Issues</a>
+        {% if qset.structured_answers %}<a href="#" class="button tiny secondary af-toggle-all" title="Open or close every answer line's breakdown (or / accept / prompt / reject)"><i class="fa fa-list"></i> Expand answers</a>{% endif %}
         <a href="#" id="toggle-pg-above" class="button tiny secondary" title="Show annotated pronunciation guides above the words they cover instead of inline"><i class="fa fa-arrow-up"></i> PGs Above</a>
         {% if not read_only %}<a href="#" id="toggle-swap-panel" class="button tiny secondary" title="Show a compact list of this packet's questions for quick swapping"><i class="fa fa-right-left"></i> Swap Panel</a>{% endif %}
         <a href="/packet_mp3/{{ packet.id }}/?order={{ order }}" id="mp3-link" class="button tiny secondary" title="Download an MP3 reading of this packet"><i class="fa fa-headphones"></i> MP3</a>

@@ -293,18 +293,22 @@ class QuestionSet (models.Model):
 
     def credit_values(self, packet=None):
         """What each {token} stands for, as a plain string."""
-        questions = (list(self.tossup_set.select_related('author', 'proofreader'))
-                     + list(self.bonus_set.select_related('author', 'proofreader')))
+        related = ('author', 'proofreader')
+        prefetch = ('co_authors__user',)
+        questions = (list(self.tossup_set.select_related(*related).prefetch_related(*prefetch))
+                     + list(self.bonus_set.select_related(*related).prefetch_related(*prefetch)))
         names = self._credit_names
-        # Each question's credited name (its freeform credit when it has one).
-        packet_authors = ([q.author_real_name() for q in questions if q.packet_id == packet.id]
+        # Each question's credited names (its freeform credit when it has one,
+        # then any co-authors), one person at a time.
+        packet_authors = ([n for q in questions if q.packet_id == packet.id
+                           for n in q.author_names()]
                           if packet is not None else [])
         return {
             '{writers}': ', '.join(names(self.writer.all())),
             '{editors}': ', '.join(names(self.editor.all())),
             '{proofreaders}': ', '.join(names(
                 q.proofreader for q in questions if q.proofread and q.proofreader_id)),
-            '{authors}': ', '.join(names(q.author_real_name() for q in questions)),
+            '{authors}': ', '.join(names(n for q in questions for n in q.author_names())),
             '{packet_authors}': ', '.join(names(packet_authors)),
             '{owner}': ', '.join(names([self.owner])),
             '{set}': self.name or '',
@@ -589,6 +593,12 @@ class QuestionSet (models.Model):
     def disabled_style_rule_set(self):
         """Style-check rule codes turned off for this set."""
         return set(c for c in (self.disabled_style_rules or '').split(',') if c)
+
+    @property
+    def pg_missing_hint(self):
+        """Whether the style check flags words that may need a pronunciation
+        guide (an opt-in rule, stored as "+pg_missing")."""
+        return '+pg_missing' in self.disabled_style_rule_set()
 
     @property
     def awaiting_approval(self):
@@ -934,6 +944,25 @@ class AIGrammarFinding(models.Model):
     def __str__(self):
         return 'ai grammar finding on {0} {1}'.format(
             self.question_type, self.question_id)
+
+
+class AIReviewRun(models.Model):
+    """The last automatic AI review of one question: queued, done or failed.
+    Without it a question with no findings can't be told apart from one that
+    was never reviewed."""
+    QUEUED, DONE, FAILED = 'queued', 'done', 'failed'
+    question_set = models.ForeignKey(QuestionSet, on_delete=models.CASCADE,
+                                     related_name='ai_review_runs')
+    question_type = models.CharField(max_length=10)  # 'tossup' | 'bonus'
+    question_id = models.PositiveIntegerField()
+    status = models.CharField(max_length=10, default=QUEUED)
+    updated_date = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [('question_type', 'question_id')]
+
+    def __str__(self):
+        return 'ai review of {0} {1}: {2}'.format(self.question_type, self.question_id, self.status)
 
 
 class AITagSuggestion(models.Model):
@@ -1748,7 +1777,110 @@ class QuestionType(models.Model):
 class QuestionHistory(models.Model):
     pass
 
-class Tossup (models.Model):
+def fancy_answer_html(question, line, structure):
+    """One answer line as an expandable answer-fancy breakdown (see
+    answer_structure.fancy_html), formatted with the question's own rules."""
+    from .answer_structure import fancy_html
+    quoted = question.guides_require_quotes()
+    return fancy_html(line, structure, lambda text: get_formatted_question_html(
+        text, True, True, False, False, guidesRequireQuotes=quoted))
+
+
+def join_names(names):
+    """"A", "A and B", "A, B, and C" -- how a byline lists several people."""
+    names = [n for n in names if n]
+    if len(names) <= 2:
+        return ' and '.join(names)
+    return '{0}, and {1}'.format(', '.join(names[:-1]), names[-1])
+
+
+def _writer_display(writer, real):
+    if writer is None:
+        return ''
+    if not real:
+        return str(writer).strip()
+    try:
+        return (writer.get_real_name() or '').strip()
+    except Exception:
+        return str(writer).strip()
+
+
+class CoCreditMixin(object):
+    """Who a question is credited to, for Tossup and Bonus.
+
+    A question has one author account (it owns the row and decides who may
+    edit) and, when it has been edited, one editor stamp. Rarely, a question is
+    the work of more than one person; ``co_authors`` and ``co_editors`` list
+    the others. They are credit only: they add names wherever the author or
+    editor is shown or exported, and change nothing about who may edit.
+    """
+
+    def _co(self, field):
+        """The co-credited writers, by name. Uses a prefetch when the list was
+        loaded with one, so a table of questions costs no query per row."""
+        if not self.pk:
+            return []
+        writers = list(getattr(self, field).all())
+        return sorted(writers, key=lambda w: (w.user.last_name.lower(), w.user.first_name.lower(),
+                                              w.user.username.lower()))
+
+    def co_author_list(self):
+        return [w for w in self._co('co_authors') if w.pk != self.author_id]
+
+    def co_editor_list(self):
+        return self._co('co_editors')
+
+    def has_co_credits(self):
+        return bool(self.co_author_list() or self.co_editor_list())
+
+    def _primary_credit(self, real):
+        credited = (self.author_text or '').strip()
+        if credited:
+            return credited
+        return _writer_display(self.author, real) if self.author_id else ''
+
+    def author_names(self, real=True):
+        """Everyone the question is credited to, the author first. A freeform
+        credit stands in for the author account."""
+        names = []
+        for name in [self._primary_credit(real)] + [_writer_display(w, real)
+                                                    for w in self.co_author_list()]:
+            if name and name not in names:
+                names.append(name)
+        return names
+
+    def author_name(self):
+        """Who this question is credited to, for anything that shows a name.
+
+        A freeform credit wins over the account: the account is who owns the
+        row, which is not always who wrote the question. Co-authors follow.
+        """
+        return join_names(self.author_names(real=False))
+
+    def author_real_name(self):
+        """The same, in the form exports want: people's names, without the
+        accounts' usernames after them."""
+        return join_names(self.author_names(real=True))
+
+    def editor_names(self, real=True):
+        """Everyone credited with editing: the editor stamp (once the question
+        is marked edited) and any co-editors."""
+        writers = ([self.editor] if self.edited and self.editor_id else []) + self.co_editor_list()
+        names = []
+        for writer in writers:
+            name = _writer_display(writer, real)
+            if name and name not in names:
+                names.append(name)
+        return names
+
+    def editor_name(self):
+        return join_names(self.editor_names(real=False))
+
+    def editor_real_name(self):
+        return join_names(self.editor_names(real=True))
+
+
+class Tossup (CoCreditMixin, models.Model):
     # SET_NULL: deleting a packet sends its questions back to unpacketized.
     packet = models.ForeignKey(Packet, on_delete=models.SET_NULL, null=True)
     question_set = models.ForeignKey(QuestionSet, on_delete=models.CASCADE)
@@ -1798,6 +1930,10 @@ class Tossup (models.Model):
     last_changed_date = models.DateTimeField()
     edited_date = models.DateTimeField(null=True)
     editor = models.ForeignKey(Writer, on_delete=models.CASCADE, null=True, related_name='tossup_editor')
+    # Rarely, more than one person wrote or edited a question. Credit only --
+    # see CoCreditMixin; the author and editor fields above keep their jobs.
+    co_authors = models.ManyToManyField(Writer, blank=True, related_name='tossup_co_authored')
+    co_editors = models.ManyToManyField(Writer, blank=True, related_name='tossup_co_edited')
     proofread_date = models.DateTimeField(null=True)
     proofreader = models.ForeignKey(Writer, on_delete=models.CASCADE, null=True, related_name='tossup_proofreader')
 
@@ -1909,12 +2045,19 @@ class Tossup (models.Model):
             return []
         return validate(self.answer_structure(), self.tossup_text)
 
-    def to_html(self, include_category=False, include_character_count=False):
-
+    def to_html(self, include_category=False, include_character_count=False, fancy_answers=False):
+        """The question as HTML. With `fancy_answers`, a set that records
+        structured answers prints the answer line as an expandable answer-fancy
+        breakdown (the proof pane and the document views ask for that)."""
         output = ''
         quoted = self.guides_require_quotes()
-        output = output + "<p>" + get_formatted_question_html(self.tossup_text, False, True, False, True, allPower=self.is_all_power(), allowSuperpower=self.superpower_enabled(), guidesRequireQuotes=quoted) + "<br />"
-        output = output + "ANSWER: " + get_formatted_question_html(self.tossup_answer, True, True, False, False, guidesRequireQuotes=quoted) + "</p>"
+        text_html = get_formatted_question_html(self.tossup_text, False, True, False, True, allPower=self.is_all_power(), allowSuperpower=self.superpower_enabled(), guidesRequireQuotes=quoted)
+        if fancy_answers and self.structured_answers_enabled():
+            output = ('<div class="af-question"><p>' + text_html + '</p>'
+                      + fancy_answer_html(self, self.tossup_answer, self.answer_structure()) + '</div>')
+        else:
+            output = output + "<p>" + text_html + "<br />"
+            output = output + "ANSWER: " + get_formatted_question_html(self.tossup_answer, True, True, False, False, guidesRequireQuotes=quoted) + "</p>"
         if (include_category and self.category is not None):
             output = output + "<p><strong>Category:</strong> " + str(self.category) + "</p>"
         else:
@@ -1962,30 +2105,6 @@ class Tossup (models.Model):
     def setup_search_fields(self, remove_unicode=True):
         self.search_question_content = search_text(self.tossup_text, remove_unicode)
         self.search_question_answers = search_text(self.tossup_answer, remove_unicode)
-
-    def author_name(self):
-        """Who this question is credited to, for anything that shows a name.
-
-        A freeform credit wins over the account: the account is who owns the
-        row, which is not always who wrote the question.
-        """
-        credited = (self.author_text or '').strip()
-        if credited:
-            return credited
-        return str(self.author) if self.author_id else ''
-
-    def author_real_name(self):
-        """The same, in the form exports want: a person's name, without the
-        account's username after it."""
-        credited = (self.author_text or '').strip()
-        if credited:
-            return credited
-        if not self.author_id:
-            return ''
-        try:
-            return (self.author.get_real_name() or '').strip()
-        except Exception:
-            return ''
 
     def get_question_set(self):
         try:
@@ -2049,7 +2168,7 @@ class Tossup (models.Model):
     def get_tossup_type(self):
         return get_tossup_type_from_question_type(self.question_type)
 
-class Bonus(models.Model):
+class Bonus(CoCreditMixin, models.Model):
     # SET_NULL: deleting a packet sends its questions back to unpacketized.
     packet = models.ForeignKey(Packet, on_delete=models.SET_NULL, null=True)
     question_set = models.ForeignKey(QuestionSet, on_delete=models.CASCADE)
@@ -2109,6 +2228,9 @@ class Bonus(models.Model):
     last_changed_date = models.DateTimeField()
     edited_date = models.DateTimeField(null=True)
     editor = models.ForeignKey(Writer, on_delete=models.CASCADE, null=True, related_name='bonus_editor')
+    # Credit only -- see CoCreditMixin.
+    co_authors = models.ManyToManyField(Writer, blank=True, related_name='bonus_co_authored')
+    co_editors = models.ManyToManyField(Writer, blank=True, related_name='bonus_co_edited')
     proofread_date = models.DateTimeField(null=True)
     proofreader = models.ForeignKey(Writer, on_delete=models.CASCADE, null=True, related_name='bonus_proofreader')
 
@@ -2273,11 +2395,43 @@ class Bonus(models.Model):
         
         return output
 
-    def to_html(self, include_category=False, include_character_count=False):
+    def _fancy_parts_html(self, quoted):
+        """The bonus with each answer as an answer-fancy breakdown -- block
+        elements, so each part gets a paragraph of its own."""
+        def fmt(text):
+            return get_formatted_question_html(text, False, True, False, False, guidesRequireQuotes=quoted)
+
+        out = '<div class="af-question">'
+        if self.get_bonus_type() == ACF_STYLE_BONUS:
+            out += '<p>' + fmt(self.leadin) + '</p>'
+            for part in (1, 2, 3):
+                out += '<p>[10{0}] {1}</p>'.format(getattr(self, 'part{0}_difficulty'.format(part)),
+                                                   fmt(getattr(self, 'part{0}_text'.format(part))))
+                out += fancy_answer_html(self, getattr(self, 'part{0}_answer'.format(part)),
+                                         self.answer_structure(part))
+        else:
+            out += '<p>' + fmt(self.part1_text) + '</p>'
+            out += fancy_answer_html(self, self.part1_answer, self.answer_structure(1))
+        return out + '</div>'
+
+    def to_html(self, include_category=False, include_character_count=False, fancy_answers=False):
+        """The bonus as HTML. `fancy_answers` as on Tossup.to_html."""
         output = ''
         quoted = self.guides_require_quotes()
+        fancy = fancy_answers and self.structured_answers_enabled()
 
-        if (self.get_bonus_type() == ACF_STYLE_BONUS):
+        if fancy:
+            output = self._fancy_parts_html(quoted)
+            if include_category and self.category is not None:
+                output = output + "<p><strong>Category:</strong> " + str(self.category) + "</p>"
+            if include_character_count:
+                limit = (self.question_set.max_vhsl_bonus_length
+                         if self.get_bonus_type() == VHSL_BONUS
+                         else self.question_set.max_acf_bonus_length)
+                char_count = self.character_count()
+                css_class = "class='over-char-limit'" if char_count > limit else ''
+                output = output + "<p><strong " + css_class + ">Character Count:</strong> " + str(char_count) + "/" + str(limit) + "</p>"
+        elif (self.get_bonus_type() == ACF_STYLE_BONUS):
             output = output + "<p>" + get_formatted_question_html(self.leadin, False, True, False, False, guidesRequireQuotes=quoted) + "<br />"
             output = output + "[10" + self.part1_difficulty + "] " + get_formatted_question_html(self.part1_text, False, True, False, False, guidesRequireQuotes=quoted) + "<br />"
             output = output + "ANSWER: " + get_formatted_question_html(self.part1_answer, True, True, False, False, guidesRequireQuotes=quoted) + "<br />"
@@ -2398,30 +2552,6 @@ class Bonus(models.Model):
         self.search_question_answers = " ".join(
             search_text(t, remove_unicode)
             for t in (self.part1_answer, self.part2_answer, self.part3_answer))
-
-    def author_name(self):
-        """Who this question is credited to, for anything that shows a name.
-
-        A freeform credit wins over the account: the account is who owns the
-        row, which is not always who wrote the question.
-        """
-        credited = (self.author_text or '').strip()
-        if credited:
-            return credited
-        return str(self.author) if self.author_id else ''
-
-    def author_real_name(self):
-        """The same, in the form exports want: a person's name, without the
-        account's username after it."""
-        credited = (self.author_text or '').strip()
-        if credited:
-            return credited
-        if not self.author_id:
-            return ''
-        try:
-            return (self.author.get_real_name() or '').strip()
-        except Exception:
-            return ''
 
     def get_question_set(self):
         try:

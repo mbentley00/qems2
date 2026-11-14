@@ -239,9 +239,9 @@ $(function () {
         if (textarea.id === 'id_questions') {
             $toolbar.find('.rich-editor-qb').before(
                 '<a href="#" class="rich-editor-btn rich-editor-skel" data-cmd="bonusskel" ' +
-                'title="Start a bonus: the &quot;For 10 points each:&quot; line, three [10] parts ' +
-                'and an ANSWER line for each. Added at the end of the box, with the caret where ' +
-                'the leadin goes.">Bonus skeleton</a>');
+                'title="Start a bonus: the &quot;For 10 points each:&quot; line, then three [10] parts ' +
+                'and their ANSWER lines marked INCOMPLETE until you write them. Added at the end of ' +
+                'the box, with the caret where the leadin goes.">Bonus skeleton</a>');
         }
         var $editor = $('<div class="rich-editor" contenteditable="true" spellcheck="true"></div>');
         // Only the big bulk "type questions" box gets the extra-tall sizing.
@@ -729,10 +729,16 @@ $(function () {
         /* ---------- Bonus skeleton (Type Questions) ---------- */
 
         var BONUS_LEADIN_LINE = 'For 10 points each:';
+        // INCOMPLETE is the placeholder an unwritten part carries (the
+        // duplicate checker ignores it), so a skeleton saved before it is
+        // finished still parses as a bonus. The answer has to be underlined
+        // for the parser to accept it.
+        var BONUS_PART_LINE = '[10] INCOMPLETE';
+        var BONUS_ANSWER_LINE = 'ANSWER: _INCOMPLETE_';
         var BONUS_SKELETON = [BONUS_LEADIN_LINE,
-                              '[10] ', 'ANSWER: ',
-                              '[10] ', 'ANSWER: ',
-                              '[10] ', 'ANSWER: '];
+                              BONUS_PART_LINE, BONUS_ANSWER_LINE,
+                              BONUS_PART_LINE, BONUS_ANSWER_LINE,
+                              BONUS_PART_LINE, BONUS_ANSWER_LINE];
 
         // Append a blank bonus at the end of the box. The end, rather than the
         // caret: the box holds a run of whole questions, and dropping seven

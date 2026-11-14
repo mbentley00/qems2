@@ -1,0 +1,55 @@
+{% comment %}
+One row of a structured answer group. Include with `prefix`, `group` (or /
+accept / prompt / reject / unparsed), `entry` (blank for the clone template),
+and `is_tossup`. Every alternate, accept and prompt can carry the same
+modifiers as an answer-fancy breakdown: "in place of", a reading window
+("until read", "until/after "word" is read" -- tossups only), and for a prompt
+what to ask.
+{% endcomment %}
+<div class="sa-row" data-when="{{ entry.when|default:'' }}">
+    <div class="sa-main">
+        {% if group == 'prompt' %}
+        <select name="{{ prefix }}_prompt_anti" class="sa-kind" aria-label="Prompt or antiprompt">
+            <option value="prompt"{% if not entry.anti %} selected{% endif %}>prompt on</option>
+            <option value="anti"{% if entry.anti %} selected{% endif %}>antiprompt on</option>
+        </select>
+        {% endif %}
+        {% if group == 'unparsed' %}
+        <input type="text" name="{{ prefix }}_unparsed" value="{{ entry }}" class="sa-text"
+               placeholder="printed as typed">
+        {% else %}
+        <input type="text" name="{{ prefix }}_{{ group }}_text" value="{{ entry.text|default:'' }}" class="sa-text"
+               placeholder="{% if group == 'or' %}an equally good answer{% elif group == 'accept' %}another acceptable answer{% elif group == 'prompt' %}what to prompt on{% else %}what not to accept{% endif %}">
+        {% endif %}
+        <button type="button" class="sa-remove" title="Remove">&times;</button>
+    </div>
+    {% if group == 'or' or group == 'accept' or group == 'prompt' %}
+    <div class="sa-mods">
+        {% if group == 'prompt' %}
+        <label class="sa-mod sa-mod-wide">by asking
+            <input type="text" name="{{ prefix }}_prompt_instruction" value="{{ entry.instruction|default:'' }}"
+                   placeholder="what the moderator says" class="sa-instruction"
+                   title="What the moderator should say. Leaving this empty means every moderator invents their own follow-up.">
+        </label>
+        {% endif %}
+        <label class="sa-mod">in place of
+            <input type="text" name="{{ prefix }}_{{ group }}_inplace" value="{{ entry.in_place_of|default:'' }}"
+                   placeholder="words it replaces" class="sa-inplace"
+                   title='Optional: e.g. accept "USSR" in place of "Soviet Union"'>
+        </label>
+        {% if is_tossup %}
+        <label class="sa-mod">
+            <select name="{{ prefix }}_{{ group }}_when" class="sa-when" aria-label="When this applies">
+                <option value=""{% if not entry.when %} selected{% endif %}>any time</option>
+                <option value="until_read"{% if entry.when == 'until_read' %} selected{% endif %}>until read</option>
+                <option value="until"{% if entry.when == 'until' %} selected{% endif %}>until &hellip; is read</option>
+                <option value="after"{% if entry.when == 'after' %} selected{% endif %}>after &hellip; is read</option>
+            </select>
+            <input type="text" name="{{ prefix }}_{{ group }}_word" value="{{ entry.word|default:'' }}"
+                   placeholder="word in the tossup" class="sa-word"
+                   title="A word in the tossup the moderator reads up to">
+        </label>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>

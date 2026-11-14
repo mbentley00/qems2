@@ -25,6 +25,29 @@ Include with `q` (the tossup or bonus) and `qtype`; uses the page's `form`,
         <span class="qmeta-word">&middot; in</span>
         <a href="/packet_grid/{{ qset.id }}/" class="qmeta-packet-link" title="Open the packet grid">{% if q.packet %}{{ q.packet.packet_name }}{% if q.question_number %}, #{{ q.question_number }}{% endif %}{% else %}no packet{% endif %}&nbsp;&#8599;</a>
     </div>
+    {% comment %}
+    More than one writer or editor. Rare, so it stays out of the way: the panel
+    is hidden until More > "Credit more writers or editors" opens it, and only
+    shows on its own once a question has co-credits. Credit only -- the author
+    account still decides who may edit. The views add these fields only for
+    someone who can save the question (co-editors: editors and owners).
+    {% endcomment %}
+    {% if form.co_authors %}
+    <div class="qcocredit"{% if not q.has_co_credits %} hidden{% endif %}>
+        <input type="hidden" name="co_credit_form" value="1">
+        <div class="qco-row">
+            <span class="qco-label">Also written by</span>
+            <div class="qco-choices">{% for box in form.co_authors %}<label class="qco-choice">{{ box.tag }} {{ box.choice_label }}</label>{% empty %}<span class="qco-empty">No one else in this set.</span>{% endfor %}</div>
+        </div>
+        {% if form.co_editors %}
+        <div class="qco-row">
+            <span class="qco-label">Also edited by</span>
+            <div class="qco-choices">{% for box in form.co_editors %}<label class="qco-choice">{{ box.tag }} {{ box.choice_label }}</label>{% empty %}<span class="qco-empty">This set has no editors.</span>{% endfor %}</div>
+        </div>
+        {% endif %}
+        <p class="qco-help">Credited alongside the author{% if form.co_editors %} and editor{% endif %} on this page and in exports and packet credits. It doesn't change who can edit the question. Saved with the question.</p>
+    </div>
+    {% endif %}
     {% if form.category.errors or form.author.errors or form.author_text.errors %}
     <div class="qmeta-errors">{{ form.category.errors }}{{ form.author.errors }}{{ form.author_text.errors }}</div>
     {% endif %}
@@ -79,6 +102,7 @@ Include with `q` (the tossup or bonus) and `qtype`; uses the page's `form`,
                 {% if qtype == "bonus" and question_type == "VHSL bonus" %}
                 <a href="/convert_bonus/{{ q.id }}" class="qmenu-item convert_bonus" value="{{ q.id }}" qset-id="{{ qset.id }}" target-type="ACF-style bonus">Convert to ACF bonus</a>
                 {% endif %}
+                {% if form.co_authors %}<a href="#" class="qmenu-item qco-open"{% if q.has_co_credits %} hidden{% endif %} title="Rarely needed: credit a question to more than one writer or editor">Credit more writers or editors&hellip;</a>{% endif %}
                 <a href="/export_question/{{ qtype }}/{{ q.id }}/yapp-json/" class="qmenu-item" title="Download just this {{ qtype }} as a one-question YAPP JSON packet, readable by MODAQ">YAPP</a>
                 <a href="/export_question/{{ qtype }}/{{ q.id }}/yapp2-json/" class="qmenu-item" title="Download just this {{ qtype }} as YAPP2 JSON — the same packet, plus pronunciation-guide anchoring">YAPP2</a>
                 <hr class="qmenu-sep">

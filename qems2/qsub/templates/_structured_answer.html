@@ -1,82 +1,76 @@
 {% load filters %}
 {% comment %}
-One structured answer line: the required primary answer, then any number of
-accepts and directed prompts. Include with `prefix` (the POST field prefix,
-e.g. "answer" or "part1"), `structure` (from a question's answer_structure()),
-`label`, and `is_tossup` (only a tossup can say "until X is read" — a bonus part
-has no shared text to read up to).
+One structured answer line, laid out like an "answer-fancy" breakdown: the
+canonical answer, then "or", "accept", "prompt on" and "reject" lists, then a
+note printed in parentheses after the bracket. Include with `prefix` (the POST
+field prefix, e.g. "answer" or "part1"), `structure` (from a question's
+answer_structure()), `label`, and `is_tossup` (only a tossup can say "until X
+is read" -- a bonus part has no shared text to read up to).
+
+Each group carries a <template> of a blank row, rendered by the same include as
+the filled rows, which structured_answer.js clones for "+ add".
 {% endcomment %}
 <div class="structured-answer" data-prefix="{{ prefix }}" data-is-tossup="{{ is_tossup|yesno:"1,0" }}">
     <label class="sa-primary">
         {{ label }}<span class="sa-required" title="Required">*</span>
+        <span class="sa-group-head sa-canonical-head">Answer</span>
         <input type="text" name="{{ prefix }}_primary" value="{{ structure.primary }}"
                class="sa-primary-input" required>
     </label>
 
-    <div class="sa-group" data-group="accept">
-        <div class="sa-group-head">Also accept</div>
+    <div class="sa-group" data-group="or">
+        <div class="sa-group-head">or</div>
         <div class="sa-rows">
-            {% for accept in structure.accepts %}
-            <div class="sa-row">
-                <input type="text" name="{{ prefix }}_accept_text" value="{{ accept.text }}"
-                       placeholder="another acceptable answer" class="sa-text">
-                {% if is_tossup %}
-                <input type="text" name="{{ prefix }}_accept_until" value="{{ accept.until|default_if_none:"" }}"
-                       placeholder="until this word is read" class="sa-until"
-                       title="Optional: a word in the tossup after which this stops being acceptable">
-                {% endif %}
-                <button type="button" class="sa-remove" title="Remove">&times;</button>
-            </div>
-            {% endfor %}
+            {% for entry in structure.alternates %}{% include "_structured_answer_row.html" with group="or" %}{% endfor %}
         </div>
+        <template class="sa-template">{% include "_structured_answer_row.html" with group="or" entry=None %}</template>
+        <button type="button" class="sa-add" data-group="or">+ or</button>
+    </div>
+
+    <div class="sa-group" data-group="accept">
+        <div class="sa-group-head">accept</div>
+        <div class="sa-rows">
+            {% for entry in structure.accepts %}{% include "_structured_answer_row.html" with group="accept" %}{% endfor %}
+        </div>
+        <template class="sa-template">{% include "_structured_answer_row.html" with group="accept" entry=None %}</template>
         <button type="button" class="sa-add" data-group="accept">+ accept</button>
     </div>
 
     <div class="sa-group" data-group="prompt">
-        <div class="sa-group-head">Prompt on</div>
+        <div class="sa-group-head">prompt on</div>
         <div class="sa-rows">
-            {% for prompt in structure.prompts %}
-            <div class="sa-row">
-                <select name="{{ prefix }}_prompt_anti" class="sa-kind">
-                    <option value="prompt"{% if not prompt.anti %} selected{% endif %}>prompt</option>
-                    <option value="anti"{% if prompt.anti %} selected{% endif %}>antiprompt</option>
-                </select>
-                <input type="text" name="{{ prefix }}_prompt_text" value="{{ prompt.text }}"
-                       placeholder="what to prompt on" class="sa-text">
-                <input type="text" name="{{ prefix }}_prompt_instruction" value="{{ prompt.instruction }}"
-                       placeholder="by asking&hellip;" class="sa-instruction"
-                       title="What the moderator should say. Leaving this empty means every moderator invents their own follow-up.">
-                {% if is_tossup %}
-                <input type="text" name="{{ prefix }}_prompt_until" value="{{ prompt.until|default_if_none:"" }}"
-                       placeholder="until this word is read" class="sa-until"
-                       title="Optional: a word in the tossup after which this stops being promptable">
-                {% endif %}
-                <button type="button" class="sa-remove" title="Remove">&times;</button>
-            </div>
-            {% endfor %}
+            {% for entry in structure.prompts %}{% include "_structured_answer_row.html" with group="prompt" %}{% endfor %}
         </div>
+        <template class="sa-template">{% include "_structured_answer_row.html" with group="prompt" entry=None %}</template>
         <button type="button" class="sa-add" data-group="prompt">+ prompt</button>
     </div>
 
-    <div class="sa-group" data-group="note">
-        <div class="sa-group-head">Notes
-            <small>Anything else the answer line says &mdash; a &ldquo;do not accept&rdquo;, a
-                clarification for the moderator &mdash; printed word for word.</small>
+    <div class="sa-group" data-group="reject">
+        <div class="sa-group-head">reject</div>
+        <div class="sa-rows">
+            {% for entry in structure.rejects %}{% include "_structured_answer_row.html" with group="reject" %}{% endfor %}
+        </div>
+        <template class="sa-template">{% include "_structured_answer_row.html" with group="reject" entry=None %}</template>
+        <button type="button" class="sa-add" data-group="reject">+ reject</button>
+    </div>
+
+    <div class="sa-group" data-group="unparsed"{% if not structure.unparsed %} hidden{% endif %}>
+        <div class="sa-group-head">Other clauses
+            <small>Parts of the bracket that didn't fit a group above, printed word for word.</small>
         </div>
         <div class="sa-rows">
-            {% for clause in structure.unparsed %}
-            <div class="sa-row">
-                <input type="text" name="{{ prefix }}_unparsed" value="{{ clause }}" class="sa-text"
-                       placeholder="printed as typed">
-                <button type="button" class="sa-remove" title="Remove">&times;</button>
-            </div>
-            {% endfor %}
+            {% for entry in structure.unparsed %}{% include "_structured_answer_row.html" with group="unparsed" %}{% endfor %}
         </div>
-        <button type="button" class="sa-add" data-group="note">+ note</button>
+    </div>
+
+    <div class="sa-group" data-group="note">
+        <div class="sa-group-head">Note</div>
+        <input type="text" name="{{ prefix }}_note" value="{{ structure.note }}" class="sa-text sa-note"
+               placeholder="optional">
     </div>
 
     {% comment %}
-    The line as it prints, formatting and all — the same rendering the saved
+    The line as it prints, formatting and all -- the same rendering the saved
     question gets above the form. The editor rewrites it as the fields change;
     this is what it looks like before any of that happens.
     {% endcomment %}

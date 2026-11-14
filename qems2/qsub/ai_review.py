@@ -53,8 +53,18 @@ def queue_review(qset, tossups=(), bonuses=(), writer=None):
     if not refs:
         return
     writer_id = writer.id if writer is not None else None
+    mark_runs(qset.id, refs, 'queued')
     # After commit: the thread opens its own connection and must see the rows.
     transaction.on_commit(lambda: _start(qset.id, refs, writer_id))
+
+
+def mark_runs(qset_id, refs, status):
+    """Record the review state of each (qtype, id) question."""
+    from .models import AIReviewRun
+    for qtype, qid in refs:
+        AIReviewRun.objects.update_or_create(
+            question_type=qtype, question_id=qid,
+            defaults={'question_set_id': qset_id, 'status': status})
 
 
 def _start(qset_id, refs, writer_id):
@@ -69,6 +79,7 @@ def _run(qset_id, refs, writer_id):
     except Exception as ex:  # never let a background thread die silently
         try:
             _store_error(qset_id, refs, writer_id, 'The AI review crashed: {0}'.format(ex))
+            mark_runs(qset_id, refs, 'failed')
         except Exception:
             pass
     finally:
@@ -113,6 +124,8 @@ def run_review(qset_id, refs, writer_id=None):
         stored += 1
     if error:
         _store_error(qset_id, refs, writer_id, error)
+    reviewed = [(r.partition('-')[0], int(r.partition('-')[2])) for r in known]
+    mark_runs(qset_id, reviewed, 'failed' if error else 'done')
     return stored
 
 

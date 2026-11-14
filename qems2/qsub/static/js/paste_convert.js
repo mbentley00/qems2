@@ -627,10 +627,17 @@ $(function () {
             }
         });
 
-        // Default to the unified editor view (whole-bonus rich text). Populate
-        // the textarea from the saved fields now, before rich_editor.js enhances
-        // it (this script runs first), so the rich editor renders the content.
-        if ($unifiedContainer.length && $unifiedTextarea.length) {
+        // A set with structured answer lines has no single answer field per
+        // part for the whole-bonus box to read or write, so the box would show
+        // blank answers and drop any typed there. Those pages stay on the
+        // individual fields.
+        if ($individualContainer.find('.structured-answer').length) {
+            $toggleBtn.hide();
+        } else if ($unifiedContainer.length && $unifiedTextarea.length) {
+            // Default to the unified editor view (whole-bonus rich text).
+            // Populate the textarea from the saved fields now, before
+            // rich_editor.js enhances it (this script runs first), so the rich
+            // editor renders the content.
             unifiedMode = true;
             $unifiedTextarea.val(fieldsToUnified());
             $individualContainer.hide();

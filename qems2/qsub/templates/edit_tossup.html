@@ -55,8 +55,8 @@ button in the question panel brings it back.
             {{ tossup|tossup_html_verbose }}
             </div>
             <p><strong>Written by:</strong> {{ tossup.author_name|escape }} on {{ tossup.created_date }}</p>
-            {% if tossup.edited and tossup.editor %}
-                <p><strong>Edited by:</strong> {{ tossup.editor|escape }} on {{ tossup.edited_date }}</p>
+            {% if tossup.editor_names %}
+                <p><strong>Edited by:</strong> {{ tossup.editor_name|escape }}{% if tossup.edited and tossup.editor %} on {{ tossup.edited_date }}{% endif %}</p>
             {% endif %}
             {% if tossup.proofread and tossup.proofreader %}
                 <p><strong>Proofread by:</strong> {{ tossup.proofreader|escape }} on {{ tossup.proofread_date }}</p>
@@ -137,6 +137,7 @@ button in the question panel brings it back.
 </form>
 {% if tossup and pending_suggestions %}{% include "_suggested_changes.html" with question_type="tossup" q_id=tossup.id %}{% endif %}
 
+{% if tossup %}{% include "_ai_review_panel.html" with question=tossup qtype="tossup" %}{% endif %}
 {% if tossup %}{% include "_style_check_panel.html" with question_type="tossup" q_id=tossup.id qset_id=qset.id %}{% endif %}
 {% include "_order_constraints.html" %}
 {% include "_playtest.html" %}
@@ -152,9 +153,9 @@ button in the question panel brings it back.
 {% if tossup and role == "editor" %}{% include "_swap_dialog.html" %}{% endif %}
 
 <script src="{% static 'js/anchored_comments.js' %}?v=4"></script>
-{% if structured_answers_on %}<script src="{% static 'js/structured_answer.js' %}?v=3"></script>{% endif %}
+{% if structured_answers_on %}<script src="{% static 'js/structured_answer.js' %}?v=4"></script>{% endif %}
 <script src="{% static 'js/live_char_count.js' %}?v=2"></script>
-<script src="{% static 'js/question_tabs.js' %}?v=4"></script>
+<script src="{% static 'js/question_tabs.js' %}?v=5"></script>
 <script>
 // Writers sometimes bold the power section by hand. Power is applied
 // automatically from the (*) and (+) marks, so a long bold run at the start of

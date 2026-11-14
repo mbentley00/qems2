@@ -61,7 +61,8 @@ RULE_LABELS = [
     ('imperative', 'Interrogative giveaway'),
     ('underline', 'Answer line has no underline'),
     ('answer_format', 'Non-standard bold/underline on an answer line'),
-    ('pronunciation', 'Pronunciation-guide suggestions'),
+    ('pronunciation', 'Suggest guides from the pronunciation dictionary'),
+    ('pg_missing', 'Flag other hard-to-say words with no guide'),
     ('pg_span', 'Pronunciation guides without a marked target (\\P…\\P)'),
     ('pg_possessive', 'Pronunciation guides that split a possessive'),
     ('answer_alts', 'Answer line missing standard alternates'),
@@ -90,8 +91,35 @@ def configurable_rules(guide=DEFAULT_GUIDE):
     return [(c, lbl) for c, lbl in RULE_LABELS if c in on]
 
 
+# Rules that are off until a set turns them on. A set's stored rule list holds
+# the codes it turned off, plus "+code" for each of these it turned on.
+OPT_IN_CODES = {'pg_missing'}
+
+
+def rule_enabled(code, disabled):
+    """Whether rule `code` runs for a set whose stored list is `disabled`."""
+    disabled = set(disabled or ())
+    if code in OPT_IN_CODES:
+        return '+' + code in disabled
+    return code not in disabled
+
+
+def stored_rule_list(configurable, turned_on):
+    """The list to store for a set, given the configurable codes and the ones
+    ticked on: every unticked ordinary rule, and "+code" per ticked opt-in rule."""
+    out = []
+    for c in configurable:
+        if c in OPT_IN_CODES:
+            if c in turned_on:
+                out.append('+' + c)
+        elif c not in turned_on:
+            out.append(c)
+    return out
+
+
 def _enabled_codes(guide, disabled):
-    return GUIDE_CODES.get(guide, GUIDE_CODES[DEFAULT_GUIDE]) - set(disabled or ())
+    return {c for c in GUIDE_CODES.get(guide, GUIDE_CODES[DEFAULT_GUIDE])
+            if rule_enabled(c, disabled)}
 
 
 # A dismissal is keyed by (code, token), and the token is what keeps it narrow:
@@ -100,6 +128,7 @@ def _enabled_codes(guide, disabled):
 # The number is which '|'-separated part of the token holds that name.
 _TOKEN_SUBJECT_PART = {
     'pronunciation': 1,     # Question|Diderot
+    'pg_missing': 1,        # Question|Pallavicino
     'pg_span': 2,           # Question|0|("DID-er-OW")
     'pg_possessive': 2,     # Question|0|("SAH-chee")
     'prompt_undirected': 1,  # Answer|Louis
@@ -325,6 +354,33 @@ def _pronunciation_issues(label, raw, field, require_quotes=False):
             INFO, message, 'pronunciation', '{0}|{1}'.format(label, term),
             {'field': field, 'op': 'guide', 'term': term, 'pron': pron},
             message_html=message_html))
+    return issues
+
+
+# Italic runs in QEMS markup: ~Il ritorno~ (a backslash-escaped \~ is a literal tilde).
+_ITALIC_RUN = re.compile(r'(?<!\\)~(.*?)(?<!\\)~', re.S)
+
+
+def _pg_missing_issues(label, raw, field, skip_dictionary_terms=False, require_quotes=False):
+    """Words a local model thinks a writer would have guided (see pg_need). A
+    hint to look, with no fix: the model knows a word looks hard to say, not
+    how to say it. With `skip_dictionary_terms`, words the pronunciation
+    dictionary already offers a guide for are left to that suggestion."""
+    from . import pg_need
+    plain = _plain(raw)
+    if not plain.strip():
+        return []
+    italic = ' '.join(_plain(m) for m in _ITALIC_RUN.findall(raw or ''))
+    taken = []
+    if skip_dictionary_terms:
+        taken = [(s, e) for _t, _p, s, e in suggest_guide_matches(plain, require_quotes)]
+    issues = []
+    for word, start, end, _p in pg_need.flag_words(plain, italic):
+        if any(s < end and start < e for s, e in taken):
+            continue
+        message = '{0}: "{1}" may need a pronunciation guide'.format(label, word)
+        issues.append(_issue(INFO, message, 'pg_missing', '{0}|{1}'.format(label, word),
+                             message_html=_context_html(message, plain, start, end)))
     return issues
 
 
@@ -1002,6 +1058,10 @@ def check_tossup(tu, guide=DEFAULT_GUIDE, disabled=None):
     if 'pronunciation' in enabled:
         issues += _pronunciation_issues('Question', text, 'tossup_text', quoted)
 
+    if 'pg_missing' in enabled:
+        issues += _pg_missing_issues('Question', text, 'tossup_text',
+                                     'pronunciation' in enabled, quoted)
+
     if 'pg_span' in enabled:
         issues += _pg_span_issues('Question', text, 'tossup_text', quoted)
 
@@ -1071,6 +1131,11 @@ def check_bonus(b, guide=DEFAULT_GUIDE, disabled=None):
         for label, raw, field in parts:
             if raw.strip():
                 issues += _pronunciation_issues(label, raw, field, quoted)
+
+    if 'pg_missing' in enabled:
+        for label, raw, field in parts:
+            if raw.strip():
+                issues += _pg_missing_issues(label, raw, field, 'pronunciation' in enabled, quoted)
 
     if 'pg_span' in enabled:
         for label, raw, field in parts:

@@ -20,11 +20,22 @@
     <strong>{{ count }}</strong> question{{ count|pluralize }} in {{ title }}
     (<span>{{ tossups|length }}</span> tossup{{ tossups|length|pluralize }},
     <span>{{ bonuses|length }}</span> bonus{{ bonuses|length|pluralize }}).
-    <span class="right"><a href="javascript:window.print()" class="button tiny secondary">Print</a></span>
+    <span class="right">{% if qset.structured_answers %}<a href="#" class="button tiny secondary af-toggle-all" title="Open or close every answer line's breakdown (or / accept / prompt / reject)"><i class="fa fa-list"></i> Expand answers</a>{% endif %} <a href="javascript:window.print()" class="button tiny secondary">Print</a></span>
 </div>
 
 {% include "_category_comments.html" %}
 
+{% if qset.structured_answers %}
+<script>
+/* Expand / collapse every answer-fancy breakdown at once. */
+$(document).on('click', '.af-toggle-all', function (e) {
+    e.preventDefault();
+    var open = !$(this).data('open');
+    $('details.af').prop('open', open);
+    $(this).data('open', open).html('<i class="fa fa-list"></i> ' + (open ? 'Collapse answers' : 'Expand answers'));
+});
+</script>
+{% endif %}
 <div class="cat-doc-page">
     {% if tossups %}
     <h4>Tossups</h4>

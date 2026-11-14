@@ -75,7 +75,10 @@ class QuestionSetForm(forms.ModelForm):
                    'tiebreak_bonuses_per_packet', 'extra_tossups', 'extra_bonuses',
                    'legacy_requirements',
                    # Superuser-only; saved separately in edit_question_set.
-                   'ai_auto_review']
+                   'ai_auto_review',
+                   # Set from the Style Check page's rule list. Never rendered
+                   # here, so a settings save used to wipe it.
+                   'disabled_style_rules']
 
     def clean_question_table_columns(self):
         """Only keys the model knows, in its own order. The value is a list the
@@ -206,7 +209,7 @@ class TossupForm(forms.ModelForm):
                    'search_question_content', 'search_question_answers', 'question_history',
                    'editor', 'edited_date', 'proofreader', 'proofread_date',
                    'created_date', 'last_changed_date', 'all_power',
-                   'tossup_answer_structure']
+                   'tossup_answer_structure', 'co_authors', 'co_editors']
 
     def __init__(self, *args, **kwargs):
         qset_id = kwargs.pop('qset_id', None)
@@ -297,7 +300,8 @@ class BonusForm(forms.ModelForm):
                    'search_question_content', 'search_question_answers', 'question_history',
                    'editor', 'edited_date', 'proofreader', 'proofread_date',
                    'created_date', 'last_changed_date',
-                   'part1_answer_structure', 'part2_answer_structure', 'part3_answer_structure']
+                   'part1_answer_structure', 'part2_answer_structure', 'part3_answer_structure',
+                   'co_authors', 'co_editors']
 
     def __init__(self, *args, **kwargs):
         qset_id = kwargs.pop('qset_id', None)

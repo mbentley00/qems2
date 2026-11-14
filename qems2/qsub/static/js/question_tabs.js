@@ -94,6 +94,17 @@ $(function () {
         if (e.key === 'Escape') { closeMenus(); }
     });
 
+    // More > "Credit more writers or editors": shows the co-credit pickers,
+    // which stay hidden until a question has co-credits.
+    $card.on('click', '.qco-open', function (e) {
+        e.preventDefault();
+        closeMenus();
+        $(this).prop('hidden', true);
+        var $panel = $card.find('.qcocredit').prop('hidden', false);
+        var first = $panel.find('input[type=checkbox]').get(0);
+        if (first) { first.focus(); }
+    });
+
     // The Status button says what is set, so the flags can be read without
     // opening it.
     var $status = $card.find('.qmeta-status');

@@ -42,7 +42,8 @@ from .duplicate_checker import (find_duplicates, find_internal_issues,
                                 normalize_answer, CRITICAL, WARNING, INFO)
 from django.utils.safestring import mark_safe
 from django_comments.models import Comment
-from django.db.models import Q, Max, Prefetch, Count
+from django.db.models import Q, Max, Prefetch, Count, BooleanField
+from django import forms as django_forms
 from django.db import connection
 
 
@@ -1297,6 +1298,15 @@ def _sync_set_categories(qset):
     return added, removed, stranded
 
 
+# The QuestionSet checkboxes create_question_set.html shows. Any other boolean
+# setting a new set gets from its model default (see create_question_set).
+# A test keeps this in step with the template.
+CREATE_PAGE_CHECKBOXES = {
+    'public', 'char_count_ignores_pronunciation_guides', 'guides_require_quotes',
+    'tossups_only', 'enable_superpower', 'structured_answers',
+}
+
+
 @login_required
 def create_question_set (request):
     user = request.user.writer
@@ -1316,6 +1326,13 @@ def create_question_set (request):
             # for the moment, just use the default ACF Distribution
             #dist = Distribution.objects.get(id=1)
             question_set = form.save(commit=False)
+            # A checkbox the create page doesn't show posts nothing, which the
+            # form reads as "unticked": every new set came out with duplicate
+            # checks off. Settings that aren't on this page keep their default.
+            for _field in QuestionSet._meta.fields:
+                if (isinstance(_field, BooleanField) and _field.name in form.fields
+                        and _field.name not in CREATE_PAGE_CHECKBOXES):
+                    setattr(question_set, _field.name, _field.get_default())
             if needs_approval:
                 question_set.approval_status = QuestionSet.APPROVAL_PENDING
             question_set.owner = user
@@ -1560,6 +1577,14 @@ def edit_question_set(request, qset_id):
                 if _ai_available(request.user):
                     # Not on QuestionSetForm, so an owner or editor can't set it.
                     qset.ai_auto_review = request.POST.get('ai_auto_review') == 'on'
+                if request.POST.get('pg_hint_shown'):
+                    # The same opt-in as the Style Check page's rule list
+                    rules = qset.disabled_style_rule_set() - {'+pg_missing'}
+                    if request.POST.get('pg_missing_hint') == 'on':
+                        rules.add('+pg_missing')
+                    if rules != qset.disabled_style_rule_set():
+                        qset.disabled_style_rules = ','.join(sorted(rules))
+                        cache.clear()
                 qset.save()
                 if qset.per_packet_distribution and previous_packets != qset.num_packets:
                     distribution_lines.derive(qset)
@@ -1764,11 +1789,11 @@ def categories(request, qset_id, category_id):
         # costs one query per question in the category.
         tossups = _table_order(qset, Tossup.objects
                                .filter(question_set=qset, category=category_id)
-                               .select_related(*QUESTION_LIST_RELATED)
+                               .select_related(*QUESTION_LIST_RELATED).prefetch_related(*QUESTION_LIST_PREFETCH)
                                .prefetch_related('category_tags'))
         bonuses = _table_order(qset, Bonus.objects
                                .filter(question_set=qset, category=category_id)
-                               .select_related(*QUESTION_LIST_RELATED)
+                               .select_related(*QUESTION_LIST_RELATED).prefetch_related(*QUESTION_LIST_PREFETCH)
                                .prefetch_related('category_tags'))
         attach_question_comments({t.id: t for t in tossups}, {b.id: b for b in bonuses})
 
@@ -1868,7 +1893,7 @@ def category_document(request, qset_id, category_id=None, category_name=None):
 
     def item(q, qtype):
         return {
-            'id': q.id, 'qtype': qtype, 'html': q.to_html(),
+            'id': q.id, 'qtype': qtype, 'html': q.to_html(fancy_answers=True),
             'category': str(q.category) if q.category else '',
             'packet': q.packet.packet_name if q.packet else 'Unpacketized',
             'number': q.question_number or '',
@@ -2960,9 +2985,9 @@ def edit_packet(request, packet_id):
             # packet, which is slow anywhere and painful against a managed
             # Postgres, where each one is a network round trip.
             tossups = list(packet.tossup_set.order_by('question_number')
-                           .select_related(*QUESTION_LIST_RELATED))
+                           .select_related(*QUESTION_LIST_RELATED).prefetch_related(*QUESTION_LIST_PREFETCH))
             bonuses = list(packet.bonus_set.order_by('question_number')
-                           .select_related(*QUESTION_LIST_RELATED))
+                           .select_related(*QUESTION_LIST_RELATED).prefetch_related(*QUESTION_LIST_PREFETCH))
             attach_question_comments({t.id: t for t in tossups},
                                      {b.id: b for b in bonuses})
             # Edit mode is for owners and editors -- not "anyone who isn't a
@@ -3587,6 +3612,7 @@ def _structure_preview(answer, question_text='', is_tossup=True):
     return {
         'structure': structure,
         'line': answer_structure.format_line(structure),
+        'breakdown': answer_structure.breakdown(structure),
         'problems': answer_structure.validate(structure, question_text, is_tossup),
         'interesting': answer_structure.has_content(structure),
     }
@@ -3740,6 +3766,51 @@ def _with_structured_answers(request, qset, fields):
     return (post if post is not None else request.POST), structures
 
 
+def _add_co_credit_fields(form, qset, user):
+    """Give an edit form its "also written by" / "also edited by" pickers.
+
+    Co-credits are rare and opt-in: the fields exist only on the edit page of
+    a saved question, for someone who can save it, and the panel holding them
+    starts hidden behind More until a question has any. Co-editors are an
+    editor's or owner's call. Credit only -- the author account still decides
+    who may edit (see CoCreditMixin).
+    """
+    question = form.instance if form is not None else None
+    if question is None or not question.pk:
+        return
+    order = ('user__last_name', 'user__first_name', 'user__username')
+    current_authors = list(question.co_authors.values_list('pk', flat=True))
+    members = (Writer.objects
+               .filter(Q(question_set_writer=qset) | Q(question_set_editor=qset)
+                       | Q(pk=qset.owner_id) | Q(pk__in=current_authors))
+               .exclude(pk=question.author_id).distinct().order_by(*order))
+    form.fields['co_authors'] = django_forms.ModelMultipleChoiceField(
+        queryset=members, required=False, widget=django_forms.CheckboxSelectMultiple,
+        initial=current_authors)
+    if qset.is_owner(user) or qset.editor.filter(pk=user.pk).exists():
+        current_editors = list(question.co_editors.values_list('pk', flat=True))
+        editors = (Writer.objects
+                   .filter(Q(question_set_editor=qset) | Q(pk=qset.owner_id)
+                           | Q(pk__in=current_editors))
+                   .distinct().order_by(*order))
+        form.fields['co_editors'] = django_forms.ModelMultipleChoiceField(
+            queryset=editors, required=False, widget=django_forms.CheckboxSelectMultiple,
+            initial=current_editors)
+
+
+def _apply_co_credits(request, form, question):
+    """Store what the co-credit pickers posted. Only a post from the panel
+    (it carries ``co_credit_form``) changes anything, so every other way of
+    saving a question leaves its co-credits alone."""
+    if 'co_credit_form' not in request.POST:
+        return
+    if 'co_authors' in form.fields:
+        question.co_authors.set([w for w in form.cleaned_data.get('co_authors') or []
+                                 if w.pk != question.author_id])
+    if 'co_editors' in form.fields:
+        question.co_editors.set(form.cleaned_data.get('co_editors') or [])
+
+
 @login_required
 def edit_tossup(request, tossup_id):
     user = request.user.writer
@@ -3774,6 +3845,8 @@ def edit_tossup(request, tossup_id):
             form = None
             message = 'You are not authorized to view or edit this question!'
             message_class = 'alert-box alert'
+        if not read_only:
+            _add_co_credit_fields(form, qset, user)
 
         # Arrived straight from Add a Tossup / a one-question Type Questions:
         # report the style and repeat checks once, at the top of the page.
@@ -3832,6 +3905,7 @@ def edit_tossup(request, tossup_id):
             post_data, posted_structures = _with_structured_answers(
                 request, qset, [('tossup_answer', 'answer', True)])
             form = TossupForm(post_data, instance=tossup, qset_id=qset.id, role=role)
+            _add_co_credit_fields(form, qset, user)
             can_change = True
             if tossup.locked and not (qset.is_owner(user) or user in qset.editor.all()):
                 can_change = False
@@ -3877,6 +3951,7 @@ def edit_tossup(request, tossup_id):
                         change_type = QUESTION_READ_CAREFULLY
 
                     tossup.save_question(edit_type=change_type, changer=user)
+                    _apply_co_credits(request, form, tossup)
                     save_tag_selection(request, qset, tossup, tossup.category, is_tossup=True)
                     tossup_length = tossup.character_count()
                     cache.clear()
@@ -3968,6 +4043,8 @@ def edit_bonus(request, bonus_id):
             form = None
             message = 'You are not authorized to view or edit this question!'
             message_class = 'alert-box alert'
+        if not read_only:
+            _add_co_credit_fields(form, qset, user)
 
         # Arrived straight from Add a Bonus / a one-question Type Questions.
         new_checks = None
@@ -4028,6 +4105,7 @@ def edit_bonus(request, bonus_id):
                  ('part2_answer', 'part2', False),
                  ('part3_answer', 'part3', False)])
             form = BonusForm(post_data, instance=bonus, qset_id=qset.id, role=role, question_type=question_type)
+            _add_co_credit_fields(form, qset, user)
 
             can_change = True
             if bonus.locked and not (qset.is_owner(user) or user in qset.editor.all()):
@@ -4079,6 +4157,7 @@ def edit_bonus(request, bonus_id):
                         change_type = QUESTION_READ_CAREFULLY
 
                     bonus.save_question(edit_type=change_type, changer=user)
+                    _apply_co_credits(request, form, bonus)
                     save_tag_selection(request, qset, bonus, bonus.category, is_tossup=False)
                     char_count = bonus.character_count()
                     cache.clear()
@@ -6104,12 +6183,12 @@ def search(request, passed_qset_id=None):
                 questions = []
                 if 'qsub.tossup' in search_models:
                     tu_qs = (Tossup.objects.filter(question_set_id__in=set_ids)
-                             .select_related(*QUESTION_LIST_RELATED)
+                             .select_related(*QUESTION_LIST_RELATED).prefetch_related(*QUESTION_LIST_PREFETCH)
                              .prefetch_related('category_tags'))
                     questions += list(fulltext_filter(tu_qs, query, answers_only))
                 if 'qsub.bonus' in search_models:
                     bs_qs = (Bonus.objects.filter(question_set_id__in=set_ids)
-                             .select_related(*QUESTION_LIST_RELATED)
+                             .select_related(*QUESTION_LIST_RELATED).prefetch_related(*QUESTION_LIST_PREFETCH)
                              .prefetch_related('category_tags'))
                     questions += list(fulltext_filter(bs_qs, query, answers_only))
 
@@ -7147,8 +7226,8 @@ def export_question_set(request, qset_id, output_format):
     if request.method == 'GET':
         if (role == 'editor'):
             if (output_format in ("csv", "tsv")):
-                tossups = Tossup.objects.filter(question_set=qset)
-                bonuses = Bonus.objects.filter(question_set=qset)
+                tossups = Tossup.objects.filter(question_set=qset).select_related(*QUESTION_LIST_RELATED).prefetch_related(*QUESTION_LIST_PREFETCH)
+                bonuses = Bonus.objects.filter(question_set=qset).select_related(*QUESTION_LIST_RELATED).prefetch_related(*QUESTION_LIST_PREFETCH)
 
                 if output_format == "tsv":
                     response = HttpResponse(content_type='text/tab-separated-values')
@@ -7163,9 +7242,9 @@ def export_question_set(request, qset_id, output_format):
                 for tossup in tossups:
                     comment_string = build_comment_string(tossup_content_type_id, tossup.id)
 
-                    editor_name = ""
-                    if tossup.edited and tossup.editor is not None:
-                        editor_name = safe_name(tossup.editor)
+                    editor_name = join_names([safe_name(w) for w in
+                        ([tossup.editor] if tossup.edited and tossup.editor is not None else [])
+                        + tossup.co_editor_list()])
 
                     proofreader_name = ""
                     if tossup.proofread and tossup.proofreader is not None:
@@ -7179,9 +7258,9 @@ def export_question_set(request, qset_id, output_format):
                 for bonus in bonuses:
                     comment_string = build_comment_string(bonus_content_type_id, bonus.id)
 
-                    editor_name = ""
-                    if bonus.edited and bonus.editor is not None:
-                        editor_name = safe_name(bonus.editor)
+                    editor_name = join_names([safe_name(w) for w in
+                        ([bonus.editor] if bonus.edited and bonus.editor is not None else [])
+                        + bonus.co_editor_list()])
 
                     proofreader_name = ""
                     if bonus.proofread and bonus.proofreader is not None:
@@ -7261,8 +7340,9 @@ def export_question_set(request, qset_id, output_format):
                         parts.append('[{0}]'.format(', '.join(tags)))
                     if include_ids:
                         parts.append('~{0}~'.format(q.id))
-                    if include_editors and q.edited:
-                        editor = html.unescape(safe_name(q.editor)).strip() if q.editor else ''
+                    if include_editors:
+                        # The editor stamp (once edited) and any co-editors
+                        editor = html.unescape(q.editor_real_name()).strip()
                         if editor:
                             parts.append('<Editor: {0}>'.format(editor))
                     return ' '.join(p for p in parts if p).strip()
@@ -7273,17 +7353,23 @@ def export_question_set(request, qset_id, output_format):
                     the whole set. Names are de-duplicated and sorted."""
                     writers, editors = {}, {}
                     all_qs = (list(Tossup.objects.filter(question_set=qset)
-                                   .select_related('author', 'editor')) +
+                                   .select_related(*QUESTION_LIST_RELATED)
+                                   .prefetch_related(*QUESTION_LIST_PREFETCH)) +
                               list(Bonus.objects.filter(question_set=qset)
-                                   .select_related('author', 'editor')))
+                                   .select_related(*QUESTION_LIST_RELATED)
+                                   .prefetch_related(*QUESTION_LIST_PREFETCH)))
                     for q in all_qs:
                         # Keyed by name, not account: a freeform credit names
-                        # someone the account does not.
-                        name = html.unescape(q.author_real_name()).strip()
-                        if name:
-                            writers[name] = name
-                        if q.edited and q.editor_id:
-                            editors[q.editor_id] = html.unescape(safe_name(q.editor)).strip()
+                        # someone the account does not. Co-authors and
+                        # co-editors count as people of their own.
+                        for name in q.author_names():
+                            name = html.unescape(name).strip()
+                            if name:
+                                writers[name] = name
+                        for name in q.editor_names():
+                            name = html.unescape(name).strip()
+                            if name:
+                                editors[name] = name
                     return (sorted(n for n in writers.values() if n),
                             sorted(n for n in editors.values() if n))
 
@@ -7568,10 +7654,10 @@ def export_question_set(request, qset_id, output_format):
                         document.add_heading('{0} {1}'.format(qset.name, packet.packet_name), level=1)
                         tossups = list(Tossup.objects.filter(
                             packet=packet, question_set=qset
-                        ).order_by('question_number'))
+                        ).select_related(*QUESTION_LIST_RELATED).prefetch_related(*QUESTION_LIST_PREFETCH).order_by('question_number'))
                         bonuses = list(Bonus.objects.filter(
                             packet=packet, question_set=qset
-                        ).order_by('question_number'))
+                        ).select_related(*QUESTION_LIST_RELATED).prefetch_related(*QUESTION_LIST_PREFETCH).order_by('question_number'))
                         add_front_matter_to_doc(document, packet, first=(pkt_i == 0))
                         add_careful_notes_to_doc(document, tossups, bonuses)
                         write_all_questions_to_doc(document, tossups, bonuses)
@@ -7579,10 +7665,10 @@ def export_question_set(request, qset_id, output_format):
                     # Unpacketed questions
                     unpacketed_tossups = Tossup.objects.filter(
                         packet__isnull=True, question_set=qset
-                    ).order_by('question_number')
+                    ).select_related(*QUESTION_LIST_RELATED).prefetch_related(*QUESTION_LIST_PREFETCH).order_by('question_number')
                     unpacketed_bonuses = Bonus.objects.filter(
                         packet__isnull=True, question_set=qset
-                    ).order_by('question_number')
+                    ).select_related(*QUESTION_LIST_RELATED).prefetch_related(*QUESTION_LIST_PREFETCH).order_by('question_number')
                     if unpacketed_tossups.exists() or unpacketed_bonuses.exists():
                         document.add_heading('Unpacketed Questions', level=1)
                         write_all_questions_to_doc(document, unpacketed_tossups, unpacketed_bonuses)
@@ -7597,8 +7683,8 @@ def export_question_set(request, qset_id, output_format):
 
                 elif output_format == "docx-by-category":
                     # Collect top-level categories
-                    all_tossups = Tossup.objects.filter(question_set=qset).select_related('category', 'author', 'editor', 'packet')
-                    all_bonuses = Bonus.objects.filter(question_set=qset).select_related('category', 'author', 'editor', 'packet')
+                    all_tossups = Tossup.objects.filter(question_set=qset).select_related(*QUESTION_LIST_RELATED).prefetch_related(*QUESTION_LIST_PREFETCH)
+                    all_bonuses = Bonus.objects.filter(question_set=qset).select_related(*QUESTION_LIST_RELATED).prefetch_related(*QUESTION_LIST_PREFETCH)
 
                     categories = set()
                     has_uncategorized = False
@@ -7666,11 +7752,11 @@ def export_question_set(request, qset_id, output_format):
                     for packet in packets:
                         packet_tus.append(list(
                             Tossup.objects.filter(packet=packet, question_set=qset)
-                            .select_related('category', 'author', 'editor')
+                            .select_related(*QUESTION_LIST_RELATED).prefetch_related(*QUESTION_LIST_PREFETCH)
                             .order_by('question_number')))
                         packet_bos.append(list(
                             Bonus.objects.filter(packet=packet, question_set=qset)
-                            .select_related('category', 'author', 'editor')
+                            .select_related(*QUESTION_LIST_RELATED).prefetch_related(*QUESTION_LIST_PREFETCH)
                             .order_by('question_number')))
 
                     # Build answer matrix workbook from the actual packets
@@ -7726,11 +7812,11 @@ def export_question_set(request, qset_id, output_format):
                     # kept out of the per-packet answer matrix.
                     unpacketed_tus = list(
                         Tossup.objects.filter(packet__isnull=True, question_set=qset)
-                        .select_related('category', 'author', 'editor')
+                        .select_related(*QUESTION_LIST_RELATED).prefetch_related(*QUESTION_LIST_PREFETCH)
                         .order_by('question_number'))
                     unpacketed_bos = list(
                         Bonus.objects.filter(packet__isnull=True, question_set=qset)
-                        .select_related('category', 'author', 'editor')
+                        .select_related(*QUESTION_LIST_RELATED).prefetch_related(*QUESTION_LIST_PREFETCH)
                         .order_by('question_number'))
 
                     def _safe_filename(name):
@@ -7813,15 +7899,15 @@ def export_question_set(request, qset_id, output_format):
                     groups.append((
                         packet.packet_name,
                         list(Tossup.objects.filter(packet=packet, question_set=qset)
-                             .select_related('category', 'author').order_by('question_number')),
+                             .select_related(*QUESTION_LIST_RELATED).prefetch_related(*QUESTION_LIST_PREFETCH).order_by('question_number')),
                         list(Bonus.objects.filter(packet=packet, question_set=qset)
-                             .select_related('category', 'author').order_by('question_number'))))
+                             .select_related(*QUESTION_LIST_RELATED).prefetch_related(*QUESTION_LIST_PREFETCH).order_by('question_number'))))
                 unpacketed_tus = list(
                     Tossup.objects.filter(packet__isnull=True, question_set=qset)
-                    .select_related('category', 'author').order_by('question_number'))
+                    .select_related(*QUESTION_LIST_RELATED).prefetch_related(*QUESTION_LIST_PREFETCH).order_by('question_number'))
                 unpacketed_bos = list(
                     Bonus.objects.filter(packet__isnull=True, question_set=qset)
-                    .select_related('category', 'author').order_by('question_number'))
+                    .select_related(*QUESTION_LIST_RELATED).prefetch_related(*QUESTION_LIST_PREFETCH).order_by('question_number'))
                 if unpacketed_tus or unpacketed_bos:
                     groups.append(('Unpacketed', unpacketed_tus, unpacketed_bos))
 
@@ -7881,13 +7967,13 @@ def export_question_set(request, qset_id, output_format):
                     groups.append((
                         packet.packet_name,
                         list(Tossup.objects.filter(packet=packet, question_set=qset)
-                             .select_related('category', 'author', 'editor').order_by('question_number')),
+                             .select_related(*QUESTION_LIST_RELATED).prefetch_related(*QUESTION_LIST_PREFETCH).order_by('question_number')),
                         list(Bonus.objects.filter(packet=packet, question_set=qset)
-                             .select_related('category', 'author', 'editor').order_by('question_number'))))
+                             .select_related(*QUESTION_LIST_RELATED).prefetch_related(*QUESTION_LIST_PREFETCH).order_by('question_number'))))
                 unp_tu = list(Tossup.objects.filter(packet__isnull=True, question_set=qset)
-                              .select_related('category', 'author', 'editor').order_by('question_number'))
+                              .select_related(*QUESTION_LIST_RELATED).prefetch_related(*QUESTION_LIST_PREFETCH).order_by('question_number'))
                 unp_bo = list(Bonus.objects.filter(packet__isnull=True, question_set=qset)
-                              .select_related('category', 'author', 'editor').order_by('question_number'))
+                              .select_related(*QUESTION_LIST_RELATED).prefetch_related(*QUESTION_LIST_PREFETCH).order_by('question_number'))
                 if unp_tu or unp_bo:
                     groups.append(('Unpacketed', unp_tu, unp_bo))
                     packets_in_order.append(None)
@@ -7895,13 +7981,18 @@ def export_question_set(request, qset_id, output_format):
                 credits = None
                 if pdf_opts['credits']:
                     writers, editors = {}, {}
-                    for q in (list(Tossup.objects.filter(question_set=qset).select_related('author', 'editor')) +
-                              list(Bonus.objects.filter(question_set=qset).select_related('author', 'editor'))):
-                        name = html.unescape(q.author_real_name()).strip()
-                        if name:
-                            writers[name] = name
-                        if q.edited and q.editor_id:
-                            editors[q.editor_id] = html.unescape(safe_name(q.editor)).strip()
+                    for q in (list(Tossup.objects.filter(question_set=qset).select_related(*QUESTION_LIST_RELATED)
+                                   .prefetch_related(*QUESTION_LIST_PREFETCH)) +
+                              list(Bonus.objects.filter(question_set=qset).select_related(*QUESTION_LIST_RELATED)
+                                   .prefetch_related(*QUESTION_LIST_PREFETCH))):
+                        for name in q.author_names():
+                            name = html.unescape(name).strip()
+                            if name:
+                                writers[name] = name
+                        for name in q.editor_names():
+                            name = html.unescape(name).strip()
+                            if name:
+                                editors[name] = name
                     credits = (sorted(n for n in writers.values() if n),
                                sorted(n for n in editors.values() if n))
 
@@ -8246,6 +8337,22 @@ def questions_remaining(request, qset_id):
                               'qset': qset,
                               'message': message})
 
+def _tag_question_counts(qset):
+    """{tag id: questions in this set carrying it}, for tossups and for
+    bonuses: two grouped queries instead of two counts per tag."""
+    from django.db.models import Count
+    out = []
+    for through, fk in ((CategoryTag.tossups.through, 'tossup'),
+                        (CategoryTag.bonuses.through, 'bonus')):
+        out.append(dict(through.objects
+                        .filter(categorytag__question_set=qset,
+                                **{fk + '__question_set': qset})
+                        .values_list('categorytag_id')
+                        .annotate(n=Count('id'))
+                        .values_list('categorytag_id', 'n')))
+    return out
+
+
 @login_required
 def category_overview(request, qset_id):
     qset = QuestionSet.objects.get(id=qset_id)
@@ -8275,9 +8382,9 @@ def category_overview(request, qset_id):
     # axis they run along, with how many questions each has against what it
     # asks for, so a row says what is outstanding without a second page.
     tags_by_path = {}
-    for tag in (CategoryTag.objects.filter(question_set=qset)
-                ):
-        entry = tag.progress()
+    tu_counts, bs_counts = _tag_question_counts(qset)
+    for tag in CategoryTag.objects.filter(question_set=qset):
+        entry = tag.progress(tu_counts.get(tag.id, 0), bs_counts.get(tag.id, 0))
         entry['tag'] = tag
         entry['count_label'] = _tag_count_label(tag, entry)
         tags_by_path.setdefault(tag.category_path, []).append(entry)
@@ -8380,6 +8487,19 @@ def _super_group_post(request, qset, user):
         messages.success(request, 'Super-group "{0}" saved'.format(name))
     return HttpResponseRedirect(back)
 
+def _bulk_change_lists(qset):
+    """Every question in the set for the bulk-change table, newest first, with
+    authors, categories, packets and comments loaded in a handful of queries.
+    Rendering the rows straight from querysets cost six queries per question,
+    which on a 10,000-question set ran past the server's request timeout."""
+    tossups = list(Tossup.objects.filter(question_set=qset).order_by('-id')
+                   .select_related(*QUESTION_LIST_RELATED))
+    bonuses = list(Bonus.objects.filter(question_set=qset).order_by('-id')
+                   .select_related(*QUESTION_LIST_RELATED))
+    attach_question_comments({t.id: t for t in tossups}, {b.id: b for b in bonuses})
+    return {'tossups': tossups, 'bonuses': bonuses}
+
+
 @login_required
 def bulk_change_set(request, qset_id):
     user = request.user.writer
@@ -8396,15 +8516,11 @@ def bulk_change_set(request, qset_id):
     if role != 'editor':
         message = 'You are not authorized to make bulk operations on this set'
         return HttpResponseRedirect('/failure.html/')
-    else:
-        tossups = Tossup.objects.filter(question_set=qset).order_by('-id')
-        bonuses = Bonus.objects.filter(question_set=qset).order_by('-id')
 
     if request.method == 'GET':
         return render(request, 'bulk_change_set.html',
                                  {'user': user,
-                                  'tossups': tossups,
-                                  'bonuses': bonuses,
+                                  **_bulk_change_lists(qset),
                                   'qset': qset,
                                   'message': message,
                                   'message_class': message_class})
@@ -8460,8 +8576,7 @@ def bulk_change_set(request, qset_id):
                     cache.clear()
                     return render(request, 'bulk_change_set.html',
                                              {'user': user,
-                                              'tossups': tossups,
-                                              'bonuses': bonuses,
+                                              **_bulk_change_lists(qset),
                                               'qset': qset,
                                               'message': message,
                                               'message_class': message_class})
@@ -8473,8 +8588,7 @@ def bulk_change_set(request, qset_id):
                     cache.clear()
                     return render(request, 'bulk_change_set.html',
                                              {'user': user,
-                                              'tossups': tossups,
-                                              'bonuses': bonuses,
+                                              **_bulk_change_lists(qset),
                                               'qset': qset,
                                               'message': message,
                                               'message_class': message_class})
@@ -8497,8 +8611,7 @@ def bulk_change_set(request, qset_id):
                     cache.clear()
                     return render(request, 'bulk_change_set.html',
                                              {'user': user,
-                                              'tossups': tossups,
-                                              'bonuses': bonuses,
+                                              **_bulk_change_lists(qset),
                                               'qset': qset,
                                               'message': message,
                                               'message_class': message_class})
@@ -8510,8 +8623,7 @@ def bulk_change_set(request, qset_id):
                     cache.clear()
                     return render(request, 'bulk_change_set.html',
                                              {'user': user,
-                                              'tossups': tossups,
-                                              'bonuses': bonuses,
+                                              **_bulk_change_lists(qset),
                                               'qset': qset,
                                               'message': message,
                                               'message_class': message_class})
@@ -8520,13 +8632,10 @@ def bulk_change_set(request, qset_id):
                     message = "Successfully deleted questions."
                     message_class = 'alert-box success'
                     cache.clear()
-                    tossups = Tossup.objects.filter(question_set=qset).order_by('-id')
-                    bonuses = Bonus.objects.filter(question_set=qset).order_by('-id')
 
                     return render(request, 'bulk_change_set.html',
                                              {'user': user,
-                                              'tossups': tossups,
-                                              'bonuses': bonuses,
+                                              **_bulk_change_lists(qset),
                                               'qset': qset,
                                               'message': message,
                                               'message_class': message_class})
@@ -8536,13 +8645,10 @@ def bulk_change_set(request, qset_id):
                     message = "Successfully converted question type to ACF-style tossups."
                     message_class = 'alert-box success'
                     cache.clear()
-                    tossups = Tossup.objects.filter(question_set=qset).order_by('-id')
-                    bonuses = Bonus.objects.filter(question_set=qset).order_by('-id')
 
                     return render(request, 'bulk_change_set.html',
                                              {'user': user,
-                                              'tossups': tossups,
-                                              'bonuses': bonuses,
+                                              **_bulk_change_lists(qset),
                                               'qset': qset,
                                               'message': message,
                                               'message_class': message_class})
@@ -8552,13 +8658,10 @@ def bulk_change_set(request, qset_id):
                     message = "Successfully converted question type to ACF-style bonuses."
                     message_class = 'alert-box success'
                     cache.clear()
-                    tossups = Tossup.objects.filter(question_set=qset).order_by('-id')
-                    bonuses = Bonus.objects.filter(question_set=qset).order_by('-id')
 
                     return render(request, 'bulk_change_set.html',
                                              {'user': user,
-                                              'tossups': tossups,
-                                              'bonuses': bonuses,
+                                              **_bulk_change_lists(qset),
                                               'qset': qset,
                                               'message': message,
                                               'message_class': message_class})
@@ -8568,13 +8671,10 @@ def bulk_change_set(request, qset_id):
                     message_class = 'alert-box success'
                     cache.clear()
 
-                    tossups = Tossup.objects.filter(question_set=qset).order_by('-id')
-                    bonuses = Bonus.objects.filter(question_set=qset).order_by('-id')
 
                     return render(request, 'bulk_change_set.html',
                                              {'user': user,
-                                              'tossups': tossups,
-                                              'bonuses': bonuses,
+                                              **_bulk_change_lists(qset),
                                               'qset': qset,
                                               'message': message,
                                               'message_class': message_class})
@@ -8609,8 +8709,7 @@ def bulk_change_set(request, qset_id):
                 message_class = 'alert-box warning'
                 return render(request, 'bulk_change_set.html',
                                          {'user': user,
-                                          'tossups': tossups,
-                                          'bonuses': bonuses,
+                                          **_bulk_change_lists(qset),
                                           'qset': qset,
                                           'message': message,
                                           'message_class': message_class})
@@ -8619,8 +8718,7 @@ def bulk_change_set(request, qset_id):
             message_class = 'alert-box warning'
             return render(request, 'bulk_change_set.html',
                                      {'user': user,
-                                      'tossups': tossups,
-                                      'bonuses': bonuses,
+                                      **_bulk_change_lists(qset),
                                       'qset': qset,
                                       'message': message,
                                       'message_class': message_class})
@@ -8673,13 +8771,10 @@ def bulk_change_author(request, qset_id):
         message_class = 'alert-box success'
         cache.clear()
 
-        tossups = Tossup.objects.filter(question_set=qset).order_by('-id')
-        bonuses = Bonus.objects.filter(question_set=qset).order_by('-id')
 
         return render(request, 'bulk_change_set.html',
                                  {'user': user,
-                                  'tossups': tossups,
-                                  'bonuses': bonuses,
+                                  **_bulk_change_lists(qset),
                                   'qset': qset,
                                   'message': message,
                                   'message_class': message_class})
@@ -8732,13 +8827,10 @@ def bulk_change_packet(request, qset_id):
         message_class = 'alert-box success'
         cache.clear()
 
-        tossups = Tossup.objects.filter(question_set=qset).order_by('-id')
-        bonuses = Bonus.objects.filter(question_set=qset).order_by('-id')
 
         return render(request, 'bulk_change_set.html',
                                  {'user': user,
-                                  'tossups': tossups,
-                                  'bonuses': bonuses,
+                                  **_bulk_change_lists(qset),
                                   'qset': qset,
                                   'message': message,
                                   'message_class': message_class})
@@ -8807,13 +8899,10 @@ def bulk_move_question(request, qset_id):
         message_class = 'alert-box success'
         cache.clear()
 
-        tossups = Tossup.objects.filter(question_set=qset).order_by('-id')
-        bonuses = Bonus.objects.filter(question_set=qset).order_by('-id')
 
         return render(request, 'bulk_change_set.html',
                                  {'user': user,
-                                  'tossups': tossups,
-                                  'bonuses': bonuses,
+                                  **_bulk_change_lists(qset),
                                   'qset': qset,
                                   'message': message,
                                   'message_class': message_class})
@@ -8932,11 +9021,16 @@ def contributor(request, qset_id, writer_id):
             {'message': 'You are not authorized to view this set',
              'message_class': 'alert-box alert'})
 
-    tossups = Tossup.objects.filter(question_set=qset).filter(author=writer)
-    bonuses = Bonus.objects.filter(question_set=qset).filter(author=writer)
+    # Loaded once with everything the rows show; per-row lookups cost six
+    # queries a question, minutes on a set of thousands.
+    tossups = list(Tossup.objects.filter(question_set=qset, author=writer)
+                   .select_related(*QUESTION_LIST_RELATED))
+    bonuses = list(Bonus.objects.filter(question_set=qset, author=writer)
+                   .select_related(*QUESTION_LIST_RELATED))
+    attach_question_comments({t.id: t for t in tossups}, {b.id: b for b in bonuses})
 
-    writer_status =   {'tossups_written': tossups.count(),
-                         'bonuses_written': bonuses.count()
+    writer_status =   {'tossups_written': len(tossups),
+                         'bonuses_written': len(bonuses)
                          }
             
             
@@ -9894,7 +9988,7 @@ def inline_save_question(request):
             'changed_date': timezone.localtime(question.last_changed_date).strftime('%m/%d/%y %H:%M')
                             if question.last_changed_date else '',
             'fields': _inline_edit_fields(question, qtype),
-            'html': question.to_html(),
+            'html': question.to_html(fancy_answers=True),
         }), status=409)
 
     # Only the prose fields, and only the ones actually sent -- the editor
@@ -9910,7 +10004,7 @@ def inline_save_question(request):
     if not changed_any:
         return HttpResponse(json.dumps({
             'ok': True, 'unchanged': True, 'revision': current,
-            'fields': _inline_edit_fields(question, qtype), 'html': question.to_html()}))
+            'fields': _inline_edit_fields(question, qtype), 'html': question.to_html(fancy_answers=True)}))
 
     try:
         question.is_valid()
@@ -9932,7 +10026,7 @@ def inline_save_question(request):
         'ok': True,
         'revision': _question_revision(question),
         'fields': _inline_edit_fields(question, qtype),
-        'html': question.to_html(),
+        'html': question.to_html(fancy_answers=True),
         'length': length,
         'max_length': max_length,
         'over_length': bool(max_length and length > max_length),
@@ -9977,7 +10071,7 @@ def view_packet(request, packet_id):
             'id': question.id,
             'qtype': qtype,
             'number': number,
-            'html': question.to_html(),
+            'html': question.to_html(fancy_answers=True),
             'category': str(question.category) if question.category else '',
             'tags': tag_names.get((qtype, question.id), []),
             'edit_url': '{0}{1}/'.format(edit_url, question.id),
@@ -11469,8 +11563,13 @@ def style_check(request, qset_id):
     if request.method == 'POST' and request.POST.get('action') == 'save_rules':
         if qset.is_owner(user) or user in qset.editor.all():
             configurable = [c for c, _ in style_checker.configurable_rules(guide)]
-            disabled = [c for c in configurable if request.POST.get('rule_' + c) != 'on']
-            qset.disabled_style_rules = ','.join(disabled)
+            turned_on = {c for c in configurable if request.POST.get('rule_' + c) == 'on'}
+            # Keep the opt-in state of rules this guide doesn't list (another
+            # guide's settings form leaves them alone).
+            kept = [c for c in qset.disabled_style_rule_set()
+                    if c.startswith('+') and c[1:] not in configurable]
+            qset.disabled_style_rules = ','.join(
+                style_checker.stored_rule_list(configurable, turned_on) + kept)
             qset.save()
             cache.clear()
         return HttpResponseRedirect('/style_check/{0}/?guide={1}'.format(qset.id, guide))
@@ -11548,7 +11647,8 @@ def style_check(request, qset_id):
                    'is_ai_user': _is_ai_user(request.user),
                    'ai_findings_json': (json.dumps(_ai_grammar_findings_json(qset)).replace('<', '\\u003c')
                                         if _is_ai_user(request.user) else '[]'),
-                   'rule_settings': [{'code': c, 'label': lbl, 'enabled': c not in disabled}
+                   'rule_settings': [{'code': c, 'label': lbl,
+                                      'enabled': style_checker.rule_enabled(c, disabled)}
                                      for c, lbl in style_checker.configurable_rules(guide)]})
 
 
@@ -11863,6 +11963,38 @@ def dismiss_ai_grammar_finding(request):
     return HttpResponse(json.dumps({'ok': True}))
 
 
+@login_required
+def ai_review_question(request):
+    """Run the automatic AI review on one question now (admin only), replacing
+    its earlier automatic findings, and return its refreshed panel."""
+    from . import ai, ai_review
+    from django.template.loader import render_to_string
+    if request.method != 'POST':
+        return HttpResponse(json.dumps({'ok': False, 'error': 'POST required'}), status=405)
+    if not _is_ai_user(request.user):
+        return HttpResponse(json.dumps({'ok': False, 'error': 'Not authorized'}), status=403)
+    qtype = request.POST.get('qtype', '')
+    question = _style_question(qtype, _int_or_none(request.POST.get('qid')))
+    if question is None or not question.question_set.ai_auto_review:
+        return HttpResponse(json.dumps({'ok': False, 'error': 'No such question'}), status=404)
+    if not ai.ai_enabled():
+        return HttpResponse(json.dumps({'ok': False, 'error': 'No API key is configured'}))
+    qset = question.question_set
+    refs = [(qtype, question.id)]
+    AIGrammarFinding.objects.filter(question_set=qset, question_type=qtype,
+                                    question_id=question.id, source='auto').delete()
+    ai_review.mark_runs(qset.id, refs, 'queued')
+    try:
+        ai_review.run_review(qset.id, refs, request.user.writer.id)
+    except Exception as ex:
+        ai_review._store_error(qset.id, refs, request.user.writer.id,
+                               'The AI review crashed: {0}'.format(ex))
+        ai_review.mark_runs(qset.id, refs, 'failed')
+    html_out = render_to_string('_ai_review_panel.html',
+                                {'question': question, 'qtype': qtype}, request=request)
+    return HttpResponse(json.dumps({'ok': True, 'html': html_out}))
+
+
 def _style_question(qtype, qid):
     if qtype == 'tossup':
         return Tossup.objects.filter(id=qid).first()
@@ -12072,7 +12204,8 @@ def style_ignored(request, qset_id):
     disabled = qset.disabled_style_rule_set()
     off_rules = [{'code': code, 'label': label}
                  for code, label in style_checker.configurable_rules(guide)
-                 if code in disabled]
+                 if code not in style_checker.OPT_IN_CODES
+                 and not style_checker.rule_enabled(code, disabled)]
 
     set_wide = []
     for d in (StyleRuleDismissal.objects.filter(question_set=qset)
@@ -12506,10 +12639,10 @@ def category_tag_questions(request, qset_id, tag_id):
     if tag is None:
         raise Http404('No such tag in this set')
     tossups = _table_order(qset, tag.tossups.filter(question_set=qset)
-                           .select_related(*QUESTION_LIST_RELATED)
+                           .select_related(*QUESTION_LIST_RELATED).prefetch_related(*QUESTION_LIST_PREFETCH)
                            .prefetch_related('category_tags'))
     bonuses = _table_order(qset, tag.bonuses.filter(question_set=qset)
-                           .select_related(*QUESTION_LIST_RELATED)
+                           .select_related(*QUESTION_LIST_RELATED).prefetch_related(*QUESTION_LIST_PREFETCH)
                            .prefetch_related('category_tags'))
     attach_question_comments({t.id: t for t in tossups}, {b.id: b for b in bonuses})
     return render(request, 'category_tag.html', {
@@ -13359,6 +13492,10 @@ def _tag_maxima(post, minima):
     return out
 
 
+#: Answer lines listed per tag on the unfocused category-tags page.
+TAG_INDEX_ANSWER_CAP = 12
+
+
 def _category_tag_totals(tag_groups):
     """A category's tag totals for the summary line, counting each question once.
 
@@ -13377,13 +13514,16 @@ def _category_tag_totals(tag_groups):
     tu_ids, bs_ids, q_tu_ids, q_bs_ids = set(), set(), set(), set()
     for group in tag_groups:
         for row in group['rows']:
-            tu_ids.update(t['id'] for t in row['tossups'])
-            bs_ids.update(b['id'] for b in row['bonuses'])
+            # The full id lists: the answer lines shown may be cut short.
+            row_tu = row.get('tu_ids', [t['id'] for t in row['tossups']])
+            row_bs = row.get('bs_ids', [b['id'] for b in row['bonuses']])
+            tu_ids.update(row_tu)
+            bs_ids.update(row_bs)
             # "Of any type" counts only against tags that ask for a number of
             # questions, the way the per-tag rows do.
             if row['tag'].num_questions:
-                q_tu_ids.update(t['id'] for t in row['tossups'])
-                q_bs_ids.update(b['id'] for b in row['bonuses'])
+                q_tu_ids.update(row_tu)
+                q_bs_ids.update(row_bs)
     return {
         'tu_required': axis_max('num_tossups'), 'tu_done': len(tu_ids),
         'bs_required': axis_max('num_bonuses'), 'bs_done': len(bs_ids),
@@ -13588,22 +13728,30 @@ def category_tags(request, qset_id):
             question_set=qset).select_related('packet')))
     for tag in tag_qs:
         tags_by_path.setdefault(tag.category_path, []).append(tag)
+    # The index lists a few answer lines per tag, not all of them: a big set's
+    # tags carry tens of thousands of questions between them, which made this
+    # page tens of megabytes. Each tag's own page has the full list.
+    line_cap = None if focused else TAG_INDEX_ANSWER_CAP
     for path in sorted(tags_by_path, key=lambda p: (bool(p), p)):
         rows = []
         for tag in tags_by_path[path]:
+            all_tu, all_bs = list(tag.tossups.all()), list(tag.bonuses.all())
             tossups = [{'id': t.id,
                         'answer': _formatted_answer_preview(t.tossup_answer),
                         'location': '{0} #{1}'.format(t.packet.packet_name, t.question_number) if t.packet else 'Unassigned'}
-                       for t in tag.tossups.all()]
+                       for t in all_tu[:line_cap]]
             bonuses = [{'id': b.id,
                         'answer': mark_safe(' / '.join(filter(None, [
                             _formatted_answer_preview(b.part1_answer, 20),
                             _formatted_answer_preview(b.part2_answer, 20),
                             _formatted_answer_preview(b.part3_answer, 20)]))),
                         'location': '{0} #{1}'.format(b.packet.packet_name, b.question_number) if b.packet else 'Unassigned'}
-                       for b in tag.bonuses.all()]
-            row = tag.progress(len(tossups), len(bonuses))
-            row.update({'tag': tag, 'tossups': tossups, 'bonuses': bonuses})
+                       for b in all_bs[:line_cap]]
+            row = tag.progress(len(all_tu), len(all_bs))
+            row.update({'tag': tag, 'tossups': tossups, 'bonuses': bonuses,
+                        'tu_ids': [t.id for t in all_tu], 'bs_ids': [b.id for b in all_bs],
+                        'tu_more': len(all_tu) - len(tossups),
+                        'bs_more': len(all_bs) - len(bonuses)})
             rows.append(row)
         # Within a category, tags are shown under the axis they belong to —
         # "Time", "Location" — with the unnamed ones last under their own head.

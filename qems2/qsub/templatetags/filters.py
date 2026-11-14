@@ -1,4 +1,5 @@
 import re
+from datetime import timedelta
 from django.template.defaultfilters import register
 from django.utils.html import escape
 from django.utils.safestring import mark_safe
@@ -467,7 +468,7 @@ def tossup_html(tossup):
 
 @register.filter(name='tossup_html_verbose')
 def tossup_html_verbose(tossup):
-    return tossup.to_html(include_category=True, include_character_count=True)
+    return tossup.to_html(include_category=True, include_character_count=True, fancy_answers=True)
 
 @register.filter(name='bonus_html')
 def bonus_html(bonus):
@@ -481,7 +482,7 @@ def bonus_leadin(bonus):
 
 @register.filter(name='bonus_html_verbose')
 def bonus_html_verbose(bonus):
-    return bonus.to_html(include_category=True, include_character_count=True)
+    return bonus.to_html(include_category=True, include_character_count=True, fancy_answers=True)
 
 @register.filter(name='tossup_history_html')
 def tossup_history_html(tossup):
@@ -611,3 +612,56 @@ def _threaded_comments(obj, include_removed=False):
 
 #@register.filter(name='compare_categories'):
 #def compare_categories(cat1, cat2):
+
+
+@register.simple_tag(takes_context=True)
+def ai_review_findings(context, question, qtype):
+    """The AI review findings stored for one question, for its edit page.
+
+    None means "don't show the panel", and nothing about it reaches the page:
+    the set doesn't review submissions, or the viewer can't see AI results
+    (they are admin-only, as on the Style Check page).
+    """
+    request = context.get('request')
+    user = getattr(request, 'user', None)
+    if question is None or not getattr(question, 'pk', None) or user is None \
+            or not (user.is_authenticated and user.is_superuser) \
+            or not question.question_set.ai_auto_review:
+        return None
+    findings = list(AIGrammarFinding.objects.filter(
+        question_set_id=question.question_set_id, question_type=qtype,
+        question_id=question.pk).order_by('id'))
+    for f in findings:
+        if f.kind == 'answer':
+            # Escaped first: the suggestion is model output; only the
+            # answer-line markup may become HTML.
+            f.suggestion_html = mark_safe(get_formatted_question_html(
+                escape(f.suggestion or ''), True, False, False, False))
+    return findings
+
+
+# A review still "queued" after this long died with its worker
+AI_REVIEW_STALE = timedelta(minutes=10)
+
+
+@register.simple_tag
+def ai_review_state(question, qtype):
+    """Where the automatic review of one question stands: 'none' (never
+    reviewed), 'running', 'failed', 'outdated' (edited since) or 'done'.
+    Only meaningful where ai_review_findings shows the panel."""
+    from django.utils import timezone
+    from qems2.qsub.models import AIReviewRun
+    run = AIReviewRun.objects.filter(question_type=qtype, question_id=getattr(question, 'pk', None)).first()
+    if run is None:
+        return 'none'
+    if run.status == AIReviewRun.QUEUED:
+        return 'running' if timezone.now() - run.updated_date < AI_REVIEW_STALE else 'none'
+    if run.status == AIReviewRun.FAILED:
+        return 'failed'
+    changed = getattr(question, 'last_changed_date', None)
+    if changed is not None:
+        if timezone.is_naive(changed):
+            changed = timezone.make_aware(changed)
+        if changed > run.updated_date:
+            return 'outdated'
+    return 'done'

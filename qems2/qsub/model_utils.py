@@ -457,6 +457,8 @@ def get_question_type_from_string(question_type):
 
 QUESTION_LIST_RELATED = ('category', 'author__user', 'editor__user', 'packet',
                          'question_set', 'question_type')
+#: Co-credited writers, loaded with a list so printing names costs no query per row.
+QUESTION_LIST_PREFETCH = ('co_authors__user', 'co_editors__user')
 
 def mark_discord_comments(comments):
     """Tag each comment with ``.is_discord`` and ``.discord_thread_url`` so

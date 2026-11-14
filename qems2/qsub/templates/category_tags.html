@@ -191,6 +191,7 @@ its one category, since that is the whole page then.
                         {% for q in row.tossups %}
                         <div class="tag-a-line"><span class="tag-a-kind">T:</span><a href="/edit_tossup/{{ q.id }}/" title="{{ q.location }}">{{ q.answer }}</a></div>
                         {% endfor %}
+                        {% if row.tu_more %}<div class="tag-a-line tag-a-more"><a href="/category_tags/{{ qset.id }}/tag/{{ row.tag.id }}/">+{{ row.tu_more }} more</a></div>{% endif %}
                     </td>
                     <td class="{% if row.bs_over %}tag-over{% elif row.bs_complete %}tag-complete{% else %}tag-incomplete{% endif %}">
                         {{ row.bs_done }}{% if row.tag.num_bonuses %}/{{ row.tag.num_bonuses }}{% endif %}{% if row.tag.max_bonuses != None and row.tag.max_bonuses != row.tag.num_bonuses %}<span class="tag-max" title="At most {{ row.tag.max_bonuses }}">&le;{{ row.tag.max_bonuses }}</span>{% endif %}
@@ -199,6 +200,7 @@ its one category, since that is the whole page then.
                         {% for q in row.bonuses %}
                         <div class="tag-a-line"><span class="tag-a-kind">B:</span><a href="/edit_bonus/{{ q.id }}/" title="{{ q.location }}">{{ q.answer }}</a></div>
                         {% endfor %}
+                        {% if row.bs_more %}<div class="tag-a-line tag-a-more"><a href="/category_tags/{{ qset.id }}/tag/{{ row.tag.id }}/">+{{ row.bs_more }} more</a></div>{% endif %}
                     </td>
                     <td class="{% if row.q_over %}tag-over{% elif row.q_complete %}tag-complete{% else %}tag-incomplete{% endif %}">
                         {% if row.tag.num_questions %}{{ row.q_done }}/{{ row.tag.num_questions }}{% elif row.tag.max_questions != None %}{{ row.q_done }}{% else %}&mdash;{% endif %}{% if row.tag.max_questions != None and row.tag.max_questions != row.tag.num_questions %}<span class="tag-max" title="At most {{ row.tag.max_questions }}">&le;{{ row.tag.max_questions }}</span>{% endif %}

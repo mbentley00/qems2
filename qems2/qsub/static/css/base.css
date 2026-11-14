@@ -2132,18 +2132,54 @@ html[data-theme="dark"] .structured-answer .sa-required { color: #f0a868; }
     color: var(--qx-muted, #999);
     pointer-events: none;
 }
-.structured-answer .sa-row {
+/* A row is the entry on one line and its modifiers (by asking, in place of, a
+   reading window) in a smaller line under it, like the directive spans in an
+   answer-fancy breakdown. */
+.structured-answer .sa-row { margin-bottom: 8px; }
+.structured-answer .sa-main {
     display: flex;
     gap: 6px;
     align-items: center;
-    margin-bottom: 4px;
 }
+.structured-answer .sa-mods {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    margin: 3px 0 0 14px;
+    font-size: 0.85em;
+    color: var(--qx-muted, #767676);
+}
+.structured-answer .sa-mod {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex: 1 1 12em;
+    margin: 0;
+    font-size: inherit;
+    color: inherit;
+    white-space: nowrap;
+}
+.structured-answer .sa-mod-wide { flex: 2 1 100%; }
+.structured-answer .sa-mod input,
+.structured-answer .sa-mod select {
+    margin: 0;
+    height: auto;
+    padding: 2px 6px;
+    font-size: 1em;
+    display: inline-block;
+    width: auto;
+}
+.structured-answer .sa-mod .rich-editor-wrapper { flex: 1 1 auto; min-width: 0; margin: 0; }
+.structured-answer .sa-when { width: auto; min-width: 10.5em; flex: 0 0 auto; padding-right: 1.8em; }
+.structured-answer .sa-inplace,
+.structured-answer .sa-word { flex: 1 1 6em; min-width: 0; }
+/* The word only means something for "until/after ... is read". */
+.structured-answer .sa-row:not([data-when="until"]):not([data-when="after"]) .sa-word { display: none; }
 .structured-answer .sa-row input,
 .structured-answer .sa-row select { margin: 0; }
 .structured-answer .sa-text { flex: 2 1 0; }
-.structured-answer .sa-instruction { flex: 2 1 0; }
-.structured-answer .sa-until { flex: 1 1 0; }
 .structured-answer .sa-kind { flex: 0 0 auto; width: auto; }
+.structured-answer .sa-canonical-head { display: block; margin-bottom: 0; }
 .structured-answer .sa-remove {
     flex: 0 0 auto;
     border: none;
@@ -2212,15 +2248,90 @@ html[data-theme="dark"] .structured-answer .sa-required { color: #f0a868; }
     letter-spacing: 0.04em;
     color: var(--qx-muted, #767676);
 }
-.sa-read-list, .sa-read-problems { margin: 2px 0 0; padding-left: 0; list-style: none; }
-.sa-read-list li { margin: 0; }
-.sa-read-kind {
-    display: inline-block;
-    min-width: 5.5em;
-    color: var(--qx-muted, #767676);
-    font-size: 0.9em;
+.sa-read-problems { margin: 2px 0 0; padding-left: 0; list-style: none; }
+/* The answer-fancy breakdown: label column, one bullet per entry, directive
+   words muted and quoted words set off -- after QBOWLOSM's HTML packets. */
+.sa-fancy {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 2px 10px;
+    margin: 4px 0 0;
+    font-family: Georgia, 'Times New Roman', serif;
 }
-.sa-read-asis { font-style: italic; }
+.sa-fancy dt {
+    margin: 0;
+    font-weight: normal;
+    font-size: 0.9em;
+    color: var(--qx-muted, #767676);
+    text-align: right;
+}
+.sa-fancy dt.sa-fancy-canonical { font-weight: 600; color: inherit; }
+.sa-fancy dd { margin: 0; }
+.sa-fancy ul { margin: 0; padding-left: 1.1em; }
+.sa-fancy li { margin: 0; }
+.sa-fancy dt.sa-fancy-rejects,
+.sa-fancy dd.sa-fancy-rejects { color: #a1490b; }
+html[data-theme="dark"] .sa-fancy dt.sa-fancy-rejects,
+html[data-theme="dark"] .sa-fancy dd.sa-fancy-rejects { color: #f0a868; }
+.sa-fancy-directive { color: var(--qx-muted, #767676); font-style: italic; }
+
+/* The answer-fancy breakdown on the proof pane and the document views
+   (Tossup/Bonus.to_html(fancy_answers=True)): the answer line is a <details>
+   summary, and opening it lists the line by group -- after QBOWLOSM's HTML
+   packets on minkowski.space. */
+.af-question > p { margin: 0 0 0.3em; }
+/* Beats `.panel.question p + p`, which sets the byline lines under a question
+   in the UI face: every paragraph of the question itself stays in its own. */
+.panel.question .af-question p { font-family: inherit; }
+details.af { margin: 0 0 8px; }
+details.af > summary { cursor: pointer; list-style: none; }
+details.af > summary::-webkit-details-marker { display: none; }
+details.af > summary > p.answer::before {
+    content: "\25B8";
+    display: inline-block;
+    width: 1em;
+    color: var(--qx-muted, #999);
+    font-size: 0.85em;
+    /* Times has no triangle glyph; take it from a font that does */
+    font-family: "Segoe UI Symbol", Arial, sans-serif;
+}
+details.af[open] > summary > p.answer::before { content: "\25BE"; }
+details.af > summary > p.answer { display: inline; margin: 0; }
+/* The packet document runs a question's paragraphs inline so its number sits
+   on the first line; the first stays that way, the rest get lines of their own. */
+.doc-question .af-question { display: inline; }
+.doc-question .af-question > p { display: block; margin: 0 0 0.3em; }
+.doc-question .af-question > p:first-child { display: inline; }
+.doc-question .af-question > p:first-child::after { content: ""; display: block; margin-bottom: 0.3em; }
+.af-question > p.answer { margin: 0 0 0.6em; }
+.answer-fancy {
+    margin: 4px 0 2px;
+    padding: 4px 0 4px 10px;
+    border-left: 2px solid var(--qx-border, #ddd);
+}
+.answer-fancy dl {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 2px 10px;
+    margin: 0;
+}
+.answer-fancy dt {
+    margin: 0;
+    font-weight: normal;
+    color: var(--qx-muted, #767676);
+    text-align: right;
+}
+.answer-fancy dt.af-canonical { font-weight: 600; color: inherit; }
+.answer-fancy dd { margin: 0; }
+.answer-fancy ul { margin: 0; padding-left: 1.1em; list-style: disc; }
+.answer-fancy li { margin: 0; }
+.answer-fancy .af-directive { color: var(--qx-muted, #767676); font-style: italic; }
+.answer-fancy dt.af-reject, .answer-fancy dd.af-reject { color: #a1490b; }
+html[data-theme="dark"] .answer-fancy dt.af-reject,
+html[data-theme="dark"] .answer-fancy dd.af-reject { color: #f0a868; }
+.answer-fancy .af-note { margin: 4px 0 0; color: var(--qx-muted, #767676); }
+@media print { details.af > summary > p.answer::before { display: none; } }
+.sa-fancy-note { margin: 4px 0 0; font-size: 0.95em; color: var(--qx-muted, #767676); }
 .sa-read-problems { margin-top: 4px; color: #8a5b00; }
 html[data-theme="dark"] .sa-read-problems { color: #f0a868; }
 .sa-read-problems li { margin: 0; }
@@ -2406,6 +2517,17 @@ body.app-authed a.qtab-link:hover { color: var(--qx-ink); }
 body.app-authed a.qmeta-packet-link { color: var(--qx-ink); font-size: .95rem; padding: 0 4px; }
 body.app-authed a.qmeta-packet-link:hover { color: var(--qx-primary); }
 .qmeta-errors { padding: 0 22px 10px; }
+/* Co-credits: more than one writer or editor. Opened from More, so it reads as
+   a quiet addendum to the byline rather than a standing part of it. */
+.qcocredit { padding: 0 22px 12px; font-size: 0.9em; }
+.qcocredit[hidden] { display: none; }
+.qco-row { display: flex; gap: 10px; align-items: baseline; margin-bottom: 6px; }
+.qco-label { flex: 0 0 8.5em; color: var(--qx-muted, #767676); }
+.qco-choices { display: flex; flex-wrap: wrap; gap: 2px 14px; }
+.qco-choice { display: inline-flex; align-items: center; gap: 5px; margin: 0; font-size: inherit; cursor: pointer; }
+.qco-choice input { margin: 0; }
+.qco-empty { color: var(--qx-muted, #767676); font-style: italic; }
+.qco-help { margin: 2px 0 0; font-size: 0.9em; color: var(--qx-muted, #767676); }
 .qmeta-measure { position: absolute; visibility: hidden; white-space: pre; font-family: var(--qx-sans);
     font-size: .95rem; font-weight: 600; padding: 0 8px; }
 
